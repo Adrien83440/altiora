@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>ALTIORA — Suivi CA & Résultats</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --blue-dark:#0f1f5c;--blue-main:#1a3dce;--blue-light:#4f7ef8;
+      --blue-ghost:#f0f4ff;--white:#fff;--text:#1a1f36;--muted:#6b7280;
+      --border:#e2e8f0;--bg:#f5f7ff;--sidebar-w:252px;--radius:12px;
+      --green:#10b981;--orange:#f59e0b;--red:#ef4444;--purple:#6366f1;
+    }
+    body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;font-size:13px;}
+
+    /* SIDEBAR */
+    .sidebar{width:var(--sidebar-w);min-height:100vh;background:linear-gradient(180deg,#0f1f5c 0%,#162366 100%);display:flex;flex-direction:column;position:fixed;left:0;top:0;z-index:100;padding-bottom:24px;overflow-y:auto;}
+    .sidebar-logo{display:flex;align-items:center;gap:10px;padding:26px 20px 22px;border-bottom:1px solid rgba(255,255,255,0.08);margin-bottom:10px;}
+    .sidebar-logo-icon{width:36px;height:36px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;}
+    .sidebar-logo-text{font-size:18px;font-weight:800;color:white;letter-spacing:1px;}
+    .sidebar-section-label{font-size:10px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:1.2px;text-transform:uppercase;padding:14px 20px 5px;}
+    .nav-item{display:flex;align-items:center;gap:11px;padding:10px 20px;color:rgba(255,255,255,0.6);font-size:13px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:all 0.18s;user-select:none;}
+    .nav-item:hover{color:white;background:rgba(255,255,255,0.06);}
+    .nav-item.active{color:white;background:rgba(255,255,255,0.1);border-left-color:#4f7ef8;}
+    .nav-icon{font-size:15px;width:18px;text-align:center;flex-shrink:0;}
+    .nav-label{flex:1;}
+    .nav-chevron{font-size:11px;color:rgba(255,255,255,0.3);transition:transform 0.25s;margin-left:auto;}
+    .nav-item.open .nav-chevron{transform:rotate(90deg);}
+    .submenu{overflow:hidden;max-height:0;transition:max-height 0.3s ease;}
+    .submenu.open{max-height:300px;}
+    .sub-item{display:flex;align-items:center;gap:9px;padding:8px 20px 8px 44px;color:rgba(255,255,255,0.45);font-size:12.5px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:all 0.18s;}
+    .sub-item:hover{color:rgba(255,255,255,0.8);background:rgba(255,255,255,0.05);}
+    .sub-item.active{color:white;background:rgba(79,126,248,0.15);border-left-color:rgba(79,126,248,0.6);}
+    .sub-dot{width:5px;height:5px;background:rgba(255,255,255,0.3);border-radius:50%;flex-shrink:0;}
+    .sub-item.active .sub-dot{background:#4f7ef8;}
+    .sub-year-badge{margin-left:auto;font-size:10px;color:rgba(255,255,255,0.25);font-weight:600;}
+    .sidebar-footer{margin-top:auto;padding:16px 20px 0;border-top:1px solid rgba(255,255,255,0.08);}
+    .user-card{display:flex;align-items:center;gap:10px;padding:10px;background:rgba(255,255,255,0.07);border-radius:10px;}
+    .user-avatar{width:32px;height:32px;background:linear-gradient(135deg,var(--blue-light),#6366f1);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:white;flex-shrink:0;}
+    .user-name{font-size:12px;font-weight:600;color:white;}
+    .user-plan{font-size:10px;color:rgba(255,255,255,0.4);}
+    .logout-btn{margin-left:auto;background:none;border:none;color:rgba(255,255,255,0.3);cursor:pointer;font-size:14px;padding:4px;}
+
+    /* MAIN */
+    .main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;}
+    .topbar{background:white;border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
+    .topbar-left h1{font-size:17px;font-weight:700;}
+    .topbar-left p{font-size:12px;color:var(--muted);}
+    .topbar-right{display:flex;align-items:center;gap:10px;}
+    .year-select{padding:7px 14px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;color:var(--blue-main);background:var(--blue-ghost);cursor:pointer;outline:none;}
+    .year-select:focus{border-color:var(--blue-main);}
+    .btn{padding:8px 16px;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.2s;}
+    .btn-primary{background:linear-gradient(135deg,var(--blue-main),var(--blue-light));color:white;box-shadow:0 3px 10px rgba(26,61,206,0.3);}
+    .btn-primary:hover{opacity:0.9;}
+
+    .content{padding:22px 28px;flex:1;}
+
+    /* KPI ANNUELS */
+    .kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:22px;}
+    .kpi-card{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:18px;position:relative;overflow:hidden;}
+    .kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
+    .kpi-card.blue::before{background:linear-gradient(90deg,var(--blue-main),var(--blue-light));}
+    .kpi-card.green::before{background:linear-gradient(90deg,#10b981,#34d399);}
+    .kpi-card.orange::before{background:linear-gradient(90deg,#f59e0b,#fbbf24);}
+    .kpi-card.red::before{background:linear-gradient(90deg,#ef4444,#f87171);}
+    .kpi-card.purple::before{background:linear-gradient(90deg,#6366f1,#a5b4fc);}
+    .kpi-label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px;}
+    .kpi-value{font-size:20px;font-weight:800;letter-spacing:-0.5px;margin-bottom:4px;}
+    .kpi-value.positive{color:var(--green);}
+    .kpi-value.negative{color:var(--red);}
+    .kpi-sub{font-size:11px;color:var(--muted);}
+
+    /* TABLEAU ANNUEL */
+    .table-section{background:white;border:1px solid var(--border);border-radius:var(--radius);margin-bottom:22px;overflow:hidden;}
+    .table-section-head{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);}
+    .table-section-title{font-size:14px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px;}
+    .badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;}
+    .badge-blue{background:var(--blue-ghost);color:var(--blue-main);}
+    .badge-green{background:#f0fdf4;color:#10b981;}
+    .badge-orange{background:#fffbeb;color:#f59e0b;}
+
+    .annual-table{width:100%;border-collapse:collapse;font-size:12px;}
+    .annual-table th{padding:9px 14px;text-align:right;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.4px;background:#f8faff;border-bottom:1px solid var(--border);white-space:nowrap;}
+    .annual-table th:first-child{text-align:left;}
+    .annual-table td{padding:8px 14px;text-align:right;border-bottom:1px solid #f1f5f9;font-weight:500;}
+    .annual-table td:first-child{text-align:left;font-weight:600;color:var(--text);}
+    .annual-table tr:last-child td{border-bottom:none;}
+    .annual-table tr:hover td{background:#fafbff;}
+    .annual-table tfoot td{padding:10px 14px;font-weight:800;background:#f0f4ff;border-top:2px solid var(--border);color:var(--blue-main);}
+    .annual-table tfoot td:first-child{color:var(--text);}
+    .td-positive{color:var(--green);font-weight:700;}
+    .td-negative{color:var(--red);font-weight:700;}
+    .td-muted{color:var(--muted);}
+    .td-cumul{color:var(--purple);font-weight:700;}
+
+    /* CHARTS */
+    .charts-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:22px;}
+    .charts-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-bottom:22px;}
+    .chart-card{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:20px;}
+    .chart-card.full{grid-column:1/-1;}
+    .chart-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;}
+    .chart-title{font-size:13px;font-weight:700;color:var(--text);}
+    .chart-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+    .chart-wrap{position:relative;}
+    .chart-wrap.h200{height:200px;}
+    .chart-wrap.h240{height:240px;}
+    .chart-wrap.h280{height:280px;}
+
+    /* LOADER */
+    .loader{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--muted);gap:12px;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .spin{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--blue-main);border-radius:50%;animation:spin .7s linear infinite;}
+
+    /* EMPTY STATE */
+    .empty-state{text-align:center;padding:40px;color:var(--muted);}
+    .empty-state .empty-icon{font-size:40px;margin-bottom:12px;}
+    .empty-state p{font-size:13px;line-height:1.6;}
+
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .content{animation:fadeIn 0.3s ease both;}
+  </style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-icon">📊</div>
+    <div class="sidebar-logo-text">ALTIORA</div>
+  </div>
+  <div class="sidebar-section-label">Principal</div>
+  <div class="nav-item" onclick="window.location.href='dashboard.html'"><span class="nav-icon">🏠</span><span class="nav-label">Tableau de bord</span></div>
+  <div class="nav-item active"><span class="nav-icon">📈</span><span class="nav-label">Suivi CA & Résultats</span></div>
+  <div class="nav-item" onclick="toggleMenu('kpis-menu',this)"><span class="nav-icon">🎯</span><span class="nav-label">KPIs Clés</span><span class="nav-chevron">›</span></div>
+  <div class="submenu" id="kpis-menu">
+    <div class="sub-item"><span class="sub-dot"></span>Coût de revient</div>
+    <div class="sub-item"><span class="sub-dot"></span>Marge brute & nette</div>
+    <div class="sub-item"><span class="sub-dot"></span>Panier moyen</div>
+  </div>
+  <div class="nav-item" onclick="toggleMenu('pilotage-menu',this)"><span class="nav-icon">🧭</span><span class="nav-label">Pilotage</span><span class="nav-chevron">›</span></div>
+  <div class="submenu" id="pilotage-menu">
+    <div class="sub-item" onclick="window.location.href='pilotage.html?year=2025'"><span class="sub-dot"></span>Pilotage 2025<span class="sub-year-badge">2025</span></div>
+    <div class="sub-item" onclick="window.location.href='pilotage.html?year=2026'"><span class="sub-dot"></span>Pilotage 2026<span class="sub-year-badge">2026</span></div>
+    <div class="sub-item" onclick="window.location.href='pilotage.html?year=2027'"><span class="sub-dot"></span>Pilotage 2027<span class="sub-year-badge">2027</span></div>
+  </div>
+  <div class="nav-item" onclick="window.location.href='dashboard.html'"><span class="nav-icon">🏦</span><span class="nav-label">Dettes & Emprunts</span></div>
+  <div class="sidebar-footer">
+    <div class="user-card">
+      <div class="user-avatar" id="userAvatar">A</div>
+      <div><div class="user-name" id="userName">Utilisateur</div><div class="user-plan">Plan gratuit</div></div>
+      <button class="logout-btn" onclick="handleLogout()">⎋</button>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1 id="topTitle">Suivi CA & Résultats 2026</h1>
+      <p>Données consolidées depuis le Pilotage mensuel</p>
+    </div>
+    <div class="topbar-right">
+      <select class="year-select" id="yearSelect" onchange="loadYear()">
+        <option value="2025">2025</option>
+        <option value="2026" selected>2026</option>
+        <option value="2027">2027</option>
+      </select>
+      <button class="btn btn-primary" onclick="loadYear()">🔄 Actualiser</button>
+    </div>
+  </div>
+
+  <div class="content" id="mainContent">
+    <div class="loader"><div class="spin"></div> Chargement des données...</div>
+  </div>
+</div>
+
+<!-- Firebase -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  const app = initializeApp({
+    apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain:"altiora-70599.firebaseapp.com",
+    projectId:"altiora-70599",
+    storageBucket:"altiora-70599.firebasestorage.app",
+    messagingSenderId:"120905555746",
+    appId:"1:120905455746:web:618460c65cdc9e57cc8f7b"
+  });
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  window._auth=auth; window._db=db; window._doc=doc; window._getDoc=getDoc; window._signOut=signOut;
+
+  onAuthStateChanged(auth, user=>{
+    if(!user){window.location.href='index.html';return;}
+    window._uid=user.uid;
+    const name=user.displayName||user.email.split('@')[0];
+    document.getElementById('userName').textContent=name;
+    document.getElementById('userAvatar').textContent=name.charAt(0).toUpperCase();
+    const urlYear=new URLSearchParams(window.location.search).get('year');
+    if(urlYear)document.getElementById('yearSelect').value=urlYear;
+    loadYear();
+  });
+</script>
+
+<script>
+const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const MONTHS_SHORT=['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
+let _charts=[];
+
+function toggleMenu(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('open');}
+async function handleLogout(){await window._signOut(window._auth);window.location.href='index.html';}
+
+async function loadYear(){
+  const year=parseInt(document.getElementById('yearSelect').value);
+  document.getElementById('topTitle').textContent=`Suivi CA & Résultats ${year}`;
+  document.getElementById('mainContent').innerHTML='<div class="loader"><div class="spin"></div> Chargement des données...</div>';
+
+  // Destroy existing charts
+  _charts.forEach(c=>{try{c.destroy();}catch(e){}});
+  _charts=[];
+
+  if(!window._uid){setTimeout(loadYear,800);return;}
+
+  // Load all 12 months
+  const months=[];
+  for(let m=0;m<12;m++){
+    const key=`${year}-${String(m+1).padStart(2,'0')}`;
+    try{
+      const snap=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
+      months.push(snap.exists()?snap.data():null);
+    }catch(e){months.push(null);}
+  }
+
+  // Compute per-month data
+  const data=months.map((d,m)=>{
+    if(!d)return{caHT:0,caTTC:0,tvaCollectee:0,fixesHT:0,varHT:0,creditsHT:0,leasingHT:0,chargesHT:0,resultat:0,cashflow:0,prevCA:0};
+    const caHT=d.ca?d.ca.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
+    const caTTC=d.ca?d.ca.reduce((s,r)=>{const h=parseFloat(r.montantHT)||0;return s+h*(1+(r.tvaRate||0)/100);},0):0;
+    const tvaCollectee=d.ca?d.ca.reduce((s,r)=>{const h=parseFloat(r.montantHT)||0;return s+h*(r.tvaRate||0)/100;},0):0;
+    const rentrees=d.rentreesSupp?d.rentreesSupp.reduce((s,r)=>s+(parseFloat(r.montant)||0),0):0;
+    const prevCA=d.previsionCA?d.previsionCA.reduce((s,r)=>s+(parseFloat(r.montant)||0),0):0;
+    const fixesHT=d.chargesFixe?d.chargesFixe.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
+    const varHT=d.chargesVar?d.chargesVar.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
+    const leasingHT=d.leasing?d.leasing.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
+    let creditsHT=0;
+    if(d.credits)d.credits.forEach((r,i)=>{
+      if(r.ligneType==='principal')creditsHT+=parseFloat(r.montant)||0;
+      else{
+        let mt=parseFloat(r.montant)||0;
+        if(r.tvaAuto&&parseFloat(r.tauxInteret)>0){
+          const p=d.credits.slice(0,i).reverse().find(c=>c.fournisseur===r.fournisseur&&c.ligneType==='principal');
+          if(p)mt=(parseFloat(p.montant)||0)*parseFloat(r.tauxInteret)/100/12;
+        }
+        creditsHT+=mt;
+      }
+    });
+    const chargesHT=fixesHT+varHT+creditsHT+leasingHT;
+    const resultat=caHT+rentrees-chargesHT;
+    const cashflow=caTTC+rentrees-(fixesHT*(1+0.2)+varHT*(1+0.2)+creditsHT+leasingHT*(1+0.2));
+    return{caHT,caTTC,tvaCollectee,fixesHT,varHT,creditsHT,leasingHT,chargesHT,resultat,cashflow,prevCA,rentrees};
+  });
+
+  // Cumuls
+  let cumulCA=0,cumulCharges=0,cumulResultat=0;
+  const cumuls=data.map(d=>{
+    cumulCA+=d.caHT;cumulCharges+=d.chargesHT;cumulResultat+=d.resultat;
+    return{cumulCA,cumulCharges,cumulResultat,diff:cumulCA-cumulCharges};
+  });
+
+  // Totaux annuels
+  const totCA=data.reduce((s,d)=>s+d.caHT,0);
+  const totTTC=data.reduce((s,d)=>s+d.caTTC,0);
+  const totCharges=data.reduce((s,d)=>s+d.chargesHT,0);
+  const totResultat=data.reduce((s,d)=>s+d.resultat,0);
+  const totCashflow=data.reduce((s,d)=>s+d.cashflow,0);
+  const totFixes=data.reduce((s,d)=>s+d.fixesHT,0);
+  const totVar=data.reduce((s,d)=>s+d.varHT,0);
+  const totCredits=data.reduce((s,d)=>s+d.creditsHT,0);
+  const totLeasing=data.reduce((s,d)=>s+d.leasingHT,0);
+  const hasData=totCA>0||totCharges>0;
+
+  document.getElementById('mainContent').innerHTML=`
+    <!-- KPIs ANNUELS -->
+    <div class="kpi-grid">
+      <div class="kpi-card blue">
+        <div class="kpi-label">CA Annuel HT</div>
+        <div class="kpi-value">${fmtE(totCA)}</div>
+        <div class="kpi-sub">TTC : ${fmtE(totTTC)}</div>
+      </div>
+      <div class="kpi-card orange">
+        <div class="kpi-label">Total Charges HT</div>
+        <div class="kpi-value">${fmtE(totCharges)}</div>
+        <div class="kpi-sub">Fixes ${fmtE(totFixes)} · Var. ${fmtE(totVar)}</div>
+      </div>
+      <div class="kpi-card ${totResultat>=0?'green':'red'}">
+        <div class="kpi-label">Résultat Annuel HT</div>
+        <div class="kpi-value ${totResultat>=0?'positive':'negative'}">${fmtE(totResultat)}</div>
+        <div class="kpi-sub">CA − Dépenses totales</div>
+      </div>
+      <div class="kpi-card purple">
+        <div class="kpi-label">Cashflow Total</div>
+        <div class="kpi-value ${totCashflow>=0?'positive':'negative'}">${fmtE(totCashflow)}</div>
+        <div class="kpi-sub">Flux de trésorerie annuel</div>
+      </div>
+      <div class="kpi-card ${(totResultat/Math.max(totCA,1)*100)>=0?'green':'red'}">
+        <div class="kpi-label">Taux de Résultat</div>
+        <div class="kpi-value ${totCA>0?(totResultat/totCA>=0?'positive':'negative'):''}">${totCA>0?fmtPct(totResultat/totCA*100):'— %'}</div>
+        <div class="kpi-sub">Résultat / CA HT</div>
+      </div>
+    </div>
+
+    <!-- TABLEAU CA ANNUEL -->
+    <div class="table-section">
+      <div class="table-section-head">
+        <div class="table-section-title">💰 CA Annuel <span class="badge badge-blue">${year}</span></div>
+      </div>
+      <div style="overflow-x:auto">
+      <table class="annual-table">
+        <thead><tr><th>Mois</th><th>CA HT</th><th>CA TTC</th><th>TVA Collectée</th><th>Rentrées Supp.</th><th>Prévision CA</th><th>Écart Prévi/Réel</th></tr></thead>
+        <tbody>${data.map((d,i)=>`<tr>
+          <td>${MONTHS[i]}</td>
+          <td>${d.caHT>0?fmtE(d.caHT):'<span class="td-muted">—</span>'}</td>
+          <td>${d.caTTC>0?fmtE(d.caTTC):'<span class="td-muted">—</span>'}</td>
+          <td>${d.tvaCollectee>0?fmtE(d.tvaCollectee):'<span class="td-muted">—</span>'}</td>
+          <td>${d.rentrees>0?fmtE(d.rentrees):'<span class="td-muted">—</span>'}</td>
+          <td>${d.prevCA>0?fmtE(d.prevCA):'<span class="td-muted">—</span>'}</td>
+          <td>${d.prevCA>0?`<span class="${(d.caHT-d.prevCA)>=0?'td-positive':'td-negative'}">${fmtE(d.caHT-d.prevCA)}</span>`:'<span class="td-muted">—</span>'}</td>
+        </tr>`).join('')}</tbody>
+        <tfoot><tr><td>TOTAL ANNUEL</td><td>${fmtE(totCA)}</td><td>${fmtE(totTTC)}</td><td>${fmtE(data.reduce((s,d)=>s+d.tvaCollectee,0))}</td><td>${fmtE(data.reduce((s,d)=>s+d.rentrees,0))}</td><td>${fmtE(data.reduce((s,d)=>s+d.prevCA,0))}</td><td class="${(totCA-data.reduce((s,d)=>s+d.prevCA,0))>=0?'td-positive':'td-negative'}">${fmtE(totCA-data.reduce((s,d)=>s+d.prevCA,0))}</td></tr></tfoot>
+      </table>
+      </div>
+    </div>
+
+    <!-- TABLEAU CHARGES -->
+    <div class="table-section">
+      <div class="table-section-head">
+        <div class="table-section-title">🧾 Charges & Résultats par mois <span class="badge badge-orange">${year}</span></div>
+      </div>
+      <div style="overflow-x:auto">
+      <table class="annual-table">
+        <thead><tr><th>Mois</th><th>Charges Fixes HT</th><th>Charges Var. HT</th><th>Emprunts/Crédits</th><th>Leasing HT</th><th>Total Charges HT</th><th>Résultat HT</th><th>Cashflow</th><th>Cumul CA−Dép.</th></tr></thead>
+        <tbody>${data.map((d,i)=>`<tr>
+          <td>${MONTHS[i]}</td>
+          <td>${d.fixesHT>0?fmtE(d.fixesHT):'<span class="td-muted">—</span>'}</td>
+          <td>${d.varHT>0?fmtE(d.varHT):'<span class="td-muted">—</span>'}</td>
+          <td>${d.creditsHT>0?fmtE(d.creditsHT):'<span class="td-muted">—</span>'}</td>
+          <td>${d.leasingHT>0?fmtE(d.leasingHT):'<span class="td-muted">—</span>'}</td>
+          <td>${d.chargesHT>0?fmtE(d.chargesHT):'<span class="td-muted">—</span>'}</td>
+          <td><span class="${d.resultat>=0?'td-positive':'td-negative'}">${d.caHT>0||d.chargesHT>0?fmtE(d.resultat):'<span class="td-muted">—</span>'}</span></td>
+          <td><span class="${d.cashflow>=0?'td-positive':'td-negative'}">${d.caHT>0||d.chargesHT>0?fmtE(d.cashflow):'<span class="td-muted">—</span>'}</span></td>
+          <td><span class="td-cumul">${cumuls[i].diff!==0?fmtE(cumuls[i].diff):'<span class="td-muted">—</span>'}</span></td>
+        </tr>`).join('')}</tbody>
+        <tfoot><tr><td>TOTAL ANNUEL</td><td>${fmtE(totFixes)}</td><td>${fmtE(totVar)}</td><td>${fmtE(totCredits)}</td><td>${fmtE(totLeasing)}</td><td>${fmtE(totCharges)}</td><td class="${totResultat>=0?'td-positive':'td-negative'}">${fmtE(totResultat)}</td><td class="${totCashflow>=0?'td-positive':'td-negative'}">${fmtE(totCashflow)}</td><td class="td-cumul">${fmtE(totCA-totCharges)}</td></tr></tfoot>
+      </table>
+      </div>
+    </div>
+
+    <!-- GRAPHIQUES ROW 1 -->
+    <div class="charts-grid-2">
+      <div class="chart-card">
+        <div class="chart-head"><div><div class="chart-title">📈 Évolution CA mensuel</div><div class="chart-sub">HT et TTC sur ${year}</div></div></div>
+        <div class="chart-wrap h240"><canvas id="chartCA"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-head"><div><div class="chart-title">💹 Résultat HT par mois</div><div class="chart-sub">CA − Total Charges HT</div></div></div>
+        <div class="chart-wrap h240"><canvas id="chartResultat"></canvas></div>
+      </div>
+    </div>
+
+    <!-- GRAPHIQUES ROW 2 -->
+    <div class="charts-grid-2">
+      <div class="chart-card">
+        <div class="chart-head"><div><div class="chart-title">📊 Répartition des charges</div><div class="chart-sub">Fixes / Variables / Emprunts / Leasing par mois</div></div></div>
+        <div class="chart-wrap h240"><canvas id="chartCharges"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-head"><div><div class="chart-title">💰 Évolution Cashflow</div><div class="chart-sub">Flux de trésorerie mensuel ${year}</div></div></div>
+        <div class="chart-wrap h240"><canvas id="chartCashflow"></canvas></div>
+      </div>
+    </div>
+
+    <!-- GRAPHIQUES ROW 3 -->
+    <div class="charts-grid-2">
+      <div class="chart-card full">
+        <div class="chart-head"><div><div class="chart-title">🔵 CA vs Dépenses — Comparaison mensuelle</div><div class="chart-sub">Différence CA HT vs Total Charges HT mois par mois</div></div></div>
+        <div class="chart-wrap h280"><canvas id="chartDiff"></canvas></div>
+      </div>
+    </div>
+
+    <!-- GRAPHIQUE CUMUL -->
+    <div class="charts-grid-2" style="margin-bottom:0">
+      <div class="chart-card full">
+        <div class="chart-head"><div><div class="chart-title">📉 Variation Résultat Annuel cumulé</div><div class="chart-sub">Cumul CA HT − Cumul Charges HT au fil des mois</div></div></div>
+        <div class="chart-wrap h280"><canvas id="chartCumul"></canvas></div>
+      </div>
+    </div>
+  `;
+
+  // Build charts
+  buildCharts(data,cumuls,year);
+}
+
+function buildCharts(data,cumuls,year){
+  const labels=MONTHS_SHORT;
+  const caHT=data.map(d=>d.caHT);
+  const caTTC=data.map(d=>d.caTTC);
+  const fixesHT=data.map(d=>d.fixesHT);
+  const varHT=data.map(d=>d.varHT);
+  const creditsHT=data.map(d=>d.creditsHT);
+  const leasingHT=data.map(d=>d.leasingHT);
+  const chargesHT=data.map(d=>d.chargesHT);
+  const resultats=data.map(d=>d.resultat);
+  const cashflows=data.map(d=>d.cashflow);
+  const cumulDiff=cumuls.map(c=>c.diff);
+
+  const font={size:11,family:'Plus Jakarta Sans'};
+  const gridColor='#f1f5f9';
+  const tickColor='#9ca3af';
+
+  const baseOpts=(yCallback)=>({
+    responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{position:'bottom',labels:{font,color:'#6b7280',padding:12,boxWidth:10}}},
+    scales:{
+      x:{grid:{display:false},ticks:{font,color:tickColor}},
+      y:{grid:{color:gridColor},ticks:{font,color:tickColor,callback:yCallback||(v=>fmtK(v))}}
+    }
+  });
+
+  // CA Chart
+  const c1=new Chart(document.getElementById('chartCA'),{
+    type:'bar',
+    data:{labels,datasets:[
+      {label:'CA HT',data:caHT,backgroundColor:'rgba(26,61,206,0.8)',borderRadius:5,order:2},
+      {label:'CA TTC',data:caTTC,type:'line',borderColor:'#4f7ef8',borderWidth:2,pointRadius:3,pointBackgroundColor:'#4f7ef8',fill:false,tension:0.4,order:1}
+    ]},
+    options:baseOpts()
+  });
+  _charts.push(c1);
+
+  // Résultat Chart
+  const resultColors=resultats.map(v=>v>=0?'rgba(16,185,129,0.8)':'rgba(239,68,68,0.8)');
+  const c2=new Chart(document.getElementById('chartResultat'),{
+    type:'bar',
+    data:{labels,datasets:[{label:'Résultat HT',data:resultats,backgroundColor:resultColors,borderRadius:5}]},
+    options:{...baseOpts(),plugins:{legend:{display:false}}}
+  });
+  _charts.push(c2);
+
+  // Charges stacked
+  const c3=new Chart(document.getElementById('chartCharges'),{
+    type:'bar',
+    data:{labels,datasets:[
+      {label:'Charges Fixes',data:fixesHT,backgroundColor:'rgba(26,61,206,0.85)',borderRadius:3,stack:'charges'},
+      {label:'Charges Var.',data:varHT,backgroundColor:'rgba(79,126,248,0.85)',borderRadius:3,stack:'charges'},
+      {label:'Emprunts',data:creditsHT,backgroundColor:'rgba(245,158,11,0.85)',borderRadius:3,stack:'charges'},
+      {label:'Leasing',data:leasingHT,backgroundColor:'rgba(16,185,129,0.85)',borderRadius:3,stack:'charges'},
+    ]},
+    options:baseOpts()
+  });
+  _charts.push(c3);
+
+  // Cashflow
+  const cfColors=cashflows.map(v=>v>=0?'rgba(99,102,241,0.8)':'rgba(239,68,68,0.8)');
+  const c4=new Chart(document.getElementById('chartCashflow'),{
+    type:'bar',
+    data:{labels,datasets:[
+      {label:'Cashflow',data:cashflows,backgroundColor:cfColors,borderRadius:5},
+    ]},
+    options:{...baseOpts(),plugins:{legend:{display:false}}}
+  });
+  _charts.push(c4);
+
+  // CA vs Dépenses
+  const blueGrad=ctx=>{const g=ctx.createLinearGradient(0,0,0,280);g.addColorStop(0,'rgba(26,61,206,0.15)');g.addColorStop(1,'rgba(26,61,206,0)');return g;};
+  const orangeGrad=ctx=>{const g=ctx.createLinearGradient(0,0,0,280);g.addColorStop(0,'rgba(245,158,11,0.15)');g.addColorStop(1,'rgba(245,158,11,0)');return g;};
+  const c5ctx=document.getElementById('chartDiff').getContext('2d');
+  const c5=new Chart(c5ctx,{
+    type:'line',
+    data:{labels,datasets:[
+      {label:'CA HT',data:caHT,borderColor:'#1a3dce',borderWidth:2.5,backgroundColor:blueGrad(c5ctx),fill:true,tension:0.4,pointRadius:4,pointBackgroundColor:'#1a3dce'},
+      {label:'Dépenses HT',data:chargesHT,borderColor:'#f59e0b',borderWidth:2.5,backgroundColor:orangeGrad(c5ctx),fill:true,tension:0.4,pointRadius:4,pointBackgroundColor:'#f59e0b'},
+    ]},
+    options:baseOpts()
+  });
+  _charts.push(c5);
+
+  // Cumul résultat
+  const cumulColors=cumulDiff.map(v=>v>=0?'rgba(16,185,129,0.8)':'rgba(239,68,68,0.8)');
+  const c6ctx=document.getElementById('chartCumul').getContext('2d');
+  const gradCumul=c6ctx.createLinearGradient(0,0,0,280);
+  gradCumul.addColorStop(0,'rgba(99,102,241,0.2)');gradCumul.addColorStop(1,'rgba(99,102,241,0)');
+  const c6=new Chart(c6ctx,{
+    type:'line',
+    data:{labels,datasets:[
+      {label:'Cumul CA − Charges',data:cumulDiff,borderColor:'#6366f1',borderWidth:2.5,backgroundColor:gradCumul,fill:true,tension:0.4,pointRadius:4,pointBackgroundColor:cumulColors},
+    ]},
+    options:baseOpts()
+  });
+  _charts.push(c6);
+}
+
+function fmtE(n){return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
+function fmtK(v){const n=parseFloat(v)||0;return Math.abs(n)>=1000?(n/1000).toFixed(1)+'k€':n.toFixed(0)+'€';}
+function fmtPct(n){return (parseFloat(n)||0).toFixed(1)+'%';}
+
+window.loadYear=loadYear;
+window.toggleMenu=toggleMenu;
+window.handleLogout=handleLogout;
+</script>
+</body>
+</html>
