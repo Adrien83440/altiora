@@ -553,30 +553,30 @@ function renderProduct(p){
       </div>
 
       <!-- KPI ROW -->
-      <div class="kpi-row">
+      <div class="kpi-row" id="kpi-row-live">
         <div class="kpi-box blue">
           <div class="kpi-label">Prix vente HT</div>
-          <div class="kpi-val blue">${fmtE(p.pv)}</div>
+          <div class="kpi-val blue" id="kpi-pv">${fmtE(p.pv)}</div>
           <div class="kpi-sub">Par unité</div>
         </div>
-        <div class="kpi-box ${txMB>=30?'green':txMB>=10?'orange':'red'}">
+        <div class="kpi-box ${txMB>=30?'green':txMB>=10?'orange':'red'}" id="kpi-box-mb">
           <div class="kpi-label">Marge brute</div>
-          <div class="kpi-val ${txMB>=30?'pos':txMB>=10?'':'neg'}">${fmtE(mb)}</div>
-          <div class="kpi-sub">${txMB.toFixed(1)}% du PV</div>
+          <div class="kpi-val ${txMB>=30?'pos':txMB>=10?'':'neg'}" id="kpi-mb">${fmtE(mb)}</div>
+          <div class="kpi-sub" id="kpi-mb-sub">${txMB.toFixed(1)}% du PV</div>
         </div>
-        <div class="kpi-box ${txMN>=20?'green':txMN>=5?'orange':'red'}">
+        <div class="kpi-box ${txMN>=20?'green':txMN>=5?'orange':'red'}" id="kpi-box-mn">
           <div class="kpi-label">Marge nette</div>
-          <div class="kpi-val ${txMN>=20?'pos':txMN>=5?'':'neg'}">${fmtE(mn)}</div>
-          <div class="kpi-sub">${txMN.toFixed(1)}% du PV</div>
+          <div class="kpi-val ${txMN>=20?'pos':txMN>=5?'':'neg'}" id="kpi-mn">${fmtE(mn)}</div>
+          <div class="kpi-sub" id="kpi-mn-sub">${txMN.toFixed(1)}% du PV</div>
         </div>
         <div class="kpi-box">
           <div class="kpi-label">Coûts variables</div>
-          <div class="kpi-val">${fmtE(cv)}</div>
+          <div class="kpi-val" id="kpi-cv">${fmtE(cv)}</div>
           <div class="kpi-sub">${p.pv>0?(cv/p.pv*100).toFixed(1)+'% du PV':'—'}</div>
         </div>
-        <div class="kpi-box purple">
+        <div class="kpi-box purple" id="kpi-box-cf">
           <div class="kpi-label">CF imputées</div>
-          <div class="kpi-val">${fmtE(cfImpute)}</div>
+          <div class="kpi-val" id="kpi-cf">${fmtE(cfImpute)}</div>
           <div class="kpi-sub">Par unité (clé répart.)</div>
         </div>
       </div>
@@ -853,13 +853,36 @@ function refreshMarge(id){
   const sim=p.sim||{pv:0,mp:0,mo:0,cf:0,vol:parseFloat(p.qte)||1};
   const s=calcSim(p,sim);
   const cle=p.cle||{type:'temps',produit:0,total:0};
-  // Update KPIs
-  const upd=(id2,val)=>{const el=document.getElementById(id2);if(el)el.textContent=val;};
-  // Re-render result + table
+
+  // ── MISE À JOUR KPI BOXES DU HAUT ──
+  const set=(eid,val)=>{const el=document.getElementById(eid);if(el)el.textContent=val;};
+  const setCls=(eid,...cls)=>{const el=document.getElementById(eid);if(el){el.className=el.className.replace(/\b(pos|neg)\b/g,'');if(cls[0])el.classList.add(cls[0]);}};
+
+  set('kpi-mn', fmtE(mn));
+  set('kpi-mn-sub', txMN.toFixed(1)+'% du PV');
+  set('kpi-cf', fmtE(cfImpute));
+  set('kpi-mb', fmtE(mb));
+  set('kpi-mb-sub', txMB.toFixed(1)+'% du PV');
+  set('kpi-cv', fmtE(cv));
+
+  // Couleur marge nette
+  const boxMN=document.getElementById('kpi-box-mn');
+  if(boxMN){boxMN.className='kpi-box '+(txMN>=20?'green':txMN>=5?'orange':'red');}
+  const valMN=document.getElementById('kpi-mn');
+  if(valMN){valMN.className='kpi-val '+(txMN>=20?'pos':txMN>=5?'':'neg');}
+
+  // Couleur marge brute
+  const boxMB=document.getElementById('kpi-box-mb');
+  if(boxMB){boxMB.className='kpi-box '+(txMB>=30?'green':txMB>=10?'orange':'red');}
+  const valMB=document.getElementById('kpi-mb');
+  if(valMB){valMB.className='kpi-val '+(txMB>=30?'pos':txMB>=10?'':'neg');}
+
+  // Re-render simulateur + table
   const srg=document.getElementById('sim-result-grid');
   if(srg)srg.innerHTML=renderSimResult(p,s,{mb,txMB,mn,txMN,cfImpute});
   const ct=document.getElementById('comp-table');
   if(ct)ct.innerHTML=renderCompTable(p,s,{cv,mb,txMB,cfImpute,mn,txMN});
+
   // Update clé result
   const cr=document.getElementById('cle-result');
   if(cr)cr.innerHTML=cle.total>0&&cle.produit>0?
