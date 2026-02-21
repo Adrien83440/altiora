@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+<title>ALTIORA — Import de données</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"/>
+<!-- SheetJS pour lire Excel -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --blue:#1a3dce;--blue2:#4f7ef8;--bg:#f4f6fb;--white:#fff;
+  --border:#e2e8f0;--text:#1a1f36;--muted:#6b7280;
+  --green:#10b981;--red:#ef4444;--orange:#f59e0b;--purple:#6366f1;
+  --radius:14px;--sw:250px;
+}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;font-size:13px}
+
+nav{width:var(--sw);min-height:100vh;background:linear-gradient(180deg,#0f1f5c,#162366);position:fixed;top:0;left:0;display:flex;flex-direction:column;padding-bottom:20px;overflow-y:auto;z-index:99}
+.logo{display:flex;align-items:center;gap:10px;padding:22px 18px;border-bottom:1px solid rgba(255,255,255,.08)}
+.logo-i{width:33px;height:33px;background:rgba(255,255,255,.14);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px}
+.logo-t{font-size:17px;font-weight:800;color:#fff;letter-spacing:1px}
+.ns{font-size:10px;font-weight:700;color:rgba(255,255,255,.28);letter-spacing:1px;text-transform:uppercase;padding:12px 18px 4px}
+.ni{display:flex;align-items:center;gap:9px;padding:9px 18px;color:rgba(255,255,255,.55);font-size:12.5px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:.15s}
+.ni:hover{color:#fff;background:rgba(255,255,255,.06)}
+.ni.on{color:#fff;background:rgba(255,255,255,.1);border-left-color:#4f7ef8}
+.sub{overflow:hidden;max-height:0;transition:max-height .3s}.sub.open{max-height:200px}
+.si{display:flex;align-items:center;gap:7px;padding:7px 18px 7px 40px;color:rgba(255,255,255,.4);font-size:12px;cursor:pointer;border-left:3px solid transparent;transition:.15s}
+.si:hover{color:rgba(255,255,255,.75);background:rgba(255,255,255,.04)}
+.si.on{color:#fff;background:rgba(79,126,248,.15);border-left-color:rgba(79,126,248,.6)}
+.dot{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.25)}.si.on .dot{background:#4f7ef8}
+.chev{font-size:11px;color:rgba(255,255,255,.3);transition:transform .25s;margin-left:auto}
+.nav-footer{margin-top:auto;padding:12px 18px 0;border-top:1px solid rgba(255,255,255,.08)}
+.ucard{display:flex;align-items:center;gap:8px;padding:8px;background:rgba(255,255,255,.07);border-radius:8px;cursor:pointer;transition:.15s}
+.ucard:hover{background:rgba(255,255,255,.12)}
+.uav{width:29px;height:29px;background:linear-gradient(135deg,#4f7ef8,#6366f1);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff}
+.un{font-size:11.5px;font-weight:600;color:#fff}.upl{font-size:10px;color:rgba(255,255,255,.3)}
+.lbtn{margin-left:auto;background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;font-size:13px}
+
+main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
+.topbar{background:#fff;border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50}
+.topbar h1{font-size:16px;font-weight:700}.topbar p{font-size:11px;color:var(--muted)}
+.tb-r{display:flex;gap:8px;align-items:center}
+.btn{padding:7px 14px;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:5px}
+.btn-p{background:linear-gradient(135deg,var(--blue),var(--blue2));color:#fff;box-shadow:0 3px 10px rgba(26,61,206,.2)}
+.btn-o{background:#fff;color:var(--blue);border:1.5px solid var(--border)}
+.btn-o:hover{border-color:var(--blue2)}
+.btn-xs{padding:4px 10px;font-size:11px}
+.btn-g{background:#f0fdf4;color:var(--green);border:1.5px solid #bbf7d0}
+.btn-d{background:#fef2f2;color:var(--red);border:1.5px solid #fecaca}
+
+.page{padding:20px 24px;display:flex;flex-direction:column;gap:18px}
+
+/* STEPS */
+.steps{display:flex;align-items:center;gap:0;margin-bottom:4px}
+.step{display:flex;align-items:center;gap:8px;flex:1}
+.step-num{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;border:2px solid var(--border);color:var(--muted);background:#fff;transition:.3s}
+.step-num.done{background:var(--green);border-color:var(--green);color:#fff}
+.step-num.active{background:var(--blue);border-color:var(--blue);color:#fff}
+.step-label{font-size:11px;font-weight:600;color:var(--muted)}
+.step-label.active{color:var(--blue);font-weight:700}
+.step-label.done{color:var(--green)}
+.step-line{flex:1;height:2px;background:var(--border);margin:0 8px;transition:.3s}
+.step-line.done{background:var(--green)}
+
+/* CARDS */
+.card{background:#fff;border:1px solid var(--border);border-radius:var(--radius)}
+.card-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:#f8faff}
+.card-title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:7px}
+.card-body{padding:20px}
+
+/* FORMAT SELECTOR */
+.format-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.fmt-btn{border:2px solid var(--border);border-radius:12px;padding:18px 14px;cursor:pointer;text-align:center;background:#fff;transition:.2s;position:relative}
+.fmt-btn:hover{border-color:var(--blue2);background:#f8faff;transform:translateY(-2px);box-shadow:0 4px 16px rgba(79,126,248,.1)}
+.fmt-btn.on{border-color:var(--blue);background:#eff6ff;box-shadow:0 0 0 3px rgba(79,126,248,.12)}
+.fmt-icon{font-size:28px;margin-bottom:8px}
+.fmt-name{font-size:13px;font-weight:700;margin-bottom:3px}
+.fmt-desc{font-size:11px;color:var(--muted)}
+.fmt-badge{position:absolute;top:-8px;right:10px;background:var(--green);color:#fff;font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px}
+
+/* DROP ZONE */
+.dropzone{border:2px dashed var(--border);border-radius:12px;padding:40px 20px;text-align:center;cursor:pointer;transition:.2s;background:#fafbff}
+.dropzone:hover,.dropzone.drag{border-color:var(--blue2);background:#eff6ff}
+.dropzone-icon{font-size:40px;margin-bottom:10px}
+.dropzone-title{font-size:14px;font-weight:700;margin-bottom:4px}
+.dropzone-sub{font-size:12px;color:var(--muted)}
+.dropzone-btn{margin-top:14px;display:inline-flex;align-items:center;gap:6px;padding:8px 18px;background:var(--blue);color:#fff;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;border:none;font-family:'Plus Jakarta Sans',sans-serif}
+input[type=file]{display:none}
+
+/* GOOGLE SHEETS */
+.gs-input{display:flex;gap:10px;align-items:center}
+.gs-field{flex:1;padding:10px 14px;border:2px solid var(--border);border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;outline:none;transition:.15s}
+.gs-field:focus{border-color:var(--blue2);box-shadow:0 0 0 3px rgba(79,126,248,.1)}
+
+/* PREVIEW TABLE */
+.preview-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px;max-height:220px;overflow-y:auto}
+.preview-table{width:100%;border-collapse:collapse;font-size:11px}
+.preview-table th{padding:7px 12px;background:#f8faff;border-bottom:1px solid var(--border);font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;white-space:nowrap;position:sticky;top:0}
+.preview-table td{padding:7px 12px;border-bottom:1px solid #f8faff;white-space:nowrap}
+.preview-table tr:hover td{background:#f8faff}
+
+/* MAPPING */
+.mapping-grid{display:flex;flex-direction:column;gap:0}
+.dest-section{margin-bottom:16px}
+.dest-title{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.map-rows{display:flex;flex-direction:column;gap:6px}
+.map-row{display:grid;grid-template-columns:1fr 40px 1fr 80px;align-items:center;gap:10px;padding:10px 14px;background:#f8faff;border:1px solid var(--border);border-radius:10px;transition:.15s}
+.map-row:hover{background:#eff6ff;border-color:#c7d2fe}
+.map-row.mapped{background:#f0fdf4;border-color:#86efac}
+.map-row.ignored{opacity:.45}
+.map-dest{font-size:12px;font-weight:700;color:var(--text)}
+.map-dest-sub{font-size:10px;color:var(--muted);margin-top:1px}
+.map-arrow{font-size:16px;color:var(--muted);text-align:center}
+.map-sel{width:100%;padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;color:var(--text);background:#fff;outline:none;cursor:pointer;transition:.15s}
+.map-sel:focus{border-color:var(--blue2)}
+.map-sel.has-val{border-color:var(--green);background:#f0fdf4}
+.map-ignore{padding:4px 8px;border:1.5px solid var(--border);border-radius:6px;background:#fff;font-size:10px;font-weight:600;cursor:pointer;color:var(--muted);font-family:'Plus Jakarta Sans',sans-serif;transition:.15s}
+.map-ignore:hover{background:#fef2f2;color:var(--red);border-color:#fecaca}
+.map-ignore.active{background:#fef2f2;color:var(--red);border-color:#fecaca}
+
+/* AUTO DETECT BADGES */
+.auto-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;background:#d1fae5;color:#065f46;margin-left:6px}
+
+/* RÉSUMÉ IMPORT */
+.import-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.is-box{background:#f8faff;border:1.5px solid var(--border);border-radius:10px;padding:14px;text-align:center}
+.is-box.ok{background:#f0fdf4;border-color:#86efac}
+.is-box.warn{background:#fffbeb;border-color:#fde68a}
+.is-val{font-size:20px;font-weight:800;margin-bottom:3px}
+.is-lbl{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase}
+
+/* PROGRESS */
+.progress-bar-wrap{background:#e2e8f0;border-radius:99px;height:8px;overflow:hidden;margin:10px 0}
+.progress-bar-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--blue2));border-radius:99px;transition:width .5s ease}
+
+/* TOAST */
+.toast{position:fixed;bottom:18px;right:18px;padding:10px 16px;border-radius:9px;font-size:13px;font-weight:600;z-index:9999;transform:translateY(60px);opacity:0;transition:.3s}
+.toast.show{transform:translateY(0);opacity:1}
+.toast.ok{background:#10b981;color:#fff}
+.toast.err{background:#ef4444;color:#fff}
+.toast.info{background:#1a3dce;color:#fff}
+
+/* PANEL VISIBILITY */
+.panel{display:none}.panel.on{display:block}
+.hidden{display:none}
+
+/* HAMBURGER */
+.hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#0f1f5c;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;box-shadow:0 4px 16px rgba(15,31,92,.45);-webkit-tap-highlight-color:transparent}
+.hamburger span{display:block;width:20px;height:2.5px;background:#fff;border-radius:2px;transition:all .25s ease;pointer-events:none}
+.hamburger.open span:nth-child(1){transform:translateY(7.5px) rotate(45deg)}
+.hamburger.open span:nth-child(2){opacity:0;transform:scaleX(0)}
+.hamburger.open span:nth-child(3){transform:translateY(-7.5px) rotate(-45deg)}
+.nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000}
+.nav-overlay.show{display:block}
+
+@media(max-width:768px){
+  .hamburger{display:flex!important}
+  nav{position:fixed!important;top:0!important;left:0!important;height:100vh!important;height:-webkit-fill-available!important;width:min(280px,84vw)!important;z-index:1001!important;transform:translateX(-105%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1)!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;margin:0!important}
+  nav.open{transform:translateX(0)!important;box-shadow:8px 0 32px rgba(0,0,0,.3)!important}
+  main{margin-left:0!important;width:100vw!important;overflow-x:hidden!important}
+  .topbar{padding:10px 10px 10px 62px!important;flex-wrap:wrap!important;gap:6px!important}
+  .topbar h1{font-size:14px!important}
+  .tb-r{width:100%!important;flex-wrap:wrap!important}
+  .page{padding:12px 10px!important;overflow-x:hidden!important}
+  .format-grid{grid-template-columns:1fr!important;gap:10px!important}
+  .import-summary{grid-template-columns:1fr 1fr 1fr!important;gap:8px!important}
+  .map-row{grid-template-columns:1fr 30px 1fr 60px!important;gap:6px!important}
+  .steps{overflow-x:auto}
+  .gs-input{flex-direction:column!important}
+  .gs-field{width:100%}
+}
+</style>
+</head>
+<body>
+
+<button class="hamburger" id="hamburger" onclick="toggleSidebar()" aria-label="Menu">
+  <span></span><span></span><span></span>
+</button>
+<div class="nav-overlay" id="navOverlay" onclick="closeSidebar()"></div>
+
+<nav>
+  <div class="logo"><div class="logo-i">📊</div><div class="logo-t">ALTIORA</div></div>
+  <div class="ns">Principal</div>
+  <div class="ni" onclick="location.href='dashboard.html'"><span>🏠</span><span>Tableau de bord</span></div>
+  <div class="ni" onclick="location.href='suivi-ca.html'"><span>📈</span><span>Suivi CA & Résultats</span></div>
+  <div class="ni" onclick="toggleNav('kpis-sub',this)"><span>🎯</span><span style="flex:1">KPIs Clés</span><span class="chev" id="chev-kpis">›</span></div>
+  <div class="sub" id="kpis-sub">
+    <div class="si" onclick="location.href='cout-revient.html'"><span class="dot"></span>Coût de revient</div>
+    <div class="si" onclick="location.href='marges.html'"><span class="dot"></span>Marge brute &amp; nette</div>
+    <div class="si" onclick="location.href='panier-moyen.html'"><span class="dot"></span>Panier moyen</div>
+  </div>
+  <div class="ni" onclick="toggleNav('pil-sub',this)"><span>🧭</span><span style="flex:1">Pilotage</span><span class="chev" id="chev-pil">›</span></div>
+  <div class="sub" id="pil-sub">
+    <div class="si" onclick="location.href='pilotage.html?year=2025'"><span class="dot"></span>Pilotage 2025</div>
+    <div class="si" onclick="location.href='pilotage.html?year=2026'"><span class="dot"></span>Pilotage 2026</div>
+    <div class="si" onclick="location.href='pilotage.html?year=2027'"><span class="dot"></span>Pilotage 2027</div>
+  </div>
+  <div class="ni" onclick="location.href='dettes.html'"><span>🏦</span><span>Dettes &amp; Emprunts</span></div>
+  <div class="ns">Outils</div>
+  <div class="ni on"><span>📥</span><span>Import de données</span></div>
+  <div class="nav-footer">
+    <div class="ucard" onclick="location.href='profil.html'">
+      <div class="uav" id="av">A</div>
+      <div><div class="un" id="uname">Utilisateur</div><div class="upl">Plan gratuit</div></div>
+      <button class="lbtn" onclick="event.stopPropagation();doLogout()">⎋</button>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <div class="topbar">
+    <div>
+      <h1>📥 Import de données</h1>
+      <p>Importez vos fichiers Excel, CSV ou Google Sheets et mappez les colonnes vers Altiora</p>
+    </div>
+    <div class="tb-r">
+      <button class="btn btn-o btn-xs" onclick="location.href='dashboard.html'">← Dashboard</button>
+    </div>
+  </div>
+
+  <div class="page">
+
+    <!-- ÉTAPES -->
+    <div class="steps" id="stepsBar">
+      <div class="step">
+        <div class="step-num active" id="sn1">1</div>
+        <div class="step-label active" id="sl1">Format &amp; fichier</div>
+      </div>
+      <div class="step-line" id="line1"></div>
+      <div class="step">
+        <div class="step-num" id="sn2">2</div>
+        <div class="step-label" id="sl2">Mapping colonnes</div>
+      </div>
+      <div class="step-line" id="line2"></div>
+      <div class="step">
+        <div class="step-num" id="sn3">3</div>
+        <div class="step-label" id="sl3">Vérification</div>
+      </div>
+      <div class="step-line" id="line3"></div>
+      <div class="step">
+        <div class="step-num" id="sn4">4</div>
+        <div class="step-label" id="sl4">Import ✓</div>
+      </div>
+    </div>
+
+    <!-- ═══ ÉTAPE 1 : FORMAT + UPLOAD ═══ -->
+    <div class="panel on" id="step1">
+
+      <!-- Choix format -->
+      <div class="card">
+        <div class="card-head"><div class="card-title">📂 Choisissez votre format</div></div>
+        <div class="card-body">
+          <div class="format-grid">
+            <div class="fmt-btn on" id="fmt-xlsx" onclick="selectFmt('xlsx')">
+              <div class="fmt-badge">Recommandé</div>
+              <div class="fmt-icon">📊</div>
+              <div class="fmt-name">Excel (.xlsx)</div>
+              <div class="fmt-desc">Fichiers Microsoft Excel ou LibreOffice</div>
+            </div>
+            <div class="fmt-btn" id="fmt-csv" onclick="selectFmt('csv')">
+              <div class="fmt-icon">📄</div>
+              <div class="fmt-name">CSV (.csv)</div>
+              <div class="fmt-desc">Fichiers texte séparés par virgule ou point-virgule</div>
+            </div>
+            <div class="fmt-btn" id="fmt-gsheets" onclick="selectFmt('gsheets')">
+              <div class="fmt-icon">🟢</div>
+              <div class="fmt-name">Google Sheets</div>
+              <div class="fmt-desc">Collez le lien de partage de votre feuille</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Upload zone -->
+      <div class="card" id="uploadCard">
+        <div class="card-head"><div class="card-title" id="uploadTitle">📊 Importer votre fichier Excel</div></div>
+        <div class="card-body">
+          <!-- XLSX / CSV -->
+          <div id="dropArea">
+            <div class="dropzone" id="dropzone"
+              ondragover="ev(event,'drag',true)"
+              ondragleave="ev(event,'drag',false)"
+              ondrop="onDrop(event)">
+              <div class="dropzone-icon" id="dzIcon">📊</div>
+              <div class="dropzone-title" id="dzTitle">Glissez votre fichier ici</div>
+              <div class="dropzone-sub" id="dzSub">ou cliquez pour sélectionner</div>
+              <button class="dropzone-btn" onclick="document.getElementById('fileInput').click()">
+                📁 Choisir un fichier
+              </button>
+              <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="onFile(this.files[0])"/>
+            </div>
+          </div>
+          <!-- Google Sheets -->
+          <div id="gsArea" class="hidden">
+            <div style="margin-bottom:12px;font-size:12px;color:var(--muted)">
+              ℹ️ Votre feuille doit être partagée en <strong>"Tout le monde avec le lien"</strong> et publiée sur le web (Fichier → Partager → Publier sur le Web → CSV)
+            </div>
+            <div class="gs-input">
+              <input class="gs-field" id="gsUrl" placeholder="https://docs.google.com/spreadsheets/d/..." />
+              <button class="btn btn-p" onclick="loadGSheets()">📥 Charger</button>
+            </div>
+            <div style="margin-top:10px;font-size:11px;color:var(--muted)">
+              💡 Ou collez l'URL CSV publiée : <code>https://docs.google.com/spreadsheets/d/ID/export?format=csv</code>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Aperçu fichier -->
+      <div class="card hidden" id="previewCard">
+        <div class="card-head">
+          <div class="card-title">👁️ Aperçu du fichier <span id="previewFilename" style="font-size:11px;color:var(--muted);font-weight:500;margin-left:8px"></span></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <span id="previewStats" style="font-size:11px;color:var(--muted)"></span>
+            <button class="btn btn-o btn-xs" onclick="resetFile()">✕ Changer</button>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0">
+          <!-- Sélection feuille Excel -->
+          <div id="sheetSelector" class="hidden" style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+            <span style="font-size:12px;font-weight:600">Feuille :</span>
+            <select id="sheetSelect" class="map-sel" style="width:200px" onchange="selectSheet()"></select>
+          </div>
+          <div class="preview-wrap">
+            <table class="preview-table" id="previewTable"></table>
+          </div>
+        </div>
+        <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
+          <button class="btn btn-p" onclick="goStep(2)">Suivant → Mapper les colonnes</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ═══ ÉTAPE 2 : MAPPING ═══ -->
+    <div class="panel" id="step2">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">🗺️ Mapper les colonnes</div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-o btn-xs" onclick="autoDetect()">✨ Détection auto</button>
+            <button class="btn btn-o btn-xs" onclick="goStep(1)">← Retour</button>
+          </div>
+        </div>
+        <div class="card-body">
+
+          <!-- Destination Altiora -->
+          <div style="margin-bottom:16px">
+            <div style="font-size:12px;font-weight:700;margin-bottom:8px">📍 Où importer ces données ?</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-xs" id="dest-ca" onclick="setDest('ca',this)" style="border:2px solid var(--border)">📈 CA mensuel</button>
+              <button class="btn btn-xs" id="dest-charges" onclick="setDest('charges',this)" style="border:2px solid var(--border)">💸 Charges fixes/var</button>
+              <button class="btn btn-xs" id="dest-dettes" onclick="setDest('dettes',this)" style="border:2px solid var(--border)">🏦 Dettes</button>
+            </div>
+          </div>
+
+          <!-- Légende -->
+          <div style="display:grid;grid-template-columns:1fr 40px 1fr 80px;gap:10px;padding:8px 14px;background:#f1f5f9;border-radius:8px;margin-bottom:10px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase">
+            <div>Champ Altiora</div><div></div><div>Colonne de votre fichier</div><div>Action</div>
+          </div>
+
+          <!-- Lignes de mapping générées dynamiquement -->
+          <div id="mappingRows"></div>
+
+          <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">
+            <button class="btn btn-o" onclick="goStep(1)">← Retour</button>
+            <button class="btn btn-p" onclick="goStep(3)">Vérifier → Prévisualiser l'import</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ ÉTAPE 3 : VÉRIFICATION ═══ -->
+    <div class="panel" id="step3">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">✅ Vérification avant import</div>
+          <button class="btn btn-o btn-xs" onclick="goStep(2)">← Retour</button>
+        </div>
+        <div class="card-body">
+          <div class="import-summary" id="importSummary"></div>
+          <div id="verifyTable"></div>
+          <div style="margin-top:16px;padding:12px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;font-size:12px;color:#92400e" id="warningBox"></div>
+          <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:8px">
+            <button class="btn btn-o" onclick="goStep(2)">← Modifier</button>
+            <button class="btn btn-p" id="importBtn" onclick="doImport()">🚀 Importer les données</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ ÉTAPE 4 : SUCCÈS ═══ -->
+    <div class="panel" id="step4">
+      <div class="card" style="text-align:center;padding:40px 20px">
+        <div style="font-size:56px;margin-bottom:16px">🎉</div>
+        <div style="font-size:20px;font-weight:800;margin-bottom:8px;color:var(--green)">Import réussi !</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:24px" id="successMsg"></div>
+        <div class="progress-bar-wrap" style="max-width:400px;margin:0 auto 24px">
+          <div class="progress-bar-fill" id="successBar" style="width:0%"></div>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+          <button class="btn btn-p" onclick="location.href='dashboard.html'">🏠 Voir le dashboard</button>
+          <button class="btn btn-o" onclick="location.href='suivi-ca.html'">📈 Voir le CA</button>
+          <button class="btn btn-o" onclick="resetAll()">📥 Nouvel import</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── ÉTAT GLOBAL ──
+let _fmt = 'xlsx';
+let _wb = null;          // workbook SheetJS
+let _headers = [];       // colonnes du fichier
+let _rows = [];          // données (array of objects)
+let _dest = 'ca';        // destination: ca | charges | dettes
+let _mapping = {};       // {altioraField: fileColumn}
+let _ignored = new Set();
+let _currentStep = 1;
+
+// ── DÉFINITION DES CHAMPS PAR DESTINATION ──
+const DEST_FIELDS = {
+  ca: [
+    {key:'mois',     label:'Mois',               sub:'Janvier, Février... ou 1-12', required:true,  hint:['mois','month','période','date']},
+    {key:'ca_ht',    label:'CA HT (€)',           sub:'Chiffre d\'affaires hors taxe', required:true,  hint:['ca ht','ca_ht','ca','chiffre','ventes','recettes','revenu']},
+    {key:'ca_ttc',   label:'CA TTC (€)',          sub:'Chiffre d\'affaires TTC',      required:false, hint:['ca ttc','ca_ttc','ttc']},
+    {key:'prevision',label:'Prévision CA (€)',    sub:'Objectif ou prévision',        required:false, hint:['prévision','objectif','forecast','budget']},
+  ],
+  charges: [
+    {key:'mois',     label:'Mois',               sub:'Mois de la charge',            required:true,  hint:['mois','month','période','date']},
+    {key:'nom',      label:'Nom de la charge',   sub:'Libellé ou description',       required:true,  hint:['nom','libellé','description','charge','poste','label']},
+    {key:'montant',  label:'Montant HT (€)',     sub:'Montant hors taxe',            required:true,  hint:['montant','amount','ht','prix','coût','valeur']},
+    {key:'type',     label:'Type',               sub:'Fixe ou Variable',             required:false, hint:['type','catégorie','nature','fixe','variable']},
+  ],
+  dettes: [
+    {key:'nom',      label:'Nom / Description',  sub:'Intitulé de la dette',         required:true,  hint:['nom','libellé','description','objet','dette']},
+    {key:'montant',  label:'Montant initial (€)',sub:'Capital emprunté',             required:true,  hint:['montant','capital','principal','amount']},
+    {key:'taux',     label:'Taux (%)',           sub:'Taux d\'intérêt annuel',       required:false, hint:['taux','taux%','rate','intérêt']},
+    {key:'duree',    label:'Durée (mois)',       sub:'Durée de remboursement',       required:false, hint:['durée','duree','mois','months','terme']},
+    {key:'debut',    label:'Date de début',      sub:'Date de départ',               required:false, hint:['début','date','start','origine']},
+    {key:'type',     label:'Type',               sub:'emprunt/fournisseur/leasing',  required:false, hint:['type','nature','catégorie']},
+  ],
+};
+
+// ── NAVIGATION SIDEBAR ──
+function toggleNav(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('on')}
+async function doLogout(){try{if(window._signOut&&window._auth)await window._signOut(window._auth)}catch(e){}location.href='index.html'}
+function toggleSidebar(){var n=document.querySelector('nav'),b=document.getElementById('hamburger'),o=document.getElementById('navOverlay');n.classList.toggle('open');b.classList.toggle('open');o.classList.toggle('show');document.body.style.overflow=n.classList.contains('open')?'hidden':''}
+function closeSidebar(){var n=document.querySelector('nav'),b=document.getElementById('hamburger'),o=document.getElementById('navOverlay');n.classList.remove('open');b.classList.remove('open');o.classList.remove('show');document.body.style.overflow=''}
+
+// ── UTILS ──
+function showToast(msg,type){var t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');setTimeout(()=>t.className='toast',3000)}
+function fe(n){return(parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'}
+
+// ── ÉTAPES ──
+function goStep(n){
+  if(n===2&&!_rows.length){showToast('Chargez d\'abord un fichier','err');return}
+  if(n===3){buildVerify();if(!validateMapping())return}
+  _currentStep=n;
+  for(let i=1;i<=4;i++){
+    document.getElementById('step'+i).className='panel'+(i===n?' on':'');
+    const sn=document.getElementById('sn'+i), sl=document.getElementById('sl'+i);
+    if(i<n){sn.className='step-num done';sl.className='step-label done'}
+    else if(i===n){sn.className='step-num active';sl.className='step-label active'}
+    else{sn.className='step-num';sl.className='step-label'}
+    if(i<4){const l=document.getElementById('line'+i);l.className='step-line'+(i<n?' done':'')}
+  }
+  if(n===2) buildMapping();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+// ── FORMAT ──
+function selectFmt(f){
+  _fmt=f;
+  ['xlsx','csv','gsheets'].forEach(k=>{
+    document.getElementById('fmt-'+k).classList.toggle('on',k===f)
+  });
+  document.getElementById('dropArea').classList.toggle('hidden',f==='gsheets');
+  document.getElementById('gsArea').classList.toggle('hidden',f!=='gsheets');
+  const icons={'xlsx':'📊','csv':'📄','gsheets':'🟢'};
+  const titles={'xlsx':'Importer votre fichier Excel','csv':'Importer votre fichier CSV','gsheets':'Charger depuis Google Sheets'};
+  const dzIcons={'xlsx':'📊','csv':'📄','gsheets':''};
+  document.getElementById('uploadTitle').textContent=titles[f];
+  document.getElementById('dzIcon').textContent=icons[f]||'📁';
+  document.getElementById('fileInput').accept=f==='csv'?'.csv':'.xlsx,.xls';
+}
+
+// ── DROP ZONE ──
+function ev(e,cls,add){e.preventDefault();document.getElementById('dropzone').classList.toggle(cls,add)}
+function onDrop(e){e.preventDefault();document.getElementById('dropzone').classList.remove('drag');const f=e.dataTransfer.files[0];if(f)onFile(f)}
+
+// ── LECTURE FICHIER ──
+function onFile(file){
+  if(!file)return;
+  const ext=file.name.split('.').pop().toLowerCase();
+  if(ext==='csv'||_fmt==='csv'){readCSV(file)}
+  else{readXLSX(file)}
+}
+
+function readXLSX(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      _wb=XLSX.read(e.target.result,{type:'binary'});
+      const sheets=_wb.SheetNames;
+      // Sélecteur de feuilles
+      const sel=document.getElementById('sheetSelect');
+      sel.innerHTML=sheets.map((s,i)=>`<option value="${i}">${s}</option>`).join('');
+      document.getElementById('sheetSelector').classList.toggle('hidden',sheets.length<=1);
+      parseSheet(0,file.name);
+    }catch(err){showToast('Erreur lecture Excel','err')}
+  };
+  reader.readAsBinaryString(file);
+}
+
+function selectSheet(){
+  const idx=parseInt(document.getElementById('sheetSelect').value);
+  parseSheet(idx,'');
+}
+
+function parseSheet(idx,filename){
+  const ws=_wb.Sheets[_wb.SheetNames[idx]];
+  const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+  if(!data.length){showToast('Feuille vide','err');return}
+  _headers=data[0].map(h=>String(h).trim()).filter(h=>h);
+  _rows=data.slice(1).filter(r=>r.some(c=>c!=='')).map(r=>{
+    const obj={};_headers.forEach((h,i)=>obj[h]=r[i]);return obj;
+  });
+  showPreview(filename||_wb.SheetNames[document.getElementById('sheetSelect').value||0]);
+}
+
+function readCSV(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const text=e.target.result;
+      // Détecter séparateur
+      const sep=text.indexOf(';')>text.indexOf(',')?';':',';
+      const lines=text.trim().split('\n');
+      _headers=lines[0].split(sep).map(h=>h.trim().replace(/^"|"$/g,''));
+      _rows=lines.slice(1).filter(l=>l.trim()).map(l=>{
+        const vals=l.split(sep).map(v=>v.trim().replace(/^"|"$/g,''));
+        const obj={};_headers.forEach((h,i)=>obj[h]=vals[i]||'');return obj;
+      });
+      showPreview(file.name);
+    }catch(err){showToast('Erreur lecture CSV','err')}
+  };
+  reader.readAsText(file,'UTF-8');
+}
+
+async function loadGSheets(){
+  const url=document.getElementById('gsUrl').value.trim();
+  if(!url){showToast('Collez un lien Google Sheets','err');return}
+  // Convertir URL en URL CSV export
+  let csvUrl=url;
+  if(url.includes('/spreadsheets/d/')){
+    const id=url.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1];
+    if(!id){showToast('Lien invalide','err');return}
+    csvUrl=`https://docs.google.com/spreadsheets/d/${id}/export?format=csv`;
+  }
+  showToast('⏳ Chargement...','info');
+  try{
+    const r=await fetch(csvUrl);
+    if(!r.ok)throw new Error();
+    const text=await r.text();
+    const lines=text.trim().split('\n');
+    _headers=lines[0].split(',').map(h=>h.trim().replace(/^"|"$/g,''));
+    _rows=lines.slice(1).filter(l=>l.trim()).map(l=>{
+      const vals=l.split(',').map(v=>v.trim().replace(/^"|"$/g,''));
+      const obj={};_headers.forEach((h,i)=>obj[h]=vals[i]||'');return obj;
+    });
+    showPreview('Google Sheets');
+  }catch(e){showToast('Impossible de charger — vérifiez le lien et les permissions','err')}
+}
+
+// ── PRÉVISUALISATION ──
+function showPreview(filename){
+  document.getElementById('previewFilename').textContent=filename;
+  document.getElementById('previewStats').textContent=`${_rows.length} lignes · ${_headers.length} colonnes`;
+  // Tableau
+  const t=document.getElementById('previewTable');
+  const maxRows=Math.min(_rows.length,8);
+  t.innerHTML=`<thead><tr>${_headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+    <tbody>${Array.from({length:maxRows},(_,i)=>`<tr>${_headers.map(h=>`<td>${_rows[i][h]??''}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  document.getElementById('previewCard').classList.remove('hidden');
+  document.getElementById('uploadCard').classList.add('hidden');
+  showToast(`✅ ${_rows.length} lignes chargées !`,'ok');
+}
+
+function resetFile(){
+  _wb=null;_headers=[];_rows=[];_mapping={};_ignored.clear();
+  document.getElementById('previewCard').classList.add('hidden');
+  document.getElementById('uploadCard').classList.remove('hidden');
+  document.getElementById('fileInput').value='';
+}
+
+// ── DESTINATION ──
+function setDest(d,btn){
+  _dest=d;
+  ['ca','charges','dettes'].forEach(k=>{
+    const b=document.getElementById('dest-'+k);
+    b.style.borderColor=k===d?'var(--blue)':'var(--border)';
+    b.style.background=k===d?'#eff6ff':'';
+    b.style.color=k===d?'var(--blue)':'';
+  });
+  buildMapping();
+}
+
+// ── DÉTECTION AUTO ──
+function autoDetect(){
+  const fields=DEST_FIELDS[_dest];
+  let matched=0;
+  fields.forEach(f=>{
+    const col=_headers.find(h=>{
+      const hl=h.toLowerCase();
+      return f.hint.some(hint=>hl.includes(hint)||hint.includes(hl));
+    });
+    if(col){
+      _mapping[f.key]=col;
+      _ignored.delete(f.key);
+      matched++;
+    }
+  });
+  buildMapping();
+  showToast(`✨ ${matched} colonne${matched>1?'s':''} détectée${matched>1?'s':''} automatiquement !`,matched>0?'ok':'info');
+}
+
+// ── MAPPING UI ──
+function buildMapping(){
+  const fields=DEST_FIELDS[_dest];
+  const opts=`<option value="">— Ne pas importer —</option>`+_headers.map(h=>`<option value="${h}">${h}</option>`).join('');
+
+  document.getElementById('mappingRows').innerHTML=fields.map(f=>{
+    const isIgnored=_ignored.has(f.key);
+    const cur=_mapping[f.key]||'';
+    const hasMapped=!!cur;
+    const autoTag=hasMapped?`<span class="auto-badge">✨ Auto</span>`:'';
+    return`<div class="map-row ${hasMapped?'mapped':''} ${isIgnored?'ignored':''}" id="mr-${f.key}">
+      <div>
+        <div class="map-dest">${f.label} ${f.required?'<span style="color:var(--red)">*</span>':''} ${autoTag}</div>
+        <div class="map-dest-sub">${f.sub}</div>
+      </div>
+      <div class="map-arrow">→</div>
+      <select class="map-sel ${hasMapped?'has-val':''}" id="ms-${f.key}" onchange="onMapChange('${f.key}',this)">
+        ${opts}
+      </select>
+      <button class="map-ignore ${isIgnored?'active':''}" onclick="toggleIgnore('${f.key}')">${isIgnored?'↺ Restaurer':'✕ Ignorer'}</button>
+    </div>`;
+  }).join('');
+
+  // Appliquer valeurs actuelles
+  fields.forEach(f=>{
+    const sel=document.getElementById('ms-'+f.key);
+    if(sel&&_mapping[f.key])sel.value=_mapping[f.key];
+  });
+}
+
+function onMapChange(key,sel){
+  if(sel.value){_mapping[key]=sel.value;_ignored.delete(key)}
+  else delete _mapping[key];
+  const row=document.getElementById('mr-'+key);
+  row.classList.toggle('mapped',!!sel.value);
+  sel.classList.toggle('has-val',!!sel.value);
+  // Supprimer badge auto si modifié manuellement
+  row.querySelector('.auto-badge')?.remove();
+}
+
+function toggleIgnore(key){
+  if(_ignored.has(key)){_ignored.delete(key)}
+  else{_ignored.add(key);delete _mapping[key];document.getElementById('ms-'+key).value=''}
+  buildMapping();
+}
+
+function validateMapping(){
+  const required=DEST_FIELDS[_dest].filter(f=>f.required&&!_ignored.has(f.key));
+  const missing=required.filter(f=>!_mapping[f.key]);
+  if(missing.length){
+    showToast(`Mappez d'abord : ${missing.map(f=>f.label).join(', ')}`, 'err');
+    return false;
+  }
+  return true;
+}
+
+// ── VÉRIFICATION ──
+function buildVerify(){
+  const fields=DEST_FIELDS[_dest].filter(f=>_mapping[f.key]&&!_ignored.has(f.key));
+  const nbRows=_rows.length;
+  const nbMapped=fields.length;
+  const nbIgnored=_ignored.size;
+
+  // Summary boxes
+  document.getElementById('importSummary').innerHTML=`
+    <div class="is-box ok"><div class="is-val" style="color:var(--green)">${nbRows}</div><div class="is-lbl">Lignes à importer</div></div>
+    <div class="is-box ok"><div class="is-val" style="color:var(--blue)">${nbMapped}</div><div class="is-lbl">Champs mappés</div></div>
+    <div class="is-box ${nbIgnored?'warn':''}"><div class="is-val" style="color:${nbIgnored?'var(--orange)':'var(--muted)'}">${nbIgnored}</div><div class="is-lbl">Champs ignorés</div></div>`;
+
+  // Table preview
+  const previewRows=_rows.slice(0,5);
+  const headers=fields.map(f=>f.label);
+  document.getElementById('verifyTable').innerHTML=`
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin-bottom:12px">
+      <table class="preview-table">
+        <thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+        <tbody>${previewRows.map(r=>`<tr>${fields.map(f=>`<td>${r[_mapping[f.key]]??'—'}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>
+    </div>
+    ${_rows.length>5?`<div style="font-size:11px;color:var(--muted);margin-bottom:8px">+ ${_rows.length-5} autres lignes…</div>`:''}`;
+
+  // Warnings
+  const warns=[];
+  if(_dest==='ca'){
+    const hasMois=_mapping['mois'];const hasCa=_mapping['ca_ht'];
+    if(!hasMois)warns.push('⚠️ Le champ "Mois" n\'est pas mappé — les données seront importées sans date');
+    if(!hasCa)warns.push('⚠️ Le champ "CA HT" est obligatoire');
+  }
+  document.getElementById('warningBox').innerHTML=warns.length
+    ?warns.join('<br/>')
+    :'✅ Tout est prêt pour l\'import !';
+  document.getElementById('warningBox').style.background=warns.length?'#fffbeb':'#f0fdf4';
+  document.getElementById('warningBox').style.borderColor=warns.length?'#fde68a':'#bbf7d0';
+  document.getElementById('warningBox').style.color=warns.length?'#92400e':'#065f46';
+}
+
+// ── IMPORT FINAL ──
+const MONTHS_FR=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+function parseMois(v){
+  if(!v)return -1;
+  const s=String(v).toLowerCase().trim();
+  const n=parseInt(s);if(n>=1&&n<=12)return n-1;
+  const idx=MONTHS_FR.findIndex(m=>s.startsWith(m.slice(0,3)));
+  if(idx>=0)return idx;
+  // Date Excel ou string date
+  try{const d=new Date(v);if(!isNaN(d))return d.getMonth()}catch(e){}
+  return -1;
+}
+
+function doImport(){
+  const btn=document.getElementById('importBtn');
+  btn.textContent='⏳ Import en cours...';btn.disabled=true;
+
+  const year=new Date().getFullYear();
+  let count=0,errors=0;
+
+  if(_dest==='ca'){
+    // Charger données existantes
+    let data;
+    try{data=JSON.parse(localStorage.getItem('altiora_suivi_'+year)||'null')}catch(e){}
+    if(!data){data={months:Array(12).fill(null).map(()=>({ca:'',charges:'',resultat:''}))}}
+    _rows.forEach(r=>{
+      const moisVal=_mapping['mois']?r[_mapping['mois']]:'';
+      const m=parseMois(moisVal);
+      if(m<0){errors++;return}
+      if(_mapping['ca_ht']&&r[_mapping['ca_ht']]!=='')data.months[m].ca=parseFloat(String(r[_mapping['ca_ht']]).replace(',','.'))||0;
+      if(_mapping['prevision']&&r[_mapping['prevision']]!=='')data.months[m].prevision=parseFloat(String(r[_mapping['prevision']]).replace(',','.'))||0;
+      count++;
+    });
+    localStorage.setItem('altiora_suivi_'+year,JSON.stringify(data));
+  }
+  else if(_dest==='charges'){
+    let data;
+    try{data=JSON.parse(localStorage.getItem('altiora_pilotage_'+year)||'null')}catch(e){}
+    if(!data)data={months:Array(12).fill(null).map(()=>({chargesFixed:[],chargesVar:[]}))}
+    _rows.forEach(r=>{
+      const moisVal=_mapping['mois']?r[_mapping['mois']]:'';
+      const m=parseMois(moisVal);
+      const nom=_mapping['nom']?r[_mapping['nom']]||'Import':'Import';
+      const montant=parseFloat(String((_mapping['montant']?r[_mapping['montant']]:0)||0).replace(',','.'))||0;
+      const type=(_mapping['type']?String(r[_mapping['type']]).toLowerCase():'fixe').includes('var')?'var':'fixe';
+      if(m>=0){
+        const arr=type==='var'?data.months[m].chargesVar:data.months[m].chargesFixed;
+        arr.push({nom,montant,id:Date.now()+'_'+Math.random().toString(36).slice(2)});
+      } else {
+        // Sans mois → charger sur tous les mois si fixe
+        if(type==='fixe'){data.months.forEach(mo=>mo.chargesFixed.push({nom,montant,id:Date.now()+'_'+Math.random().toString(36).slice(2)}))}
+        errors++;
+      }
+      count++;
+    });
+    localStorage.setItem('altiora_pilotage_'+year,JSON.stringify(data));
+  }
+  else if(_dest==='dettes'){
+    let dettes;
+    try{dettes=JSON.parse(localStorage.getItem('altiora_dettes')||'[]')}catch(e){dettes=[]}
+    _rows.forEach(r=>{
+      const nom=_mapping['nom']?r[_mapping['nom']]||'Import':'Import';
+      const montant=parseFloat(String((_mapping['montant']?r[_mapping['montant']]:0)||0).replace(',','.'))||0;
+      if(!montant){errors++;return}
+      const taux=parseFloat(String((_mapping['taux']?r[_mapping['taux']]:0)||0).replace(',','.'))||0;
+      const duree=parseInt(_mapping['duree']?r[_mapping['duree']]:0)||60;
+      const debut=_mapping['debut']?r[_mapping['debut']]||new Date().toISOString().slice(0,10):new Date().toISOString().slice(0,10);
+      const typeRaw=(_mapping['type']?String(r[_mapping['type']]).toLowerCase():'emprunt');
+      const type=typeRaw.includes('fournisseur')?'fournisseur':typeRaw.includes('leasing')?'leasing':typeRaw.includes('découvert')?'decouvert':'emprunt';
+      dettes.push({id:Date.now()+'_'+Math.random().toString(36).slice(2),nom,montant,taux,duree,debut,type,amort:'constant',paiements:[],active:true});
+      count++;
+    });
+    localStorage.setItem('altiora_dettes',JSON.stringify(dettes));
+  }
+
+  // Sync Firebase si connecté
+  if(window._uid&&window._setDoc){
+    const key=_dest==='dettes'?'dettes':'pilotage';
+    const val=_dest==='dettes'
+      ?{list:JSON.parse(localStorage.getItem('altiora_dettes'))}
+      :{[`y${new Date().getFullYear()}`]:JSON.parse(localStorage.getItem(`altiora_${_dest==='ca'?'suivi':'pilotage'}_${new Date().getFullYear()}`))};
+    window._setDoc(window._doc(window._db,key,window._uid,'data','all'),val,{merge:true}).catch(()=>{});
+  }
+
+  // Succès
+  setTimeout(()=>{
+    document.getElementById('successMsg').textContent=`${count} ligne${count>1?'s':''} importée${count>1?'s':''} dans Altiora${errors>0?` (${errors} ignorée${errors>1?'s':''})`:''}`;
+    goStep(4);
+    // Animer barre
+    setTimeout(()=>{document.getElementById('successBar').style.width='100%'},100);
+    showToast(`🎉 ${count} lignes importées !`,'ok');
+  },600);
+}
+
+function resetAll(){
+  _wb=null;_headers=[];_rows=[];_mapping={};_ignored.clear();_dest='ca';
+  resetFile();setDest('ca',document.getElementById('dest-ca'));
+  goStep(1);
+}
+</script>
+
+<script type="module">
+import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import{getAuth,onAuthStateChanged,signOut}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import{getFirestore,doc,setDoc,getDoc}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+const app=initializeApp({apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",authDomain:"altiora-70599.firebaseapp.com",projectId:"altiora-70599",storageBucket:"altiora-70599.firebasestorage.app",messagingSenderId:"120905555746",appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"});
+const auth=getAuth(app),db=getFirestore(app);
+window._auth=auth;window._db=db;window._doc=doc;window._setDoc=setDoc;window._getDoc=getDoc;window._signOut=signOut;
+onAuthStateChanged(auth,user=>{
+  if(!user){location.href='index.html';return}
+  window._uid=user.uid;
+  const n=user.displayName||user.email?.split('@')[0]||'';
+  document.getElementById('uname').textContent=n;
+  document.getElementById('av').textContent=n[0]?.toUpperCase()||'A';
+});
+</script>
+</body>
+</html>
