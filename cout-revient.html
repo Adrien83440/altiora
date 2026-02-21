@@ -774,7 +774,25 @@ function refreshFiche(id){
   if(pvTtc)pvTtc.textContent=d.pv>0?`Prix TTC : ${fmtE(d.pvTTC)}`:'—';
   const pvttc=document.getElementById('fk-pvttc');
   if(pvttc)pvttc.textContent=d.pv>0?fmtE(d.pvTTC):'—';
+
+  // Re-render les cost-pills dans chaque tableau (pour mettre à jour les totaux par ligne)
+  // On re-render seulement les spans .cost-pill sans détruire les inputs
+  _refreshCostPills('ingr-tbody', p.ingredients, (r)=>(parseFloat(r.qte)||0)*(parseFloat(r.prixUnitaire)||0));
+  _refreshCostPills('mo-tbody',   p.mainOeuvre,  (r)=>(parseFloat(r.heures)||0)*(parseFloat(r.tauxHoraire)||0));
+  _refreshCostPills('cf-tbody',   p.chargesFixes,(r)=>{const m=parseFloat(r.montant)||0,rep=parseFloat(r.repartition)||0;return rep>0?m*rep/100:m;});
+  _refreshCostPills('emb-tbody',  p.emballages,  (r)=>(parseFloat(r.qte)||0)*(parseFloat(r.prixUnit)||0));
+  _refreshCostPills('liv-tbody',  p.livraison,   (r)=>(parseFloat(r.montant)||0)/(parseFloat(p.quantiteProduites)||1));
+
   renderCatalogueItem(id);
+}
+
+function _refreshCostPills(tbodyId, rows, calcFn){
+  const tb=document.getElementById(tbodyId);
+  if(!tb||!rows)return;
+  const pills=tb.querySelectorAll('.cost-pill');
+  rows.forEach((r,i)=>{
+    if(pills[i])pills[i].textContent=fmtE(calcFn(r));
+  });
 }
 
 function renderCatalogueItem(id){
@@ -796,11 +814,47 @@ function updatePrixVente(id,value){
 }
 
 // ── ADD / DEL ROWS ──
-function addIngredient(id){_products[id].ingredients.push({nom:'',qte:'',unite:'g',prixUnitaire:''});document.getElementById('ingr-tbody').innerHTML=renderIngredients(_products[id].ingredients,id);}
-function addMO(id){_products[id].mainOeuvre.push({description:'',heures:'',tauxHoraire:''});document.getElementById('mo-tbody').innerHTML=renderMO(_products[id].mainOeuvre,id);}
-function addCF(id){_products[id].chargesFixes.push({description:'',montant:'',repartition:''});document.getElementById('cf-tbody').innerHTML=renderCF(_products[id].chargesFixes,id);}
-function addEmb(id){_products[id].emballages.push({description:'',qte:'',prixUnit:''});document.getElementById('emb-tbody').innerHTML=renderEmb(_products[id].emballages,id);}
-function addLiv(id){_products[id].livraison.push({description:'',montant:''});document.getElementById('liv-tbody').innerHTML=renderLiv(_products[id].livraison,id);}
+function addIngredient(id){
+  _products[id].ingredients.push({nom:'',qte:'',unite:'g',prixUnitaire:''});
+  const tb=document.getElementById('ingr-tbody');
+  tb.innerHTML=renderIngredients(_products[id].ingredients,id);
+  refreshFiche(id);
+  // Focus sur le nom de la dernière ligne
+  const inputs=tb.querySelectorAll('input[placeholder="Beurre, farine..."]');
+  if(inputs.length)inputs[inputs.length-1].focus();
+}
+function addMO(id){
+  _products[id].mainOeuvre.push({description:'',heures:'',tauxHoraire:''});
+  const tb=document.getElementById('mo-tbody');
+  tb.innerHTML=renderMO(_products[id].mainOeuvre,id);
+  refreshFiche(id);
+  const inputs=tb.querySelectorAll('input[placeholder="Fabrication, montage..."]');
+  if(inputs.length)inputs[inputs.length-1].focus();
+}
+function addCF(id){
+  _products[id].chargesFixes.push({description:'',montant:'',repartition:''});
+  const tb=document.getElementById('cf-tbody');
+  tb.innerHTML=renderCF(_products[id].chargesFixes,id);
+  refreshFiche(id);
+  const inputs=tb.querySelectorAll('input[placeholder="Loyer, électricité..."]');
+  if(inputs.length)inputs[inputs.length-1].focus();
+}
+function addEmb(id){
+  _products[id].emballages.push({description:'',qte:'',prixUnit:''});
+  const tb=document.getElementById('emb-tbody');
+  tb.innerHTML=renderEmb(_products[id].emballages,id);
+  refreshFiche(id);
+  const inputs=tb.querySelectorAll('input[placeholder="Boîte, sachet..."]');
+  if(inputs.length)inputs[inputs.length-1].focus();
+}
+function addLiv(id){
+  _products[id].livraison.push({description:'',montant:''});
+  const tb=document.getElementById('liv-tbody');
+  tb.innerHTML=renderLiv(_products[id].livraison,id);
+  refreshFiche(id);
+  const inputs=tb.querySelectorAll('input[placeholder="Transporteur, carburant..."]');
+  if(inputs.length)inputs[inputs.length-1].focus();
+}
 
 function delRow(id,section,i){
   _products[id][section].splice(i,1);
