@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>ALTIORA — Panier Moyen</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --blue-dark:#0f1f5c;--blue-main:#1a3dce;--blue-light:#4f7ef8;--blue-ghost:#f0f4ff;
+      --text:#1a1f36;--muted:#6b7280;--border:#e2e8f0;--bg:#f5f7ff;--sidebar-w:252px;--radius:12px;
+      --green:#10b981;--green-light:#d1fae5;--orange:#f59e0b;--orange-light:#fef3c7;
+      --red:#ef4444;--red-light:#fee2e2;--purple:#6366f1;--purple-light:#eef2ff;
+    }
+    body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;font-size:13px;}
+
+    /* SIDEBAR */
+    .sidebar{width:var(--sidebar-w);min-height:100vh;background:linear-gradient(180deg,#0f1f5c 0%,#162366 100%);display:flex;flex-direction:column;position:fixed;left:0;top:0;z-index:100;padding-bottom:24px;overflow-y:auto;}
+    .sidebar-logo{display:flex;align-items:center;gap:10px;padding:26px 20px 22px;border-bottom:1px solid rgba(255,255,255,0.08);margin-bottom:10px;}
+    .sidebar-logo-icon{width:36px;height:36px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;}
+    .sidebar-logo-text{font-size:18px;font-weight:800;color:white;letter-spacing:1px;}
+    .sidebar-section-label{font-size:10px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:1.2px;text-transform:uppercase;padding:14px 20px 5px;}
+    .nav-item{display:flex;align-items:center;gap:11px;padding:10px 20px;color:rgba(255,255,255,0.6);font-size:13px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:all 0.18s;}
+    .nav-item:hover{color:white;background:rgba(255,255,255,0.06);}
+    .nav-item.active{color:white;background:rgba(255,255,255,0.1);border-left-color:#4f7ef8;}
+    .nav-icon{font-size:15px;width:18px;text-align:center;flex-shrink:0;}
+    .nav-label{flex:1;}
+    .nav-chevron{font-size:11px;color:rgba(255,255,255,0.3);transition:transform 0.25s;margin-left:auto;}
+    .nav-item.open .nav-chevron{transform:rotate(90deg);}
+    .submenu{overflow:hidden;max-height:0;transition:max-height 0.3s ease;}
+    .submenu.open{max-height:300px;}
+    .sub-item{display:flex;align-items:center;gap:9px;padding:8px 20px 8px 44px;color:rgba(255,255,255,0.45);font-size:12.5px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:all 0.18s;}
+    .sub-item:hover{color:rgba(255,255,255,0.8);background:rgba(255,255,255,0.05);}
+    .sub-item.active{color:white;background:rgba(79,126,248,0.15);border-left-color:rgba(79,126,248,0.6);}
+    .sub-dot{width:5px;height:5px;background:rgba(255,255,255,0.3);border-radius:50%;flex-shrink:0;}
+    .sub-item.active .sub-dot{background:#4f7ef8;}
+    .sub-year-badge{margin-left:auto;font-size:10px;color:rgba(255,255,255,0.25);font-weight:600;}
+    .sidebar-footer{margin-top:auto;padding:16px 20px 0;border-top:1px solid rgba(255,255,255,0.08);}
+    .user-card{display:flex;align-items:center;gap:10px;padding:10px;background:rgba(255,255,255,0.07);border-radius:10px;}
+    .user-avatar{width:32px;height:32px;background:linear-gradient(135deg,var(--blue-light),#6366f1);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:white;flex-shrink:0;}
+    .user-name{font-size:12px;font-weight:600;color:white;}
+    .user-plan{font-size:10px;color:rgba(255,255,255,0.4);}
+    .logout-btn{margin-left:auto;background:none;border:none;color:rgba(255,255,255,0.3);cursor:pointer;font-size:14px;padding:4px;}
+
+    /* MAIN */
+    .main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;}
+    .topbar{background:white;border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
+    .topbar-left h1{font-size:17px;font-weight:700;}
+    .topbar-left p{font-size:12px;color:var(--muted);}
+    .topbar-right{display:flex;align-items:center;gap:10px;}
+    .btn{padding:8px 16px;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.18s;}
+    .btn-primary{background:linear-gradient(135deg,var(--blue-main),var(--blue-light));color:white;box-shadow:0 3px 10px rgba(26,61,206,0.25);}
+    .btn-primary:hover{opacity:0.9;transform:translateY(-1px);}
+    .btn-outline{background:white;color:var(--blue-main);border:1.5px solid var(--border);}
+    .btn-outline:hover{border-color:var(--blue-main);}
+    .btn-sm{padding:6px 14px;font-size:12px;}
+    .btn-xs{padding:3px 8px;font-size:11px;}
+    .btn-danger{background:#fef2f2;color:var(--red);border:1px solid #fecaca;}
+
+    /* LAYOUT */
+    .content{padding:22px 28px;display:flex;flex-direction:column;gap:20px;}
+
+    /* YEAR SELECTOR */
+    .year-bar{display:flex;align-items:center;gap:10px;}
+    .year-btn{padding:7px 18px;border:1.5px solid var(--border);border-radius:8px;background:white;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;color:var(--muted);transition:all 0.15s;}
+    .year-btn.active{background:var(--blue-main);color:white;border-color:var(--blue-main);}
+
+    /* KPI CARDS */
+    .kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;}
+    .kpi-card{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;}
+    .kpi-card.green{background:var(--green-light);border-color:#6ee7b7;}
+    .kpi-card.orange{background:var(--orange-light);border-color:#fcd34d;}
+    .kpi-card.blue{background:var(--blue-ghost);border-color:#c7d2fe;}
+    .kpi-card.purple{background:var(--purple-light);border-color:#c7d2fe;}
+    .kpi-icon{font-size:20px;margin-bottom:8px;}
+    .kpi-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;}
+    .kpi-val{font-size:22px;font-weight:800;color:var(--text);}
+    .kpi-sub{font-size:11px;color:var(--muted);margin-top:3px;}
+    .kpi-trend{font-size:11px;font-weight:700;margin-top:4px;}
+    .kpi-trend.up{color:var(--green);}
+    .kpi-trend.down{color:var(--red);}
+
+    /* CHARTS ROW */
+    .charts-row{display:grid;grid-template-columns:2fr 1fr;gap:16px;}
+    .charts-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;}
+    .chart-card{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:18px;}
+    .chart-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+    .chart-title{font-size:13px;font-weight:700;}
+    .chart-sub{font-size:11px;color:var(--muted);}
+    .chart-wrap{position:relative;}
+
+    /* TABLE SAISIE */
+    .table-card{background:white;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+    .table-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);background:#f8faff;}
+    .table-title{font-size:13px;font-weight:700;}
+    .data-table{width:100%;border-collapse:collapse;font-size:12px;}
+    .data-table th{padding:10px 14px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;background:#f8faff;border-bottom:1px solid var(--border);white-space:nowrap;}
+    .data-table th.ht-col::after{content:" HT";font-size:9px;color:var(--blue-main);font-weight:700;}
+    .data-table td{padding:0;border-bottom:1px solid #f1f5f9;vertical-align:middle;}
+    .data-table tr:hover td{background:#fafbff;}
+    .data-table tr.current-month td{background:linear-gradient(90deg,#f0f9ff,white);}
+    .month-label{padding:10px 14px;font-weight:700;color:var(--text);font-size:12px;white-space:nowrap;}
+    .month-label.current{color:var(--blue-main);}
+    .cell-computed{padding:10px 14px;font-weight:700;color:var(--text);text-align:right;}
+    .cell-computed.green{color:var(--green);}
+    .cell-computed.blue{color:var(--blue-main);}
+    .cell-computed.orange{color:var(--orange);}
+    .cell-input{width:100%;padding:8px 10px;border:none;background:transparent;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;color:var(--text);text-align:right;outline:none;}
+    .cell-input:focus{background:#f0f4ff;}
+    .cell-input::placeholder{color:#d1d5db;}
+    td.input-cell{border-left:1px solid #f1f5f9;}
+
+    /* CATÉGORIES */
+    .cat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+    .cat-card{background:white;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+    .cat-head{padding:13px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+    .cat-name-input{font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:700;color:var(--text);border:none;outline:none;background:transparent;flex:1;}
+    .cat-body{padding:14px 16px;}
+    .cat-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:12px;}
+    .cat-row:last-child{margin-bottom:0;padding-top:8px;border-top:1px solid var(--border);font-weight:700;}
+    .cat-kpi{text-align:right;font-weight:700;}
+    .cat-kpi.green{color:var(--green);}
+    .cat-kpi.blue{color:var(--blue-main);}
+    .cat-input{width:80px;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;text-align:right;outline:none;color:var(--text);}
+    .cat-input:focus{border-color:var(--blue-main);}
+    .add-cat-btn{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;border:2px dashed var(--border);border-radius:var(--radius);cursor:pointer;color:var(--muted);font-size:13px;font-weight:600;background:white;transition:all 0.15s;}
+    .add-cat-btn:hover{border-color:var(--blue-main);color:var(--blue-main);background:var(--blue-ghost);}
+
+    /* SIMULATEUR */
+    .sim-card{background:white;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:0 4px 20px rgba(99,102,241,0.08);}
+    .sim-head{padding:18px 24px;background:linear-gradient(135deg,#4f46e5,#7c3aed);display:flex;align-items:center;justify-content:space-between;}
+    .sim-title{font-size:15px;font-weight:700;color:white;}
+    .sim-body{padding:22px 24px;}
+    .sim-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px;}
+    .sim-lever{background:#f8faff;border:1.5px solid #e8eaf6;border-radius:12px;padding:16px;}
+    .sim-lever-label{font-size:11px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:6px;}
+    .sim-ht-tag{font-size:9px;font-weight:700;padding:1px 6px;border-radius:20px;background:#e0f2fe;color:#0369a1;margin-left:auto;}
+    .sim-field-wrap{display:flex;align-items:center;gap:6px;padding:8px 12px;background:white;border:2px solid #e2e8f0;border-radius:9px;transition:border-color 0.15s;}
+    .sim-field-wrap:focus-within{border-color:var(--blue-main);box-shadow:0 0 0 3px rgba(79,126,248,0.1);}
+    .sim-field-input{flex:1;border:none;background:transparent;font-family:'Plus Jakarta Sans',sans-serif;font-size:17px;font-weight:800;color:#1a1f36;outline:none;min-width:0;}
+    .sim-field-input::placeholder{color:#cbd5e1;}
+    .sim-field-unit{font-size:12px;font-weight:700;color:var(--muted);flex-shrink:0;}
+    .sim-result-box{background:linear-gradient(135deg,#1a1f36,#2d3561);border-radius:14px;padding:22px;color:white;}
+    .sim-res-title{font-size:11px;font-weight:600;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:16px;}
+    .sim-res-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;}
+    .sim-res-item{text-align:center;}
+    .sim-res-label{font-size:10px;color:rgba(255,255,255,0.4);font-weight:600;text-transform:uppercase;margin-bottom:6px;}
+    .sim-res-cur{font-size:11px;color:rgba(255,255,255,0.35);margin-bottom:3px;}
+    .sim-res-new{font-size:18px;font-weight:800;}
+    .sim-res-new.pos{color:#34d399;}
+    .sim-res-new.neg{color:#f87171;}
+    .sim-res-delta{font-size:11px;font-weight:700;margin-top:3px;}
+    .sim-res-delta.pos{color:#6ee7b7;}
+    .sim-res-delta.neg{color:#fca5a5;}
+
+    /* HT BADGE */
+    .ht-badge{font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;background:#dbeafe;color:#1d4ed8;margin-left:4px;vertical-align:middle;}
+
+    .toast{position:fixed;bottom:24px;right:24px;background:#1a1f36;color:white;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;transform:translateY(80px);opacity:0;transition:all 0.3s;}
+    .toast.show{transform:translateY(0);opacity:1;}
+    .toast.success{background:#10b981;}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+    .content>*{animation:fadeIn 0.25s ease both;}
+  </style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sidebar-logo"><div class="sidebar-logo-icon">📊</div><div class="sidebar-logo-text">ALTIORA</div></div>
+  <div class="sidebar-section-label">Principal</div>
+  <div class="nav-item" onclick="window.location.href='dashboard.html'"><span class="nav-icon">🏠</span><span class="nav-label">Tableau de bord</span></div>
+  <div class="nav-item" onclick="window.location.href='suivi-ca.html'"><span class="nav-icon">📈</span><span class="nav-label">Suivi CA & Résultats</span></div>
+  <div class="nav-item active" id="kpis-nav"><span class="nav-icon">🎯</span><span class="nav-label" onclick="toggleMenu('kpis-menu',document.getElementById('kpis-nav'))">KPIs Clés</span><span class="nav-chevron" onclick="toggleMenu('kpis-menu',document.getElementById('kpis-nav'))">›</span></div>
+  <div class="submenu open" id="kpis-menu">
+    <div class="sub-item" onclick="window.location.href='cout-revient.html'"><span class="sub-dot"></span>Coût de revient</div>
+    <div class="sub-item" onclick="window.location.href='marges.html'"><span class="sub-dot"></span>Marge brute & nette</div>
+    <div class="sub-item active"><span class="sub-dot"></span>Panier moyen</div>
+  </div>
+  <div class="nav-item" onclick="toggleMenu('pilotage-menu',this)"><span class="nav-icon">🧭</span><span class="nav-label">Pilotage</span><span class="nav-chevron">›</span></div>
+  <div class="submenu" id="pilotage-menu">
+    <div class="sub-item" onclick="window.location.href='pilotage.html?year=2025'"><span class="sub-dot"></span>Pilotage 2025<span class="sub-year-badge">2025</span></div>
+    <div class="sub-item" onclick="window.location.href='pilotage.html?year=2026'"><span class="sub-dot"></span>Pilotage 2026<span class="sub-year-badge">2026</span></div>
+    <div class="sub-item" onclick="window.location.href='pilotage.html?year=2027'"><span class="sub-dot"></span>Pilotage 2027<span class="sub-year-badge">2027</span></div>
+  </div>
+  <div class="nav-item"><span class="nav-icon">🏦</span><span class="nav-label">Dettes & Emprunts</span></div>
+  <div class="sidebar-footer">
+    <div class="user-card">
+      <div class="user-avatar" id="userAvatar">A</div>
+      <div><div class="user-name" id="userName">Utilisateur</div><div class="user-plan">Plan gratuit</div></div>
+      <button class="logout-btn" onclick="handleLogout()">⎋</button>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>Panier moyen <span class="ht-badge">HT</span></h1>
+      <p>Évolution mensuelle · Analyse par catégorie · Simulateur d'impact · Toutes les valeurs sont en HT</p>
+    </div>
+    <div class="topbar-right">
+      <div class="year-bar" id="yearBar"></div>
+      <button class="btn btn-primary btn-sm" onclick="saveAll()">💾 Sauvegarder</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- KPI CARDS -->
+    <div class="kpi-grid" id="kpiGrid">
+      <div class="kpi-card blue"><div class="kpi-icon">🛒</div><div class="kpi-label">Panier moyen/commande HT</div><div class="kpi-val" id="kpi-pm-cmd">—</div><div class="kpi-sub">CA ÷ nb transactions</div><div class="kpi-trend" id="kpi-pm-cmd-trend"></div></div>
+      <div class="kpi-card green"><div class="kpi-icon">👤</div><div class="kpi-label">Panier moyen/client HT</div><div class="kpi-val" id="kpi-pm-cli">—</div><div class="kpi-sub">CA ÷ nb clients</div><div class="kpi-trend" id="kpi-pm-cli-trend"></div></div>
+      <div class="kpi-card"><div class="kpi-icon">💶</div><div class="kpi-label">CA total HT (année)</div><div class="kpi-val" id="kpi-ca">—</div><div class="kpi-sub">Cumul annuel</div></div>
+      <div class="kpi-card orange"><div class="kpi-icon">🔄</div><div class="kpi-label">Transactions / mois</div><div class="kpi-val" id="kpi-txn">—</div><div class="kpi-sub">Moyenne mensuelle</div></div>
+      <div class="kpi-card purple"><div class="kpi-icon">👥</div><div class="kpi-label">Clients / mois</div><div class="kpi-val" id="kpi-cli">—</div><div class="kpi-sub">Moyenne mensuelle</div></div>
+    </div>
+
+    <!-- GRAPHIQUES LIGNE 1 -->
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-head">
+          <div><div class="chart-title">📈 Évolution panier moyen HT</div><div class="chart-sub">Par commande et par client sur l'année</div></div>
+        </div>
+        <div class="chart-wrap" style="height:220px"><canvas id="chartEvolution"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-head">
+          <div><div class="chart-title">🍩 Répartition CA par catégorie</div><div class="chart-sub">HT annuel</div></div>
+        </div>
+        <div class="chart-wrap" style="height:220px"><canvas id="chartCategories"></canvas></div>
+      </div>
+    </div>
+
+    <!-- GRAPHIQUES LIGNE 2 -->
+    <div class="charts-row-3">
+      <div class="chart-card">
+        <div class="chart-head"><div class="chart-title">👥 Évolution clients</div></div>
+        <div class="chart-wrap" style="height:160px"><canvas id="chartClients"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-head"><div class="chart-title">🔄 Évolution transactions</div></div>
+        <div class="chart-wrap" style="height:160px"><canvas id="chartTxn"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-head"><div class="chart-title">💶 Évolution CA HT</div></div>
+        <div class="chart-wrap" style="height:160px"><canvas id="chartCA"></canvas></div>
+      </div>
+    </div>
+
+    <!-- TABLEAU DE SAISIE -->
+    <div class="table-card">
+      <div class="table-head">
+        <div class="table-title">📋 Saisie mensuelle <span class="ht-badge">HT</span></div>
+        <div style="font-size:11px;color:var(--muted)">Les paniers moyens sont calculés automatiquement</div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="data-table" id="dataTable">
+          <thead>
+            <tr>
+              <th>Mois</th>
+              <th style="text-align:right">Nb clients<br><span style="font-weight:400;text-transform:none;font-size:10px;color:var(--muted)">(total)</span></th>
+              <th style="text-align:right" class="ht-col">CA total</th>
+              <th style="text-align:right">Nb transactions<br><span style="font-weight:400;text-transform:none;font-size:10px;color:var(--muted)">(ventes mois)</span></th>
+              <th style="text-align:right" class="ht-col">CA / transaction</th>
+              <th style="text-align:right" class="ht-col">Panier moy./client</th>
+              <th style="text-align:right">Transactions/<br>client</th>
+              <th style="text-align:right">Évolution<br>panier</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- CATÉGORIES -->
+    <div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div>
+          <div style="font-size:14px;font-weight:700">📦 Panier moyen par catégorie <span class="ht-badge">HT</span></div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">Comparez les performances par type de produit ou service</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="addCategory()">+ Ajouter une catégorie</button>
+      </div>
+      <div class="cat-grid" id="catGrid"></div>
+    </div>
+
+    <!-- SIMULATEUR -->
+    <div class="sim-card">
+      <div class="sim-head">
+        <div class="sim-title">🔮 Simulateur d'impact sur le CA <span style="font-size:11px;opacity:0.7;font-weight:400">— Toutes valeurs HT</span></div>
+        <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3)" onclick="resetSim()">↺ Réinitialiser</button>
+      </div>
+      <div class="sim-body">
+        <div class="sim-grid">
+          <div class="sim-lever">
+            <div class="sim-lever-label">🛒 Panier moyen/commande <span class="sim-ht-tag">HT</span></div>
+            <div class="sim-field-wrap">
+              <input type="number" class="sim-field-input" id="sim-pm" placeholder="0" oninput="calcSim()" onchange="calcSim()"/>
+              <span class="sim-field-unit">€ HT</span>
+            </div>
+          </div>
+          <div class="sim-lever">
+            <div class="sim-lever-label">🔄 Nb transactions/mois <span class="sim-ht-tag">HT</span></div>
+            <div class="sim-field-wrap">
+              <input type="number" class="sim-field-input" id="sim-txn" placeholder="0" oninput="calcSim()" onchange="calcSim()"/>
+              <span class="sim-field-unit">ventes</span>
+            </div>
+          </div>
+          <div class="sim-lever">
+            <div class="sim-lever-label">👥 Nb clients/mois <span class="sim-ht-tag">HT</span></div>
+            <div class="sim-field-wrap">
+              <input type="number" class="sim-field-input" id="sim-cli" placeholder="0" oninput="calcSim()" onchange="calcSim()"/>
+              <span class="sim-field-unit">clients</span>
+            </div>
+          </div>
+          <div class="sim-lever">
+            <div class="sim-lever-label">📅 Période simulée <span class="sim-ht-tag">HT</span></div>
+            <div class="sim-field-wrap">
+              <input type="number" class="sim-field-input" id="sim-mois" placeholder="12" value="12" oninput="calcSim()" onchange="calcSim()"/>
+              <span class="sim-field-unit">mois</span>
+            </div>
+          </div>
+        </div>
+        <div class="sim-result-box">
+          <div class="sim-res-title">📊 Résultat simulé vs situation actuelle (moyennes)</div>
+          <div class="sim-res-grid" id="simResultGrid">
+            <div class="sim-res-item"><div class="sim-res-label">Panier/commande HT</div><div class="sim-res-cur" id="sr-pm-cur">—</div><div class="sim-res-new neutral" id="sr-pm-new">—</div><div class="sim-res-delta" id="sr-pm-delta"></div></div>
+            <div class="sim-res-item"><div class="sim-res-label">CA mensuel HT</div><div class="sim-res-cur" id="sr-ca-cur">—</div><div class="sim-res-new neutral" id="sr-ca-new">—</div><div class="sim-res-delta" id="sr-ca-delta"></div></div>
+            <div class="sim-res-item"><div class="sim-res-label">CA annuel HT</div><div class="sim-res-cur" id="sr-ca-an-cur">—</div><div class="sim-res-new neutral" id="sr-ca-an-new">—</div><div class="sim-res-delta" id="sr-ca-an-delta"></div></div>
+            <div class="sim-res-item"><div class="sim-res-label">Panier/client HT</div><div class="sim-res-cur" id="sr-pc-cur">—</div><div class="sim-res-new neutral" id="sr-pc-new">—</div><div class="sim-res-delta" id="sr-pc-delta"></div></div>
+            <div class="sim-res-item"><div class="sim-res-label">Transactions/client</div><div class="sim-res-cur" id="sr-tc-cur">—</div><div class="sim-res-new neutral" id="sr-tc-new">—</div><div class="sim-res-delta" id="sr-tc-delta"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- FIREBASE -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  const app = initializeApp({
+    apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain:"altiora-70599.firebaseapp.com",
+    projectId:"altiora-70599",
+    storageBucket:"altiora-70599.firebasestorage.app",
+    messagingSenderId:"120905555746",
+    appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+  });
+  const auth=getAuth(app); const db=getFirestore(app);
+  window._auth=auth;window._db=db;window._doc=doc;window._setDoc=setDoc;window._getDoc=getDoc;window._signOut=signOut;
+  onAuthStateChanged(auth,user=>{
+    if(!user){window.location.href='index.html';return;}
+    window._uid=user.uid;
+    const name=user.displayName||user.email.split('@')[0];
+    document.getElementById('userName').textContent=name;
+    document.getElementById('userAvatar').textContent=name.charAt(0).toUpperCase();
+    loadData();
+  });
+</script>
+
+<script>
+// ── STATE ──
+const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const COLORS=['#4f7ef8','#10b981','#f59e0b','#ef4444','#6366f1','#14b8a6','#ec4899','#8b5cf6'];
+let _year = new Date().getFullYear();
+let _data = {}; // { YYYY: { months: [{clients,ca,txn}×12], categories: [{nom,ca,txn,clients}] } }
+let _charts = {};
+
+function toggleMenu(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('open');}
+async function handleLogout(){await window._signOut(window._auth);window.location.href='index.html';}
+
+// ── INIT ──
+function initYear(y){
+  if(!_data[y]) _data[y]={months:Array(12).fill(null).map(()=>({clients:'',ca:'',txn:''})),categories:[]};
+}
+
+function buildYearBar(){
+  const bar=document.getElementById('yearBar');
+  const years=[2024,2025,2026,2027];
+  bar.innerHTML=years.map(y=>`<button class="year-btn ${y===_year?'active':''}" onclick="switchYear(${y})">${y}</button>`).join('');
+}
+
+function switchYear(y){_year=y;buildYearBar();renderTable();renderKPIs();renderCharts();renderCategories();}
+
+// ── LOAD ──
+async function loadData(){
+  if(!window._uid){setTimeout(loadData,500);return;}
+  try{
+    const snap=await window._getDoc(window._doc(window._db,'panier',window._uid,'data','all'));
+    if(snap.exists()) _data=snap.data().years||{};
+  }catch(e){console.warn(e);}
+  initYear(_year);
+  buildYearBar();
+  renderTable();
+  renderKPIs();
+  renderCharts();
+  renderCategories();
+  prefillSim();
+}
+
+async function saveAll(){
+  if(!window._uid)return;
+  try{
+    await window._setDoc(window._doc(window._db,'panier',window._uid,'data','all'),{years:_data});
+    showToast('✅ Données sauvegardées !','success');
+  }catch(e){showToast('Erreur sauvegarde','');console.error(e);}
+}
+
+// ── CALCULS ──
+function calcMonth(m){
+  const clients=parseFloat(m.clients)||0;
+  const ca=parseFloat(m.ca)||0;
+  const txn=parseFloat(m.txn)||0;
+  const caPerTxn=txn>0?ca/txn:0;
+  const caPerCli=clients>0?ca/clients:0;
+  const txnPerCli=clients>0?txn/clients:0;
+  return{clients,ca,txn,caPerTxn,caPerCli,txnPerCli};
+}
+
+function getMonthsWithData(){
+  initYear(_year);
+  return _data[_year].months.map((m,i)=>({...calcMonth(m),idx:i})).filter(m=>m.ca>0||m.clients>0||m.txn>0);
+}
+
+function getAverages(){
+  const active=getMonthsWithData();
+  if(!active.length) return{pmCmd:0,pmCli:0,ca:0,txn:0,cli:0,caTotal:0};
+  const caTotal=active.reduce((s,m)=>s+m.ca,0);
+  const txnTotal=active.reduce((s,m)=>s+m.txn,0);
+  const cliTotal=active.reduce((s,m)=>s+m.clients,0);
+  const pmCmd=txnTotal>0?caTotal/txnTotal:0;
+  const pmCli=cliTotal>0?caTotal/cliTotal:0;
+  return{pmCmd,pmCli,ca:caTotal/active.length,txn:txnTotal/active.length,cli:cliTotal/active.length,caTotal};
+}
+
+// ── RENDER TABLE ──
+function renderTable(){
+  initYear(_year);
+  const months=_data[_year].months;
+  const now=new Date();
+  const curMonth=now.getFullYear()===_year?now.getMonth():-1;
+  const tbody=document.getElementById('tableBody');
+  let prevPm=0;
+  tbody.innerHTML=months.map((m,i)=>{
+    const c=calcMonth(m);
+    const isCur=i===curMonth;
+    const evo=prevPm>0&&c.caPerTxn>0?((c.caPerTxn-prevPm)/prevPm*100):null;
+    if(c.caPerTxn>0)prevPm=c.caPerTxn;
+    const evoHtml=evo!==null?`<span style="color:${evo>=0?'var(--green)':'var(--red)'};font-weight:700">${evo>=0?'▲':'▼'} ${Math.abs(evo).toFixed(1)}%</span>`:'-';
+    return `<tr class="${isCur?'current-month':''}">
+      <td><div class="month-label ${isCur?'current'}">${MONTHS[i]} ${_year}${isCur?' 📍':''}</div></td>
+      <td class="input-cell"><input class="cell-input" type="number" placeholder="0" value="${m.clients}" oninput="updateMonth(${i},'clients',this.value)" onchange="updateMonth(${i},'clients',this.value)"/></td>
+      <td class="input-cell"><input class="cell-input" type="number" placeholder="0.00" value="${m.ca}" oninput="updateMonth(${i},'ca',this.value)" onchange="updateMonth(${i},'ca',this.value)"/></td>
+      <td class="input-cell"><input class="cell-input" type="number" placeholder="0" value="${m.txn}" oninput="updateMonth(${i},'txn',this.value)" onchange="updateMonth(${i},'txn',this.value)"/></td>
+      <td><div class="cell-computed blue">${c.caPerTxn>0?fmtE(c.caPerTxn):'-'}</div></td>
+      <td><div class="cell-computed green">${c.caPerCli>0?fmtE(c.caPerCli):'-'}</div></td>
+      <td><div class="cell-computed">${c.txnPerCli>0?c.txnPerCli.toFixed(2):'-'}</div></td>
+      <td><div class="cell-computed" style="text-align:right;padding-right:14px">${evoHtml}</div></td>
+    </tr>`;
+  }).join('');
+}
+
+function updateMonth(i,field,val){
+  initYear(_year);
+  _data[_year].months[i][field]=val;
+  renderTableRow(i);
+  renderKPIs();
+  renderCharts();
+  prefillSim();
+}
+
+function renderTableRow(i){
+  // Re-render just the computed cells of row i
+  renderTable(); // Simple pour l'instant
+}
+
+// ── KPIs ──
+function renderKPIs(){
+  const av=getAverages();
+  const months=getMonthsWithData();
+  // Trend : compare last 2 mois
+  let trendCmd='',trendCli='';
+  if(months.length>=2){
+    const last=months[months.length-1],prev=months[months.length-2];
+    if(prev.caPerTxn>0){const d=(last.caPerTxn-prev.caPerTxn)/prev.caPerTxn*100;trendCmd=`<span class="${d>=0?'up':'down'}">${d>=0?'▲':'▼'} ${Math.abs(d).toFixed(1)}% vs mois préc.</span>`;}
+    if(prev.caPerCli>0){const d=(last.caPerCli-prev.caPerCli)/prev.caPerCli*100;trendCli=`<span class="${d>=0?'up':'down'}">${d>=0?'▲':'▼'} ${Math.abs(d).toFixed(1)}% vs mois préc.</span>`;}
+  }
+  setText('kpi-pm-cmd',av.pmCmd>0?fmtE(av.pmCmd):'—');
+  setText('kpi-pm-cli',av.pmCli>0?fmtE(av.pmCli):'—');
+  setText('kpi-ca',fmtE(av.caTotal));
+  setText('kpi-txn',av.txn>0?Math.round(av.txn)+'':'—');
+  setText('kpi-cli',av.cli>0?Math.round(av.cli)+'':'—');
+  document.getElementById('kpi-pm-cmd-trend').innerHTML=trendCmd;
+  document.getElementById('kpi-pm-cli-trend').innerHTML=trendCli;
+}
+
+// ── CHARTS ──
+function renderCharts(){
+  const months=_data[_year]?.months||[];
+  const labels=MONTHS;
+  const pmCmd=months.map(m=>calcMonth(m).caPerTxn||null);
+  const pmCli=months.map(m=>calcMonth(m).caPerCli||null);
+  const clients=months.map(m=>parseFloat(m.clients)||null);
+  const txn=months.map(m=>parseFloat(m.txn)||null);
+  const ca=months.map(m=>parseFloat(m.ca)||null);
+
+  makeLineChart('chartEvolution',labels,[
+    {label:'Panier/commande HT',data:pmCmd,color:'#4f7ef8'},
+    {label:'Panier/client HT',data:pmCli,color:'#10b981'},
+  ]);
+  makeBarChart('chartClients',labels,[{label:'Clients',data:clients,color:'#6366f1'}]);
+  makeBarChart('chartTxn',labels,[{label:'Transactions',data:txn,color:'#f59e0b'}]);
+  makeAreaChart('chartCA',labels,ca,'#4f7ef8');
+  renderCatChart();
+}
+
+function makeLineChart(id,labels,datasets){
+  if(_charts[id])_charts[id].destroy();
+  const ctx=document.getElementById(id);
+  if(!ctx)return;
+  _charts[id]=new Chart(ctx,{
+    type:'line',
+    data:{labels,datasets:datasets.map(d=>({label:d.label,data:d.data,borderColor:d.color,backgroundColor:d.color+'22',tension:0.4,fill:true,pointRadius:4,pointHoverRadius:6,borderWidth:2.5,spanGaps:true}))},
+    options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{position:'bottom',labels:{font:{size:11},boxWidth:12}}},scales:{y:{beginAtZero:true,ticks:{callback:v=>v+'€'}}}}
+  });
+}
+
+function makeBarChart(id,labels,datasets){
+  if(_charts[id])_charts[id].destroy();
+  const ctx=document.getElementById(id);if(!ctx)return;
+  _charts[id]=new Chart(ctx,{
+    type:'bar',data:{labels,datasets:datasets.map(d=>({label:d.label,data:d.data,backgroundColor:d.color+'cc',borderRadius:4}))},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}
+  });
+}
+
+function makeAreaChart(id,labels,data,color){
+  if(_charts[id])_charts[id].destroy();
+  const ctx=document.getElementById(id);if(!ctx)return;
+  _charts[id]=new Chart(ctx,{
+    type:'line',data:{labels,datasets:[{data,borderColor:color,backgroundColor:color+'22',fill:true,tension:0.4,pointRadius:3,borderWidth:2,spanGaps:true}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{callback:v=>v+'€'}}}}
+  });
+}
+
+function renderCatChart(){
+  initYear(_year);
+  const cats=_data[_year].categories||[];
+  if(_charts['chartCategories'])_charts['chartCategories'].destroy();
+  const ctx=document.getElementById('chartCategories');if(!ctx)return;
+  if(!cats.length){
+    _charts['chartCategories']=new Chart(ctx,{type:'doughnut',data:{labels:['Aucune catégorie'],datasets:[{data:[1],backgroundColor:['#e2e8f0']}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}});
+    return;
+  }
+  const data=cats.map(c=>parseFloat(c.ca)||0);
+  const labels=cats.map(c=>c.nom||'Sans nom');
+  _charts['chartCategories']=new Chart(ctx,{
+    type:'doughnut',
+    data:{labels,datasets:[{data,backgroundColor:COLORS.slice(0,cats.length),borderWidth:2,borderColor:'white',hoverOffset:6}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom',labels:{font:{size:11},boxWidth:10}}}}
+  });
+}
+
+// ── CATÉGORIES ──
+function renderCategories(){
+  initYear(_year);
+  const cats=_data[_year].categories||[];
+  const grid=document.getElementById('catGrid');
+  grid.innerHTML=cats.map((c,i)=>`
+    <div class="cat-card" style="border-top:3px solid ${COLORS[i%COLORS.length]}">
+      <div class="cat-head">
+        <input class="cat-name-input" value="${c.nom||''}" placeholder="Nom catégorie..." oninput="_data[${_year}].categories[${i}].nom=this.value;renderCatChart()" onchange="_data[${_year}].categories[${i}].nom=this.value;renderCatChart()"/>
+        <button class="btn btn-danger btn-xs" onclick="deleteCat(${i})">✕</button>
+      </div>
+      <div class="cat-body">
+        <div class="cat-row"><span>CA mensuel HT (€)</span><input class="cat-input" type="number" placeholder="0" value="${c.ca||''}" oninput="updateCat(${i},'ca',this.value)" onchange="updateCat(${i},'ca',this.value)"/></div>
+        <div class="cat-row"><span>Nb transactions/mois</span><input class="cat-input" type="number" placeholder="0" value="${c.txn||''}" oninput="updateCat(${i},'txn',this.value)" onchange="updateCat(${i},'txn',this.value)"/></div>
+        <div class="cat-row"><span>Nb clients/mois</span><input class="cat-input" type="number" placeholder="0" value="${c.cli||''}" oninput="updateCat(${i},'cli',this.value)" onchange="updateCat(${i},'cli',this.value)"/></div>
+        <div class="cat-row" style="margin-top:10px;padding-top:10px">
+          <span>Panier moyen/commande HT</span>
+          <div class="cat-kpi blue">${(parseFloat(c.txn)||0)>0?fmtE((parseFloat(c.ca)||0)/(parseFloat(c.txn)||1)):'-'}</div>
+        </div>
+        <div class="cat-row">
+          <span>Panier moyen/client HT</span>
+          <div class="cat-kpi green">${(parseFloat(c.cli)||0)>0?fmtE((parseFloat(c.ca)||0)/(parseFloat(c.cli)||1)):'-'}</div>
+        </div>
+        <div class="cat-row">
+          <span>Transactions/client</span>
+          <div class="cat-kpi">${(parseFloat(c.cli)||0)>0?((parseFloat(c.txn)||0)/(parseFloat(c.cli)||1)).toFixed(2):'-'}</div>
+        </div>
+      </div>
+    </div>
+  `).join('') + `<div class="add-cat-btn" onclick="addCategory()"><span style="font-size:20px">+</span> Nouvelle catégorie</div>`;
+}
+
+function updateCat(i,field,val){
+  initYear(_year);
+  _data[_year].categories[i][field]=val;
+  renderCategories();
+  renderCatChart();
+}
+
+function addCategory(){
+  initYear(_year);
+  if(!_data[_year].categories)_data[_year].categories=[];
+  _data[_year].categories.push({nom:'Nouvelle catégorie',ca:'',txn:'',cli:''});
+  renderCategories();
+  renderCatChart();
+}
+
+function deleteCat(i){
+  initYear(_year);
+  _data[_year].categories.splice(i,1);
+  renderCategories();
+  renderCatChart();
+}
+
+// ── SIMULATEUR ──
+function prefillSim(){
+  const av=getAverages();
+  if(av.pmCmd>0)document.getElementById('sim-pm').placeholder=av.pmCmd.toFixed(2);
+  if(av.txn>0)document.getElementById('sim-txn').placeholder=Math.round(av.txn);
+  if(av.cli>0)document.getElementById('sim-cli').placeholder=Math.round(av.cli);
+  // Mettre à jour les valeurs actuelles dans le résultat
+  const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
+  set('sr-pm-cur',av.pmCmd>0?fmtE(av.pmCmd):'—');
+  const caMens=av.txn>0&&av.pmCmd>0?av.pmCmd*av.txn:0;
+  set('sr-ca-cur',caMens>0?fmtE(caMens):'—');
+  set('sr-ca-an-cur',fmtE(av.caTotal));
+  set('sr-pc-cur',av.pmCli>0?fmtE(av.pmCli):'—');
+  const tc=av.cli>0&&av.txn>0?av.txn/av.cli:0;
+  set('sr-tc-cur',tc>0?tc.toFixed(2):'—');
+}
+
+function calcSim(){
+  const av=getAverages();
+  const pmSim=parseFloat(document.getElementById('sim-pm').value)||av.pmCmd;
+  const txnSim=parseFloat(document.getElementById('sim-txn').value)||av.txn;
+  const cliSim=parseFloat(document.getElementById('sim-cli').value)||av.cli;
+  const mois=parseFloat(document.getElementById('sim-mois').value)||12;
+
+  const caMensSim=pmSim*txnSim;
+  const caAnSim=caMensSim*mois;
+  const pcSim=cliSim>0?(caMensSim/cliSim):0;
+  const tcSim=cliSim>0?(txnSim/cliSim):0;
+
+  const caMensCur=av.pmCmd*av.txn;
+  const caAnCur=av.caTotal;
+  const pcCur=av.pmCli;
+  const tcCur=av.cli>0?av.txn/av.cli:0;
+
+  function resItem(newVal,curVal,isEur=true){
+    const delta=newVal-curVal;
+    const pos=delta>=0;
+    const fmt=isEur?fmtE:(v=>v.toFixed(2));
+    return{new:newVal,cur:curVal,delta,pos,fmtNew:fmt(newVal),fmtDelta:(pos?'+':'')+fmt(delta)};
+  }
+
+  const items=[
+    {ids:['sr-pm-new','sr-pm-delta'],...resItem(pmSim,av.pmCmd)},
+    {ids:['sr-ca-new','sr-ca-delta'],...resItem(caMensSim,caMensCur)},
+    {ids:['sr-ca-an-new','sr-ca-an-delta'],...resItem(caAnSim,caAnCur)},
+    {ids:['sr-pc-new','sr-pc-delta'],...resItem(pcSim,pcCur)},
+    {ids:['sr-tc-new','sr-tc-delta'],...resItem(tcSim,tcCur,false)},
+  ];
+
+  items.forEach(item=>{
+    const newEl=document.getElementById(item.ids[0]);
+    const deltaEl=document.getElementById(item.ids[1]);
+    if(newEl){newEl.textContent=item.fmtNew;newEl.className='sim-res-new '+(item.pos?'pos':'neg');}
+    if(deltaEl){deltaEl.textContent=item.fmtDelta;deltaEl.className='sim-res-delta '+(item.pos?'pos':'neg');}
+  });
+}
+
+function resetSim(){
+  ['sim-pm','sim-txn','sim-cli'].forEach(id=>{document.getElementById(id).value='';});
+  document.getElementById('sim-mois').value='12';
+  calcSim();
+}
+
+// ── UTILS ──
+function fmtE(n){return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
+function setText(id,v){const el=document.getElementById(id);if(el)el.textContent=v;}
+function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');setTimeout(()=>t.className='toast',3200);}
+
+window.toggleMenu=toggleMenu;window.handleLogout=handleLogout;
+window.switchYear=switchYear;window.updateMonth=updateMonth;
+window.addCategory=addCategory;window.updateCat=updateCat;window.deleteCat=deleteCat;
+window.calcSim=calcSim;window.resetSim=resetSim;window.saveAll=saveAll;
+</script>
+</body>
+</html>
