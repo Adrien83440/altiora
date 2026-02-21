@@ -264,9 +264,9 @@
     document.getElementById('userAvatar').textContent=name.charAt(0).toUpperCase();
     const now=new Date();
     document.getElementById('monthSelect').value=now.getMonth();
-    const urlYear = new URLSearchParams(window.location.search).get('year');
-window._year = urlYear ? parseInt(urlYear) : now.getFullYear();
-loadMonth();
+    const urlYear = new URLSearchParams(window.location.search).get("year");
+    window._year = urlYear ? parseInt(urlYear) : now.getFullYear();
+    loadMonth();
   });
 </script>
 
@@ -483,16 +483,74 @@ function renderPrevCA(rows){
 
 function renderCharges(rows,key){
   const tbId=key==='chargesFixe'?'cf-tbody':key==='chargesVar'?'cv-tbody':'leas-tbody';
-  return rows.map((r,i)=>`<tr>
-    <td><select class="cell-input" style="width:58px" onchange="_data['${key}'][${i}].pointe=this.value"><option ${r.pointe==='Oui'?'selected':''}>Oui</option><option ${r.pointe==='Non'?'selected':''}>Non</option></select></td>
-    <td><input class="cell-input" style="width:100px" placeholder="Fournisseur" value="${r.fournisseur}" oninput="_data['${key}'][${i}].fournisseur=this.value"/></td>
-    <td><input class="cell-input" style="width:100px" placeholder="Type" value="${r.type}" oninput="_data['${key}'][${i}].type=this.value"/></td>
-    <td><input class="cell-input" style="width:80px" type="number" placeholder="0.00" value="${r.montantHT}" oninput="_data['${key}'][${i}].montantHT=this.value;refreshTotals()"/></td>
-    <td><select class="cell-input" style="width:58px" onchange="_data['${key}'][${i}].tvaRate=parseFloat(this.value);refreshTotals()">${TVA_RATES.map(t=>`<option value="${t}" ${r.tvaRate==t?'selected':''}>${t}%</option>`).join('')}</select></td>
-    <td><span class="cell-readonly blue">${r.montantHT?fmtN(parseFloat(r.montantHT)*(1+(r.tvaRate||0)/100)):'—'} €</span></td>
-    <td><select class="cell-input" style="width:58px" onchange="_data['${key}'][${i}].deductible=this.value;refreshTotals()"><option ${r.deductible==='Oui'?'selected':''}>Oui</option><option ${r.deductible==='Non'?'selected':''}>Non</option></select></td>
-    <td><button class="btn btn-danger btn-sm" onclick="delRow('${key}',${i},'${tbId}',r=>renderCharges(r,'${key}'))">✕</button></td>
-  </tr>`).join('');
+  const isFixe=key==='chargesFixe';
+  return rows.map((r,i)=>{
+    const ht=parseFloat(r.montantHT)||0;
+    const rate=parseFloat(r.tvaRate)||0;
+    const ttc=ht>0?ht*(1+rate/100):0;
+    return `<tr>
+    <td><select class="cell-input" style="width:55px" onchange="_data['${key}'][${i}].pointe=this.value"><option ${r.pointe==='Oui'?'selected':''}>Oui</option><option ${r.pointe==='Non'?'selected':''}>Non</option></select></td>
+    <td><input class="cell-input" style="width:95px" placeholder="Fournisseur" value="${r.fournisseur}" oninput="_data['${key}'][${i}].fournisseur=this.value"/></td>
+    <td><input class="cell-input" style="width:95px" placeholder="Type" value="${r.type}" oninput="_data['${key}'][${i}].type=this.value"/></td>
+    <td><input class="cell-input" style="width:76px" type="number" placeholder="HT" value="${r.montantHT}" id="${key}-ht-${i}" oninput="updateChargeHT('${key}',${i},this.value)"/></td>
+    <td><select class="cell-input" style="width:55px" onchange="updateChargeTVARate('${key}',${i},this.value)">${TVA_RATES.map(t=>`<option value="${t}" ${rate==t?'selected':''}>${t}%</option>`).join('')}</select></td>
+    <td><input class="cell-input" style="width:76px" type="number" placeholder="TTC" value="${ttc>0?ttc.toFixed(2):''}" id="${key}-ttc-${i}" oninput="updateChargeTTC('${key}',${i},this.value)"/></td>
+    <td><select class="cell-input" style="width:55px" onchange="_data['${key}'][${i}].deductible=this.value;refreshTotals()"><option ${r.deductible==='Oui'?'selected':''}>Oui</option><option ${r.deductible==='Non'?'selected':''}>Non</option></select></td>
+    <td style="white-space:nowrap;display:flex;gap:4px;align-items:center;padding:5px 7px;">
+      ${isFixe?`<button class="btn btn-orange btn-sm" style="font-size:10px;padding:3px 8px;" title="Appliquer cette ligne sur toute l'année" onclick="duplicateFixeLine(${i})">⚡ Année</button>`:''}
+      <button class="btn btn-danger btn-sm" onclick="delRow('${key}',${i},'${tbId}',r=>renderCharges(r,'${key}'))">✕</button>
+    </td>
+  </tr>`;
+  }).join('');
+}
+
+function updateChargeHT(key,i,value){
+  _data[key][i].montantHT=value;
+  const ht=parseFloat(value)||0;
+  const rate=parseFloat(_data[key][i].tvaRate)||0;
+  const ttcEl=document.getElementById(`${key}-ttc-${i}`);
+  if(ttcEl)ttcEl.value=ht>0?(ht*(1+rate/100)).toFixed(2):'';
+  refreshTotals();
+}
+
+function updateChargeTTC(key,i,value){
+  const ttc=parseFloat(value)||0;
+  const rate=parseFloat(_data[key][i].tvaRate)||0;
+  const ht=ttc>0?(rate>0?ttc/(1+rate/100):ttc):0;
+  _data[key][i].montantHT=ht>0?ht.toFixed(4):'';
+  const htEl=document.getElementById(`${key}-ht-${i}`);
+  if(htEl)htEl.value=ht>0?ht.toFixed(2):'';
+  refreshTotals();
+}
+
+function updateChargeTVARate(key,i,value){
+  _data[key][i].tvaRate=parseFloat(value);
+  const ht=parseFloat(_data[key][i].montantHT)||0;
+  if(ht>0){
+    const ttcEl=document.getElementById(`${key}-ttc-${i}`);
+    if(ttcEl)ttcEl.value=(ht*(1+parseFloat(value)/100)).toFixed(2);
+  }
+  refreshTotals();
+}
+
+async function duplicateFixeLine(i){
+  if(!window._uid){showToast('Non connecté','warning');return;}
+  const currentM=parseInt(document.getElementById('monthSelect').value);
+  const ligne=JSON.parse(JSON.stringify(_data.chargesFixe[i]));
+  let count=0;
+  for(let m=0;m<12;m++){
+    if(m===currentM)continue;
+    const key=`${window._year}-${String(m+1).padStart(2,'0')}`;
+    try{
+      const snap=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
+      let md=defaultData(window._year,m);
+      if(snap.exists())md={...md,...snap.data()};
+      if(!md.chargesFixe)md.chargesFixe=[];
+      const exists=md.chargesFixe.some(c=>c.fournisseur===ligne.fournisseur&&c.type===ligne.type);
+      if(!exists){md.chargesFixe.push(ligne);await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key),md);count++;}
+    }catch(e){console.warn(e);}
+  }
+  showToast(`⚡ "${ligne.fournisseur||ligne.type||'Ligne'}" appliquée sur ${count} mois !`,'success');
 }
 
 function renderCredits(rows){
@@ -703,6 +761,8 @@ window.loadMonth=loadMonth;window.setYear=setYear;window.toggleMenu=toggleMenu;
 window.updateCA=updateCA;window.addCharge=addCharge;window.addCredit=addCredit;
 window.delCredit=delCredit;window.refreshCredits=refreshCredits;
 window.delRow=delRow;window.addRentree=addRentree;window.refreshTotals=refreshTotals;
+window.updateChargeHT=updateChargeHT;window.updateChargeTTC=updateChargeTTC;window.updateChargeTVARate=updateChargeTVARate;
+window.duplicateFixeLine=duplicateFixeLine;
 window.saveAll=saveAll;window.openFixedChargesModal=openFixedChargesModal;
 window.closeModal=closeModal;window.applyFixedCharges=applyFixedCharges;
 window.handleLogout=handleLogout;
