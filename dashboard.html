@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ALTIORA — Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --blue-dark:  #0f1f5c;
+      --blue-main:  #1a3dce;
+      --blue-light: #4f7ef8;
+      --blue-pale:  #e8eeff;
+      --blue-ghost: #f0f4ff;
+      --white:      #ffffff;
+      --text:       #1a1f36;
+      --muted:      #6b7280;
+      --border:     #e2e8f0;
+      --bg:         #f5f7ff;
+      --sidebar-w:  240px;
+      --radius:     14px;
+    }
+
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background: var(--bg); color: var(--text); display: flex; min-height: 100vh; }
+
+    /* ── SIDEBAR ── */
+    .sidebar {
+      width: var(--sidebar-w);
+      min-height: 100vh;
+      background: linear-gradient(180deg, var(--blue-dark) 0%, #162366 100%);
+      display: flex;
+      flex-direction: column;
+      position: fixed;
+      left: 0; top: 0;
+      z-index: 100;
+      padding: 0 0 24px;
+    }
+
+    .sidebar-logo {
+      display: flex; align-items: center; gap: 10px;
+      padding: 28px 22px 24px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      margin-bottom: 12px;
+    }
+    .sidebar-logo-icon {
+      width: 36px; height: 36px;
+      background: rgba(255,255,255,0.15);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 9px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    .sidebar-logo-text { font-size: 18px; font-weight: 800; color: white; letter-spacing: 1px; }
+
+    .sidebar-section-label {
+      font-size: 10px; font-weight: 700;
+      color: rgba(255,255,255,0.35);
+      letter-spacing: 1.2px; text-transform: uppercase;
+      padding: 16px 22px 6px;
+    }
+
+    .nav-item {
+      display: flex; align-items: center; gap: 12px;
+      padding: 11px 22px;
+      color: rgba(255,255,255,0.6);
+      font-size: 13.5px; font-weight: 500;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      transition: all 0.2s;
+      text-decoration: none;
+    }
+    .nav-item:hover { color: white; background: rgba(255,255,255,0.06); }
+    .nav-item.active {
+      color: white;
+      background: rgba(255,255,255,0.1);
+      border-left-color: #4f7ef8;
+    }
+    .nav-icon { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
+    .nav-badge {
+      margin-left: auto;
+      background: rgba(79,126,248,0.3);
+      color: #a5b4fc;
+      font-size: 10px; font-weight: 700;
+      padding: 2px 7px; border-radius: 20px;
+    }
+    .nav-soon {
+      margin-left: auto;
+      background: rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.3);
+      font-size: 9px; font-weight: 600;
+      padding: 2px 6px; border-radius: 4px;
+      letter-spacing: 0.5px;
+    }
+
+    .sidebar-footer {
+      margin-top: auto;
+      padding: 16px 22px 0;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .user-card {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px;
+      background: rgba(255,255,255,0.07);
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    .user-avatar {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--blue-light), #6366f1);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 700; color: white;
+      flex-shrink: 0;
+    }
+    .user-name { font-size: 12px; font-weight: 600; color: white; }
+    .user-plan { font-size: 10px; color: rgba(255,255,255,0.4); }
+    .logout-btn {
+      margin-left: auto;
+      background: none; border: none;
+      color: rgba(255,255,255,0.3);
+      cursor: pointer; font-size: 14px;
+      padding: 4px;
+    }
+    .logout-btn:hover { color: rgba(255,255,255,0.7); }
+
+    /* ── MAIN ── */
+    .main {
+      margin-left: var(--sidebar-w);
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    /* Top bar */
+    .topbar {
+      background: white;
+      border-bottom: 1px solid var(--border);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky; top: 0; z-index: 50;
+    }
+    .topbar-left h1 { font-size: 18px; font-weight: 700; color: var(--text); }
+    .topbar-left p { font-size: 12px; color: var(--muted); margin-top: 1px; }
+    .topbar-right { display: flex; align-items: center; gap: 12px; }
+    .period-select {
+      padding: 7px 12px;
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 13px; font-weight: 500;
+      color: var(--text);
+      background: white; cursor: pointer; outline: none;
+    }
+    .period-select:focus { border-color: var(--blue-main); }
+    .btn-primary {
+      padding: 8px 16px;
+      background: linear-gradient(135deg, var(--blue-main), var(--blue-light));
+      color: white; border: none; border-radius: 8px;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 3px 10px rgba(26,61,206,0.3);
+    }
+
+    /* Content */
+    .content { padding: 28px 32px; flex: 1; }
+
+    /* Page views */
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* KPI Cards */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+      margin-bottom: 28px;
+    }
+    .kpi-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px;
+      position: relative;
+      overflow: hidden;
+      transition: box-shadow 0.2s;
+    }
+    .kpi-card:hover { box-shadow: 0 4px 20px rgba(26,61,206,0.08); }
+    .kpi-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0;
+      height: 3px;
+    }
+    .kpi-card.blue::before   { background: linear-gradient(90deg, var(--blue-main), var(--blue-light)); }
+    .kpi-card.green::before  { background: linear-gradient(90deg, #10b981, #34d399); }
+    .kpi-card.orange::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+    .kpi-card.purple::before { background: linear-gradient(90deg, #6366f1, #a5b4fc); }
+
+    .kpi-icon {
+      width: 40px; height: 40px;
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+      margin-bottom: 14px;
+    }
+    .kpi-card.blue   .kpi-icon { background: #eff6ff; }
+    .kpi-card.green  .kpi-icon { background: #f0fdf4; }
+    .kpi-card.orange .kpi-icon { background: #fffbeb; }
+    .kpi-card.purple .kpi-icon { background: #eef2ff; }
+
+    .kpi-label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .kpi-value { font-size: 26px; font-weight: 800; color: var(--text); margin-bottom: 8px; letter-spacing: -0.5px; }
+    .kpi-empty { font-size: 22px; font-weight: 700; color: #d1d5db; }
+    .kpi-trend { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }
+    .kpi-trend.up   { color: #10b981; }
+    .kpi-trend.down { color: #ef4444; }
+    .kpi-trend.neutral { color: var(--muted); }
+
+    /* Charts grid */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 18px;
+      margin-bottom: 28px;
+    }
+    .chart-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+    }
+    .chart-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+    .chart-title { font-size: 15px; font-weight: 700; color: var(--text); }
+    .chart-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .chart-tag {
+      font-size: 11px; font-weight: 600;
+      padding: 4px 10px; border-radius: 20px;
+      background: var(--blue-ghost); color: var(--blue-main);
+    }
+    .chart-wrap { position: relative; height: 220px; }
+
+    /* Bottom grid */
+    .bottom-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+    }
+
+    /* Table */
+    .table-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .table-header { padding: 18px 22px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .table-title { font-size: 14px; font-weight: 700; color: var(--text); }
+    table { width: 100%; border-collapse: collapse; }
+    th { padding: 10px 22px; text-align: left; font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; background: var(--bg); border-bottom: 1px solid var(--border); }
+    td { padding: 12px 22px; font-size: 13px; border-bottom: 1px solid #f8f9fa; }
+    tr:last-child td { border-bottom: none; }
+    .td-muted { color: var(--muted); font-size: 12px; }
+
+    .status-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 20px; }
+    .status-badge.good   { background: #f0fdf4; color: #10b981; }
+    .status-badge.warn   { background: #fffbeb; color: #f59e0b; }
+    .status-badge.empty  { background: var(--bg); color: var(--muted); }
+
+    /* Coming soon page */
+    .coming-soon {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 60vh; text-align: center;
+    }
+    .coming-soon-icon { font-size: 56px; margin-bottom: 20px; }
+    .coming-soon h2 { font-size: 22px; font-weight: 800; color: var(--text); margin-bottom: 8px; }
+    .coming-soon p { font-size: 14px; color: var(--muted); max-width: 360px; line-height: 1.7; margin-bottom: 24px; }
+    .coming-soon .pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--blue-ghost);
+      color: var(--blue-main);
+      font-size: 13px; font-weight: 600;
+      padding: 8px 18px; border-radius: 20px;
+    }
+
+    /* Animations */
+    @keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+    .page.active { animation: fadeIn 0.3s ease both; }
+  </style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-icon">📊</div>
+    <div class="sidebar-logo-text">ALTIORA</div>
+  </div>
+
+  <div class="sidebar-section-label">Principal</div>
+  <a class="nav-item active" onclick="showPage('dashboard', this)">
+    <span class="nav-icon">🏠</span> Tableau de bord
+    <span class="nav-badge">Live</span>
+  </a>
+  <a class="nav-item" onclick="showPage('ca', this)">
+    <span class="nav-icon">📈</span> Suivi CA & Résultats
+  </a>
+  <a class="nav-item" onclick="showPage('marges', this)">
+    <span class="nav-icon">💹</span> Marges & Coûts
+  </a>
+
+  <div class="sidebar-section-label">Analyse</div>
+  <a class="nav-item" onclick="showPage('kpis', this)">
+    <span class="nav-icon">🎯</span> KPIs Clés
+    <span class="nav-soon">BIENTÔT</span>
+  </a>
+  <a class="nav-item" onclick="showPage('simulation', this)">
+    <span class="nav-icon">🔮</span> Simulation CA
+    <span class="nav-soon">BIENTÔT</span>
+  </a>
+
+  <div class="sidebar-footer">
+    <div class="user-card">
+      <div class="user-avatar" id="userAvatar">A</div>
+      <div>
+        <div class="user-name" id="userName">Utilisateur</div>
+        <div class="user-plan">Plan gratuit</div>
+      </div>
+      <button class="logout-btn" onclick="handleLogout()" title="Déconnexion">⎋</button>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1 id="pageTitle">Tableau de bord</h1>
+      <p id="pageDate"></p>
+    </div>
+    <div class="topbar-right">
+      <select class="period-select">
+        <option>Ce mois-ci</option>
+        <option>Trimestre en cours</option>
+        <option>Cette année</option>
+      </select>
+      <button class="btn-primary">+ Saisir des données</button>
+    </div>
+  </div>
+
+  <!-- CONTENT -->
+  <div class="content">
+
+    <!-- PAGE: DASHBOARD -->
+    <div class="page active" id="page-dashboard">
+
+      <!-- KPI Cards -->
+      <div class="kpi-grid">
+        <div class="kpi-card blue">
+          <div class="kpi-icon">💰</div>
+          <div class="kpi-label">Chiffre d'affaires</div>
+          <div class="kpi-empty">— €</div>
+          <div class="kpi-trend neutral">Aucune donnée</div>
+        </div>
+        <div class="kpi-card green">
+          <div class="kpi-icon">📊</div>
+          <div class="kpi-label">Marge brute</div>
+          <div class="kpi-empty">— %</div>
+          <div class="kpi-trend neutral">Aucune donnée</div>
+        </div>
+        <div class="kpi-card orange">
+          <div class="kpi-icon">🧾</div>
+          <div class="kpi-label">Charges totales</div>
+          <div class="kpi-empty">— €</div>
+          <div class="kpi-trend neutral">Aucune donnée</div>
+        </div>
+        <div class="kpi-card purple">
+          <div class="kpi-icon">📉</div>
+          <div class="kpi-label">Résultat net</div>
+          <div class="kpi-empty">— €</div>
+          <div class="kpi-trend neutral">Aucune donnée</div>
+        </div>
+      </div>
+
+      <!-- Charts -->
+      <div class="charts-grid">
+        <div class="chart-card">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Évolution du CA</div>
+              <div class="chart-sub">12 derniers mois</div>
+            </div>
+            <div class="chart-tag">Placeholder</div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="caChart"></canvas>
+          </div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Répartition des coûts</div>
+              <div class="chart-sub">Mois en cours</div>
+            </div>
+            <div class="chart-tag">Placeholder</div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="coutChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom -->
+      <div class="bottom-grid">
+        <div class="table-card">
+          <div class="table-header">
+            <div class="table-title">Indicateurs du mois</div>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Indicateur</th><th>Valeur</th><th>Statut</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Panier moyen</td>
+                <td class="td-muted">—</td>
+                <td><span class="status-badge empty">En attente</span></td>
+              </tr>
+              <tr>
+                <td>Taux de marge</td>
+                <td class="td-muted">—</td>
+                <td><span class="status-badge empty">En attente</span></td>
+              </tr>
+              <tr>
+                <td>Charges fixes</td>
+                <td class="td-muted">—</td>
+                <td><span class="status-badge empty">En attente</span></td>
+              </tr>
+              <tr>
+                <td>Point mort</td>
+                <td class="td-muted">—</td>
+                <td><span class="status-badge empty">En attente</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-header">
+            <div>
+              <div class="chart-title">Marge vs Charges</div>
+              <div class="chart-sub">Comparaison mensuelle</div>
+            </div>
+            <div class="chart-tag">Placeholder</div>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="margeChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAGE: CA & Résultats -->
+    <div class="page" id="page-ca">
+      <div class="coming-soon">
+        <div class="coming-soon-icon">📈</div>
+        <h2>Suivi CA & Résultats</h2>
+        <p>Ce module vous permettra de suivre votre chiffre d'affaires mensuel, vos objectifs et vos résultats en temps réel.</p>
+        <div class="pill">🔨 Brique 3 — En construction</div>
+      </div>
+    </div>
+
+    <!-- PAGE: Marges -->
+    <div class="page" id="page-marges">
+      <div class="coming-soon">
+        <div class="coming-soon-icon">💹</div>
+        <h2>Marges & Coûts</h2>
+        <p>Analysez vos marges par produit ou service, suivez l'évolution de vos coûts et identifiez les leviers d'optimisation.</p>
+        <div class="pill">🔨 Brique 4 — En construction</div>
+      </div>
+    </div>
+
+    <!-- PAGE: KPIs -->
+    <div class="page" id="page-kpis">
+      <div class="coming-soon">
+        <div class="coming-soon-icon">🎯</div>
+        <h2>KPIs Clés</h2>
+        <p>Vos indicateurs de performance les plus importants au même endroit — panier moyen, taux de conversion, point mort et plus.</p>
+        <div class="pill">🔨 Brique 5 — En construction</div>
+      </div>
+    </div>
+
+    <!-- PAGE: Simulation -->
+    <div class="page" id="page-simulation">
+      <div class="coming-soon">
+        <div class="coming-soon-icon">🔮</div>
+        <h2>Simulation CA</h2>
+        <p>Simulez différents scénarios de croissance et visualisez l'impact sur votre rentabilité.</p>
+        <div class="pill">🔨 Brique 6 — En construction</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Firebase -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  const app = initializeApp({
+    apiKey: "AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain: "altiora-70599.firebaseapp.com",
+    projectId: "altiora-70599",
+    storageBucket: "altiora-70599.firebasestorage.app",
+    messagingSenderId: "120905555746",
+    appId: "1:120905555746:web:618460c65cdc9e57cc8f7b"
+  });
+
+  const auth = getAuth(app);
+  window._auth = auth;
+  window._signOut = signOut;
+
+  onAuthStateChanged(auth, user => {
+    if (!user) {
+      window.location.href = 'index.html';
+      return;
+    }
+    const name = user.displayName || user.email.split('@')[0];
+    document.getElementById('userName').textContent = name;
+    document.getElementById('userAvatar').textContent = name.charAt(0).toUpperCase();
+  });
+</script>
+
+<script>
+  // Date
+  const now = new Date();
+  document.getElementById('pageDate').textContent = now.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
+
+  // Navigation
+  const pageTitles = {
+    dashboard: 'Tableau de bord',
+    ca: 'Suivi CA & Résultats',
+    marges: 'Marges & Coûts',
+    kpis: 'KPIs Clés',
+    simulation: 'Simulation CA'
+  };
+
+  function showPage(id, el) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.getElementById('page-' + id).classList.add('active');
+    el.classList.add('active');
+    document.getElementById('pageTitle').textContent = pageTitles[id];
+  }
+
+  async function handleLogout() {
+    await window._signOut(window._auth);
+    window.location.href = 'index.html';
+  }
+
+  window.showPage = showPage;
+  window.handleLogout = handleLogout;
+
+  // Charts placeholder
+  const blueGrad = ctx => {
+    const g = ctx.createLinearGradient(0, 0, 0, 220);
+    g.addColorStop(0, 'rgba(26,61,206,0.2)');
+    g.addColorStop(1, 'rgba(26,61,206,0)');
+    return g;
+  };
+
+  const months = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
+  const emptyData = months.map(() => 0);
+  const placeholderData = [12000,15000,13500,17000,16000,19500,18000,21000,20000,23000,22000,25000];
+
+  // CA Chart
+  const caCtx = document.getElementById('caChart').getContext('2d');
+  new Chart(caCtx, {
+    type: 'line',
+    data: {
+      labels: months,
+      datasets: [{
+        label: 'CA (€)',
+        data: placeholderData,
+        borderColor: '#1a3dce',
+        borderWidth: 2.5,
+        backgroundColor: blueGrad(caCtx),
+        fill: true,
+        tension: 0.45,
+        pointRadius: 3,
+        pointBackgroundColor: '#1a3dce'
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11, family: 'Plus Jakarta Sans' }, color: '#9ca3af' } },
+        y: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 11, family: 'Plus Jakarta Sans' }, color: '#9ca3af', callback: v => v/1000 + 'k€' } }
+      }
+    }
+  });
+
+  // Coûts doughnut
+  const coutCtx = document.getElementById('coutChart').getContext('2d');
+  new Chart(coutCtx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Charges fixes','Matières premières','Masse salariale','Autres'],
+      datasets: [{
+        data: [35, 28, 25, 12],
+        backgroundColor: ['#1a3dce','#4f7ef8','#a5b4fc','#e8eeff'],
+        borderWidth: 0,
+        hoverOffset: 6
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: '68%',
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 11, family: 'Plus Jakarta Sans' }, color: '#6b7280', padding: 12, boxWidth: 10 } }
+      }
+    }
+  });
+
+  // Marge vs Charges bar
+  const margeCtx = document.getElementById('margeChart').getContext('2d');
+  new Chart(margeCtx, {
+    type: 'bar',
+    data: {
+      labels: ['Jan','Fév','Mar','Avr','Mai','Juin'],
+      datasets: [
+        { label: 'Marge', data: [4500,5200,4800,6000,5700,7000], backgroundColor: 'rgba(26,61,206,0.8)', borderRadius: 6 },
+        { label: 'Charges', data: [3800,4100,4300,4500,4200,4800], backgroundColor: 'rgba(165,180,252,0.6)', borderRadius: 6 }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom', labels: { font: { size: 11, family: 'Plus Jakarta Sans' }, color: '#6b7280', padding: 12, boxWidth: 10 } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11, family: 'Plus Jakarta Sans' }, color: '#9ca3af' } },
+        y: { grid: { color: '#f3f4f6' }, ticks: { font: { size: 11, family: 'Plus Jakarta Sans' }, color: '#9ca3af', callback: v => v/1000+'k€' } }
+      }
+    }
+  });
+</script>
+</body>
+</html>
