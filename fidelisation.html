@@ -168,10 +168,21 @@ main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
 .toggle input:checked+.toggle-slider::before{transform:translateX(18px)}
 
 /* MODAL */
-.overlay{position:fixed;inset:0;background:rgba(15,31,92,.4);backdrop-filter:blur(4px);z-index:200;display:none;align-items:center;justify-content:center}
-.overlay.show{display:flex}
-.modal{background:#fff;border-radius:var(--radius);padding:24px;width:min(520px,95vw);max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2)}
-.modal h2{font-size:16px;font-weight:800;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.modal-wrap{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center}
+.modal-wrap:not(.hidden){display:flex}
+.modal-backdrop{position:absolute;inset:0;background:rgba(15,31,92,.45);backdrop-filter:blur(4px)}
+.modal{background:#fff;border-radius:var(--radius);width:min(520px,95vw);max-height:92vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.25);position:relative;z-index:1;animation:modalIn .2s ease}
+@keyframes modalIn{from{opacity:0;transform:translateY(16px) scale(.97)}to{opacity:1;transform:none}}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 14px;border-bottom:1px solid var(--border)}
+.modal-title{font-size:15px;font-weight:800;display:flex;align-items:center;gap:7px}
+.modal-close{background:none;border:none;font-size:16px;cursor:pointer;color:var(--muted);padding:4px 8px;border-radius:6px;line-height:1;transition:.15s}
+.modal-close:hover{background:#f1f5f9;color:var(--text)}
+.modal .g2,.modal .field,.modal .modal-footer{padding:0 20px}
+.modal .g2:first-of-type,.modal .field:first-of-type{margin-top:16px}
+.modal-footer{padding:14px 20px 20px;border-top:1px solid var(--border);margin-top:16px;display:flex;gap:8px;justify-content:flex-end}
+.fc-tab{padding:9px 14px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;transition:.15s;white-space:nowrap}
+.fc-tab:hover{color:var(--text)}
+.fc-tab.on{color:var(--blue);border-bottom-color:var(--blue)}
 .field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
 .field label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
 .field-wrap{display:flex;align-items:center;gap:8px;padding:9px 13px;border:1.5px solid var(--border);border-radius:10px;background:#f8faff;transition:.15s}
@@ -526,11 +537,13 @@ html,body{overflow-x:hidden;max-width:100vw}
 </main>
 
 <!-- MODALS -->
-<div class="overlay" id="overlay" onclick="if(event.target===this)closeModal()">
+<!-- ═══════════════ MODALS ═══════════════ -->
 
-  <!-- ADD CLIENT -->
-  <div class="modal hidden" id="modal-addClient">
-    <h2>👤 Ajouter un client</h2>
+<!-- ADD CLIENT -->
+<div class="modal-wrap hidden" id="mw-addClient">
+  <div class="modal-backdrop" onclick="closeModal('addClient')"></div>
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">👤 Ajouter un client</div><button class="modal-close" onclick="closeModal('addClient')">✕</button></div>
     <div class="g2">
       <div class="field"><label>Prénom *</label><div class="field-wrap"><input class="field-in" id="nc-prenom" placeholder="Marie"/></div></div>
       <div class="field"><label>Nom *</label><div class="field-wrap"><input class="field-in" id="nc-nom" placeholder="Martin"/></div></div>
@@ -540,30 +553,111 @@ html,body{overflow-x:hidden;max-width:100vw}
     <div class="field"><label>Date de naissance</label><div class="field-wrap"><input class="field-in" id="nc-bday" type="date"/></div></div>
     <div class="field"><label>Points de départ</label><div class="field-wrap"><input class="field-in" id="nc-pts" type="number" value="0" min="0"/></div></div>
     <div class="modal-footer">
-      <button class="btn btn-o" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-o" onclick="closeModal('addClient')">Annuler</button>
       <button class="btn btn-p" onclick="addClient()">✅ Ajouter</button>
     </div>
   </div>
+</div>
 
-  <!-- ADD TAMPON -->
-  <div class="modal hidden" id="modal-addTampon">
-    <h2>✅ Valider un tampon</h2>
+<!-- FICHE CLIENT (édition) -->
+<div class="modal-wrap hidden" id="mw-ficheClient">
+  <div class="modal-backdrop" onclick="closeModal('ficheClient')"></div>
+  <div class="modal" style="width:min(580px,95vw)">
+    <div class="modal-head"><div class="modal-title">✏️ Fiche client</div><button class="modal-close" onclick="closeModal('ficheClient')">✕</button></div>
+    <div style="display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--border);margin-bottom:16px">
+      <div id="fc-avatar" style="width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:#fff;flex-shrink:0;background:#4f7ef8"></div>
+      <div>
+        <div id="fc-name" style="font-size:17px;font-weight:800"></div>
+        <div id="fc-seg" style="font-size:12px;color:var(--muted);margin-top:2px"></div>
+      </div>
+      <div style="margin-left:auto;text-align:right">
+        <div style="font-size:22px;font-weight:800;color:var(--blue)" id="fc-pts-display">0</div>
+        <div style="font-size:10px;color:var(--muted)">points</div>
+      </div>
+    </div>
+    <!-- TABS internes -->
+    <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:16px">
+      <div class="fc-tab on" onclick="fcTab('infos',this)">📋 Infos</div>
+      <div class="fc-tab" onclick="fcTab('points',this)">⭐ Points</div>
+      <div class="fc-tab" onclick="fcTab('carte',this)">🎴 Carte</div>
+      <div class="fc-tab" onclick="fcTab('histo',this)">📅 Historique</div>
+    </div>
+    <!-- Infos -->
+    <div id="fc-panel-infos">
+      <div class="g2">
+        <div class="field"><label>Prénom</label><div class="field-wrap"><input class="field-in" id="fc-prenom"/></div></div>
+        <div class="field"><label>Nom</label><div class="field-wrap"><input class="field-in" id="fc-nom"/></div></div>
+      </div>
+      <div class="field"><label>Téléphone</label><div class="field-wrap"><input class="field-in" id="fc-tel" type="tel"/></div></div>
+      <div class="field"><label>Email</label><div class="field-wrap"><input class="field-in" id="fc-email" type="email"/></div></div>
+      <div class="field"><label>Date de naissance</label><div class="field-wrap"><input class="field-in" id="fc-bday" type="date"/></div></div>
+      <div class="field"><label>Note interne</label><div class="field-wrap"><input class="field-in" id="fc-note" placeholder="Client régulier du lundi..."/></div></div>
+    </div>
+    <!-- Points -->
+    <div id="fc-panel-points" class="hidden">
+      <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <div style="flex:1;background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:12px;text-align:center">
+          <div style="font-size:22px;font-weight:800;color:#0369a1" id="fc-pts-val">0</div>
+          <div style="font-size:10px;color:var(--muted)">Points actuels</div>
+        </div>
+        <div style="flex:1;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:12px;text-align:center">
+          <div style="font-size:22px;font-weight:800;color:var(--green)" id="fc-pts-total">0</div>
+          <div style="font-size:10px;color:var(--muted)">Points gagnés (total)</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <input class="ci" id="fc-pts-add" type="number" placeholder="100" style="flex:1;width:auto;text-align:left"/>
+        <button class="btn btn-g btn-xs" onclick="fcAddPoints(1)">+ Ajouter</button>
+        <button class="btn btn-xs" style="background:#fef2f2;color:var(--red);border:1.5px solid #fecaca" onclick="fcAddPoints(-1)">− Retirer</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted)">Prochain palier : <span id="fc-next-palier" style="font-weight:700">—</span></div>
+    </div>
+    <!-- Carte tampons -->
+    <div id="fc-panel-carte" class="hidden">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <div style="font-size:14px;font-weight:700">Tampons : <span id="fc-tampons-count" style="color:var(--blue)">0</span> / <span id="fc-tampons-max">10</span></div>
+        <button class="btn btn-p btn-xs" onclick="fcAddTampon()">✅ +1 tampon</button>
+        <button class="btn btn-xs" style="background:#fef2f2;color:var(--red);border:1.5px solid #fecaca;margin-left:auto" onclick="fcResetTampons()">🔄 Reset carte</button>
+      </div>
+      <div id="fc-tampons-grid" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
+      <div style="padding:10px 14px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;font-size:12px;color:#92400e" id="fc-carte-info"></div>
+    </div>
+    <!-- Historique -->
+    <div id="fc-panel-histo" class="hidden">
+      <div id="fc-histo-list" style="display:flex;flex-direction:column;gap:0;max-height:260px;overflow-y:auto"></div>
+    </div>
+    <div class="modal-footer" id="fc-footer">
+      <button class="btn btn-xs" style="background:#fef2f2;color:var(--red);border:1.5px solid #fecaca;margin-right:auto" onclick="fcDelete()">🗑️ Supprimer</button>
+      <button class="btn btn-o" onclick="closeModal('ficheClient')">Fermer</button>
+      <button class="btn btn-p" onclick="fcSave()">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ADD TAMPON -->
+<div class="modal-wrap hidden" id="mw-addTampon">
+  <div class="modal-backdrop" onclick="closeModal('addTampon')"></div>
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">✅ Valider un tampon</div><button class="modal-close" onclick="closeModal('addTampon')">✕</button></div>
     <div class="field"><label>Client</label>
-      <div class="field-wrap"><select class="field-sel" id="tp-client"></select></div>
+      <div class="field-wrap"><select class="field-sel" id="tp-client" onchange="updateTpPreview()"></select></div>
     </div>
     <div class="field"><label>Montant achat (€) — pour les points</label>
-      <div class="field-wrap"><input class="field-in" id="tp-montant" type="number" min="0" placeholder="0"/></div>
+      <div class="field-wrap"><input class="field-in" id="tp-montant" type="number" min="0" placeholder="0" oninput="updateTpPreview()"/></div>
     </div>
     <div id="tp-preview" style="padding:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;font-size:12px;color:#065f46;margin:8px 0"></div>
     <div class="modal-footer">
-      <button class="btn btn-o" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-o" onclick="closeModal('addTampon')">Annuler</button>
       <button class="btn btn-p" onclick="addTampon()">✅ Valider le tampon</button>
     </div>
   </div>
+</div>
 
-  <!-- ADD PALIER -->
-  <div class="modal hidden" id="modal-addPalier">
-    <h2>🏆 Ajouter un palier</h2>
+<!-- ADD PALIER -->
+<div class="modal-wrap hidden" id="mw-addPalier">
+  <div class="modal-backdrop" onclick="closeModal('addPalier')"></div>
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">🏆 Ajouter un palier</div><button class="modal-close" onclick="closeModal('addPalier')">✕</button></div>
     <div class="field"><label>Points requis *</label><div class="field-wrap"><input class="field-in" id="np-pts" type="number" min="1" placeholder="500"/></div></div>
     <div class="field"><label>Récompense *</label><div class="field-wrap"><input class="field-in" id="np-reward" placeholder="Ex: -10% sur votre prochaine commande"/></div></div>
     <div class="field"><label>Icône</label>
@@ -575,14 +669,17 @@ html,body{overflow-x:hidden;max-width:100vw}
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-o" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-o" onclick="closeModal('addPalier')">Annuler</button>
       <button class="btn btn-p" onclick="addPalier()">✅ Ajouter</button>
     </div>
   </div>
+</div>
 
-  <!-- ADD COUPON -->
-  <div class="modal hidden" id="modal-addCoupon">
-    <h2>🎫 Créer un coupon</h2>
+<!-- ADD COUPON -->
+<div class="modal-wrap hidden" id="mw-addCoupon">
+  <div class="modal-backdrop" onclick="closeModal('addCoupon')"></div>
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">🎫 Créer un coupon</div><button class="modal-close" onclick="closeModal('addCoupon')">✕</button></div>
     <div class="field"><label>Nom du coupon *</label><div class="field-wrap"><input class="field-in" id="co-name" placeholder="Ex: Offre printemps"/></div></div>
     <div class="g2">
       <div class="field"><label>Type de réduction</label>
@@ -598,7 +695,7 @@ html,body{overflow-x:hidden;max-width:100vw}
     </div>
     <div class="field"><label>Attribuer à</label>
       <div class="field-wrap">
-        <select class="field-sel" id="co-target">
+        <select class="field-sel" id="co-target" onchange="toggleCoClient()">
           <option value="all">Tous les clients</option>
           <option value="vip">VIP uniquement</option>
           <option value="inactif">Clients inactifs</option>
@@ -612,17 +709,20 @@ html,body{overflow-x:hidden;max-width:100vw}
     </div>
     <div class="g2">
       <div class="field"><label>Date d'expiration</label><div class="field-wrap"><input class="field-in" id="co-exp" type="date"/></div></div>
-      <div class="field"><label>Utilisations max</label><div class="field-wrap"><input class="field-in" id="co-max" type="number" min="1" placeholder="∞" value="1"/></div></div>
+      <div class="field"><label>Utilisations max</label><div class="field-wrap"><input class="field-in" id="co-max" type="number" min="1" value="1"/></div></div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-o" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-o" onclick="closeModal('addCoupon')">Annuler</button>
       <button class="btn btn-p" onclick="addCoupon()">✅ Créer le coupon</button>
     </div>
   </div>
+</div>
 
-  <!-- ADD CAMPAGNE -->
-  <div class="modal hidden" id="modal-addCampagne">
-    <h2>📣 Nouvelle campagne</h2>
+<!-- ADD CAMPAGNE -->
+<div class="modal-wrap hidden" id="mw-addCampagne">
+  <div class="modal-backdrop" onclick="closeModal('addCampagne')"></div>
+  <div class="modal">
+    <div class="modal-head"><div class="modal-title">📣 Nouvelle campagne</div><button class="modal-close" onclick="closeModal('addCampagne')">✕</button></div>
     <div class="field"><label>Nom de la campagne *</label><div class="field-wrap"><input class="field-in" id="ca-name" placeholder="Ex: Promo été 2026"/></div></div>
     <div class="g2">
       <div class="field"><label>Canal</label>
@@ -646,24 +746,23 @@ html,body{overflow-x:hidden;max-width:100vw}
       </div>
     </div>
     <div class="field"><label>Message *</label>
-      <textarea id="ca-msg" style="width:100%;padding:10px 13px;border:1.5px solid var(--border);border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:500;resize:vertical;min-height:100px;outline:none" placeholder="Bonjour {prenom}, profitez de notre offre exclusive..."></textarea>
+      <textarea id="ca-msg" oninput="updateCaPreview()" style="width:100%;padding:10px 13px;border:1.5px solid var(--border);border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:500;resize:vertical;min-height:90px;outline:none" placeholder="Bonjour {prenom}, profitez de notre offre exclusive..."></textarea>
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-top:-8px">Variables : {prenom}, {points}, {tampons}, {coupon}</div>
-    <div class="g2" style="margin-top:8px">
+    <div style="font-size:11px;color:var(--muted);margin-top:-8px;margin-bottom:10px">Variables : {prenom}, {points}, {tampons}, {coupon}</div>
+    <div id="ca-preview" style="padding:10px 14px;background:#f8faff;border:1px solid var(--border);border-radius:10px;font-size:12px;color:var(--muted)">Aperçu : —</div>
+    <div class="g2" style="margin-top:12px">
       <div class="field"><label>Date d'envoi</label><div class="field-wrap"><input class="field-in" id="ca-date" type="date"/></div></div>
       <div class="field"><label>Heure</label><div class="field-wrap"><input class="field-in" id="ca-heure" type="time" value="10:00"/></div></div>
     </div>
-    <div id="ca-preview" style="padding:10px 14px;background:#f8faff;border:1px solid var(--border);border-radius:10px;font-size:12px;margin-top:4px;color:var(--muted)">Aperçu : —</div>
     <div class="modal-footer">
-      <button class="btn btn-o" onclick="closeModal()">Annuler</button>
+      <button class="btn btn-o" onclick="closeModal('addCampagne')">Annuler</button>
       <button class="btn btn-purple" onclick="saveCampagne(true)">💾 Planifier</button>
       <button class="btn btn-pink" onclick="saveCampagne(false)">🚀 Envoyer (test)</button>
     </div>
   </div>
-
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast"="toast" id="toast"></div>
 
 <script>
 // ═══ ÉTAT ═══
@@ -871,9 +970,9 @@ function renderClients(){
       <td>${visit}</td>
       <td>${bday==='01/01'?'—':bday}</td>
       <td><div style="display:flex;gap:5px">
-        <button class="btn btn-xs btn-o" onclick="openTamponFor('${c.id}')">✅</button>
-        <button class="btn btn-xs" style="background:#ede9fe;color:var(--purple)" onclick="addPointsManual('${c.id}')">+pts</button>
-        <button class="btn btn-xs" style="background:#fef2f2;color:var(--red)" onclick="deleteClient('${c.id}')">✕</button>
+        <button class="btn btn-xs btn-o" onclick="openFicheClient('${c.id}');setTimeout(()=>fcTab('carte',document.querySelectorAll('.fc-tab')[2]),100)">✅</button>
+        <button class="btn btn-xs" style="background:#ede9fe;color:var(--purple)" onclick="openFicheClient('${c.id}');setTimeout(()=>fcTab('points',document.querySelectorAll('.fc-tab')[1]),100)">+pts</button>
+        <button class="btn btn-xs btn-o" onclick="openFicheClient('${c.id}')">✏️</button><button class="btn btn-xs" style="background:#fef2f2;color:var(--red)" onclick="deleteClient('${c.id}')">✕</button>
       </div></td>
     </tr>`;
   }).join('');
@@ -922,7 +1021,7 @@ function renderPointsTable(){
     <td style="font-weight:700">${fi(c.points||0)}</td>
     <td style="color:var(--green);font-weight:700">${fi(c.points||0)}</td>
     <td>${segBadge(getSeg(c))}</td>
-    <td><button class="btn btn-xs btn-o" onclick="addPointsManual('${c.id}')">+ Points</button></td>
+    <td><button class="btn btn-xs btn-o" onclick="openFicheClient('${c.id}');setTimeout(()=>fcTab('points',document.querySelectorAll('.fc-tab')[1]),100)">+ Points</button></td>
   </tr>`).join('');
 }
 
@@ -1011,8 +1110,8 @@ function deleteClient(id){
 }
 
 function openTamponFor(id){
-  document.getElementById('tp-client').value=id;
   openModal('addTampon');
+  const sel=document.getElementById('tp-client');if(sel)sel.value=id;
   updateTpPreview();
 }
 
@@ -1118,15 +1217,7 @@ function useCoupon(id){
 function deleteCoupon(id){coupons=coupons.filter(c=>c.id!==id);save();renderCoupons()}
 
 // ═══ CAMPAGNES ═══
-document.addEventListener('DOMContentLoaded',()=>{
-  const msg=document.getElementById('ca-msg');
-  if(msg)msg.addEventListener('input',updateCaPreview);
-  const tgt=document.getElementById('co-target');
-  if(tgt)tgt.addEventListener('change',()=>{
-    const cf=document.getElementById('co-client-field');
-    cf.classList.toggle('hidden',tgt.value!=='one');
-  });
-});
+
 function updateCaPreview(){
   const msg=document.getElementById('ca-msg').value;
   const sample=clients[0]||{prenom:'Marie',points:350,tampons:4};
@@ -1155,21 +1246,148 @@ function resetClients(){if(!confirm('Vraiment supprimer tous les clients ?'))ret
 
 // ═══ MODAL ═══
 function openModal(id){
-  document.querySelectorAll('.modal').forEach(m=>m.classList.add('hidden'));
-  document.getElementById('modal-'+id).classList.remove('hidden');
-  document.getElementById('overlay').classList.add('show');
+  // Fermer tous les autres d'abord
+  document.querySelectorAll('.modal-wrap').forEach(m=>m.classList.add('hidden'));
+  const mw=document.getElementById('mw-'+id);
+  if(!mw){console.warn('modal non trouvé:',id);return}
+  mw.classList.remove('hidden');
+  document.body.style.overflow='hidden';
   // Peupler selects clients
   if(id==='addTampon'||id==='addCoupon'){
     const opts=clients.map(c=>`<option value="${c.id}">${c.prenom} ${c.nom}</option>`).join('');
-    document.querySelectorAll('#tp-client,#co-client').forEach(s=>s.innerHTML=opts);
-    if(id==='addTampon')document.getElementById('tp-montant').addEventListener('input',updateTpPreview);
+    const tpc=document.getElementById('tp-client');if(tpc)tpc.innerHTML=opts;
+    const coc=document.getElementById('co-client');if(coc)coc.innerHTML=opts;
     if(id==='addTampon'&&clients.length)updateTpPreview();
   }
-  // Date par défaut
-  const d=document.getElementById('co-exp');if(d&&!d.value){const dt=new Date();dt.setMonth(dt.getMonth()+3);d.value=dt.toISOString().slice(0,10)}
-  const d2=document.getElementById('ca-date');if(d2&&!d2.value)d2.value=today();
+  // Dates par défaut
+  const coExp=document.getElementById('co-exp');
+  if(coExp&&!coExp.value){const dt=new Date();dt.setMonth(dt.getMonth()+3);coExp.value=dt.toISOString().slice(0,10)}
+  const caDate=document.getElementById('ca-date');if(caDate&&!caDate.value)caDate.value=today();
 }
-function closeModal(){document.getElementById('overlay').classList.remove('show')}
+function closeModal(id){
+  if(id){document.getElementById('mw-'+id)?.classList.add('hidden')}
+  else{document.querySelectorAll('.modal-wrap').forEach(m=>m.classList.add('hidden'))}
+  document.body.style.overflow='';
+}
+function toggleCoClient(){
+  const t=document.getElementById('co-target')?.value;
+  document.getElementById('co-client-field')?.classList.toggle('hidden',t!=='one');
+}
+
+// ═══ FICHE CLIENT ═══
+let _fcClientId=null;
+let _fcTab='infos';
+function openFicheClient(id){
+  _fcClientId=id;
+  _fcTab='infos';
+  const c=clients.find(x=>x.id===id);
+  if(!c)return;
+  const seg=getSeg(c);
+  const segLabels={vip:'👑 VIP',actif:'✅ Actif',inactif:'😴 Inactif',nouveau:'🌱 Nouveau'};
+  document.getElementById('fc-avatar').textContent=(c.prenom[0]||'')+(c.nom[0]||'');
+  document.getElementById('fc-avatar').style.background=avatarColor(c.prenom);
+  document.getElementById('fc-name').textContent=`${c.prenom} ${c.nom}`;
+  document.getElementById('fc-seg').textContent=segLabels[seg]||'';
+  document.getElementById('fc-pts-display').textContent=fi(c.points||0)+' pts';
+  // Champs infos
+  document.getElementById('fc-prenom').value=c.prenom||'';
+  document.getElementById('fc-nom').value=c.nom||'';
+  document.getElementById('fc-tel').value=c.tel||'';
+  document.getElementById('fc-email').value=c.email||'';
+  document.getElementById('fc-bday').value=c.birthday||'';
+  document.getElementById('fc-note').value=c.note||'';
+  // Reset tabs
+  fcTab('infos',document.querySelector('.fc-tab'));
+  openModal('ficheClient');
+}
+function fcTab(t,el){
+  _fcTab=t;
+  document.querySelectorAll('.fc-tab').forEach(x=>x.classList.remove('on'));
+  if(el)el.classList.add('on');
+  ['infos','points','carte','histo'].forEach(p=>{
+    const el=document.getElementById('fc-panel-'+p);
+    if(el)el.classList.toggle('hidden',p!==t);
+  });
+  const c=clients.find(x=>x.id===_fcClientId);
+  if(!c)return;
+  if(t==='points'){
+    document.getElementById('fc-pts-val').textContent=fi(c.points||0);
+    document.getElementById('fc-pts-total').textContent=fi(c.totalPts||c.points||0);
+    const nextP=[...paliers].sort((a,b)=>a.pts-b.pts).find(p=>p.pts>(c.points||0));
+    document.getElementById('fc-next-palier').textContent=nextP?`${nextP.icon} ${nextP.reward} (${fi(nextP.pts-(c.points||0))} pts)` : '🎉 Tous débloqués !';
+  }
+  if(t==='carte'){
+    const cfgT=parseInt(cfg.tampons)||10;
+    const t2=c.tampons||0;
+    document.getElementById('fc-tampons-count').textContent=t2;
+    document.getElementById('fc-tampons-max').textContent=cfgT;
+    const emoji=cfg.emoji||'☕';
+    document.getElementById('fc-tampons-grid').innerHTML=Array.from({length:cfgT},(_,i)=>`
+      <div style="width:36px;height:36px;border-radius:50%;border:2px solid ${i<t2?'rgba(79,126,248,.6)':'var(--border)'};display:flex;align-items:center;justify-content:center;font-size:16px;background:${i<t2?'#eff6ff':'transparent'}">${i<t2?emoji:'○'}</div>`).join('');
+    document.getElementById('fc-carte-info').textContent=t2>=cfgT?`🎁 Carte complète ! Récompense disponible : ${cfg.reward||'1 produit offert'}`:`Plus que ${cfgT-t2} tampon${cfgT-t2>1?'s':''} pour ${cfg.reward||'1 produit offert'}`;
+  }
+  if(t==='histo'){
+    const hist=(c.history||[]).slice(0,20);
+    document.getElementById('fc-histo-list').innerHTML=hist.length
+      ?hist.map(h=>`<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f1f5f9">
+        <div style="width:32px;height:32px;border-radius:50%;background:${h.type==='tampon'?'#eff6ff':'#f0fdf4'};display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0">${h.type==='tampon'?'✅':'⭐'}</div>
+        <div><div style="font-size:12px;font-weight:700">${h.type==='tampon'?'Achat — tampon':'Points ajoutés'}</div>
+        <div style="font-size:10px;color:var(--muted)">${new Date(h.date).toLocaleDateString('fr-FR')}${h.montant?' · '+h.montant+'€':''}</div></div>
+        <div style="margin-left:auto;font-size:13px;font-weight:800;color:var(--green)">+${h.pts||1} ${h.pts?'pts':'tampon'}</div>
+      </div>`).join('')
+      :'<div style="text-align:center;padding:24px;color:var(--muted);font-size:12px">Aucune visite enregistrée</div>';
+  }
+}
+function fcSave(){
+  const c=clients.find(x=>x.id===_fcClientId);
+  if(!c)return;
+  c.prenom=document.getElementById('fc-prenom').value.trim()||c.prenom;
+  c.nom=document.getElementById('fc-nom').value.trim()||c.nom;
+  c.tel=document.getElementById('fc-tel').value.trim();
+  c.email=document.getElementById('fc-email').value.trim();
+  c.birthday=document.getElementById('fc-bday').value;
+  c.note=document.getElementById('fc-note').value.trim();
+  save();renderClients();
+  // Rafraîchir header fiche
+  document.getElementById('fc-name').textContent=`${c.prenom} ${c.nom}`;
+  document.getElementById('fc-avatar').textContent=(c.prenom[0]||'')+(c.nom[0]||'');
+  toast('✅ Fiche enregistrée !');
+}
+function fcAddPoints(sign){
+  const c=clients.find(x=>x.id===_fcClientId);if(!c)return;
+  const n=parseInt(document.getElementById('fc-pts-add').value)||0;
+  if(!n)return;
+  c.points=Math.max(0,(c.points||0)+sign*n);
+  if(sign>0)c.totalPts=(c.totalPts||0)+n;
+  c.history=c.history||[];
+  c.history.unshift({date:today(),type:'manuel',pts:sign*n});
+  save();
+  document.getElementById('fc-pts-val').textContent=fi(c.points);
+  document.getElementById('fc-pts-display').textContent=fi(c.points)+' pts';
+  toast((sign>0?'+':'')+sign*n+' points');
+}
+function fcAddTampon(){
+  const c=clients.find(x=>x.id===_fcClientId);if(!c)return;
+  const cfgT=parseInt(cfg.tampons)||10;
+  c.tampons=(c.tampons||0)+1;
+  c.lastVisit=today();
+  c.history=c.history||[];
+  c.history.unshift({date:today(),type:'tampon',montant:0,pts:0});
+  if(c.tampons>=cfgT){toast(`🎁 Carte complète ! Récompense : ${cfg.reward||'1 produit offert'}`,'info');c.tampons=0}
+  save();fcTab('carte',null);
+  toast('Tampon ajouté !');
+}
+function fcResetTampons(){
+  if(!confirm('Réinitialiser la carte de ce client ?'))return;
+  const c=clients.find(x=>x.id===_fcClientId);if(!c)return;
+  c.tampons=0;save();fcTab('carte',null);toast('Carte réinitialisée');
+}
+function fcDelete(){
+  if(!confirm('Supprimer définitivement ce client ?'))return;
+  clients=clients.filter(x=>x.id!==_fcClientId);
+  save();closeModal('ficheClient');renderClients();
+  toast('Client supprimé');
+}
 
 // ═══ DEMO DATA ═══
 function seedDemo(){
