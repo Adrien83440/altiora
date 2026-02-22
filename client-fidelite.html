@@ -288,12 +288,21 @@ if(!clientId){
 async function loadClientData(id){
   try{
     setStatus('Chargement de votre carte...');
+    console.log('Recherche client ID:', id);
 
     // 1. Fiche client publique
-    const clientSnap=await getDoc(doc(db,'fidelite_public',id));
+    const clientRef = doc(db,'fidelite_public',id);
+    console.log('Ref path:', clientRef.path);
+    const clientSnap=await getDoc(clientRef);
+    console.log('Existe:', clientSnap.exists(), 'Data:', clientSnap.data());
     if(!clientSnap.exists()){
-      setStatus('Carte introuvable');
-      setTimeout(showError,800);
+      setStatus('Carte introuvable — ID: '+id);
+      // Afficher l'erreur à l'écran au lieu de cacher
+      $('loadingScreen').classList.add('hide');
+      setTimeout(()=>$('loadingScreen').style.display='none',400);
+      $('errorScreen').classList.remove('hidden');
+      $('errorScreen').querySelector('.error-sub').innerHTML = 
+        'ID client: <strong style="font-family:monospace">'+id+'</strong><br/>Document introuvable dans Firebase.<br/>Vérifiez que la synchronisation a été faite.';
       return;
     }
     const client=clientSnap.data();
@@ -335,9 +344,13 @@ async function loadClientData(id){
     },300);
 
   }catch(e){
-    console.error(e);
-    setStatus('Erreur de connexion');
-    setTimeout(showError,1000);
+    console.error('Erreur Firebase:', e.code, e.message, e);
+    setStatus('Erreur: '+(e.code||e.message||'inconnue'));
+    $('loadingScreen').classList.add('hide');
+    setTimeout(()=>$('loadingScreen').style.display='none',400);
+    $('errorScreen').classList.remove('hidden');
+    $('errorScreen').querySelector('.error-sub').innerHTML = 
+      'Erreur technique: <strong>'+( e.code||e.message||JSON.stringify(e))+'</strong><br/>ID: '+id;
   }
 }
 
