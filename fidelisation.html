@@ -1730,6 +1730,56 @@ renderDashboard();
 // ═══════════════════════════════════════════
 // ENVOI CAMPAGNE SMS RÉEL
 // ═══════════════════════════════════════════
+
+
+
+window.smsSelectPack = function smsSelectPack(packId) {
+  _selectedPack = packId;
+  var ids = ['spack_50','spack_200','spack_500'];
+  ids.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.style.border = '2px solid #e2e8f0';
+    el.style.background = '#fff';
+    el.style.boxShadow = 'none';
+  });
+  var num = packId.replace('pack_','');
+  var sel = document.getElementById('spack_' + num);
+  if (sel) {
+    sel.style.border = '2px solid #4f7ef8';
+    sel.style.background = '#eff6ff';
+    sel.style.boxShadow = '0 0 0 3px rgba(79,126,248,.15)';
+  }
+}
+
+window.smsPayer = async function smsPayer() {
+  var currentUid = window._uid;
+  if (!currentUid) { toast('Non connecté — rechargez la page', 'err'); return; }
+  var btn = document.getElementById('smsPayBtn');
+  btn.textContent = '⏳ Redirection...';
+  btn.disabled = true;
+  try {
+    var res = await fetch('https://altiora-theta.vercel.app/api/create-checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ packId: _selectedPack, uid: currentUid }),
+    });
+    var data = await res.json();
+    if (data.url) {
+      window.location.href = data.url;
+    } else {
+      toast('Erreur: ' + (data.error || 'inconnue'), 'err');
+      btn.textContent = '💳 Payer avec Stripe';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    toast('Erreur connexion: ' + e.message, 'err');
+    btn.textContent = '💳 Payer avec Stripe';
+    btn.disabled = false;
+  }
+}
+
+
 window.envoyerCampagneSMS = async function envoyerCampagneSMS(campagne) {
   // Attendre que Firebase soit prêt (max 3s)
   let tries = 0;
@@ -1790,51 +1840,17 @@ window.envoyerCampagneSMS = async function envoyerCampagneSMS(campagne) {
   }
 }
 
-
-window.smsSelectPack = function smsSelectPack(packId) {
-  _selectedPack = packId;
-  var ids = ['spack_50','spack_200','spack_500'];
-  ids.forEach(function(id) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    el.style.border = '2px solid #e2e8f0';
-    el.style.background = '#fff';
-    el.style.boxShadow = 'none';
-  });
-  var num = packId.replace('pack_','');
-  var sel = document.getElementById('spack_' + num);
-  if (sel) {
-    sel.style.border = '2px solid #4f7ef8';
-    sel.style.background = '#eff6ff';
-    sel.style.boxShadow = '0 0 0 3px rgba(79,126,248,.15)';
-  }
-}
-
-window.smsPayer = async function smsPayer() {
-  var currentUid = window._uid;
-  if (!currentUid) { toast('Non connecté — rechargez la page', 'err'); return; }
-  var btn = document.getElementById('smsPayBtn');
-  btn.textContent = '⏳ Redirection...';
-  btn.disabled = true;
+window.loadSmsCredits = async function loadSmsCredits() {
+  if (!window._uid || !window._fbGetDoc || !window._fbDoc) return;
   try {
-    var res = await fetch('https://altiora-theta.vercel.app/api/create-checkout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ packId: _selectedPack, uid: currentUid }),
-    });
-    var data = await res.json();
-    if (data.url) {
-      window.location.href = data.url;
-    } else {
-      toast('Erreur: ' + (data.error || 'inconnue'), 'err');
-      btn.textContent = '💳 Payer avec Stripe';
-      btn.disabled = false;
-    }
+    const snap = await window._fbGetDoc(window._fbDoc(window._db, 'sms_credits', window._uid));
+    _smsCredits = snap.exists() ? (parseInt(snap.data().credits) || 0) : 0;
+  window._smsCredits = _smsCredits;
   } catch(e) {
-    toast('Erreur connexion: ' + e.message, 'err');
-    btn.textContent = '💳 Payer avec Stripe';
-    btn.disabled = false;
+    _smsCredits = 0; window._smsCredits = 0;
   }
+  const el = document.getElementById('smsCreditsDisplay');
+  if (el) el.textContent = _smsCredits;
 }
 
 </script>
@@ -1996,18 +2012,7 @@ window._selectedPack = 'pack_200';
 var _smsCredits = 0;
 var _selectedPack = 'pack_200';
 
-window.loadSmsCredits = async function loadSmsCredits() {
-  if (!window._uid || !window._fbGetDoc || !window._fbDoc) return;
-  try {
-    const snap = await window._fbGetDoc(window._fbDoc(window._db, 'sms_credits', window._uid));
-    _smsCredits = snap.exists() ? (parseInt(snap.data().credits) || 0) : 0;
-  window._smsCredits = _smsCredits;
-  } catch(e) {
-    _smsCredits = 0; window._smsCredits = 0;
-  }
-  const el = document.getElementById('smsCreditsDisplay');
-  if (el) el.textContent = _smsCredits;
-}
+
 
 
 
