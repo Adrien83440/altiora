@@ -559,7 +559,6 @@ const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août'
 const TVA_RATES=[0,5.5,10,20];
 // Lire l'année depuis l'URL dès le départ (avant Firebase)
 window._year=parseInt(new URLSearchParams(window.location.search).get('year'))||new Date().getFullYear();
-window._year=parseInt(new URLSearchParams(window.location.search).get('year'))||new Date().getFullYear();
 let _data={};
 
 function getMonthKey(){const m=parseInt(document.getElementById('monthSelect').value);return `${window._year}-${String(m+1).padStart(2,'0')}`;}
@@ -593,14 +592,9 @@ async function loadMonth(){
   document.getElementById('topTitle').textContent=`Pilotage — ${getMonthLabel()}`;
   const m=parseInt(document.getElementById('monthSelect').value);
   let data=defaultData(window._year,m);
-  if(window._uid && window._getDoc && window._db){
-    try{
-      // Timeout 5s pour éviter spinner infini si Firebase lent
-      const timeoutPromise=new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),5000));
-      const snap=await Promise.race([
-        window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key)),
-        timeoutPromise
-      ]);
+  try{
+    if(window._uid && window._getDoc && window._db){
+      const snap=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
       if(snap.exists()){
         const s=snap.data();
         if(s.ca&&s.ca.length===data.ca.length)data.ca=s.ca;
@@ -611,10 +605,14 @@ async function loadMonth(){
         if(s.credits)data.credits=s.credits;
         if(s.leasing)data.leasing=s.leasing;
       }
-    }catch(e){console.warn('Firebase load error (ou timeout):',e);}
-  }
+    }
+  }catch(e){console.warn('loadMonth error:',e);}
   _data=data;
-  renderPage(data,m);
+  try{renderPage(data,m);}
+  catch(e){
+    console.error('renderPage error:',e);
+    document.getElementById('mainContent').innerHTML='<div style="padding:40px;color:#ef4444;font-weight:600">Erreur d'affichage : '+e.message+'</div>';
+  }
 }
 
 function renderPage(data,month){
