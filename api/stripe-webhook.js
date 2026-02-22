@@ -1,20 +1,49 @@
-// api/stripe-webhook.js
-// Reçoit la confirmation de paiement Stripe et crédite les SMS dans Firebase
+// api/stripe-webhook.js — sans dépendance npm, vérification signature manuelle
 
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const crypto = require('crypto');
 
-// Authentification Firebase via REST (pas besoin de service account)
+// Vérification signature Stripe sans le package npm
+function verifyStripeSignature(payload, sigHeader, secret) {
+  const parts = sigHeader.split(',');
+  let timestamp = '';
+  const signatures = [];
+
+  for (const part of parts) {
+    const [key, value] = part.split('=');
+    if (key === 't') timestamp = value;
+    if (key === 'v1') signatures.push(value);
+  }
+
+  if (!timestamp || signatures.length === 0) return false;
+
+  // Vérifier que le timestamp est récent (5 minutes max)
+  const tolerance = 300;
+  if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > tolerance) return false;
+
+  const signedPayload = timestamp + '.' + payload;
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(signedPayload, 'utf8')
+    .digest('hex');
+
+  return signatures.some(sig => crypto.timingSafeEqual(
+    Buffer.from(expected, 'hex'),
+    Buffer.from(sig, 'hex')
+  ));
+}
+
+// Auth Firebase via REST
 async function getFirebaseToken() {
-  const apiKey = process.env.FIREBASE_API_KEY;
-  const email = process.env.FIREBASE_API_EMAIL;
-  const password = process.env.FIREBASE_API_PASSWORD;
-
   const res = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
+    'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + process.env.FIREBASE_API_KEY,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, returnSecureToken: true }),
+      body: JSON.stringify({
+        email: process.env.FIREBASE_API_EMAIL,
+        password: process.env.FIREBASE_API_PASSWORD,
+        returnSecureToken: true,
+      }),
     }
   );
   const data = await res.json();
@@ -22,41 +51,33 @@ async function getFirebaseToken() {
   return data.idToken;
 }
 
-// Lire un document Firestore via REST
-async function firestoreGet(token, projectId, path) {
-  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${path}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+// Lire un document Firestore
+async function firestoreGet(token, path) {
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
+  const res = await fetch(
+    'https://firestore.googleapis.com/v1/projects/' + projectId + '/databases/(default)/documents/' + path,
+    { headers: { Authorization: 'Bearer ' + token } }
+  );
   return res.json();
 }
 
-// Écrire/mettre à jour un document Firestore via REST (merge)
-async function firestorePatch(token, projectId, path, fields) {
-  // Convertir les champs en format Firestore
+// Écrire dans Firestore (merge)
+async function firestorePatch(token, path, fields) {
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
   const firestoreFields = {};
   for (const [key, value] of Object.entries(fields)) {
-    if (typeof value === 'number') {
-      firestoreFields[key] = { integerValue: value.toString() };
-    } else if (typeof value === 'string') {
-      firestoreFields[key] = { stringValue: value };
-    } else if (typeof value === 'boolean') {
-      firestoreFields[key] = { booleanValue: value };
-    }
+    if (typeof value === 'number') firestoreFields[key] = { integerValue: value.toString() };
+    else firestoreFields[key] = { stringValue: String(value) };
   }
-
-  // Construire le masque de mise à jour (updateMask)
-  const fieldMask = Object.keys(fields).join(',');
-  const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${path}?updateMask.fieldPaths=${Object.keys(fields).join('&updateMask.fieldPaths=')}`;
-
-  const res = await fetch(url, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ fields: firestoreFields }),
-  });
+  const fieldPaths = Object.keys(fields).map(k => 'updateMask.fieldPaths=' + k).join('&');
+  const res = await fetch(
+    'https://firestore.googleapis.com/v1/projects/' + projectId + '/databases/(default)/documents/' + path + '?' + fieldPaths,
+    {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: firestoreFields }),
+    }
+  );
   return res.json();
 }
 
@@ -66,16 +87,16 @@ module.exports = async (req, res) => {
   const sig = req.headers['stripe-signature'];
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
-  let event;
-  try {
-    // Vérifier la signature Stripe (sécurité critique)
-    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-  } catch (err) {
-    console.error('Signature webhook invalide:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
+  // Récupérer le body brut (nécessaire pour la vérification de signature)
+  const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+
+  if (!verifyStripeSignature(rawBody, sig, webhookSecret)) {
+    console.error('Signature Stripe invalide');
+    return res.status(400).json({ error: 'Signature invalide' });
   }
 
-  // On ne traite que les paiements réussis
+  const event = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+
   if (event.type !== 'checkout.session.completed') {
     return res.status(200).json({ received: true });
   }
@@ -88,43 +109,35 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: 'Metadata manquante' });
   }
 
-  const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
   const smsToAdd = parseInt(smsCount);
 
   try {
     const token = await getFirebaseToken();
 
-    // Lire le solde SMS actuel
-    const docPath = `sms_credits/${uid}`;
-    const existing = await firestoreGet(token, projectId, docPath);
-
-    let currentSms = 0;
-    if (existing.fields && existing.fields.credits) {
-      currentSms = parseInt(existing.fields.credits.integerValue || 0);
-    }
-
+    // Lire le solde actuel
+    const existing = await firestoreGet(token, 'sms_credits/' + uid);
+    const currentSms = parseInt(existing?.fields?.credits?.integerValue || '0');
     const newSms = currentSms + smsToAdd;
 
     // Mettre à jour le solde
-    await firestorePatch(token, projectId, docPath, {
+    await firestorePatch(token, 'sms_credits/' + uid, {
       credits: newSms,
       lastPack: packId,
       lastPurchase: new Date().toISOString().slice(0, 10),
     });
 
-    // Enregistrer la transaction dans l'historique
+    // Historique
     const txId = Date.now().toString();
-    await firestorePatch(token, projectId, `sms_credits/${uid}/history/${txId}`, {
+    await firestorePatch(token, 'sms_credits/' + uid + '/history/' + txId, {
       packId,
       smsAdded: smsToAdd,
       date: new Date().toISOString().slice(0, 10),
       stripeSessionId: session.id,
-      amount: session.amount_total,
+      amount: session.amount_total || 0,
     });
 
-    console.log(`✅ SMS crédités: ${smsToAdd} → uid ${uid} (nouveau solde: ${newSms})`);
+    console.log('✅ SMS crédités:', smsToAdd, '→ uid', uid, '| nouveau solde:', newSms);
     return res.status(200).json({ success: true, newBalance: newSms });
-
   } catch (err) {
     console.error('Erreur Firebase:', err);
     return res.status(500).json({ error: err.message });
