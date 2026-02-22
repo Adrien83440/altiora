@@ -2,8 +2,8 @@
 
 const PACKS = {
   pack_50:  { name: '50 SMS',  sms: 50,  price: 500  },
-  pack_200: { name: '200 SMS', sms: 200, price: 1500 },
-  pack_500: { name: '500 SMS', sms: 500, price: 3000 },
+  pack_200: { name: '200 SMS', sms: 200, price: 2000 },
+  pack_500: { name: '500 SMS', sms: 500, price: 4000 },
 };
 
 module.exports = async (req, res) => {
