@@ -505,7 +505,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
         <div class="hero-tags" id="heroTags"></div>
       </div>
       <div class="hero-right">
-        <div class="plan-badge plan-gratuit" id="heroPlan" style="opacity:0">👑 Plan Gratuit</div>
+        <div class="plan-badge plan-gratuit" id="heroPlan" style="opacity:0">👑</div>
         <div class="hero-member" id="heroMember">Membre depuis —</div>
       </div>
     </div>
@@ -857,9 +857,7 @@ function loadPlanUI(plan) {
   const badge = document.getElementById('heroPlan');
   if (badge) {
     badge.textContent = p.icon + ' ' + p.name;
-    badge.className = 'plan-badge ' + (_currentPlan === 'free' || _currentPlan === 'trial' ? 'plan-gratuit' : _currentPlan === 'master' ? 'plan-business' : 'plan-pro');
-    badge.style.opacity = '1';
-    badge.style.transition = 'opacity 0.3s';
+    badge.className = 'plan-badge ' + (_currentPlan === 'trial' ? 'plan-gratuit' : _currentPlan === 'master' ? 'plan-business' : 'plan-pro');
   }
   // Sidebar
   const upl = document.getElementById('uplan');
@@ -1131,7 +1129,7 @@ async function tryFirebase() {
 // ── START ──
 loadProfile();
 renderFactures();
-// tryFirebase() est appelé par onAuthStateChanged dans le module Firebase
+setTimeout(tryFirebase, 500);
 </script>
 
 <script type="module">
@@ -1158,17 +1156,68 @@ window._setDoc  = setDoc;
 window._getDoc  = getDoc;
 window._signOut = signOut;
 
-onAuthStateChanged(auth, function(user) {
+onAuthStateChanged(auth, async function(user) {
   if (!user) { window.location.href = 'index.html'; return; }
   window._uid = user.uid;
   window._firebaseReady = true;
+
   // Màj sidebar nom + avatar
   const av = document.getElementById('av');
   if (av) av.textContent = (user.displayName || user.email || 'U')[0].toUpperCase();
   const un = document.getElementById('uname');
   if (un) un.textContent = user.displayName || user.email || 'Utilisateur';
-  // Lancer le chargement des données
-  tryFirebase();
+
+  // Màj sécurité
+  const emailEl = document.getElementById('s-email');
+  if (emailEl) emailEl.value = user.email || '';
+  if (user.metadata && user.metadata.creationTime) {
+    const created = new Date(user.metadata.creationTime).toLocaleDateString('fr-FR');
+    const sinceEl = document.getElementById('s-since');
+    if (sinceEl) sinceEl.value = created;
+    const heroMember = document.getElementById('heroMember');
+    if (heroMember) heroMember.textContent = 'Membre depuis ' + created;
+  }
+
+  // ── CHARGER LE PLAN DIRECTEMENT DANS LE MODULE ──
+  const PLAN_NAMES = { free:'Plan Gratuit', trial:'Essai gratuit', pro:'Alteore Pro', max:'Alteore Max', master:'Alteore Master', past_due:'Paiement en attente', dev:'Dev / Admin' };
+  const PLAN_ICONS = { free:'🔓', trial:'⏳', pro:'📊', max:'🚀', master:'👑', past_due:'⚠️', dev:'🛠️' };
+
+  function applyPlanBadge(plan) {
+    const badge = document.getElementById('heroPlan');
+    const uplan = document.getElementById('uplan');
+    const name = PLAN_NAMES[plan] || plan;
+    const icon = PLAN_ICONS[plan] || '';
+    if (badge) {
+      badge.textContent = icon + ' ' + name;
+      badge.className = 'plan-badge ' + (plan === 'master' || plan === 'max' ? 'plan-business' : plan === 'pro' ? 'plan-pro' : 'plan-gratuit');
+      badge.style.opacity = '1';
+    }
+    if (uplan) uplan.textContent = name;
+    // Appeler aussi loadPlanUI si disponible pour màj des cards
+    if (typeof window.loadPlanUI === 'function') window.loadPlanUI(plan);
+  }
+
+  try {
+    const planSnap = await getDoc(doc(db, 'users', user.uid));
+    const plan = planSnap.exists() ? (planSnap.data().plan || 'free') : 'free';
+    applyPlanBadge(plan);
+  } catch(e) {
+    console.error('Erreur plan:', e);
+    applyPlanBadge('free');
+  }
+
+  // ── CHARGER LE PROFIL ──
+  try {
+    const snap = await getDoc(doc(db, 'profil', user.uid, 'data', 'profil'));
+    if (snap.exists()) {
+      const data = snap.data();
+      Object.keys(data).forEach(function(f) {
+        const el = document.getElementById('p-'+f);
+        if (el) el.value = data[f] || '';
+      });
+      if (typeof window.updateHero === 'function') window.updateHero();
+    }
+  } catch(e) {}
 });
 </script>
 </body>
