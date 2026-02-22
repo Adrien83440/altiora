@@ -2008,6 +2008,24 @@ window._fbLoadAll=fbLoadAll;
 onAuthStateChanged(auth, async user=>{
   if(!user){location.href='index.html';return}
   window._uid=user.uid;
+
+  // ── VÉRIFICATION DU PLAN ──
+  try {
+    const planSnap = await getDoc(doc(db,'users',user.uid));
+    const plan = planSnap.exists() ? (planSnap.data().plan||'free') : 'free';
+    const hasAccess = ['trial','max','master','dev'].includes(plan);
+    // Vérifier trial non expiré
+    if(plan==='trial'){
+      const trialEnd = planSnap.data().trialEnd;
+      const expired = trialEnd && trialEnd.toDate && trialEnd.toDate() < new Date();
+      if(expired){ location.href='profil.html?upgrade=fidelisation'; return; }
+    }
+    if(!hasAccess){
+      location.href='profil.html?upgrade=fidelisation';
+      return;
+    }
+  } catch(e){ console.warn('Plan check error:', e); }
+
   loadSmsCredits();
   const n=user.displayName||user.email?.split('@')[0]||'';
   document.getElementById('uname').textContent=n;
