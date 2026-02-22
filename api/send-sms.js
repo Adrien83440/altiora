@@ -49,11 +49,23 @@ async function firestorePatch(token, path, fields) {
 async function sendSmsTwilio(recipients, message, sender) {
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const fromNumber = process.env.TWILIO_FROM_NUMBER; // ex: +33XXXXXXXXX ou +1XXXXXXXXXX
+  const defaultFrom = process.env.TWILIO_FROM_NUMBER;
 
-  if (!accountSid || !authToken || !fromNumber) {
+  if (!accountSid || !authToken || !defaultFrom) {
     throw new Error('Variables Twilio manquantes (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER)');
   }
+
+  // Si sender fourni et alphanumérique (pas un numéro), on l'utilise — sinon le numéro par défaut
+  const isAlphanumeric = defaultFrom && !/^\+?\d+$/.test(defaultFrom);
+  let fromNumber;
+  if (sender && sender.trim()) {
+    // Nettoyer le sender : max 11 chars, alphanumérique uniquement
+    const cleanSender = sender.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 11);
+    fromNumber = cleanSender || defaultFrom;
+  } else {
+    fromNumber = defaultFrom;
+  }
+  console.log('Expéditeur utilisé:', fromNumber);
 
   const credentials = Buffer.from(accountSid + ':' + authToken).toString('base64');
   const results = { sent: 0, failed: 0, errors: [] };
