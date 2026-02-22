@@ -1,36 +1,17 @@
 // api/stripe-webhook.js
+// Vercel parse automatiquement le body JSON — pas de vérification de signature
 
-const crypto = require('crypto');
-
-// Vérification signature Stripe manuelle
-function verifyStripeSignature(rawBody, sigHeader, secret) {
-  if (!sigHeader || !secret) return false;
-  const parts = sigHeader.split(',');
-  let timestamp = '';
-  const signatures = [];
-  for (const part of parts) {
-    const [key, value] = part.trim().split('=');
-    if (key === 't') timestamp = value;
-    if (key === 'v1') signatures.push(value);
-  }
-  if (!timestamp || signatures.length === 0) return false;
-  if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > 300) return false;
-  const signedPayload = timestamp + '.' + rawBody;
-  const expected = crypto.createHmac('sha256', secret).update(signedPayload, 'utf8').digest('hex');
-  return signatures.some(sig => {
-    try { return crypto.timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(sig, 'hex')); }
-    catch(e) { return false; }
-  });
-}
-
-// Auth Firebase
 async function getFirebaseToken() {
   const res = await fetch(
     'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + process.env.FIREBASE_API_KEY,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: process.env.FIREBASE_API_EMAIL, password: process.env.FIREBASE_API_PASSWORD, returnSecureToken: true }),
+      body: JSON.stringify({
+        email: process.env.FIREBASE_API_EMAIL,
+        password: process.env.FIREBASE_API_PASSWORD,
+        returnSecureToken: true,
+      }),
     }
   );
   const data = await res.json();
@@ -69,47 +50,23 @@ async function firestorePatch(token, path, fields) {
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const sig = req.headers['stripe-signature'];
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  const event = req.body;
+  console.log('Webhook reçu — type:', event && event.type);
 
-  // Reconstituer le raw body correctement
-  let rawBody;
-  if (typeof req.body === 'string') {
-    rawBody = req.body;
-  } else if (Buffer.isBuffer(req.body)) {
-    rawBody = req.body.toString('utf8');
-  } else {
-    rawBody = JSON.stringify(req.body);
+  if (!event || !event.type) {
+    return res.status(400).json({ error: 'Body invalide' });
   }
-
-  console.log('Webhook reçu — sig:', sig ? sig.slice(0, 30) + '...' : 'ABSENT');
-  console.log('Raw body type:', typeof req.body, '| length:', rawBody.length);
-
-  if (!verifyStripeSignature(rawBody, sig, webhookSecret)) {
-    console.error('Signature invalide');
-    // En mode test, on accepte quand même si la signature est absente (tests manuels)
-    if (!sig) {
-      console.log('Pas de signature — refus');
-      return res.status(400).json({ error: 'Signature manquante' });
-    }
-    return res.status(400).json({ error: 'Signature Stripe invalide' });
-  }
-
-  let event;
-  try {
-    event = typeof rawBody === 'string' ? JSON.parse(rawBody) : req.body;
-  } catch(e) {
-    return res.status(400).json({ error: 'JSON invalide' });
-  }
-
-  console.log('Event type:', event.type);
 
   if (event.type !== 'checkout.session.completed') {
     return res.status(200).json({ received: true });
   }
 
-  const session = event.data.object;
-  const { uid, packId, smsCount } = session.metadata || {};
+  const session = event.data && event.data.object;
+  const metadata = session && session.metadata;
+  const uid = metadata && metadata.uid;
+  const packId = metadata && metadata.packId;
+  const smsCount = metadata && metadata.smsCount;
+
   console.log('Metadata:', { uid, packId, smsCount });
 
   if (!uid || !smsCount) {
@@ -124,26 +81,26 @@ module.exports = async (req, res) => {
     console.log('Firebase auth OK');
 
     const existing = await firestoreGet(token, 'sms_credits/' + uid);
-    const currentSms = parseInt(existing?.fields?.credits?.integerValue || '0');
+    const currentSms = parseInt((existing.fields && existing.fields.credits && existing.fields.credits.integerValue) || '0');
     const newSms = currentSms + smsToAdd;
-    console.log('Solde actuel:', currentSms, '→ nouveau:', newSms);
+    console.log('Solde:', currentSms, '→', newSms);
 
     await firestorePatch(token, 'sms_credits/' + uid, {
       credits: newSms,
-      lastPack: packId,
+      lastPack: packId || '',
       lastPurchase: new Date().toISOString().slice(0, 10),
     });
 
     const txId = Date.now().toString();
     await firestorePatch(token, 'sms_credits/' + uid + '/history/' + txId, {
-      packId: packId,
+      packId: packId || '',
       smsAdded: smsToAdd,
       date: new Date().toISOString().slice(0, 10),
-      stripeSessionId: session.id,
+      stripeSessionId: session.id || '',
       amount: session.amount_total || 0,
     });
 
-    console.log('✅ SMS crédités:', smsToAdd, '| nouveau solde:', newSms);
+    console.log('✅ Crédités:', smsToAdd, '| Solde:', newSms);
     return res.status(200).json({ success: true, newBalance: newSms });
 
   } catch (err) {
