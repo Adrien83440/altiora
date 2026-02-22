@@ -1287,15 +1287,18 @@ async function addCoupon(){
 }
 
 async function pushCouponToClients(coupon){
-  if(!window._uid||!window._setDoc||!window._doc||!window._getDoc)return;
+  if(!window._uid||!window._fbSetDoc||!window._fbDoc||!window._fbGetDoc){
+    console.warn('pushCoupon: Firebase non dispo',{uid:window._uid,setDoc:!!window._fbSetDoc});
+    return;
+  }
   const target=coupon.target;
   let targets=[];
   if(target==='one'){
-    // Chercher par ID en priorité, sinon par nom
     const c = coupon.targetClientId
       ? clients.find(x=>x.id===coupon.targetClientId)
       : clients.find(x=>(x.prenom+' '+x.nom)===coupon.targetName);
     if(c) targets=[c];
+    else console.warn('pushCoupon: client non trouvé',coupon.targetClientId, coupon.targetName);
   } else if(target==='all'){
     targets=clients;
   } else if(target==='vip'){
@@ -1307,25 +1310,25 @@ async function pushCouponToClients(coupon){
     const cutoff=new Date();cutoff.setMonth(cutoff.getMonth()-1);
     targets=clients.filter(c=>c.createdAt&&new Date(c.createdAt)>=cutoff);
   }
-  // Pour chaque client ciblé, ajouter le coupon dans fidelite_public
+  console.log('pushCoupon: cibles=',targets.map(x=>x.id));
   for(const c of targets){
     try{
-      const snap=await window._getDoc(window._doc(window._db,'fidelite_public',c.id));
+      const snap=await window._fbGetDoc(window._fbDoc(window._db,'fidelite_public',c.id));
       const data=snap.exists()?snap.data():{};
       const existing=data.coupons||[];
-      // Éviter les doublons
       if(!existing.find(x=>x.id===coupon.id)){
         existing.push({
           id:coupon.id, name:coupon.name, type:coupon.type,
           val:coupon.val, code:coupon.code,
           expDate:coupon.expDate||'', status:'active'
         });
-        await window._setDoc(
-          window._doc(window._db,'fidelite_public',c.id),
+        await window._fbSetDoc(
+          window._fbDoc(window._db,'fidelite_public',c.id),
           {coupons:existing},{merge:true}
         );
+        console.log('pushCoupon: ✅ envoyé à',c.id);
       }
-    }catch(e){console.warn('pushCoupon err',c.id,e);}
+    }catch(e){console.error('pushCoupon err',c.id,e);}
   }
 }
 function useCoupon(id){
