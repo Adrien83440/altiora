@@ -549,14 +549,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
     document.getElementById('userAvatar').textContent=name.charAt(0).toUpperCase();
     const now=new Date();
     document.getElementById('monthSelect').value=now.getMonth();
-    // Lire l'année depuis l'URL
-    const currentUrl = new URLSearchParams(window.location.search);
-    window._year = parseInt(currentUrl.get('year')) || now.getFullYear();
-    // Activer le bon bouton d'année dans la sidebar
-    document.querySelectorAll('.sub-year-badge').forEach(badge => {
-      const subItem = badge.closest('.sub-item');
-      if(subItem) subItem.classList.toggle('active', parseInt(badge.textContent) === window._year);
-    });
+    // window._year déjà défini dans le script normal (depuis l'URL ou année courante)
     loadMonth();
   });
 </script>
@@ -564,7 +557,9 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 <script>
 const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 const TVA_RATES=[0,5.5,10,20];
-window._year=new Date().getFullYear();
+// Lire l'année depuis l'URL dès le départ (avant Firebase)
+window._year=parseInt(new URLSearchParams(window.location.search).get('year'))||new Date().getFullYear();
+window._year=parseInt(new URLSearchParams(window.location.search).get('year'))||new Date().getFullYear();
 let _data={};
 
 function getMonthKey(){const m=parseInt(document.getElementById('monthSelect').value);return `${window._year}-${String(m+1).padStart(2,'0')}`;}
@@ -574,12 +569,6 @@ function setYear(y,el){
   window._year=y;
   document.querySelectorAll('.sub-item').forEach(s=>s.classList.remove('active'));
   if(el)el.classList.add('active');
-  // Mettre à jour le titre
-  const MONTHS_=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
-  const t=document.getElementById('topTitle');
-  const m=parseInt(document.getElementById('monthSelect')?.value||0);
-  if(t) t.textContent=`Pilotage — ${MONTHS_[m]} ${y}`;
-  // Charger les données pour la nouvelle année
   loadMonth();
 }
 function toggleMenu(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('open');}
@@ -604,12 +593,14 @@ async function loadMonth(){
   document.getElementById('topTitle').textContent=`Pilotage — ${getMonthLabel()}`;
   const m=parseInt(document.getElementById('monthSelect').value);
   let data=defaultData(window._year,m);
-  
-  // Si Firebase prêt, charger depuis Firestore
   if(window._uid && window._getDoc && window._db){
-    document.getElementById('mainContent').innerHTML='<div class="loader"><div class="spin"></div> Chargement...</div>';
     try{
-      const snap=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
+      // Timeout 5s pour éviter spinner infini si Firebase lent
+      const timeoutPromise=new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),5000));
+      const snap=await Promise.race([
+        window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key)),
+        timeoutPromise
+      ]);
       if(snap.exists()){
         const s=snap.data();
         if(s.ca&&s.ca.length===data.ca.length)data.ca=s.ca;
@@ -620,10 +611,8 @@ async function loadMonth(){
         if(s.credits)data.credits=s.credits;
         if(s.leasing)data.leasing=s.leasing;
       }
-    }catch(e){console.warn('Firebase load error:',e);}
+    }catch(e){console.warn('Firebase load error (ou timeout):',e);}
   }
-  // Sinon afficher les données vides directement (Firebase chargera via onAuthStateChanged)
-  
   _data=data;
   renderPage(data,m);
 }
