@@ -1724,6 +1724,66 @@ load();
 seedDemo();
 renderFidCard();
 renderDashboard();
+// ═══════════════════════════════════════════
+// ENVOI CAMPAGNE SMS RÉEL
+// ═══════════════════════════════════════════
+window.envoyerCampagneSMS = async function envoyerCampagneSMS(campagne) {
+  if (!window._uid) { toast('Non connecté', 'err'); return; }
+
+  // Sélectionner les destinataires selon le segment
+  const cibles = clients.filter(function(c) {
+    if (!c.tel) return false;
+    if (campagne.segment === 'all') return true;
+    return getSeg(c) === campagne.segment;
+  });
+
+  if (cibles.length === 0) {
+    toast('Aucun client avec numéro de téléphone dans ce segment', 'err');
+    return;
+  }
+
+  if (_smsCredits < cibles.length) {
+    toast('Solde insuffisant (' + _smsCredits + ' SMS, ' + cibles.length + ' destinataires)', 'err');
+    openModal('acheterSms');
+    return;
+  }
+
+  if (!confirm('Envoyer ' + cibles.length + ' SMS ? (' + _smsCredits + ' crédits disponibles)')) return;
+
+  toast('⏳ Envoi en cours...', 'ok');
+
+  try {
+    const res = await fetch('https://altiora-theta.vercel.app/api/send-sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: window._uid,
+        campagneId: campagne.id,
+        recipients: cibles.map(function(c) { return c.tel; }),
+        message: campagne.msg,
+        sender: (cfg.shopName || 'ALTIORA').slice(0, 11),
+      }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      _smsCredits = data.remaining;
+      const el = document.getElementById('smsCreditsDisplay');
+      if (el) el.textContent = _smsCredits;
+      toast('✅ ' + data.sent + ' SMS envoyés ! Solde : ' + data.remaining, 'ok');
+      // Marquer la campagne comme envoyée
+      const idx = campagnes.findIndex(function(c) { return c.id === campagne.id; });
+      if (idx >= 0) { campagnes[idx].sent = true; campagnes[idx].sentCount = data.sent; save(); renderCampagnes(); }
+    } else if (data.error === 'Solde insuffisant') {
+      toast('Solde insuffisant — achetez des SMS', 'err');
+      openModal('acheterSms');
+    } else {
+      toast('Erreur: ' + (data.error || 'inconnue'), 'err');
+    }
+  } catch(e) {
+    toast('Erreur connexion', 'err');
+  }
+}
+
 </script>
 
 <script type="module">
@@ -1939,65 +1999,7 @@ window.smsPayer = async function smsPayer() {
   }
 }
 
-// ═══════════════════════════════════════════
-// ENVOI CAMPAGNE SMS RÉEL
-// ═══════════════════════════════════════════
-window.envoyerCampagneSMS = async function envoyerCampagneSMS(campagne) {
-  if (!window._uid) { toast('Non connecté', 'err'); return; }
 
-  // Sélectionner les destinataires selon le segment
-  const cibles = clients.filter(function(c) {
-    if (!c.tel) return false;
-    if (campagne.segment === 'all') return true;
-    return getSeg(c) === campagne.segment;
-  });
-
-  if (cibles.length === 0) {
-    toast('Aucun client avec numéro de téléphone dans ce segment', 'err');
-    return;
-  }
-
-  if (_smsCredits < cibles.length) {
-    toast('Solde insuffisant (' + _smsCredits + ' SMS, ' + cibles.length + ' destinataires)', 'err');
-    openModal('acheterSms');
-    return;
-  }
-
-  if (!confirm('Envoyer ' + cibles.length + ' SMS ? (' + _smsCredits + ' crédits disponibles)')) return;
-
-  toast('⏳ Envoi en cours...', 'ok');
-
-  try {
-    const res = await fetch('https://altiora-theta.vercel.app/api/send-sms', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        uid: window._uid,
-        campagneId: campagne.id,
-        recipients: cibles.map(function(c) { return c.tel; }),
-        message: campagne.msg,
-        sender: (cfg.shopName || 'ALTIORA').slice(0, 11),
-      }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      _smsCredits = data.remaining;
-      const el = document.getElementById('smsCreditsDisplay');
-      if (el) el.textContent = _smsCredits;
-      toast('✅ ' + data.sent + ' SMS envoyés ! Solde : ' + data.remaining, 'ok');
-      // Marquer la campagne comme envoyée
-      const idx = campagnes.findIndex(function(c) { return c.id === campagne.id; });
-      if (idx >= 0) { campagnes[idx].sent = true; campagnes[idx].sentCount = data.sent; save(); renderCampagnes(); }
-    } else if (data.error === 'Solde insuffisant') {
-      toast('Solde insuffisant — achetez des SMS', 'err');
-      openModal('acheterSms');
-    } else {
-      toast('Erreur: ' + (data.error || 'inconnue'), 'err');
-    }
-  } catch(e) {
-    toast('Erreur connexion', 'err');
-  }
-}
 
 // Vérifier si retour de paiement Stripe
 (function checkStripeReturn() {
