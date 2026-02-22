@@ -435,11 +435,20 @@ if(!clientId){
 }
 
 async function load(id){
+  // Timeout de sécurité — si Firebase ne répond pas en 12s
+  const loadTimeout = setTimeout(function(){
+    showError(
+      'Connexion trop lente ou impossible.<br/>Vérifiez votre connexion internet et réessayez.',
+      'Timeout après 12s — Firebase ne répond pas'
+    );
+  }, 12000);
+
   try{
     setStatus('Chargement de votre carte...');
     console.log('Lecture Firestore: fidelite_public /'+id);
 
     const snap = await getDoc(doc(db, 'fidelite_public', id));
+    clearTimeout(loadTimeout);
     console.log('Résultat:', snap.exists() ? 'TROUVÉ' : 'INTROUVABLE');
 
     if(!snap.exists()){
@@ -462,7 +471,15 @@ async function load(id){
       }catch(e){ console.warn('Config boutique non trouvée:', e.message); }
     }
 
-    window._setClientContext(db, id, client);
+    // Stocker contexte localement dans le module aussi (fallback)
+    if(typeof window._setClientContext === 'function'){
+      window._setClientContext(db, id, client);
+    } else {
+      // Définir directement si le script classique n'est pas encore prêt
+      window._clientDb   = db;
+      window._clientId   = id;
+      window._clientData = client;
+    }
     try{
       render(client, cfg);
     }catch(renderErr){
@@ -471,9 +488,10 @@ async function load(id){
     showMain();
 
   }catch(e){
+    clearTimeout(loadTimeout);
     console.error('Erreur Firebase:', e);
     showError(
-      'Erreur de connexion Firebase.',
+      'Erreur de connexion Firebase.<br/><small>'+( e.message||'').slice(0,60)+'</small>',
       'Code: '+(e.code||'?')+' | '+( e.message||'').slice(0,80)
     );
   }
