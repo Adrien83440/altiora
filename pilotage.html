@@ -574,13 +574,12 @@ function setYear(y,el){
   window._year=y;
   document.querySelectorAll('.sub-item').forEach(s=>s.classList.remove('active'));
   if(el)el.classList.add('active');
-  // Mettre à jour l'URL sans recharger la page
-  const url=new URL(window.location.href);
-  url.searchParams.set('year',y);
-  window.history.replaceState({},'',url);
   // Mettre à jour le titre
+  const MONTHS_=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
   const t=document.getElementById('topTitle');
-  if(t){const m=parseInt(document.getElementById('monthSelect')?.value||0);const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];t.textContent=`Pilotage — ${MONTHS[m]} ${y}`;}
+  const m=parseInt(document.getElementById('monthSelect')?.value||0);
+  if(t) t.textContent=`Pilotage — ${MONTHS_[m]} ${y}`;
+  // Charger les données pour la nouvelle année
   loadMonth();
 }
 function toggleMenu(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('open');}
@@ -601,17 +600,14 @@ function defaultData(year,month){
 }
 
 async function loadMonth(){
-  // Si Firebase pas encore prêt, réessayer dans 300ms
-  if(!window._uid || !window._getDoc){
-    setTimeout(loadMonth, 300);
-    return;
-  }
   const key=getMonthKey();
   document.getElementById('topTitle').textContent=`Pilotage — ${getMonthLabel()}`;
-  document.getElementById('mainContent').innerHTML='<div class="loader"><div class="spin"></div> Chargement...</div>';
   const m=parseInt(document.getElementById('monthSelect').value);
   let data=defaultData(window._year,m);
-  if(window._uid){
+  
+  // Si Firebase prêt, charger depuis Firestore
+  if(window._uid && window._getDoc && window._db){
+    document.getElementById('mainContent').innerHTML='<div class="loader"><div class="spin"></div> Chargement...</div>';
     try{
       const snap=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
       if(snap.exists()){
@@ -624,8 +620,10 @@ async function loadMonth(){
         if(s.credits)data.credits=s.credits;
         if(s.leasing)data.leasing=s.leasing;
       }
-    }catch(e){console.warn(e);}
+    }catch(e){console.warn('Firebase load error:',e);}
   }
+  // Sinon afficher les données vides directement (Firebase chargera via onAuthStateChanged)
+  
   _data=data;
   renderPage(data,m);
 }
@@ -1016,27 +1014,6 @@ function refreshTotals(){
   s('s-tvac',fmt(t.tvaCollectee));s('s-tvad',fmt(t.tvaDue),t.tvaDue>=0?'negative':'positive');
 }
 
-/* ── SAVE ── */
-async // ── Autosave ──
-function {
-  if(!window._uid||!window._db)return;
-  _userEdited=true;
-  clearTimeout(autoSaveDebounce);
-  const ind=document.getElementById('autosave-ind');
-  if(ind){ind.textContent='⏳ Sauvegarde...';ind.classList.add('show');}
-  autoSaveDebounce=setTimeout(()=>{
-    if(!window._uid||!window._db||!_userEdited)return;
-    _userEdited=false;
-    saveAll();
-    if(ind){ind.textContent='✅ Sauvegardé';setTimeout(()=>ind.classList.remove('show'),2000);}
-  },2000);
-}
-  autoSaveDebounce=setTimeout(()=>{
-    if(!window._uid || !window._db) return;
-    saveAll();
-    if(ind){ind.textContent='✅ Sauvegardé';setTimeout(()=>ind.classList.remove('show'),2000);}
-  },1500);
-}
 
 function saveAll(){
   if(!window._uid){showToast('Non connecté','warning');return;}
