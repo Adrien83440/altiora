@@ -607,9 +607,9 @@ function renderCharges(rows, key) {
       '<td><select class="cell-input" style="width:55px" onchange="_data[\'' + key + '\'][' + i + '].pointe=this.value"><option' + (r.pointe==='Oui'?' selected':'') + '>Oui</option><option' + (r.pointe==='Non'?' selected':'') + '>Non</option></select></td>' +
       '<td><input class="cell-input" style="width:95px" placeholder="Fournisseur" value="' + (r.fournisseur||'') + '" oninput="_data[\'' + key + '\'][' + i + '].fournisseur=this.value"/></td>' +
       '<td><input class="cell-input" style="width:95px" placeholder="Type" value="' + (r.type||'') + '" oninput="_data[\'' + key + '\'][' + i + '].type=this.value"/></td>' +
-      '<td><input class="cell-input" style="width:76px" type="number" placeholder="HT" value="' + (r.montantHT||'') + '" id="' + key + '-ht-' + i + '" oninput="updateChargeHT(\'' + key + '\',' + i + ',this.value)"/></td>' +
+      '<td><input class="cell-input" style="width:76px" type="text" inputmode="decimal" placeholder="HT" value="' + (r.montantHT||'') + '" id="' + key + '-ht-' + i + '" oninput="updateChargeHT(\'' + key + '\',' + i + ',this.value)"/></td>' +
       '<td><select class="cell-input" style="width:55px" onchange="updateChargeTVARate(\'' + key + '\',' + i + ',this.value)">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + (rate==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select></td>' +
-      '<td><input class="cell-input" style="width:76px" type="number" placeholder="TTC" value="' + (ttc>0?ttc.toFixed(2):'') + '" id="' + key + '-ttc-' + i + '" oninput="updateChargeTTC(\'' + key + '\',' + i + ',this.value)"/></td>' +
+      '<td><input class="cell-input" style="width:76px" type="text" inputmode="decimal" placeholder="TTC" value="' + (ttc>0?ttc.toFixed(2):'') + '" id="' + key + '-ttc-' + i + '" oninput="updateChargeTTC(\'' + key + '\',' + i + ',this.value)"/></td>' +
       '<td><select class="cell-input" style="width:55px" onchange="_data[\'' + key + '\'][' + i + '].deductible=this.value;refreshTotals()"><option' + (r.deductible==='Oui'?' selected':'') + '>Oui</option><option' + (r.deductible==='Non'?' selected':'') + '>Non</option></select></td>' +
       '<td style="white-space:nowrap;display:flex;gap:4px;align-items:center;padding:5px 7px;">' +
         (isFixe ? '<button class="btn btn-orange btn-sm" style="font-size:10px;padding:3px 8px;" onclick="duplicateFixeLine(' + i + ')">⚡ Année</button>' : '') +
@@ -622,34 +622,34 @@ function renderCharges(rows, key) {
 function renderCredits(rows) {
   return rows.map(function(r, i) {
     var isPrincipal = r.ligneType === 'principal';
-    var montant = parseFloat(r.montant) || 0;
-    var taux = parseFloat(r.tauxInteret) || 0;
+    var montant = parseFloat((r.montant||'').toString().replace(',','.')) || 0;
+    var taux    = parseFloat((r.tauxInteret||'').toString().replace(',','.')) || 0;
     var montantCalc = montant;
     var tvaAmount = 0;
     if (!isPrincipal) {
       if (r.tvaAuto && taux > 0) {
         var principal = _data.credits.slice(0, i).reverse().find(function(c) { return c.fournisseur === r.fournisseur && c.ligneType === 'principal'; });
-        if (principal) montantCalc = (parseFloat(principal.montant)||0) * taux / 100 / 12;
+        if (principal) montantCalc = (parseFloat((principal.montant||'').toString().replace(',','.'))||0) * taux / 100 / 12;
       }
       tvaAmount = montantCalc * (parseFloat(r.tvaRate)||20) / 100;
     }
-    return '<tr class="' + (isPrincipal?'row-principal':'row-interet') + '">' +
+    return '<tr class="' + (isPrincipal?'row-principal':'row-interet') + '" id="cred-row-' + i + '">' +
       '<td><select class="cell-input" style="width:58px" onchange="_data.credits[' + i + '].pointe=this.value"><option' + (r.pointe==='Oui'?' selected':'') + '>Oui</option><option' + (r.pointe==='Non'?' selected':'') + '>Non</option></select></td>' +
-      '<td><input class="cell-input" style="width:110px" placeholder="Nom crédit" value="' + (r.fournisseur||'') + '" oninput="_data.credits[' + i + '].fournisseur=this.value;refreshCredits()"/></td>' +
+      '<td><input class="cell-input" style="width:110px" placeholder="Nom crédit" value="' + (r.fournisseur||'') + '" oninput="updateCreditField(' + i + ','fournisseur',this.value)"/></td>' +
       '<td><span class="row-type-label ' + (isPrincipal?'principal':'interet') + '">' + (isPrincipal?'💳 Principal':'💹 Intérêts') + '</span></td>' +
       '<td>' + (isPrincipal
-        ? '<input class="cell-input" style="width:80px" type="number" placeholder="0.00" value="' + (r.montant||'') + '" oninput="_data.credits[' + i + '].montant=this.value;refreshCredits()"/>'
-        : (r.tvaAuto ? '<span class="cell-readonly orange">' + fmtN(montantCalc) + ' €</span>' : '<input class="cell-input" style="width:80px" type="number" placeholder="0.00" value="' + (r.montant||'') + '" oninput="_data.credits[' + i + '].montant=this.value;refreshCredits()"/>')
+        ? '<input class="cell-input" style="width:80px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="updateCreditMontant(' + i + ',this.value)"/>'
+        : (r.tvaAuto ? '<span class="cell-readonly orange" id="cred-calc-' + i + '">' + fmtN(montantCalc) + ' €</span>' : '<input class="cell-input" style="width:80px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="updateCreditMontant(' + i + ',this.value)"/>')
       ) + '</td>' +
-      '<td>' + (!isPrincipal ? '<input class="cell-input" style="width:65px" type="number" placeholder="%" value="' + (r.tauxInteret||'') + '" oninput="_data.credits[' + i + '].tauxInteret=this.value;_data.credits[' + i + '].tvaAuto=(this.value>0);refreshCredits()"/>' : '<span style="color:var(--muted);font-size:12px">—</span>') + '</td>' +
-      '<td>' + (!isPrincipal ? '<select class="cell-input" style="width:58px" onchange="_data.credits[' + i + '].tvaRate=parseFloat(this.value);refreshCredits()">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + ((r.tvaRate||20)==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select>' : '<span style="color:var(--muted);font-size:12px">Sans TVA</span>') + '</td>' +
-      '<td><span class="cell-readonly ' + (isPrincipal?'':'green') + '">' + (isPrincipal ? '—' : fmtN(tvaAmount) + ' €') + '</span></td>' +
+      '<td>' + (!isPrincipal ? '<input class="cell-input" style="width:65px" type="text" inputmode="decimal" placeholder="%" value="' + (r.tauxInteret||'') + '" oninput="updateCreditTaux(' + i + ',this.value)"/>' : '<span style="color:var(--muted);font-size:12px">—</span>') + '</td>' +
+      '<td>' + (!isPrincipal ? '<select class="cell-input" style="width:58px" onchange="_data.credits[' + i + '].tvaRate=parseFloat(this.value);refreshCreditsCalc()">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + ((r.tvaRate||20)==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select>' : '<span style="color:var(--muted);font-size:12px">Sans TVA</span>') + '</td>' +
+      '<td><span class="cell-readonly ' + (isPrincipal?'':'green') + '" id="cred-tva-' + i + '">' + (isPrincipal ? '—' : fmtN(tvaAmount) + ' €') + '</span></td>' +
       '<td><button class="btn btn-danger btn-sm" onclick="delCredit(' + i + ')">✕</button></td>' +
     '</tr>';
   }).join('');
 }
 
-/* ─── ACTIONS ─── */
+
 function updateCA(i, field, value) {
   _data.ca[i][field] = value;
   var h055 = parseFloat(_data.ca[i].ht055) || 0;
@@ -684,8 +684,47 @@ function delCredit(i) {
   refreshCredits();
 }
 function refreshCredits() {
+  // Re-render complet — seulement pour ajout/suppression de lignes
   var tb = document.getElementById('cred-tbody');
   if (tb) tb.innerHTML = renderCredits(_data.credits);
+  refreshTotals();
+}
+
+// Met à jour un champ texte sans re-render (préserve le focus)
+function updateCreditField(i, field, value) {
+  _data.credits[i][field] = value;
+  refreshTotals();
+}
+
+function updateCreditMontant(i, value) {
+  _data.credits[i].montant = value;
+  // Recalculer la TVA de la ligne intérêts sans re-render
+  refreshCreditsCalc();
+}
+
+function updateCreditTaux(i, value) {
+  _data.credits[i].tauxInteret = value;
+  _data.credits[i].tvaAuto = (parseFloat(value.replace(',','.')) > 0);
+  refreshCreditsCalc();
+}
+
+// Recalcule uniquement les valeurs calculées (TVA, montant auto) sans toucher aux inputs
+function refreshCreditsCalc() {
+  _data.credits.forEach(function(r, i) {
+    if (r.ligneType === 'interet') {
+      var taux = parseFloat((r.tauxInteret||'').toString().replace(',','.')) || 0;
+      var montantCalc = parseFloat((r.montant||'').toString().replace(',','.')) || 0;
+      if (r.tvaAuto && taux > 0) {
+        var principal = _data.credits.slice(0, i).reverse().find(function(c) { return c.fournisseur === r.fournisseur && c.ligneType === 'principal'; });
+        if (principal) montantCalc = (parseFloat((principal.montant||'').toString().replace(',','.'))||0) * taux / 100 / 12;
+        var calcEl = document.getElementById('cred-calc-' + i);
+        if (calcEl) calcEl.textContent = fmtN(montantCalc) + ' €';
+      }
+      var tvaAmount = montantCalc * (parseFloat(r.tvaRate)||20) / 100;
+      var tvaEl = document.getElementById('cred-tva-' + i);
+      if (tvaEl) tvaEl.textContent = fmtN(tvaAmount) + ' €';
+    }
+  });
   refreshTotals();
 }
 
@@ -706,14 +745,14 @@ function addRentree() {
 
 function updateChargeHT(key, i, value) {
   _data[key][i].montantHT = value;
-  var ht   = parseFloat(value) || 0;
+  var ht   = parseFloat((value||"").replace(",",".")) || 0;
   var rate = parseFloat(_data[key][i].tvaRate) || 0;
   var el   = document.getElementById(key + '-ttc-' + i);
   if (el) el.value = ht > 0 ? (ht*(1+rate/100)).toFixed(2) : '';
   refreshTotals();
 }
 function updateChargeTTC(key, i, value) {
-  var ttc  = parseFloat(value) || 0;
+  var ttc  = parseFloat((value||"").replace(",",".")) || 0;
   var rate = parseFloat(_data[key][i].tvaRate) || 0;
   var ht   = ttc > 0 ? (rate > 0 ? ttc/(1+rate/100) : ttc) : 0;
   _data[key][i].montantHT = ht > 0 ? ht.toFixed(4) : '';
@@ -772,10 +811,11 @@ function calcTotals(data) {
   data.leasing.forEach(function(r){var h=parseFloat(r.montantHT)||0;leasingHT+=h;leasingTTC+=h*(1+(r.tvaRate||0)/100);if(r.deductible==='Oui')leasingTVA+=h*(r.tvaRate||0)/100;});
   var creditsPrincipal=0,creditsInteret=0,creditsTVA=0;
   data.credits.forEach(function(r,i){
-    if(r.ligneType==='principal'){creditsPrincipal+=parseFloat(r.montant)||0;}
+    var parseVal = function(v){ return parseFloat((v||'').toString().replace(',','.')) || 0; };
+    if(r.ligneType==='principal'){creditsPrincipal+=parseVal(r.montant);}
     else{
-      var m2=parseFloat(r.montant)||0;
-      if(r.tvaAuto&&parseFloat(r.tauxInteret)>0){var p=data.credits.slice(0,i).reverse().find(function(c){return c.fournisseur===r.fournisseur&&c.ligneType==='principal';});if(p)m2=(parseFloat(p.montant)||0)*parseFloat(r.tauxInteret)/100/12;}
+      var m2=parseVal(r.montant);
+      if(r.tvaAuto&&parseVal(r.tauxInteret)>0){var p=data.credits.slice(0,i).reverse().find(function(c){return c.fournisseur===r.fournisseur&&c.ligneType==='principal';});if(p)m2=parseVal(p.montant)*parseVal(r.tauxInteret)/100/12;}
       creditsInteret+=m2;creditsTVA+=m2*(parseFloat(r.tvaRate)||20)/100;
     }
   });
