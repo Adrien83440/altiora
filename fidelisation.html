@@ -1728,7 +1728,10 @@ renderDashboard();
 // ENVOI CAMPAGNE SMS RÉEL
 // ═══════════════════════════════════════════
 window.envoyerCampagneSMS = async function envoyerCampagneSMS(campagne) {
-  if (!window._uid) { toast('Non connecté', 'err'); return; }
+  // Attendre que Firebase soit prêt (max 3s)
+  let tries = 0;
+  while (!window._uid && tries < 30) { await new Promise(r => setTimeout(r, 100)); tries++; }
+  if (!window._uid) { toast('Non connecté — rechargez la page', 'err'); return; }
 
   // Sélectionner les destinataires selon le segment
   const cibles = clients.filter(function(c) {
@@ -1742,8 +1745,8 @@ window.envoyerCampagneSMS = async function envoyerCampagneSMS(campagne) {
     return;
   }
 
-  if (_smsCredits < cibles.length) {
-    toast('Solde insuffisant (' + _smsCredits + ' SMS, ' + cibles.length + ' destinataires)', 'err');
+  if ((window._smsCredits || 0) < cibles.length) {
+    toast('Solde insuffisant (' + (window._smsCredits || 0) + ' SMS, ' + cibles.length + ' destinataires)', 'err');
     openModal('acheterSms');
     return;
   }
@@ -1938,6 +1941,8 @@ function hideSyncBadge(){
 // ═══════════════════════════════════════════
 // CRÉDITS SMS — exposé sur window pour les onclick HTML
 // ═══════════════════════════════════════════
+window._smsCredits = 0;
+window._selectedPack = 'pack_200';
 var _smsCredits = 0;
 var _selectedPack = 'pack_200';
 
@@ -1946,8 +1951,9 @@ window.loadSmsCredits = async function loadSmsCredits() {
   try {
     const snap = await window._fbGetDoc(window._fbDoc(window._db, 'sms_credits', window._uid));
     _smsCredits = snap.exists() ? (parseInt(snap.data().credits) || 0) : 0;
+  window._smsCredits = _smsCredits;
   } catch(e) {
-    _smsCredits = 0;
+    _smsCredits = 0; window._smsCredits = 0;
   }
   const el = document.getElementById('smsCreditsDisplay');
   if (el) el.textContent = _smsCredits;
