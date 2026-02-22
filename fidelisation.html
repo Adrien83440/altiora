@@ -572,6 +572,7 @@ html,body{overflow-x:hidden;max-width:100vw}
       <div>
         <div id="fc-name" style="font-size:17px;font-weight:800"></div>
         <div id="fc-seg" style="font-size:12px;color:var(--muted);margin-top:2px"></div>
+        <button id="fc-link-btn" onclick="fcCopyLink()" style="margin-top:5px;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;cursor:pointer;background:#eff6ff;color:var(--blue);border:1px solid #bfdbfe;font-family:inherit">🔗 Copier le lien client</button>
       </div>
       <div style="margin-left:auto;text-align:right">
         <div style="font-size:22px;font-weight:800;color:var(--blue)" id="fc-pts-display">0</div>
@@ -857,13 +858,27 @@ function load(){
   document.getElementById('badge-clients').textContent=clients.length;
   document.getElementById('badge-coupons').textContent=coupons.filter(c=>c.status==='active').length;
 }
-function save(){
+function save(clientsToSync){
   localStorage.setItem('altiora_fid_clients',JSON.stringify(clients));
   localStorage.setItem('altiora_fid_coupons',JSON.stringify(coupons));
   localStorage.setItem('altiora_fid_campagnes',JSON.stringify(campagnes));
   localStorage.setItem('altiora_fid_paliers',JSON.stringify(paliers));
   document.getElementById('badge-clients').textContent=clients.length;
   document.getElementById('badge-coupons').textContent=coupons.filter(c=>c.status==='active').length;
+  // Sync Firebase en arrière-plan
+  if(window._uid && window._fbSaveClient){
+    const toSync = clientsToSync || clients;
+    const list = Array.isArray(toSync) ? toSync : [toSync];
+    list.forEach(c=>{
+      window._fbSaveClient(window._uid, c).catch(e=>console.warn('sync err',e));
+    });
+  }
+}
+function saveOne(client){
+  // Sauvegarder un seul client localement + Firebase
+  const idx=clients.findIndex(x=>x.id===client.id);
+  if(idx>=0)clients[idx]=client;
+  save([client]);
 }
 function saveConfig(){
   cfg={...cfg,
@@ -882,6 +897,10 @@ function saveConfig(){
     notifCoupon:document.getElementById('cfg-notif-coupon').checked,
   };
   localStorage.setItem('altiora_fid_cfg',JSON.stringify(cfg));
+  // Sync Firebase config
+  if(window._uid && window._fbSaveConfig){
+    window._fbSaveConfig(window._uid, cfg).catch(e=>console.warn('cfg sync err',e));
+  }
 }
 function setCfgColor(c){cfg.cardColor=c;localStorage.setItem('altiora_fid_cfg',JSON.stringify(cfg));renderFidCard()}
 function defaultPaliers(){return[
@@ -1119,6 +1138,9 @@ function deleteClient(id){
   if(!confirm('Supprimer ce client ?'))return;
   clients=clients.filter(c=>c.id!==id);
   save();renderClients();toast('Client supprimé');
+  if(window._uid && window._fbDeleteClient){
+    window._fbDeleteClient(window._uid,id).catch(e=>console.warn('del err',e));
+  }
 }
 
 function openTamponFor(id){
@@ -1396,9 +1418,19 @@ function fcResetTampons(){
 }
 function fcDelete(){
   if(!confirm('Supprimer définitivement ce client ?'))return;
+  if(window._uid&&window._fbDeleteClient)window._fbDeleteClient(window._uid,_fcClientId).catch(()=>{});
   clients=clients.filter(x=>x.id!==_fcClientId);
   save();closeModal('ficheClient');renderClients();
   toast('Client supprimé');
+}
+function fcCopyLink(){
+  const baseUrl=location.href.replace('fidelisation.html','client-fidelite.html');
+  const url=`${baseUrl.split('?')[0]}?client=${_fcClientId}`;
+  navigator.clipboard?.writeText(url).then(()=>{
+    toast('🔗 Lien copié ! Envoyez-le au client.','info');
+  }).catch(()=>{
+    prompt('Copiez ce lien et envoyez-le au client :',url);
+  });
 }
 
 // ═══ DEMO DATA ═══
@@ -1430,6 +1462,44 @@ function seedDemo(){
   save();
 }
 
+// ═══ APPLY CONFIG (pour rechargement Firebase) ═══
+function applyConfig(){
+  try{
+    document.getElementById('cfg-tampons').value=cfg.tampons||10;
+    document.getElementById('cfg-reward').value=cfg.reward||'1 produit offert';
+    document.getElementById('cfg-emoji').value=cfg.emoji||'☕';
+    document.getElementById('cfg-validity').value=cfg.validity||365;
+    document.getElementById('cfg-pts-per-euro').value=cfg.ptsPerEuro||10;
+    document.getElementById('cfg-bday-pts').value=cfg.bdayPts||200;
+    document.getElementById('cfg-ref-pts').value=cfg.refPts||500;
+    document.getElementById('cfg-vip-pts').value=cfg.vipPts||2000;
+    document.getElementById('cfg-shop-name').value=cfg.shopName||'';
+    document.getElementById('cfg-notif-bday').checked=cfg.notifBday!==false;
+    document.getElementById('cfg-notif-inactif').checked=cfg.notifInactif!==false;
+    document.getElementById('cfg-notif-palier').checked=cfg.notifPalier!==false;
+    document.getElementById('cfg-notif-coupon').checked=!!cfg.notifCoupon;
+    renderFidCard();
+  }catch(e){}
+}
+
+// Sync paliers vers Firebase quand on en ajoute/supprime
+const _origAddPalier=window.addPalier;
+function addPalier(){
+  const pts=parseInt(document.getElementById('np-pts').value);
+  const reward=document.getElementById('np-reward').value.trim();
+  if(!pts||!reward){toast('Remplissez tous les champs','err');return}
+  paliers.push({id:uid(),pts,reward,icon:document.getElementById('np-icon').value});
+  localStorage.setItem('altiora_fid_paliers',JSON.stringify(paliers));
+  if(window._uid&&window._fbSavePaliers)window._fbSavePaliers(window._uid,paliers).catch(()=>{});
+  renderPaliers();closeModal('addPalier');toast('Palier ajouté !');
+}
+function deletePalier(id){
+  paliers=paliers.filter(p=>p.id!==id);
+  localStorage.setItem('altiora_fid_paliers',JSON.stringify(paliers));
+  if(window._uid&&window._fbSavePaliers)window._fbSavePaliers(window._uid,paliers).catch(()=>{});
+  renderPaliers();
+}
+
 // ═══ INIT ═══
 load();
 seedDemo();
@@ -1440,16 +1510,115 @@ renderDashboard();
 <script type="module">
 import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import{getAuth,onAuthStateChanged,signOut}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import{getFirestore,doc,setDoc}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-const app=initializeApp({apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",authDomain:"altiora-70599.firebaseapp.com",projectId:"altiora-70599",storageBucket:"altiora-70599.firebasestorage.app",messagingSenderId:"120905555746",appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"});
-const auth=getAuth(app);window._auth=auth;window._signOut=signOut;
-onAuthStateChanged(auth,user=>{
+import{getFirestore,doc,setDoc,getDoc,collection,getDocs,deleteDoc,writeBatch}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const FB = {apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",authDomain:"altiora-70599.firebaseapp.com",projectId:"altiora-70599",storageBucket:"altiora-70599.firebasestorage.app",messagingSenderId:"120905555746",appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"};
+const app=initializeApp(FB);
+const auth=getAuth(app);
+const db=getFirestore(app);
+
+// ── Expose globalement ──
+window._auth=auth; window._signOut=signOut; window._db=db;
+window._fbSetDoc=setDoc; window._fbGetDoc=getDoc; window._fbDoc=doc;
+window._fbCollection=collection; window._fbGetDocs=getDocs;
+window._fbDeleteDoc=deleteDoc; window._fbWriteBatch=writeBatch;
+
+// ── Helpers Firebase Fidélité ──
+async function fbSaveClient(uid, client){
+  // 1. Données commerçant (privées)
+  await setDoc(doc(db,'fidelite',uid,'clients',client.id), client, {merge:true});
+  // 2. Données publiques client (carte accessible sans auth)
+  const pub = {
+    id:client.id, prenom:client.prenom, nom:client.nom,
+    points:client.points||0, tampons:client.tampons||0,
+    lastVisit:client.lastVisit||'', history:(client.history||[]).slice(0,20),
+    createdAt:client.createdAt||'', birthday:client.birthday||'',
+    uid // pour retrouver la config du commerçant
+  };
+  await setDoc(doc(db,'fidelite_public',client.id), pub, {merge:true});
+}
+async function fbDeleteClient(uid, clientId){
+  await deleteDoc(doc(db,'fidelite',uid,'clients',clientId));
+  await deleteDoc(doc(db,'fidelite_public',clientId));
+}
+async function fbSaveConfig(uid, cfg){
+  await setDoc(doc(db,'fidelite',uid,'config','main'), cfg, {merge:true});
+  // Config publique (tampons, reward, emoji, shopName pour la page client)
+  await setDoc(doc(db,'fidelite_public_cfg',uid), {
+    tampons:cfg.tampons||10, reward:cfg.reward||'1 produit offert',
+    emoji:cfg.emoji||'☕', shopName:cfg.shopName||'',
+    cardColor:cfg.cardColor||'blue', vipPts:cfg.vipPts||2000,
+    paliers:[] // rempli séparément
+  }, {merge:true});
+}
+async function fbSavePaliers(uid, paliers){
+  await setDoc(doc(db,'fidelite_public_cfg',uid), {paliers}, {merge:true});
+}
+async function fbLoadAll(uid){
+  // Clients
+  const snap = await getDocs(collection(db,'fidelite',uid,'clients'));
+  const fbClients = snap.docs.map(d=>d.data());
+  // Config
+  const cfgSnap = await getDoc(doc(db,'fidelite',uid,'config','main'));
+  const fbCfg = cfgSnap.exists() ? cfgSnap.data() : {};
+  return {clients: fbClients, cfg: fbCfg};
+}
+
+window._fbSaveClient=fbSaveClient;
+window._fbDeleteClient=fbDeleteClient;
+window._fbSaveConfig=fbSaveConfig;
+window._fbSavePaliers=fbSavePaliers;
+window._fbLoadAll=fbLoadAll;
+
+// ── Auth ──
+onAuthStateChanged(auth, async user=>{
   if(!user){location.href='index.html';return}
   window._uid=user.uid;
   const n=user.displayName||user.email?.split('@')[0]||'';
   document.getElementById('uname').textContent=n;
   document.getElementById('av').textContent=n[0]?.toUpperCase()||'A';
+
+  // Charger depuis Firebase (override localStorage si données Firebase)
+  try{
+    showSyncBadge('⏳ Chargement...');
+    const {clients:fbClients, cfg:fbCfg} = await fbLoadAll(user.uid);
+    if(fbClients.length > 0){
+      clients = fbClients;
+      // Mettre à jour localStorage aussi
+      localStorage.setItem('altiora_fid_clients', JSON.stringify(clients));
+    }
+    if(Object.keys(fbCfg).length > 0){
+      cfg = {...cfg, ...fbCfg};
+      localStorage.setItem('altiora_fid_cfg', JSON.stringify(cfg));
+      applyConfig();
+    }
+    // Sync paliers si présents
+    const pubCfgSnap = await getDoc(doc(db,'fidelite_public_cfg',user.uid));
+    if(pubCfgSnap.exists() && pubCfgSnap.data().paliers?.length){
+      paliers = pubCfgSnap.data().paliers;
+      localStorage.setItem('altiora_fid_paliers', JSON.stringify(paliers));
+    }
+    renderDashboard();
+    renderFidCard();
+    document.getElementById('badge-clients').textContent=clients.length;
+    document.getElementById('badge-coupons').textContent=coupons.filter(c=>c.status==='active').length;
+    showSyncBadge('✅ Synchronisé');
+    setTimeout(()=>hideSyncBadge(),2000);
+  }catch(e){
+    console.warn('Firebase load error:',e);
+    showSyncBadge('⚠️ Mode local');
+    setTimeout(()=>hideSyncBadge(),3000);
+  }
 });
+
+function showSyncBadge(msg){
+  let b=document.getElementById('syncBadge');
+  if(!b){b=document.createElement('div');b.id='syncBadge';b.style.cssText='position:fixed;top:10px;right:10px;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:700;z-index:9999;background:#1a1f36;color:#fff;transition:.3s';document.body.appendChild(b)}
+  b.textContent=msg; b.style.opacity='1';
+}
+function hideSyncBadge(){
+  const b=document.getElementById('syncBadge'); if(b)b.style.opacity='0';
+}
 </script>
 </body>
 </html>
