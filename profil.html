@@ -778,6 +778,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
                 <th>TVA</th>
                 <th>Total TTC</th>
                 <th>Statut</th>
+                <th>PDF</th>
               </tr>
             </thead>
             <tbody id="facturesTbody"></tbody>
@@ -1038,16 +1039,10 @@ function loadProfile() {
   } catch (e) {}
 }
 
-// ── FACTURES DEMO ──
-const FACTURES_DEMO = [
-  {num:'ALT-2025-001', date:'2025-01-01', desc:'Abonnement Gratuit — Janvier 2025', ht:0,   tva:0,    ttc:0,    statut:'payee'},
-  {num:'ALT-2025-002', date:'2025-02-01', desc:'Abonnement Gratuit — Février 2025', ht:0,   tva:0,    ttc:0,    statut:'payee'},
-  {num:'ALT-2025-003', date:'2025-03-01', desc:'Abonnement Gratuit — Mars 2025',    ht:0,   tva:0,    ttc:0,    statut:'payee'},
-];
-
-function renderFactures() {
+// ── FACTURES STRIPE ──
+function renderFactures(facts) {
   const tbody = document.getElementById('facturesTbody');
-  const facts = JSON.parse(localStorage.getItem('altiora_factures') || 'null') || FACTURES_DEMO;
+  facts = facts || [];
   let payees=0, attente=0, retard=0, total=0;
   facts.forEach(f => {
     total += f.ttc;
@@ -1064,6 +1059,11 @@ function renderFactures() {
     retard:  '<span class="status-badge status-retard">🔴 En retard</span>',
   };
 
+  if (!facts.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--muted)">📄 Aucune facture pour le moment</td></tr>';
+    return;
+  }
+
   tbody.innerHTML = facts.map(f => `<tr>
     <td><strong>${f.num}</strong></td>
     <td>${new Date(f.date).toLocaleDateString('fr-FR')}</td>
@@ -1072,7 +1072,20 @@ function renderFactures() {
     <td>${f.tva===0?'—':fe(f.tva)}</td>
     <td><strong>${f.ttc===0?'Gratuit':fe(f.ttc)}</strong></td>
     <td>${statusHtml[f.statut]||''}</td>
-  </tr>`).join('') || '<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Aucune facture</td></tr>';
+    <td>${f.pdf ? `<a href="${f.pdf}" target="_blank" style="color:var(--blue);font-weight:600;font-size:11px;text-decoration:none">⬇️ PDF</a>` : '—'}</td>
+  </tr>`).join('');
+}
+
+async function loadFacturesStripe(uid) {
+  const tbody = document.getElementById('facturesTbody');
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">⏳ Chargement...</td></tr>';
+  try {
+    const res = await fetch('/api/get-invoices?uid=' + uid);
+    const data = await res.json();
+    renderFactures(data.invoices || []);
+  } catch(e) {
+    renderFactures([]);
+  }
 }
 
 // ── SECURITE ──
@@ -1121,12 +1134,14 @@ async function tryFirebase() {
     } else {
       loadPlanUI('trial');
     }
-  } catch (e) { loadPlanUI('trial'); }
+    // Load factures Stripe
+    await loadFacturesStripe(window._uid);
+  } catch (e) { loadPlanUI('trial'); renderFactures([]); }
 }
 
 // ── START ──
 loadProfile();
-renderFactures();
+renderFactures([]);
 setTimeout(tryFirebase, 500);
 </script>
 
