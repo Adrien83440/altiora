@@ -1615,43 +1615,75 @@ onAuthStateChanged(auth, async user=>{
   document.getElementById('uname').textContent=n;
   document.getElementById('av').textContent=n[0]?.toUpperCase()||'A';
 
-  // Charger depuis Firebase (override localStorage si données Firebase)
+  showSyncBadge('⏳ Connexion Firebase...');
+
+  // ── Test d'accès Firebase en écrivant un doc de test ──
   try{
-    showSyncBadge('⏳ Chargement...');
-    const {clients:fbClients, cfg:fbCfg} = await fbLoadAll(user.uid);
+    // 1. Test écriture simple (config)
+    await setDoc(doc(db,'fidelite',user.uid,'config','main'), {_ping: Date.now()}, {merge:true});
+    
+    // 2. Charger clients
+    const snap = await getDocs(collection(db,'fidelite',user.uid,'clients'));
+    const fbClients = snap.docs.map(d=>d.data());
     if(fbClients.length > 0){
       clients = fbClients;
-      // Mettre à jour localStorage aussi
       localStorage.setItem('altiora_fid_clients', JSON.stringify(clients));
     }
-    if(Object.keys(fbCfg).length > 0){
-      cfg = {...cfg, ...fbCfg};
-      localStorage.setItem('altiora_fid_cfg', JSON.stringify(cfg));
-      applyConfig();
+
+    // 3. Charger config
+    const cfgSnap = await getDoc(doc(db,'fidelite',user.uid,'config','main'));
+    if(cfgSnap.exists()){
+      const fbCfg = cfgSnap.data();
+      delete fbCfg._ping;
+      if(Object.keys(fbCfg).length > 0){
+        cfg = {...cfg, ...fbCfg};
+        localStorage.setItem('altiora_fid_cfg', JSON.stringify(cfg));
+        applyConfig();
+      }
     }
-    // Sync paliers si présents
-    const pubCfgSnap = await getDoc(doc(db,'fidelite_public_cfg',user.uid));
-    if(pubCfgSnap.exists() && pubCfgSnap.data().paliers?.length){
-      paliers = pubCfgSnap.data().paliers;
-      localStorage.setItem('altiora_fid_paliers', JSON.stringify(paliers));
-    }
+
+    // 4. Charger paliers depuis config publique
+    try{
+      const pubCfgSnap = await getDoc(doc(db,'fidelite_public_cfg',user.uid));
+      if(pubCfgSnap.exists() && pubCfgSnap.data().paliers?.length){
+        paliers = pubCfgSnap.data().paliers;
+        localStorage.setItem('altiora_fid_paliers', JSON.stringify(paliers));
+      }
+    }catch(e2){ /* paliers depuis localStorage si erreur */ }
+
     renderDashboard();
     renderFidCard();
     document.getElementById('badge-clients').textContent=clients.length;
     document.getElementById('badge-coupons').textContent=coupons.filter(c=>c.status==='active').length;
-    showSyncBadge('✅ Synchronisé');
-    setTimeout(()=>hideSyncBadge(),2000);
+    showSyncBadge('✅ Firebase connecté');
+    setTimeout(()=>hideSyncBadge(),2500);
+
   }catch(e){
-    console.warn('Firebase load error:',e);
-    showSyncBadge('⚠️ Mode local');
-    setTimeout(()=>hideSyncBadge(),3000);
+    console.error('Firebase error:', e.code, e.message);
+    // Afficher le vrai problème
+    const msg = e.code==='permission-denied'
+      ? '⚠️ Règles Firebase à configurer'
+      : e.code==='unavailable'
+      ? '⚠️ Firebase hors ligne'
+      : '⚠️ Mode local ('+e.code+')';
+    showSyncBadge(msg, true);
+    // Fonctionner quand même en local
+    renderDashboard();
+    renderFidCard();
   }
 });
 
-function showSyncBadge(msg){
+function showSyncBadge(msg, isError){
   let b=document.getElementById('syncBadge');
-  if(!b){b=document.createElement('div');b.id='syncBadge';b.style.cssText='position:fixed;top:10px;right:10px;padding:6px 12px;border-radius:20px;font-size:11px;font-weight:700;z-index:9999;background:#1a1f36;color:#fff;transition:.3s';document.body.appendChild(b)}
-  b.textContent=msg; b.style.opacity='1';
+  if(!b){b=document.createElement('div');b.id='syncBadge';b.style.cssText='position:fixed;top:14px;right:14px;padding:8px 14px;border-radius:20px;font-size:11px;font-weight:700;z-index:9999;color:#fff;transition:.3s;max-width:280px;text-align:center;cursor:pointer';document.body.appendChild(b)}
+  b.textContent=msg;
+  b.style.background=isError?'#ef4444':msg.includes('✅')?'#10b981':'#1a1f36';
+  b.style.opacity='1';
+  if(isError){
+    // Afficher plus longtemps + lien vers aide
+    b.title='Voir les règles Firebase à configurer';
+    setTimeout(()=>{b.style.opacity='0'},8000);
+  }
 }
 function hideSyncBadge(){
   const b=document.getElementById('syncBadge'); if(b)b.style.opacity='0';
