@@ -1259,13 +1259,13 @@ function addPalier(){
 function deletePalier(id){paliers=paliers.filter(p=>p.id!==id);localStorage.setItem('altiora_fid_paliers',JSON.stringify(paliers));renderPaliers()}
 
 // ═══ COUPONS ═══
-function addCoupon(){
+async function addCoupon(){
   const name=document.getElementById('co-name').value.trim();
   const val=parseFloat(document.getElementById('co-val').value)||0;
   if(!name){toast('Nom obligatoire','err');return}
   const target=document.getElementById('co-target').value;
   const targetClient=target==='one'?clients.find(c=>c.id===document.getElementById('co-client').value):null;
-  coupons.push({
+  const coupon={
     id:uid(),name,
     type:document.getElementById('co-type').value,
     val,target,
@@ -1276,8 +1276,58 @@ function addCoupon(){
     usedCount:0,
     status:'active',
     createdAt:today()
-  });
-  save();renderCoupons();closeModal();toast('🎫 Coupon créé !');
+  };
+  coupons.push(coupon);
+  save();
+  // ── Pousser le coupon dans fidelite_public des clients ciblés ──
+  await pushCouponToClients(coupon);
+  renderCoupons();closeModal();toast('🎫 Coupon créé !');
+}
+
+async function pushCouponToClients(coupon){
+  if(!window._uid||!window._setDoc||!window._doc||!window._getDoc)return;
+  const target=coupon.target;
+  let targets=[];
+  if(target==='one'){
+    // Un seul client
+    const c=clients.find(x=>x.id===coupon.targetName||
+      (x.prenom+' '+x.nom)===coupon.targetName);
+    if(c) targets=[c];
+    else {
+      // Chercher par targetName stocké dans coupon
+      targets=clients.filter(x=>(x.prenom+' '+x.nom)===coupon.targetName);
+    }
+  } else if(target==='all'){
+    targets=clients;
+  } else if(target==='vip'){
+    targets=clients.filter(c=>c.points>=(cfg.vipPts||2000));
+  } else if(target==='inactif'){
+    const cutoff=new Date();cutoff.setMonth(cutoff.getMonth()-3);
+    targets=clients.filter(c=>!c.lastVisit||new Date(c.lastVisit)<cutoff);
+  } else if(target==='nouveau'){
+    const cutoff=new Date();cutoff.setMonth(cutoff.getMonth()-1);
+    targets=clients.filter(c=>c.createdAt&&new Date(c.createdAt)>=cutoff);
+  }
+  // Pour chaque client ciblé, ajouter le coupon dans fidelite_public
+  for(const c of targets){
+    try{
+      const snap=await window._getDoc(window._doc(window._db,'fidelite_public',c.id));
+      const data=snap.exists()?snap.data():{};
+      const existing=data.coupons||[];
+      // Éviter les doublons
+      if(!existing.find(x=>x.id===coupon.id)){
+        existing.push({
+          id:coupon.id, name:coupon.name, type:coupon.type,
+          val:coupon.val, code:coupon.code,
+          expDate:coupon.expDate||'', status:'active'
+        });
+        await window._setDoc(
+          window._doc(window._db,'fidelite_public',c.id),
+          {coupons:existing},{merge:true}
+        );
+      }
+    }catch(e){console.warn('pushCoupon err',c.id,e);}
+  }
 }
 function useCoupon(id){
   const c=coupons.find(x=>x.id===id);
