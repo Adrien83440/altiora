@@ -1,4 +1,4 @@
-// api/send-sms.js — sans dépendance npm
+// api/send-sms.js — Twilio
 
 async function getFirebaseToken() {
   const res = await fetch(
@@ -46,92 +46,115 @@ async function firestorePatch(token, path, fields) {
   return res.json();
 }
 
-async function sendSmsCapitoleMobile(recipients, message, sender) {
-  const username = process.env.CAPITOLE_USERNAME;
-  const password = process.env.CAPITOLE_PASSWORD;
-  if (!username || !password) throw new Error('Identifiants Capitole Mobile manquants');
+async function sendSmsTwilio(recipients, message, sender) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_FROM_NUMBER; // ex: +33XXXXXXXXX ou +1XXXXXXXXXX
 
-  const gsmTags = recipients.map(tel => {
-    let num = tel.replace(/[\s\-\.]/g, '');
-    if (num.startsWith('0')) num = '33' + num.slice(1);
-    if (num.startsWith('+')) num = num.slice(1);
-    return '<gsm>' + num + '</gsm>';
-  }).join('');
-
-  const senderClean = (sender || 'ALTIORA').slice(0, 11).replace(/[^a-zA-Z0-9]/g, '');
-
-  const xmlString = '<SMS><authentification><username>' + username + '</username><password>' + password + '</password></authentification><message><text>' + message + '</text><sender>' + senderClean + '</sender><route>M</route><long>no</long></message><recipients>' + gsmTags + '</recipients></SMS>';
-
-  const body = 'XML=' + encodeURIComponent(xmlString);
-
-  const res = await fetch('https://sms.capitolemobile.com/api/sendsms/xml_v2', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
-
-  const text = await res.text();
-  console.log('Réponse Capitole Mobile:', text);
-  if (text.includes('<e>') || text.toLowerCase().includes('error')) {
-    throw new Error('Capitole Mobile erreur: ' + text);
+  if (!accountSid || !authToken || !fromNumber) {
+    throw new Error('Variables Twilio manquantes (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER)');
   }
-  return text;
+
+  const credentials = Buffer.from(accountSid + ':' + authToken).toString('base64');
+  const results = { sent: 0, failed: 0, errors: [] };
+
+  for (const tel of recipients) {
+    let num = tel.replace(/[\s\-\.]/g, '');
+    if (num.startsWith('0')) num = '+33' + num.slice(1);
+    else if (!num.startsWith('+')) num = '+33' + num;
+
+    const body = new URLSearchParams({
+      To: num,
+      From: fromNumber,
+      Body: message,
+    });
+
+    try {
+      const res = await fetch(
+        'https://api.twilio.com/2010-04-01/Accounts/' + accountSid + '/Messages.json',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: 'Basic ' + credentials,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: body.toString(),
+        }
+      );
+      const data = await res.json();
+      if (data.sid) {
+        results.sent++;
+        console.log('SMS envoyé à', num, '— SID:', data.sid);
+      } else {
+        results.failed++;
+        results.errors.push(num + ': ' + (data.message || 'erreur inconnue'));
+        console.error('Échec', num, data.message);
+      }
+    } catch (e) {
+      results.failed++;
+      results.errors.push(num + ': ' + e.message);
+    }
+  }
+
+  return results;
 }
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    return res.status(200).end();
+  }
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { uid, campagneId, recipients, message, sender } = req.body;
+  const { uid, campagneId, recipients, message, sender } = req.body || {};
+  console.log('send-sms — uid:', uid, '| destinataires:', recipients && recipients.length, '| message:', message && message.slice(0, 30));
 
-  if (!uid || !recipients || !message)
-    return res.status(400).json({ error: 'uid, recipients et message requis' });
-  if (!Array.isArray(recipients) || recipients.length === 0)
-    return res.status(400).json({ error: 'recipients doit être un tableau non vide' });
-  if (message.length > 160)
-    return res.status(400).json({ error: 'Message trop long (max 160 caractères)' });
-
-  const smsNeeded = recipients.length;
+  if (!uid || !recipients || !message) {
+    return res.status(400).json({ error: 'Paramètres manquants (uid, recipients, message)' });
+  }
 
   try {
     const token = await getFirebaseToken();
 
     // Vérifier le solde
     const creditsDoc = await firestoreGet(token, 'sms_credits/' + uid);
-    const currentCredits = parseInt(creditsDoc?.fields?.credits?.integerValue || '0');
+    const currentCredits = parseInt((creditsDoc.fields && creditsDoc.fields.credits && creditsDoc.fields.credits.integerValue) || '0');
+    console.log('Solde actuel:', currentCredits, '| SMS requis:', recipients.length);
 
-    if (currentCredits < smsNeeded) {
-      return res.status(402).json({
-        error: 'Solde insuffisant',
-        credits: currentCredits,
-        needed: smsNeeded,
-      });
+    if (currentCredits < recipients.length) {
+      return res.status(402).json({ error: 'Solde insuffisant', credits: currentCredits, required: recipients.length });
     }
 
-    // Envoyer les SMS
-    await sendSmsCapitoleMobile(recipients, message, sender);
+    // Envoyer les SMS via Twilio
+    const results = await sendSmsTwilio(recipients, message, sender || 'ALTIORA');
+    console.log('Résultats Twilio:', results);
 
-    // Débiter le solde
-    const newCredits = currentCredits - smsNeeded;
-    await firestorePatch(token, 'sms_credits/' + uid, { credits: newCredits });
+    // Débiter le solde (uniquement les SMS envoyés)
+    if (results.sent > 0) {
+      const newCredits = currentCredits - results.sent;
+      await firestorePatch(token, 'sms_credits/' + uid, { credits: newCredits });
 
-    // Historique
-    const txId = (campagneId || Date.now()).toString();
-    await firestorePatch(token, 'sms_credits/' + uid + '/history/' + txId, {
-      type: 'send',
-      smsUsed: smsNeeded,
-      date: new Date().toISOString().slice(0, 10),
-      message: message.slice(0, 100),
-      recipientCount: smsNeeded,
-    });
+      // Historique
+      const txId = Date.now().toString();
+      await firestorePatch(token, 'sms_credits/' + uid + '/history/' + txId, {
+        type: 'send',
+        campagneId: campagneId || '',
+        smsSent: results.sent,
+        smsFailed: results.failed,
+        date: new Date().toISOString().slice(0, 10),
+        message: message.slice(0, 100),
+      });
 
-    console.log('✅ SMS envoyés:', smsNeeded, '| solde restant:', newCredits);
-    return res.status(200).json({ success: true, sent: smsNeeded, remaining: newCredits });
+      console.log('✅ SMS envoyés:', results.sent, '| solde restant:', newCredits);
+      return res.status(200).json({ success: true, sent: results.sent, failed: results.failed, remaining: newCredits, errors: results.errors });
+    } else {
+      return res.status(500).json({ error: 'Aucun SMS envoyé', details: results.errors });
+    }
+
   } catch (err) {
-    console.error('Erreur send-sms:', err);
+    console.error('Erreur:', err.message);
     return res.status(500).json({ error: err.message });
   }
 };
