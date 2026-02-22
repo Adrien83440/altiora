@@ -380,7 +380,7 @@ function defaultData(year, month) {
   var days = new Date(year, month + 1, 0).getDate();
   return {
     ca: Array.from({length: days}, function(_, i) {
-      return {date: (i+1) + '/' + (month+1) + '/' + year, montantHT: '', tvaRate: 20};
+      return {date: (i+1) + '/' + (month+1) + '/' + year, ht055: '', ht10: '', ht20: ''};
     }),
     rentreesSupp: [
       {type:'Aides / subventions', montant:''},
@@ -410,7 +410,21 @@ async function loadMonth() {
       var snap = await window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', key));
       if (snap.exists()) {
         var s = snap.data();
-        if (s.ca          && s.ca.length === data.ca.length) data.ca = s.ca;
+        if (s.ca && s.ca.length === data.ca.length) {
+          // Migration: ancienne structure {montantHT, tvaRate} → nouvelle {ht055, ht10, ht20}
+          data.ca = s.ca.map(function(r, i) {
+            if (r.ht055 !== undefined || r.ht10 !== undefined || r.ht20 !== undefined) return r;
+            // Ancienne ligne: ventiler dans la colonne correspondant au taux
+            var migrated = {date: r.date || data.ca[i].date, ht055: '', ht10: '', ht20: ''};
+            if (r.montantHT && parseFloat(r.montantHT) > 0) {
+              var rate = parseFloat(r.tvaRate) || 20;
+              if (rate === 5.5) migrated.ht055 = r.montantHT;
+              else if (rate === 10) migrated.ht10 = r.montantHT;
+              else migrated.ht20 = r.montantHT;
+            }
+            return migrated;
+          });
+        }
         if (s.rentreesSupp)  data.rentreesSupp = s.rentreesSupp;
         if (s.previsionCA)   data.previsionCA  = s.previsionCA;
         if (s.chargesFixe)   data.chargesFixe  = s.chargesFixe;
@@ -456,9 +470,9 @@ function renderPage(data, month) {
       '<div class="section-card">' +
         '<div class="section-head"><div class="section-title">📅 CA Journalier HT <span class="section-title-badge badge-blue">' + MONTHS[month] + ' ' + window._year + '</span></div></div>' +
         '<table class="data-table">' +
-          '<thead><tr><th>Date</th><th>Montant HT</th><th>TVA %</th><th>Total TTC</th><th>TVA collectée</th></tr></thead>' +
+          '<thead><tr><th>Date</th><th style="color:#10b981">HT 5,5%</th><th style="color:#f97316">HT 10%</th><th style="color:#4f7ef8">HT 20%</th><th>Total HT</th><th>Total TTC</th><th>TVA collectée</th></tr></thead>' +
           '<tbody id="ca-tbody">' + renderCARows(data.ca) + '</tbody>' +
-          '<tfoot><tr><td>TOTAL</td><td><span id="tot-caHT">' + fmtN(t.caHT) + '</span> €</td><td>—</td><td><span id="tot-caTTC">' + fmtN(t.caTTC) + '</span> €</td><td><span id="tot-tvaC">' + fmtN(t.tvaCollectee) + '</span> €</td></tr></tfoot>' +
+          '<tfoot><tr><td>TOTAL</td><td>—</td><td>—</td><td>—</td><td><span id="tot-caHT">' + fmtN(t.caHT) + '</span> €</td><td><span id="tot-caTTC">' + fmtN(t.caTTC) + '</span> €</td><td><span id="tot-tvaC">' + fmtN(t.tvaCollectee) + '</span> €</td></tr></tfoot>' +
         '</table>' +
       '</div>' +
       '<div style="display:flex;flex-direction:column;gap:16px;">' +
@@ -545,13 +559,20 @@ function renderPage(data, month) {
 /* ─── RENDERERS ─── */
 function renderCARows(rows) {
   return rows.map(function(r, i) {
-    var ht = parseFloat(r.montantHT) || 0;
+    var h055 = parseFloat(r.ht055) || 0;
+    var h10  = parseFloat(r.ht10)  || 0;
+    var h20  = parseFloat(r.ht20)  || 0;
+    var totalHT  = h055 + h10 + h20;
+    var totalTTC = h055*1.055 + h10*1.10 + h20*1.20;
+    var totalTVA = h055*0.055 + h10*0.10  + h20*0.20;
     return '<tr>' +
-      '<td><span style="font-size:12px;color:var(--muted)">' + r.date + '</span></td>' +
-      '<td><input class="cell-input" style="width:85px" type="number" placeholder="0.00" value="' + r.montantHT + '" oninput="updateCA(' + i + ',\'montantHT\',this.value)"/></td>' +
-      '<td><select class="cell-input" style="width:65px" onchange="updateCA(' + i + ',\'tvaRate\',this.value)">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + (r.tvaRate==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select></td>' +
-      '<td><span class="cell-readonly blue">' + (ht ? fmtN(ht * (1 + r.tvaRate/100)) : '—') + '</span></td>' +
-      '<td><span class="cell-readonly green">' + (ht ? fmtN(ht * r.tvaRate/100) : '—') + '</span></td>' +
+      '<td><span style="font-size:11px;color:var(--muted)">' + r.date + '</span></td>' +
+      '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + (r.ht055||'') + '" oninput="updateCA(' + i + ',\'ht055\',this.value)"/></td>' +
+      '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + (r.ht10||'') + '" oninput="updateCA(' + i + ',\'ht10\',this.value)"/></td>' +
+      '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + (r.ht20||'') + '" oninput="updateCA(' + i + ',\'ht20\',this.value)"/></td>' +
+      '<td><span class="cell-readonly blue">' + (totalHT  ? fmtN(totalHT)  : '—') + '</span></td>' +
+      '<td><span class="cell-readonly blue">' + (totalTTC ? fmtN(totalTTC) : '—') + '</span></td>' +
+      '<td><span class="cell-readonly green">' + (totalTVA ? fmtN(totalTVA) : '—') + '</span></td>' +
     '</tr>';
   }).join('');
 }
@@ -630,15 +651,19 @@ function renderCredits(rows) {
 
 /* ─── ACTIONS ─── */
 function updateCA(i, field, value) {
-  _data.ca[i][field] = field === 'tvaRate' ? parseFloat(value) : value;
-  var ht   = parseFloat(_data.ca[i].montantHT) || 0;
-  var rate = _data.ca[i].tvaRate;
-  var row  = document.querySelector('#ca-tbody tr:nth-child(' + (i+1) + ')');
+  _data.ca[i][field] = value;
+  var h055 = parseFloat(_data.ca[i].ht055) || 0;
+  var h10  = parseFloat(_data.ca[i].ht10)  || 0;
+  var h20  = parseFloat(_data.ca[i].ht20)  || 0;
+  var totalHT  = h055 + h10 + h20;
+  var totalTTC = h055*1.055 + h10*1.10 + h20*1.20;
+  var totalTVA = h055*0.055 + h10*0.10  + h20*0.20;
+  var row = document.querySelector('#ca-tbody tr:nth-child(' + (i+1) + ')');
   if (row) {
-    var ttcEl = row.querySelectorAll('.cell-readonly')[0];
-    var tvaEl = row.querySelectorAll('.cell-readonly')[1];
-    if (ttcEl) ttcEl.textContent = ht ? fmtN(ht*(1+rate/100)) : '—';
-    if (tvaEl) tvaEl.textContent = ht ? fmtN(ht*rate/100) : '—';
+    var spans = row.querySelectorAll('.cell-readonly');
+    if (spans[0]) spans[0].textContent = totalHT  ? fmtN(totalHT)  : '—';
+    if (spans[1]) spans[1].textContent = totalTTC ? fmtN(totalTTC) : '—';
+    if (spans[2]) spans[2].textContent = totalTVA ? fmtN(totalTVA) : '—';
   }
   refreshTotals();
 }
@@ -728,9 +753,15 @@ async function duplicateFixeLine(i) {
 
 /* ─── CALCULS ─── */
 function calcTotals(data) {
-  var caHT = data.ca.reduce(function(s,r){return s+(parseFloat(r.montantHT)||0);},0);
-  var caTTC = data.ca.reduce(function(s,r){var h=parseFloat(r.montantHT)||0;return s+h*(1+r.tvaRate/100);},0);
-  var tvaCollectee = data.ca.reduce(function(s,r){var h=parseFloat(r.montantHT)||0;return s+h*r.tvaRate/100;},0);
+  var caHT = data.ca.reduce(function(s,r){
+    return s+(parseFloat(r.ht055)||0)+(parseFloat(r.ht10)||0)+(parseFloat(r.ht20)||0);
+  },0);
+  var caTTC = data.ca.reduce(function(s,r){
+    return s+(parseFloat(r.ht055)||0)*1.055+(parseFloat(r.ht10)||0)*1.10+(parseFloat(r.ht20)||0)*1.20;
+  },0);
+  var tvaCollectee = data.ca.reduce(function(s,r){
+    return s+(parseFloat(r.ht055)||0)*0.055+(parseFloat(r.ht10)||0)*0.10+(parseFloat(r.ht20)||0)*0.20;
+  },0);
   var rentreesSupp = data.rentreesSupp.reduce(function(s,r){return s+(parseFloat(r.montant)||0);},0);
   var prevCA = data.previsionCA.reduce(function(s,r){return s+(parseFloat(r.montant)||0);},0);
   var fixesHT=0,fixesTTC=0,fixesTVA=0;
