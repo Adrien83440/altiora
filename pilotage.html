@@ -167,6 +167,51 @@
   @media(max-width:480px){
     .summary-grid{grid-template-columns:1fr}
   }
+
+/* ─── MONTH PICKER CUSTOM ─── */
+.mp-wrap { position:relative; display:inline-block; }
+.mp-display {
+  display:flex; align-items:center; gap:6px;
+  padding:4px 10px; border-radius:8px; border:1px solid var(--border);
+  background:#fff; cursor:pointer; font-size:12px; font-weight:600;
+  color:var(--text); min-width:110px; white-space:nowrap;
+  transition:border-color .15s;
+}
+.mp-display:hover { border-color:var(--blue-main); }
+.mp-display .mp-icon { color:var(--blue-main); font-size:14px; }
+.mp-display.empty { color:var(--muted); font-weight:400; }
+.mp-popup {
+  position:fixed; z-index:9999;
+  background:#fff; border-radius:14px; border:1px solid var(--border);
+  box-shadow:0 8px 32px rgba(0,0,0,.15);
+  padding:12px; width:240px;
+  display:none;
+}
+.mp-popup.open { display:block; }
+.mp-header {
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:10px;
+}
+.mp-year-btn {
+  background:none; border:none; cursor:pointer; font-size:18px;
+  color:var(--muted); padding:2px 8px; border-radius:6px;
+  transition:background .1s;
+}
+.mp-year-btn:hover { background:var(--hover); }
+.mp-year-label { font-weight:700; font-size:14px; color:var(--text); }
+.mp-months { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+.mp-month-btn {
+  padding:7px 4px; border-radius:8px; border:none; cursor:pointer;
+  font-size:12px; font-weight:500; background:var(--hover);
+  color:var(--text); transition:all .15s;
+}
+.mp-month-btn:hover { background:#dbeafe; color:var(--blue-main); }
+.mp-month-btn.selected { background:var(--blue-main); color:#fff; font-weight:700; }
+.mp-month-btn.in-range { background:#dbeafe; color:var(--blue-main); }
+.mp-clear { display:block; width:100%; margin-top:8px; padding:5px; border:none;
+  background:none; color:var(--muted); font-size:11px; cursor:pointer;
+  border-top:1px solid var(--border); }
+.mp-clear:hover { color:var(--red); }
 </style>
 </head>
 <body>
@@ -739,9 +784,9 @@ function renderCharges(rows, key) {
       '<td><select class="cell-input" style="width:55px" onchange="updateChargeTVARate(\'' + key + '\',' + i + ',this.value)">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + (rate==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select></td>' +
       '<td><input class="cell-input" style="width:76px" type="text" inputmode="decimal" placeholder="TTC" value="' + (ttc>0?ttc.toFixed(2):'') + '" id="' + key + '-ttc-' + i + '" oninput="updateChargeTTC(\'' + key + '\',' + i + ',this.value)"/></td>' +
       '<td><select class="cell-input" style="width:55px" onchange="_data[\'' + key + '\'][' + i + '].deductible=this.value;refreshTotals()"><option' + (r.deductible==='Oui'?' selected':'') + '>Oui</option><option' + (r.deductible==='Non'?' selected':'') + '>Non</option></select></td>' +
-      (key==='leasing' ? '<td style="white-space:nowrap">' +
-        '<input class="cell-input" type="month" style="width:115px;font-size:11px" title="Début" value="' + (r.dateDebut||'') + '" onchange="_data[\'' + key + '\'][' + i + '].dateDebut=this.value;scheduleSave()"/>' +
-        '<input class="cell-input" type="month" style="width:115px;font-size:11px;margin-top:3px" title="Fin" value="' + (r.dateFin||'') + '" onchange="_data[\'' + key + '\'][' + i + '].dateFin=this.value;scheduleSave()"/>' +
+      (key==='leasing' ? '<td style="white-space:nowrap;min-width:130px">' +
+        mpHtml('mpL-'+i+'-deb','leasing',i,'dateDebut',r.dateDebut||'') +
+        '<div style="margin-top:4px">' + mpHtml('mpL-'+i+'-fin','leasing',i,'dateFin',r.dateFin||'') + '</div>' +
       '</td>' : '') +
       '<td style="white-space:nowrap;display:flex;gap:4px;align-items:center;padding:5px 7px;">' +
         (isFixe ? '<button class="btn btn-orange btn-sm" style="font-size:10px;padding:3px 8px;" onclick="duplicateFixeLine(' + i + ')">⚡ Année</button>' : '') +
@@ -777,9 +822,9 @@ function renderCredits(rows) {
       '<td>' + (!isPrincipal ? '<input class="cell-input" style="width:65px" type="text" inputmode="decimal" placeholder="%" value="' + (r.tauxInteret||'') + '" oninput="updateCreditTaux(' + i + ',this.value)"/>' : '<span style="color:var(--muted);font-size:12px">—</span>') + '</td>' +
       '<td>' + (!isPrincipal ? '<select class="cell-input" style="width:58px" onchange="_data.credits[' + i + '].tvaRate=parseFloat(this.value);refreshCreditsCalc()">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + ((r.tvaRate||20)==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select>' : '<span style="color:var(--muted);font-size:12px">Sans TVA</span>') + '</td>' +
       '<td><span class="cell-readonly ' + (isPrincipal?'':'green') + '" id="cred-tva-' + i + '">' + (isPrincipal ? '—' : fmtN(tvaAmount) + ' €') + '</span></td>' +
-      '<td style="white-space:nowrap">' +
-        '<input class="cell-input" type="month" style="width:120px;font-size:11px" title="Début" value="' + (r.dateDebut||'') + '" onchange="updateCreditField(' + i + ',\'dateDebut\',this.value)"/>' +
-        '<input class="cell-input" type="month" style="width:120px;font-size:11px;margin-top:3px" title="Fin" value="' + (r.dateFin||'') + '" onchange="updateCreditField(' + i + ',\'dateFin\',this.value)"/>' +
+      '<td style="white-space:nowrap;min-width:130px">' +
+        mpHtml('mpC-'+i+'-deb','credit',i,'dateDebut',r.dateDebut||'') +
+        '<div style="margin-top:4px">' + mpHtml('mpC-'+i+'-fin','credit',i,'dateFin',r.dateFin||'') + '</div>' +
       '</td>' +
       '<td style="white-space:nowrap">' +
         (isPrincipal ? '<button class="btn btn-orange btn-sm" style="font-size:10px" onclick="propagateCredit(' + i + ')">⚡ Propager</button>' : '') +
@@ -822,13 +867,12 @@ async function propagateCredit(i) {
   var start = r.dateDebut; // 'YYYY-MM'
   var end   = r.dateFin;
   var count = 0;
-  // Générer tous les mois entre start et end
-  var cur = new Date(start + '-01');
-  var endDate = new Date(end + '-01');
-  while (cur <= endDate) {
-    var key = cur.getFullYear() + '-' + String(cur.getMonth()+1).padStart(2,'0');
-    var curM = cur.getMonth();
-    var curY = cur.getFullYear();
+  // Générer tous les mois entre start et end (UTC pour éviter décalage)
+  var startParts = start.split('-'); var endParts = end.split('-');
+  var curY = parseInt(startParts[0]), curM = parseInt(startParts[1])-1;
+  var endY = parseInt(endParts[0]),   endM = parseInt(endParts[1])-1;
+  while (curY < endY || (curY === endY && curM <= endM)) {
+    var key = curY + '-' + String(curM+1).padStart(2,'0');
     try {
       var snap = await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
       var md = defaultData(curY, curM);
@@ -846,7 +890,7 @@ async function propagateCredit(i) {
       await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md);
       count++;
     } catch(e) { console.warn('propagateCredit erreur', key, e); }
-    cur.setMonth(cur.getMonth()+1);
+    curM++; if(curM>11){curM=0;curY++;}
   }
   showToast('⚡ Crédit propagé sur ' + count + ' mois', 'success');
 }
@@ -858,12 +902,11 @@ async function propagateLeasing(i) {
   var start = r.dateDebut;
   var end   = r.dateFin;
   var count = 0;
-  var cur = new Date(start + '-01');
-  var endDate = new Date(end + '-01');
-  while (cur <= endDate) {
-    var key = cur.getFullYear() + '-' + String(cur.getMonth()+1).padStart(2,'0');
-    var curM = cur.getMonth();
-    var curY = cur.getFullYear();
+  var startParts = start.split('-'); var endParts = end.split('-');
+  var curY = parseInt(startParts[0]), curM = parseInt(startParts[1])-1;
+  var endY = parseInt(endParts[0]),   endM = parseInt(endParts[1])-1;
+  while (curY < endY || (curY === endY && curM <= endM)) {
+    var key = curY + '-' + String(curM+1).padStart(2,'0');
     try {
       var snap = await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
       var md = defaultData(curY, curM);
@@ -879,7 +922,7 @@ async function propagateLeasing(i) {
       await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md);
       count++;
     } catch(e) { console.warn('propagateLeasing erreur', key, e); }
-    cur.setMonth(cur.getMonth()+1);
+    curM++; if(curM>11){curM=0;curY++;}
   }
   showToast('⚡ Leasing propagé sur ' + count + ' mois', 'success');
 }
@@ -1238,6 +1281,156 @@ async function handleLogout() {
 }
 </script>
 <script src="nav.js"></script>
+<script>
+
+/* ─── MONTH PICKER CUSTOM ─── */
+var _mpActive = null; // {wrapperId, field, rowType, rowIdx}
+
+var MP_MONTHS = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+
+function mpOpen(wrapperId, field, rowType, rowIdx) {
+  // Fermer l'éventuel picker ouvert
+  if (_mpActive) mpClose();
+  var wrap = document.getElementById(wrapperId);
+  if (!wrap) return;
+  var popup = wrap.querySelector('.mp-popup');
+  if (!popup) return;
+  // Lire valeur courante
+  var val = _mpGetVal(rowType, rowIdx, field); // 'YYYY-MM' ou ''
+  var curYear  = val ? parseInt(val.split('-')[0]) : new Date().getFullYear();
+  var curMonth = val ? parseInt(val.split('-')[1]) - 1 : -1; // 0-based ou -1
+  popup.dataset.year  = curYear;
+  popup.dataset.month = curMonth;
+  popup.dataset.field    = field;
+  popup.dataset.rowType  = rowType;
+  popup.dataset.rowIdx   = rowIdx;
+  // Positionner le popup sous le trigger
+  var display = wrap.querySelector('.mp-display');
+  var rect = display.getBoundingClientRect();
+  popup.style.top  = (rect.bottom + window.scrollY + 4) + 'px';
+  popup.style.left = rect.left + 'px';
+  mpRender(popup, curYear, curMonth, rowType, rowIdx, field);
+  popup.classList.add('open');
+  _mpActive = wrapperId;
+}
+
+function mpClose() {
+  if (!_mpActive) return;
+  var wrap = document.getElementById(_mpActive);
+  if (wrap) { var p = wrap.querySelector('.mp-popup'); if(p) p.classList.remove('open'); }
+  _mpActive = null;
+}
+
+function mpRender(popup, year, selMonth, rowType, rowIdx, field) {
+  // Récupérer la plage pour colorier in-range
+  var startVal = _mpGetVal(rowType, rowIdx, 'dateDebut');
+  var endVal   = _mpGetVal(rowType, rowIdx, 'dateFin');
+  var startY = startVal ? parseInt(startVal.split('-')[0]) : null;
+  var startM = startVal ? parseInt(startVal.split('-')[1])-1 : null;
+  var endY   = endVal   ? parseInt(endVal.split('-')[0])   : null;
+  var endM   = endVal   ? parseInt(endVal.split('-')[1])-1 : null;
+
+  var html = '<div class="mp-header">' +
+    '<button class="mp-year-btn" onclick="mpChangeYear(' + (year-1) + ',this)">‹</button>' +
+    '<span class="mp-year-label">' + year + '</span>' +
+    '<button class="mp-year-btn" onclick="mpChangeYear(' + (year+1) + ',this)">›</button>' +
+  '</div><div class="mp-months">';
+
+  for (var m = 0; m < 12; m++) {
+    var isSel = (m === selMonth);
+    var isInRange = false;
+    if (startY !== null && endY !== null) {
+      var curAbs = year*12+m, sAbs = startY*12+startM, eAbs = endY*12+endM;
+      isInRange = curAbs >= sAbs && curAbs <= eAbs;
+    }
+    var cls = 'mp-month-btn' + (isSel?' selected':isInRange?' in-range':'');
+    html += '<button class="' + cls + '" onclick="mpSelect(' + year + ',' + m + ',this)">' + MP_MONTHS[m] + '</button>';
+  }
+  html += '</div><button class="mp-clear" onclick="mpClear(this)">✕ Effacer</button>';
+  // Vider sauf le trigger display et le popup lui-même
+  popup.innerHTML = html;
+}
+
+function mpChangeYear(newYear, btn) {
+  var popup = btn.closest('.mp-popup');
+  var selMonth = parseInt(popup.dataset.month);
+  var field   = popup.dataset.field;
+  var rowType = popup.dataset.rowType;
+  var rowIdx  = parseInt(popup.dataset.rowIdx);
+  popup.dataset.year = newYear;
+  mpRender(popup, newYear, selMonth, rowType, rowIdx, field);
+}
+
+function mpSelect(year, month, btn) {
+  var popup = btn.closest('.mp-popup');
+  var field   = popup.dataset.field;
+  var rowType = popup.dataset.rowType;
+  var rowIdx  = parseInt(popup.dataset.rowIdx);
+  var val = year + '-' + String(month+1).padStart(2,'0');
+  popup.dataset.month = month;
+  _mpSetVal(rowType, rowIdx, field, val);
+  // Mettre à jour le display
+  var wrap = popup.closest('.mp-wrap');
+  if (wrap) {
+    var disp = wrap.querySelector('.mp-display');
+    if (disp) {
+      disp.classList.remove('empty');
+      disp.innerHTML = '<span class="mp-icon">📅</span>' + MP_MONTHS[month] + ' ' + year;
+    }
+  }
+  mpRender(popup, year, month, rowType, rowIdx, field);
+  scheduleSave();
+  refreshTotals();
+  // Si on vient de définir début, rafraîchir aussi la vue fin pour colorier la plage
+  mpClose();
+}
+
+function mpClear(btn) {
+  var popup = btn.closest('.mp-popup');
+  var field   = popup.dataset.field;
+  var rowType = popup.dataset.rowType;
+  var rowIdx  = parseInt(popup.dataset.rowIdx);
+  _mpSetVal(rowType, rowIdx, field, '');
+  var wrap = popup.closest('.mp-wrap');
+  if (wrap) {
+    var disp = wrap.querySelector('.mp-display');
+    if (disp) { disp.classList.add('empty'); disp.innerHTML = '<span class="mp-icon">📅</span>' + (field==='dateDebut'?'Début':'Fin'); }
+  }
+  popup.dataset.month = -1;
+  mpRender(popup, parseInt(popup.dataset.year), -1, rowType, rowIdx, field);
+  scheduleSave();
+  mpClose();
+}
+
+function _mpGetVal(rowType, rowIdx, field) {
+  if (rowType === 'credit')  return (_data.credits[rowIdx]  && _data.credits[rowIdx][field])  || '';
+  if (rowType === 'leasing') return (_data.leasing[rowIdx]  && _data.leasing[rowIdx][field])  || '';
+  return '';
+}
+function _mpSetVal(rowType, rowIdx, field, val) {
+  if (rowType === 'credit')  { if(_data.credits[rowIdx])  _data.credits[rowIdx][field]  = val; }
+  if (rowType === 'leasing') { if(_data.leasing[rowIdx])  _data.leasing[rowIdx][field]  = val; }
+}
+
+// Fermer si clic extérieur
+document.addEventListener('click', function(e) {
+  if (!_mpActive) return;
+  var wrap = document.getElementById(_mpActive);
+  if (wrap && !wrap.contains(e.target)) mpClose();
+});
+
+function mpHtml(wrapperId, rowType, rowIdx, field, val) {
+  var label = val ? (MP_MONTHS[parseInt(val.split('-')[1])-1] + ' ' + val.split('-')[0]) : (field==='dateDebut'?'Début':'Fin');
+  var isEmpty = !val;
+  return '<div class="mp-wrap" id="' + wrapperId + '">' +
+    '<div class="mp-display' + (isEmpty?' empty':'') + '" onclick="mpOpen(\'' + wrapperId + '\',\'' + field + '\',\'' + rowType + '\',' + rowIdx + ')">' +
+      '<span class="mp-icon">📅</span>' + label +
+    '</div>' +
+    '<div class="mp-popup"></div>' +
+  '</div>';
+}
+
+</script>
 <script>
 /* ─── AUTOSAVE ─── */
 var _saveTimer = null;
