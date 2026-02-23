@@ -212,6 +212,37 @@
   background:none; color:var(--muted); font-size:11px; cursor:pointer;
   border-top:1px solid var(--border); }
 .mp-clear:hover { color:var(--red); }
+
+/* ── FOURNISSEURS ── */
+.sugg-wrap { position:relative; display:inline-block; }
+.sugg-list {
+  display:none; position:absolute; top:100%; left:0; z-index:500;
+  background:#fff; border:1px solid var(--border); border-radius:8px;
+  box-shadow:0 4px 16px rgba(0,0,0,.1); min-width:180px; max-width:260px;
+  max-height:180px; overflow-y:auto; font-size:12px;
+}
+.sugg-list.show { display:block; }
+.sugg-item {
+  padding:7px 12px; cursor:pointer; white-space:nowrap; overflow:hidden;
+  text-overflow:ellipsis; transition:.1s;
+}
+.sugg-item:hover, .sugg-item.focused { background:var(--blue-ghost); color:var(--blue-main); }
+.sugg-item-save {
+  padding:6px 12px; cursor:pointer; font-size:11px; color:var(--blue-main);
+  font-weight:600; border-top:1px solid var(--border); background:#f8f9fd;
+  border-radius:0 0 8px 8px;
+}
+.sugg-item-save:hover { background:rgba(79,126,248,.08); }
+#suppliersModal .modal { max-width:480px; width:90%; }
+.sup-list-item {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:7px 10px; border-radius:8px; border:1px solid var(--border);
+  background:#f8f9fd; font-size:13px; gap:8px; margin-bottom:6px;
+}
+.sup-list-item button { background:none; border:none; color:var(--red); cursor:pointer; font-size:14px; padding:2px 4px; }
+.sup-list-item button:hover { background:#fef2f2; border-radius:6px; }
+#suppliersModal .sup-add-row { display:flex; gap:8px; margin-bottom:14px; }
+#suppliersModal .sup-add-row input { flex:1; }
 </style>
 </head>
 <body>
@@ -280,6 +311,7 @@
         <option value="10">Novembre</option><option value="11">Décembre</option>
       </select>
       <button class="btn btn-orange btn-sm" onclick="openFixedModal()">⚡ Charges fixes → Année</button>
+      <button class="btn btn-outline btn-sm" onclick="openSuppliersModal()" title="Gérer mes fournisseurs">📋 Fournisseurs</button>
       <button class="btn btn-primary" onclick="saveAll()">💾 Sauvegarder</button>
     </div>
   </div>
@@ -288,6 +320,22 @@
   </div>
 </div>
 
+
+<!-- MODAL FOURNISSEURS -->
+<div class="modal-overlay" id="suppliersModal" style="display:none">
+  <div class="modal" style="max-width:480px;width:90%">
+    <h3 style="margin-bottom:6px">📋 Mes fournisseurs</h3>
+    <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Sauvegardez vos fournisseurs récurrents pour les retrouver en suggestion lors de la saisie.</p>
+    <div class="sup-add-row">
+      <input type="text" id="sup-new-input" class="cell-input" placeholder="Nom du fournisseur…" style="font-size:13px;padding:8px 12px;width:100%" onkeydown="if(event.key==='Enter')addSupplierFromModal()"/>
+      <button class="btn btn-primary btn-sm" onclick="addSupplierFromModal()">+ Ajouter</button>
+    </div>
+    <div id="sup-modal-list" style="max-height:280px;overflow-y:auto"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-outline btn-sm" onclick="closeSuppliersModal()">Fermer</button>
+    </div>
+  </div>
+</div>
 
 <!-- MODAL PORTÉE (suppr / modif prix) -->
 <div class="modal-overlay" id="scopeModal">
@@ -868,7 +916,7 @@ function renderCharges(rows, key) {
     var ttc = ht > 0 ? ht * (1 + rate/100) : 0;
     return '<tr>' +
       '<td><select class="cell-input" style="width:55px" onchange="_data[\'' + key + '\'][' + i + '].pointe=this.value"><option' + (r.pointe==='Oui'?' selected':'') + '>Oui</option><option' + (r.pointe==='Non'?' selected':'') + '>Non</option></select></td>' +
-      '<td><input class="cell-input" style="width:95px" placeholder="Fournisseur" value="' + (r.fournisseur||'') + '" oninput="_data[\'' + key + '\'][' + i + '].fournisseur=this.value"/></td>' +
+      '<td>' + supplierInputHtml(key, i, r.fournisseur||'') + '</td>' +
       '<td><input class="cell-input" style="width:95px" placeholder="Type" value="' + (r.type||'') + '" oninput="_data[\'' + key + '\'][' + i + '].type=this.value"/></td>' +
       '<td><input class="cell-input" style="width:76px" type="text" inputmode="decimal" placeholder="HT" value="' + (r.montantHT||'') + '" id="' + key + '-ht-' + i + '" oninput="updateChargeHT(\'' + key + '\',' + i + ',this.value)"/></td>' +
       '<td><select class="cell-input" style="width:55px" onchange="updateChargeTVARate(\'' + key + '\',' + i + ',this.value)">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + (rate==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select></td>' +
@@ -1734,6 +1782,213 @@ function mpHtml(wrapperId, rowType, rowIdx, field, val) {
   '</div>';
 }
 
+</script>
+<script>
+/* ─── FOURNISSEURS SAUVEGARDÉS ─── */
+var _suppliers = []; // liste en mémoire
+var _sugg_focused = -1;
+
+/* ── Charger depuis Firestore ── */
+async function loadSuppliers() {
+  if (!window._uid || !window._getDoc || !window._db) return;
+  try {
+    var snap = await window._getDoc(window._doc(window._db, 'suppliers', window._uid));
+    if (snap.exists()) {
+      _suppliers = (snap.data().list || []).filter(Boolean);
+    }
+  } catch(e) { console.warn('loadSuppliers error:', e); }
+  // Enrichir avec les fournisseurs déjà dans les données du mois courant
+  _enrichSuppliersFromData(_data);
+}
+
+function _enrichSuppliersFromData(data) {
+  var fields = ['chargesFixe','chargesVar','leasing'];
+  fields.forEach(function(k) {
+    (data[k] || []).forEach(function(r) {
+      if (r.fournisseur && r.fournisseur.trim()) _addToMemory(r.fournisseur.trim());
+    });
+  });
+  (data.credits || []).forEach(function(r) {
+    if (r.fournisseur && r.fournisseur.trim()) _addToMemory(r.fournisseur.trim());
+  });
+}
+
+function _addToMemory(name) {
+  if (!name) return;
+  var n = name.trim();
+  if (!n) return;
+  if (!_suppliers.some(function(s){ return s.toLowerCase() === n.toLowerCase(); })) {
+    _suppliers.push(n);
+  }
+}
+
+/* ── Persister dans Firestore ── */
+async function _persistSuppliers() {
+  if (!window._uid || !window._setDoc || !window._db) return;
+  try {
+    await window._setDoc(
+      window._doc(window._db, 'suppliers', window._uid),
+      { list: _suppliers }
+    );
+  } catch(e) { console.warn('_persistSuppliers error:', e); }
+}
+
+/* ── HTML du champ fournisseur avec autocomplétion ── */
+function supplierInputHtml(key, i, value) {
+  var uid = key + '-sup-' + i;
+  return '<div class="sugg-wrap" id="wrap-' + uid + '" style="position:relative">' +
+    '<input class="cell-input" style="width:95px" placeholder="Fournisseur" value="' + (value||'').replace(/"/g,'&quot;') + '" autocomplete="off"' +
+      ' id="inp-' + uid + '"' +
+      ' oninput="onSupplierInput(this,\'' + key + '\',' + i + ')"' +
+      ' onfocus="onSupplierFocus(this,\'' + key + '\',' + i + ')"' +
+      ' onkeydown="onSupplierKey(event,\'' + uid + '\')"' +
+      ' onblur="hideSupplierSugg(\'' + uid + '\')"' +
+    '/>' +
+    '<div class="sugg-list" id="sugg-' + uid + '"></div>' +
+  '</div>';
+}
+
+/* ── Input handler ── */
+function onSupplierInput(inp, key, i) {
+  _data[key][i].fournisseur = inp.value;
+  showSupplierSugg(inp, key + '-sup-' + i, inp.value);
+}
+
+function onSupplierFocus(inp, key, i) {
+  showSupplierSugg(inp, key + '-sup-' + i, inp.value);
+}
+
+function showSupplierSugg(inp, uid, val) {
+  var list = document.getElementById('sugg-' + uid);
+  if (!list) return;
+  var q = (val || '').trim().toLowerCase();
+  var matches = _suppliers.filter(function(s) {
+    return !q || s.toLowerCase().startsWith(q) || s.toLowerCase().includes(q);
+  }).slice(0, 8);
+
+  if (matches.length === 0 && !q) { list.classList.remove('show'); return; }
+
+  var html = matches.map(function(s, idx) {
+    return '<div class="sugg-item" onmousedown="pickSupplier(\'' + uid + '\',\'' + s.replace(/'/g,"\\'") + '\')">' + s + '</div>';
+  }).join('');
+
+  // Option "Enregistrer ce fournisseur" si la valeur actuelle est non vide et pas encore dans la liste
+  if (q && !_suppliers.some(function(s){ return s.toLowerCase() === q; })) {
+    html += '<div class="sugg-item-save" onmousedown="saveCurrentSupplier(\'' + uid + '\',\'' + inp.value.replace(/'/g,"\\'") + '\')">💾 Enregistrer « ' + inp.value + ' »</div>';
+  }
+
+  if (!html) { list.classList.remove('show'); return; }
+  list.innerHTML = html;
+  list.classList.add('show');
+  _sugg_focused = -1;
+}
+
+function pickSupplier(uid, name) {
+  var inp = document.getElementById('inp-' + uid);
+  if (!inp) return;
+  inp.value = name;
+  // Déclencher l'update dans _data
+  inp.dispatchEvent(new Event('input', {bubbles:true}));
+  hideSupplierSugg(uid);
+}
+
+function saveCurrentSupplier(uid, name) {
+  if (!name || !name.trim()) return;
+  _addToMemory(name.trim());
+  _persistSuppliers();
+  showToast('✓ Fournisseur « ' + name + ' » enregistré', 'success');
+  var list = document.getElementById('sugg-' + uid);
+  if (list) list.classList.remove('show');
+}
+
+function hideSupplierSugg(uid) {
+  setTimeout(function() {
+    var list = document.getElementById('sugg-' + uid);
+    if (list) list.classList.remove('show');
+  }, 150);
+}
+
+function onSupplierKey(e, uid) {
+  var list = document.getElementById('sugg-' + uid);
+  if (!list || !list.classList.contains('show')) return;
+  var items = list.querySelectorAll('.sugg-item');
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    _sugg_focused = Math.min(_sugg_focused + 1, items.length - 1);
+    items.forEach(function(it,j){ it.classList.toggle('focused', j===_sugg_focused); });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    _sugg_focused = Math.max(_sugg_focused - 1, 0);
+    items.forEach(function(it,j){ it.classList.toggle('focused', j===_sugg_focused); });
+  } else if (e.key === 'Enter' && _sugg_focused >= 0 && items[_sugg_focused]) {
+    e.preventDefault();
+    items[_sugg_focused].dispatchEvent(new MouseEvent('mousedown'));
+  } else if (e.key === 'Escape') {
+    list.classList.remove('show');
+  }
+}
+
+/* ── Modal gestion fournisseurs ── */
+function openSuppliersModal() {
+  renderSuppliersModalList();
+  var m = document.getElementById('suppliersModal');
+  m.style.display = 'flex';
+  setTimeout(function(){ document.getElementById('sup-new-input').focus(); }, 100);
+}
+
+function closeSuppliersModal() {
+  document.getElementById('suppliersModal').style.display = 'none';
+}
+
+function renderSuppliersModalList() {
+  var el = document.getElementById('sup-modal-list');
+  if (!_suppliers.length) {
+    el.innerHTML = '<p style="font-size:13px;color:var(--muted);text-align:center;padding:20px">Aucun fournisseur enregistré.</p>';
+    return;
+  }
+  el.innerHTML = _suppliers.slice().sort(function(a,b){ return a.localeCompare(b,'fr'); }).map(function(s) {
+    return '<div class="sup-list-item">' +
+      '<span>' + s + '</span>' +
+      '<button onclick="removeSupplier(\'' + s.replace(/'/g,"\\'") + '\')" title="Supprimer">✕</button>' +
+    '</div>';
+  }).join('');
+}
+
+function addSupplierFromModal() {
+  var inp = document.getElementById('sup-new-input');
+  var name = inp.value.trim();
+  if (!name) return;
+  _addToMemory(name);
+  _persistSuppliers();
+  inp.value = '';
+  renderSuppliersModalList();
+  showToast('✓ Fournisseur ajouté', 'success');
+}
+
+function removeSupplier(name) {
+  _suppliers = _suppliers.filter(function(s){ return s !== name; });
+  _persistSuppliers();
+  renderSuppliersModalList();
+}
+
+/* ── Init : hooker le loadMonth pour charger les fournisseurs ── */
+var _origLoadMonth = typeof loadMonth === 'function' ? loadMonth : null;
+document.addEventListener('DOMContentLoaded', function() {
+  // Charger les fournisseurs au démarrage Firebase
+  var _checkFb = setInterval(function() {
+    if (window._uid && window._db) {
+      clearInterval(_checkFb);
+      loadSuppliers();
+    }
+  }, 500);
+});
+
+// Enrichir aussi après chaque chargement de mois
+var _origRenderPage = renderPage;
+renderPage = function(data, month) {
+  _origRenderPage(data, month);
+  _enrichSuppliersFromData(data);
+};
 </script>
 <script>
 /* ─── AUTOSAVE ─── */
