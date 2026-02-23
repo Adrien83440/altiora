@@ -53,6 +53,8 @@ nav{width:var(--sw);min-height:100vh;background:linear-gradient(180deg,#0f1f5c,#
 /* ── MAIN ── */
 main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
 .topbar{background:#fff;border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;gap:12px;flex-wrap:wrap}
+.toggle-mode{background:none;border:none;padding:5px 11px;border-radius:7px;font-size:11.5px;font-weight:600;cursor:pointer;color:var(--muted);transition:.15s}
+.toggle-mode.active{background:#fff;color:var(--blue);box-shadow:0 1px 4px rgba(0,0,0,.1)}
 .topbar-left h1{font-size:17px;font-weight:800;display:flex;align-items:center;gap:8px}
 .topbar-left p{font-size:11px;color:var(--muted);margin-top:2px}
 .topbar-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -212,7 +214,11 @@ main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
       <p id="topbar-sub">Analyse de la trésorerie annuelle</p>
     </div>
     <div class="topbar-right">
-      <select class="year-sel" id="yearSelect" onchange="loadYear(parseInt(this.value))"></select>
+      <div style="display:flex;align-items:center;gap:6px;background:#f4f6fb;border:1px solid #e2e8f0;border-radius:10px;padding:3px">
+        <button id="btnCivil" class="toggle-mode active" onclick="setMode('civil')">📅 Civile</button>
+        <button id="btnExerc" class="toggle-mode" onclick="setMode('exercice')">📆 Exercice</button>
+      </div>
+      <select class="year-sel" id="yearSelect" onchange="onYearChange()"></select>
       <button class="btn btn-o" onclick="location.href='pilotage.html'">📊 Pilotage</button>
     </div>
   </div>
@@ -303,6 +309,23 @@ async function handleLogout() {
   window.location.href = 'index.html';
 }
 
+/* ── MODE : civil | exercice ── */
+// Mois de début exercice (0=Jan … 4=Mai) — aligné sur suivi-CA
+var _mode = 'civil';
+var _exerciceStartMonth = 4; // Mai
+
+function setMode(mode) {
+  _mode = mode;
+  document.getElementById('btnCivil').classList.toggle('active', mode === 'civil');
+  document.getElementById('btnExerc').classList.toggle('active', mode === 'exercice');
+  onYearChange();
+}
+
+function onYearChange() {
+  const year = parseInt(document.getElementById('yearSelect').value);
+  loadYear(year);
+}
+
 /* ── INIT ── */
 function initPage() {
   const now = new Date();
@@ -320,35 +343,63 @@ function initPage() {
 /* ── CHARGER DONNÉES ── */
 async function loadYear(year) {
   window._currentYear = year;
-  document.getElementById('topbar-sub').textContent = 'Analyse de la trésorerie · Année ' + year;
+
+  // Construire la liste des 12 mois selon le mode
+  // Mode civil  : Jan→Déc de l'année sélectionnée
+  // Mode exercice : du mois de début jusqu'à mois-1 de l'année suivante
+  // ex: Mai 2025 → Avr 2026 quand exercice démarre en Mai
+  var monthKeys = [];
+  if (_mode === 'civil') {
+    for (var m = 0; m < 12; m++) {
+      monthKeys.push({ m, key: year + '-' + String(m+1).padStart(2,'0') });
+    }
+  } else {
+    // Exercice : démarre à _exerciceStartMonth (ex: 4 = Mai)
+    for (var i = 0; i < 12; i++) {
+      var absM = _exerciceStartMonth + i;
+      var y = year + Math.floor(absM / 12);
+      var m = absM % 12;
+      monthKeys.push({ m, key: y + '-' + String(m+1).padStart(2,'0') });
+    }
+  }
+
+  var moisDebut = MS[monthKeys[0].m];
+  var moisFin   = MS[monthKeys[11].m];
+  var labelPeriode = _mode === 'civil'
+    ? 'Année civile ' + year
+    : 'Exercice ' + moisDebut + ' ' + year + ' – ' + moisFin + ' ' + (year+1);
+
+  document.getElementById('topbar-sub').textContent = 'Analyse de la trésorerie · ' + labelPeriode;
   document.getElementById('main-content').innerHTML =
-    '<div class="loader-wrap"><div class="spin"></div><span style="font-size:12px;color:var(--muted)">Chargement ' + year + '…</span></div>';
+    '<div class="loader-wrap"><div class="spin"></div><span style="font-size:12px;color:var(--muted)">Chargement…</span></div>';
 
   const uid = window._uid;
   const months = [];
 
-  for (let m = 0; m < 12; m++) {
-    const key = year + '-' + String(m+1).padStart(2,'0');
+  for (var ki = 0; ki < monthKeys.length; ki++) {
+    var mk = monthKeys[ki];
     try {
-      const snap = await window._getDoc(window._doc(window._db, 'pilotage', uid, 'months', key));
-      months.push({ m, key, raw: snap.exists() ? snap.data() : null });
+      const snap = await window._getDoc(window._doc(window._db, 'pilotage', uid, 'months', mk.key));
+      months.push({ m: mk.m, key: mk.key, raw: snap.exists() ? snap.data() : null });
     } catch(e) {
-      months.push({ m, key, raw: null });
+      months.push({ m: mk.m, key: mk.key, raw: null });
     }
   }
 
   // Dettes
   let dettes = [];
   try {
-    const snap = await window._getDoc(window._doc(window._db, 'dettes', uid));
+    const snap = await window._getDoc(window._doc(window._db, 'dettes', uid, 'data', 'all'));
     if (snap.exists()) {
-      const d = snap.data();
-      dettes = (d.items || d.dettes || []).filter(x => x && (x.nom || x.montant));
+      dettes = (snap.data().list || []).filter(x => x && (x.nom || x.montant));
     }
   } catch(e) {}
 
-  const computed = months.map(({ m, key, raw }) => calcMonth(m, raw));
-  renderPage(computed, dettes, year, new Date().getFullYear() === year ? new Date().getMonth() : -1);
+  // Labels X adaptés au mode
+  var labels = monthKeys.map(function(mk) { return MS[mk.m]; });
+
+  const computed = months.map(function(mo) { return calcMonth(mo.m, mo.raw); });
+  renderPage(computed, dettes, year, labels, labelPeriode);
 }
 
 function calcMonth(m, raw) {
@@ -422,7 +473,8 @@ function calcMonth(m, raw) {
 }
 
 /* ── RENDER ── */
-function renderPage(data, dettes, year, curMonth) {
+function renderPage(data, dettes, year, labels, labelPeriode) {
+  if (!labels) labels = MS; // fallback
   const filled = data.filter(d => d.hasData);
   const totCA       = filled.reduce((s,d) => s+d.caTotal, 0);
   const totCharges  = filled.reduce((s,d) => s+d.chargesHT, 0);
@@ -526,7 +578,7 @@ function renderPage(data, dettes, year, curMonth) {
               const cv = cumulArr[i];
               const isCur = i === curMonth;
               return `<tr style="${isCur?'background:#f0f4ff;font-weight:600':''}">
-                <td style="font-weight:700">${isCur?'▶ ':''}${MS[d.m]}</td>
+                <td style="font-weight:700">${isCur?'▶ ':''}${labels[i]||MS[d.m]}</td>
                 <td class="${d.hasData?(d.caTotal>0?'pos':'neu'):'neu'}">${d.hasData?fmt(d.caTotal):'<span style="color:#d1d5db">—</span>'}</td>
                 <td class="neu">${d.hasData&&d.prevCA>0?fmt(d.prevCA):'<span style="color:#d1d5db">—</span>'}</td>
                 <td class="${d.hasData?'neg':'neu'}">${d.hasData?fmt(d.chargesHT):'<span style="color:#d1d5db">—</span>'}</td>
@@ -572,7 +624,7 @@ function renderPage(data, dettes, year, curMonth) {
   if (cfCtx) {
     new Chart(cfCtx, {
       data: {
-        labels: MS,
+        labels: labels,
         datasets: [
           { type:'line', label:'CA HT', data: data.map(d=>d.hasData?d.caTotal:null), borderColor:'#4f7ef8', backgroundColor:'rgba(79,126,248,.08)', borderWidth:2, pointRadius:4, pointBackgroundColor:'#4f7ef8', tension:.4, fill:false, spanGaps:false },
           { type:'bar',  label:'Cashflow', data: data.map(d=>d.hasData?d.cashflow:null), backgroundColor: data.map(d=>d.hasData?(d.cashflow>=0?'rgba(16,185,129,.8)':'rgba(239,68,68,.8)'):'transparent'), borderRadius:5 }
@@ -592,7 +644,7 @@ function renderPage(data, dettes, year, curMonth) {
     new Chart(cumulCtx, {
       type:'line',
       data: {
-        labels: MS,
+        labels: labels,
         datasets:[{ label:'Solde cumulé', data:cumulArr, borderColor:'#0d9488', backgroundColor:'rgba(13,148,136,.08)', borderWidth:2.5, pointRadius:5, pointBackgroundColor: cumulArr.map(v=>v===null?'transparent':v>=0?'#0d9488':'#ef4444'), tension:.4, fill:true, spanGaps:false }]
       },
       options: {
