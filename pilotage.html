@@ -392,7 +392,8 @@ function defaultData(year, month) {
     chargesFixe:  [{fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non'}],
     chargesVar:   [{fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non'}],
     credits:      [{fournisseur:'', nom:'', ligneType:'principal', montant:'', tvaRate:20, tvaAuto:false, tauxInteret:'', pointe:'Non'}],
-    leasing:      [{fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non'}]
+    leasing:      [{fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non'}],
+    facturesPro:  [{client:'', description:'', ht055:'', ht10:'', ht20:''}]
   };
 }
 
@@ -431,6 +432,7 @@ async function loadMonth() {
         if (s.chargesVar)    data.chargesVar    = s.chargesVar;
         if (s.credits)       data.credits       = s.credits;
         if (s.leasing)       data.leasing       = s.leasing;
+        if (s.facturesPro)   data.facturesPro   = s.facturesPro;
       }
     } catch(e) { console.warn('loadMonth Firestore error:', e); }
   }
@@ -475,6 +477,30 @@ function renderPage(data, month) {
           '<tfoot><tr><td>TOTAL</td><td style="color:#10b981;font-weight:700"><span id="tot-ca055">' + fmtN(t.caHT055) + '</span> €</td><td style="color:#f97316;font-weight:700"><span id="tot-ca10">' + fmtN(t.caHT10) + '</span> €</td><td style="color:#4f7ef8;font-weight:700"><span id="tot-ca20">' + fmtN(t.caHT20) + '</span> €</td><td><span id="tot-caHT">' + fmtN(t.caHT) + '</span> €</td><td><span id="tot-caTTC">' + fmtN(t.caTTC) + '</span> €</td><td><span id="tot-tvaC">' + fmtN(t.tvaCollectee) + '</span> €</td></tr></tfoot>' +
         '</table>' +
       '</div>' +
+    '</div>' +
+
+    '<div class="section-card full" style="margin-bottom:16px;">' +
+      '<div class="section-head">' +
+        '<div class="section-title">🧾 Autres CA — Factures Pro <span class="section-title-badge badge-green">Coffrets · Traiteur · B2B</span></div>' +
+        '<button class="btn btn-outline btn-sm" onclick="addFacturePro()">+ Facture</button>' +
+      '</div>' +
+      '<div class="info-box">💡 CA hors caisse journalière : factures professionnels, coffrets cadeaux, traiteur… TVA mixte possible sur une même facture.</div>' +
+      '<table class="data-table">' +
+        '<thead><tr><th>Client</th><th>Description</th><th style="color:#10b981">HT 5,5%</th><th style="color:#f97316">HT 10%</th><th style="color:#4f7ef8">HT 20%</th><th>Total HT</th><th>Total TTC</th><th>TVA</th><th></th></tr></thead>' +
+        '<tbody id="fp-tbody">' + renderFacturesPro(data.facturesPro) + '</tbody>' +
+        '<tfoot><tr><td colspan="2">TOTAL</td>' +
+          '<td style="color:#10b981;font-weight:700"><span id="tot-fp055">' + fmtN(t.caFP055) + '</span> €</td>' +
+          '<td style="color:#f97316;font-weight:700"><span id="tot-fp10">' + fmtN(t.caFP10) + '</span> €</td>' +
+          '<td style="color:#4f7ef8;font-weight:700"><span id="tot-fp20">' + fmtN(t.caFP20) + '</span> €</td>' +
+          '<td><span id="tot-fpHT">' + fmtN(t.caFP055+t.caFP10+t.caFP20) + '</span> €</td>' +
+          '<td><span id="tot-fpTTC">' + fmtN(t.caFP055*1.055+t.caFP10*1.10+t.caFP20*1.20) + '</span> €</td>' +
+          '<td><span id="tot-fpTVA">' + fmtN(t.caFP055*0.055+t.caFP10*0.10+t.caFP20*0.20) + '</span> €</td>' +
+          '<td></td>' +
+        '</tr></tfoot>' +
+      '</table>' +
+    '</div>' +
+
+    '<div class="sections-grid">' +
       '<div style="display:flex;flex-direction:column;gap:16px;">' +
         '<div class="section-card">' +
           '<div class="section-head"><div class="section-title">💸 Rentrées supplémentaires</div><button class="btn btn-outline btn-sm" onclick="addRentree()">+ Ajouter</button></div>' +
@@ -577,7 +603,28 @@ function renderCARows(rows) {
   }).join('');
 }
 
-function renderRentrees(rows) {
+function renderFacturesPro(rows) {
+  if (!rows || rows.length === 0) rows = [{client:'', description:'', ht055:'', ht10:'', ht20:''}];
+  return rows.map(function(r, i) {
+    var h055 = parseFloat(r.ht055)||0, h10 = parseFloat(r.ht10)||0, h20 = parseFloat(r.ht20)||0;
+    var totalHT  = h055 + h10 + h20;
+    var totalTTC = h055*1.055 + h10*1.10 + h20*1.20;
+    var totalTVA = h055*0.055 + h10*0.10  + h20*0.20;
+    return '<tr>' +
+      '<td><input class="cell-input" style="width:110px" placeholder="Client / société" value="' + (r.client||'') + '" oninput="_data.facturesPro[' + i + '].client=this.value"/></td>' +
+      '<td><input class="cell-input" style="width:140px" placeholder="Description" value="' + (r.description||'') + '" oninput="_data.facturesPro[' + i + '].description=this.value"/></td>' +
+      '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + (r.ht055||'') + '" oninput="updateFacturePro(' + i + ',\'ht055\',this.value)"/></td>' +
+      '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + (r.ht10||'') + '" oninput="updateFacturePro(' + i + ',\'ht10\',this.value)"/></td>' +
+      '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + (r.ht20||'') + '" oninput="updateFacturePro(' + i + ',\'ht20\',this.value)"/></td>' +
+      '<td><span class="cell-readonly blue">' + (totalHT  ? fmtN(totalHT)  : '—') + '</span></td>' +
+      '<td><span class="cell-readonly blue">' + (totalTTC ? fmtN(totalTTC) : '—') + '</span></td>' +
+      '<td><span class="cell-readonly green">' + (totalTVA ? fmtN(totalTVA) : '—') + '</span></td>' +
+      '<td><button class="btn btn-danger btn-sm" onclick="delFacturePro(' + i + ')">✕</button></td>' +
+    '</tr>';
+  }).join('');
+}
+
+
   return rows.map(function(r, i) {
     return '<tr>' +
       '<td><input class="cell-input" style="width:140px" value="' + r.type + '" oninput="_data.rentreesSupp[' + i + '].type=this.value;refreshTotals()"/></td>' +
@@ -738,7 +785,27 @@ function delRow(key, i, tbodyId, renderFn) {
   refreshTotals();
 }
 
-function addRentree() {
+function addFacturePro() {
+  if (!_data.facturesPro) _data.facturesPro = [];
+  _data.facturesPro.push({client:'', description:'', ht055:'', ht10:'', ht20:''});
+  document.getElementById('fp-tbody').innerHTML = renderFacturesPro(_data.facturesPro);
+  refreshTotals();
+}
+
+function updateFacturePro(i, field, val) {
+  if (!_data.facturesPro) _data.facturesPro = [];
+  _data.facturesPro[i][field] = val;
+  refreshTotals();
+}
+
+function delFacturePro(i) {
+  _data.facturesPro.splice(i, 1);
+  if (_data.facturesPro.length === 0) _data.facturesPro = [{client:'', description:'', ht055:'', ht10:'', ht20:''}];
+  document.getElementById('fp-tbody').innerHTML = renderFacturesPro(_data.facturesPro);
+  refreshTotals();
+}
+
+
   _data.rentreesSupp.push({type:'', montant:''});
   document.getElementById('rsupp-tbody').innerHTML = renderRentrees(_data.rentreesSupp);
 }
@@ -795,6 +862,12 @@ function calcTotals(data) {
   var caHT055 = data.ca.reduce(function(s,r){return s+(parseFloat(r.ht055)||0);},0);
   var caHT10  = data.ca.reduce(function(s,r){return s+(parseFloat(r.ht10)||0);},0);
   var caHT20  = data.ca.reduce(function(s,r){return s+(parseFloat(r.ht20)||0);},0);
+  // Ajouter facturesPro au CA
+  var fpRows = data.facturesPro || [];
+  var caFP055 = fpRows.reduce(function(s,r){return s+(parseFloat(r.ht055)||0);},0);
+  var caFP10  = fpRows.reduce(function(s,r){return s+(parseFloat(r.ht10)||0);},0);
+  var caFP20  = fpRows.reduce(function(s,r){return s+(parseFloat(r.ht20)||0);},0);
+  caHT055 += caFP055; caHT10 += caFP10; caHT20 += caFP20;
   var caHT = caHT055 + caHT10 + caHT20;
   var caTTC = caHT055*1.055 + caHT10*1.10 + caHT20*1.20;
   var tvaCollectee = caHT055*0.055 + caHT10*0.10 + caHT20*0.20;
@@ -822,7 +895,7 @@ function calcTotals(data) {
   var resultat = caHT+rentreesSupp-chargesHT;
   var cashflow = caHT+rentreesSupp-(fixesTTC+varTTC+creditsPrincipal+creditsInteret+leasingTTC);
   var delta = resultat-(prevCA-chargesHT);
-  return {caHT,caHT055,caHT10,caHT20,caTTC,tvaCollectee,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta};
+  return {caHT,caHT055,caHT10,caHT20,caTTC,tvaCollectee,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta,caFP055,caFP10,caFP20};
 }
 
 function refreshTotals() {
@@ -830,6 +903,15 @@ function refreshTotals() {
   function s(id,v,cls){var el=document.getElementById(id);if(!el)return;el.textContent=typeof v==='string'?v:fmtN(v);if(cls){el.className=el.className.replace(/positive|negative/g,'').trim();el.classList.add(cls);}}
   s('tot-ca055',t.caHT055);s('tot-ca10',t.caHT10);s('tot-ca20',t.caHT20);
   s('tot-caHT',t.caHT);s('tot-caTTC',t.caTTC);s('tot-tvaC',t.tvaCollectee);
+  // Factures Pro sub-totals
+  var fpRows = _data.facturesPro || [];
+  var fp055=fpRows.reduce(function(s,r){return s+(parseFloat(r.ht055)||0);},0);
+  var fp10=fpRows.reduce(function(s,r){return s+(parseFloat(r.ht10)||0);},0);
+  var fp20=fpRows.reduce(function(s,r){return s+(parseFloat(r.ht20)||0);},0);
+  s('tot-fp055',fp055);s('tot-fp10',fp10);s('tot-fp20',fp20);
+  s('tot-fpHT',fp055+fp10+fp20);
+  s('tot-fpTTC',fp055*1.055+fp10*1.10+fp20*1.20);
+  s('tot-fpTVA',fp055*0.055+fp10*0.10+fp20*0.20);
   s('tot-rsupp',t.rentreesSupp);s('tot-prev',t.prevCA);
   s('tot-fixHT',t.fixesHT);s('tot-fixTTC',t.fixesTTC);s('tot-fixTVA',t.fixesTVA);
   s('tot-varHT',t.varHT);s('tot-varTTC',t.varTTC);s('tot-varTVA',t.varTVA);
