@@ -677,7 +677,7 @@ function renderPage(data, month) {
         '<div class="info-box">💡 Principal = sans TVA · Intérêts = TVA déductible · Renseigne Début/Fin pour le calcul dynamique et la propagation</div>' +
         '<table class="data-table"><thead><tr><th>Pointé</th><th>Fournisseur</th><th>Ligne</th><th>Montant</th><th>Taux int. %</th><th>TVA %</th><th>TVA déd.</th><th>Début / Fin</th><th></th></tr></thead>' +
         '<tbody id="cred-tbody">' + renderCredits(data.credits) + '</tbody>' +
-        '<tfoot><tr><td colspan="3">TOTAL CRÉDITS</td><td><span id="tot-credP">' + fmtN(t.creditsPrincipal) + '</span> €</td><td>—</td><td>—</td><td>TVA déd. : <span id="tot-credTVA">' + fmtN(t.creditsTVA) + '</span> €</td><td colspan="2"></td></tr></tfoot>' +
+        '<tfoot><tr><td colspan="3">TOTAL CRÉDITS</td><td><span id="tot-credP">' + fmtN(t.creditsPrincipal+t.creditsInteret) + '</span> €</td><td>—</td><td>—</td><td>TVA déd. : <span id="tot-credTVA">' + fmtN(t.creditsTVA) + '</span> €</td><td colspan="2"></td></tr></tfoot>' +
         '</table>' +
     '</div>' +
     '<div class="section-card full" style="margin-bottom:16px">' +
@@ -1147,7 +1147,9 @@ function calcTotals(data) {
       if (curMonthKey < r.dateDebut || curMonthKey > r.dateFin) return;
     }
     var parseVal = function(v){ return parseFloat((v||'').toString().replace(',','.')) || 0; };
-    if(r.ligneType==='principal'){creditsPrincipal+=parseVal(r.montant);}
+    // Compatibilité ancien format : si pas de ligneType, traiter comme principal
+    var isP = r.ligneType==='principal' || !r.ligneType;
+    if(isP){creditsPrincipal+=parseVal(r.montant);}
     else{
       var m2=parseVal(r.montant);
       if(r.tvaAuto&&parseVal(r.tauxInteret)>0){var p=data.credits.slice(0,i).reverse().find(function(c){return c.fournisseur===r.fournisseur&&c.ligneType==='principal';});if(p)m2=parseVal(p.montant)*parseVal(r.tauxInteret)/100/12;}
@@ -1183,7 +1185,7 @@ function refreshTotals() {
   s('tot-fixHT',t.fixesHT);s('tot-fixTTC',t.fixesTTC);s('tot-fixTVA',t.fixesTVA);
   s('tot-varHT',t.varHT);s('tot-varTTC',t.varTTC);s('tot-varTVA',t.varTVA);
   s('tot-leasHT',t.leasingHT);s('tot-leasTTC',t.leasingTTC);
-  s('tot-credP',t.creditsPrincipal);s('tot-credTVA',t.creditsTVA);
+  s('tot-credP',t.creditsPrincipal+t.creditsInteret);s('tot-credTVA',t.creditsTVA);
   s('tva-c',fmtN(t.tvaCollectee)+' €');s('tva-d',fmtN(t.tvaDed)+' €');s('tva-due',fmtN(Math.abs(t.tvaDue))+' €');
   s('cf-val',fmt(t.cashflow),t.cashflow>=0?'positive':'negative');
   s('cf-prev',fmt(t.prevCA-t.chargesHT));
@@ -1307,11 +1309,14 @@ function mpOpen(wrapperId, field, rowType, rowIdx) {
   // Positionner le popup sous le trigger
   var display = wrap.querySelector('.mp-display');
   var rect = display.getBoundingClientRect();
-  popup.style.top  = (rect.bottom + window.scrollY + 4) + 'px';
+  // position:fixed => coordonnées viewport (pas besoin de scrollY)
+  popup.style.top  = (rect.bottom + 4) + 'px';
   popup.style.left = rect.left + 'px';
   mpRender(popup, curYear, curMonth, rowType, rowIdx, field);
   popup.classList.add('open');
   _mpActive = wrapperId;
+  // Stopper la propagation pour éviter que le document click handler referme immédiatement
+  event.stopPropagation();
 }
 
 function mpClose() {
@@ -1381,7 +1386,7 @@ function mpSelect(year, month, btn) {
   mpRender(popup, year, month, rowType, rowIdx, field);
   scheduleSave();
   refreshTotals();
-  // Si on vient de définir début, rafraîchir aussi la vue fin pour colorier la plage
+  event.stopPropagation();
   mpClose();
 }
 
@@ -1399,6 +1404,7 @@ function mpClear(btn) {
   popup.dataset.month = -1;
   mpRender(popup, parseInt(popup.dataset.year), -1, rowType, rowIdx, field);
   scheduleSave();
+  event.stopPropagation();
   mpClose();
 }
 
