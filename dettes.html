@@ -618,6 +618,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
           <div class="mfield-wrap"><select class="mfield-sel" id="m-amort" onchange="calcPreview()">
             <option value="constant">Mensualités constantes (amortissement dégressif)</option>
             <option value="lineaire">Capital constant (amortissement linéaire)</option>
+            <option value="fixe">Intérêts fixes (capital + intérêts constants)</option>
             <option value="infine">In fine (intérêts seuls + capital à terme)</option>
           </select></div>
         </div>
@@ -812,6 +813,20 @@ function calcEcheancier(d){
       const interet=solde*tauxM;
       const dt=addMonths(debut,i+1);
       rows.push({date:dt.toISOString().slice(0,10),capital:capM,interet,mensualite:capM+interet,solde:Math.max(0,solde-capM),idx:i});
+      solde-=capM;
+    }
+    return rows;
+  }
+
+  if(d.amort==='fixe'){
+    // Intérêts fixes : intérêts calculés sur capital initial, capital = montant/durée
+    const capM=m/duree;
+    const intM=m*tauxM; // intérêts fixes sur capital initial
+    const mensualite=capM+intM;
+    let solde=m;
+    for(let i=0;i<duree;i++){
+      const dt=addMonths(debut,i+1);
+      rows.push({date:dt.toISOString().slice(0,10),capital:capM,interet:intM,mensualite,solde:Math.max(0,solde-capM),idx:i});
       solde-=capM;
     }
     return rows;
@@ -1480,6 +1495,7 @@ function calcPreview(){
     const tauxM=taux/12/100;
     let mensualite=0,totalInterets=0;
     if(amort==='lineaire'){mensualite=m/duree+(m*tauxM);totalInterets=m*tauxM*(duree+1)/2;}
+    else if(amort==='fixe'){mensualite=m/duree+(m*tauxM);totalInterets=m*tauxM*duree;}
     else if(amort==='infine'){mensualite=m*tauxM;totalInterets=m*tauxM*duree;}
     else if(tauxM===0){mensualite=m/duree;}
     else{mensualite=m*(tauxM*Math.pow(1+tauxM,duree))/(Math.pow(1+tauxM,duree)-1);totalInterets=mensualite*duree-m;}
