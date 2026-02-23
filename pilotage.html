@@ -134,10 +134,12 @@
   .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
 
   /* ── TOAST ── */
-  .toast{position:fixed;bottom:24px;right:24px;padding:10px 20px;border-radius:12px;font-size:13px;font-weight:600;background:#1a2f6e;color:#fff;z-index:2000;opacity:0;transform:translateY(10px);transition:.3s;pointer-events:none}
-  .toast.show{opacity:1;transform:translateY(0)}
-  .toast.success{background:#16a34a}
-  .toast.warning{background:#d97706}
+  .toast{position:fixed;top:0;left:240px;right:0;padding:0;height:0;overflow:hidden;z-index:2000;pointer-events:none;transition:height .2s ease}
+  .toast.show{height:36px}
+  .toast-inner{display:flex;align-items:center;justify-content:center;gap:8px;height:36px;font-size:13px;font-weight:700;letter-spacing:.3px;background:#16a34a;color:#fff;width:100%}
+  .toast.warning .toast-inner{background:#d97706}
+  .toast.info .toast-inner{background:#1a2f6e}
+  @media(max-width:768px){.toast{left:0}}
 
   /* ── HAMBURGER ── */
   .hamburger{display:none;position:fixed;top:14px;left:14px;z-index:200;background:var(--blue-main);border:none;border-radius:9px;width:38px;height:38px;flex-direction:column;align-items:center;justify-content:center;gap:5px;cursor:pointer;transition:.2s}
@@ -254,7 +256,7 @@
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast"><div class="toast-inner" id="toast-inner"></div></div>
 
 <!-- ═══════════════════════════════════════════════
      SCRIPT 1 : Firebase (module ES6)
@@ -370,9 +372,10 @@ function fmtE(n) { return fmtN(n) + ' €'; }
 function fmtN(n) { return (parseFloat(n) || 0).toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function showToast(msg, type) {
   var t = document.getElementById('toast');
-  t.textContent = msg;
+  var inner = document.getElementById('toast-inner');
+  inner.textContent = msg;
   t.className = 'toast show ' + (type || '');
-  var dur = t.classList.contains('success') ? 1200 : 3500;
+  var dur = (type === 'success') ? 1200 : 3500;
   setTimeout(function() { t.className = 'toast'; }, dur);
 }
 
@@ -964,21 +967,19 @@ async function handleLogout() {
 }
 </script>
 <script src="nav.js">
-/* ─── SAVE ON ENTER ─── */
-document.addEventListener('keydown', function(e) {
-  if (e.key !== 'Enter') return;
-  var tag = e.target.tagName;
-  if (tag !== 'INPUT' && tag !== 'TEXTAREA') return;
-  e.preventDefault();
-  saveQuiet();
-  // Passer au champ suivant dans la même ligne ou ligne suivante
-  var inputs = Array.from(document.querySelectorAll('input.cell-input, select.cell-input'));
-  var idx = inputs.indexOf(e.target);
-  if (idx >= 0 && idx < inputs.length - 1) {
-    inputs[idx + 1].focus();
-    inputs[idx + 1].select();
-  }
+/* ─── AUTOSAVE ON BLUR ─── */
+var _saveTimer = null;
+function scheduleSave() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(function() { saveQuiet(); }, 800);
+}
+
+document.addEventListener('change', function(e) {
+  if (e.target.classList.contains('cell-input')) scheduleSave();
 });
+document.addEventListener('blur', function(e) {
+  if (e.target.classList.contains('cell-input')) scheduleSave();
+}, true);
 
 </script>
 
