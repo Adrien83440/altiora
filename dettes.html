@@ -990,16 +990,17 @@ function renderCharts(){
   _dettes.filter(d=>d.active!==false).forEach(d=>{
     const ech=calcEcheancier(d);
     const paid=new Set(d.paiements||[]);
+    const montant=parseFloat(d.montant)||0;
     for(let i=0;i<12;i++){
-      const monthStart=new Date(yr,i,1);
       const monthEnd=new Date(yr,i+1,1);
-      // Solde à la fin du mois i = montant - capital de toutes les échéances avant la fin du mois
-      const capitalPaidByEndOfMonth=ech.filter(r=>{
+      // Capital remboursé à la fin du mois i :
+      // - Pour les échéances passées (dt < now) : toujours comptées (auto-paid)
+      // - Pour les échéances futures : comptées si dans l'échéancier prévu (dt < monthEnd)
+      const capitalPaid=ech.filter(r=>{
         const dt=new Date(r.date);
-        return dt<monthEnd&&(paid.has(r.idx)||dt<now);
+        return dt<monthEnd; // toutes les échéances jusqu'à la fin de ce mois
       }).reduce((s,r)=>s+(r.capital||0),0);
-      const solde=Math.max(0,(parseFloat(d.montant)||0)-capitalPaidByEndOfMonth);
-      monthly[i]+=solde;
+      monthly[i]+=Math.max(0,montant-capitalPaid);
     }
   });
 
