@@ -1845,7 +1845,30 @@ async function loadSuppliers() {
       }
     }
   } catch(e) { console.warn('loadSuppliers error:', e); }
+
+  // Enrichir depuis le mois courant en mémoire
   _enrichCataloguesFromData(_data);
+
+  // Scanner tous les mois depuis 2023 jusqu'à l'année en cours +2
+  // pour récupérer clients/descriptions/fournisseurs même si le catalogue était vide
+  var currentYear = new Date().getFullYear();
+  var years = [];
+  for (var y = 2023; y <= currentYear + 2; y++) years.push(y);
+  var fetchPromises = [];
+  years.forEach(function(y) {
+    for (var m = 1; m <= 12; m++) {
+      var key = y + '-' + String(m).padStart(2, '0');
+      fetchPromises.push(
+        window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', key))
+          .then(function(s) { if (s.exists()) _enrichCataloguesFromData(s.data()); })
+          .catch(function() {})
+      );
+    }
+  });
+  await Promise.all(fetchPromises);
+
+  // Persister le catalogue enrichi pour les prochaines fois
+  _persistCatalogues();
 }
 
 function _enrichCataloguesFromData(data) {
