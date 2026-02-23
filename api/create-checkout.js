@@ -20,7 +20,7 @@ module.exports = async (req, res) => {
   if (!pack) return res.status(400).json({ error: 'Pack inconnu' });
 
   const stripeKey = process.env.STRIPE_SECRET_KEY;
-  const baseUrl = 'https://altiora-theta.vercel.app';
+  const baseUrl = 'https://alteore-dev.vercel.app';
 
   const params = new URLSearchParams({
     'payment_method_types[0]':                      'card',

@@ -19,7 +19,7 @@ async function getFirebaseToken() {
 }
 
 async function firestoreGet(token, path) {
-  const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'alteore-dev';
   const res = await fetch(
     'https://firestore.googleapis.com/v1/projects/' + projectId + '/databases/(default)/documents/' + path,
     { headers: { Authorization: 'Bearer ' + token } }
@@ -28,7 +28,7 @@ async function firestoreGet(token, path) {
 }
 
 async function firestorePatch(token, path, fields) {
-  const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'alteore-dev';
   const firestoreFields = {};
   for (const [key, value] of Object.entries(fields)) {
     if (typeof value === 'number') firestoreFields[key] = { integerValue: value.toString() };

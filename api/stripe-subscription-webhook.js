@@ -8,7 +8,7 @@
 //   invoice.payment_succeeded         → paiement ok → confirmer plan actif
 //   invoice.payment_failed            → échec paiement → plan = 'past_due'
 
-const FIREBASE_PROJECT = 'altiora-70599';
+const FIREBASE_PROJECT = 'alteore-dev';
 
 // ── Déterminer le plan depuis le priceId Stripe ──
 const PRICE_TO_PLAN = {
@@ -27,7 +27,7 @@ function getPlanFromSubscription(subscription) {
 
 // ── Mise à jour Firestore via REST API ──
 async function updateFirestore(uid, fields) {
-  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/users/${uid}?updateMask.fieldPaths=${Object.keys(fields).join('&updateMask.fieldPaths=')}`;
 
   // Convertir les champs en format Firestore
@@ -55,7 +55,7 @@ async function updateFirestore(uid, fields) {
 
 // ── Récupérer uid depuis customerId (via Firestore query) ──
 async function getUidFromCustomer(customerId) {
-  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents:runQuery?key=${fbKey}`;
 
   const res = await fetch(url, {

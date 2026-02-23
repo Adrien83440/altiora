@@ -11,7 +11,7 @@ module.exports = async (req, res) => {
   if (!priceId) return res.status(400).json({ error: 'priceId manquant' });
 
   const stripeKey = process.env.STRIPE_SECRET_KEY;
-  const baseUrl = process.env.APP_URL || 'https://altiora-theta.vercel.app';
+  const baseUrl = process.env.APP_URL || 'https://alteore-dev.vercel.app';
 
   try {
     const res2 = await fetch('https://api.stripe.com/v1/checkout/sessions', {

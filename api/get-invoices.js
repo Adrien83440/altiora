@@ -1,10 +1,10 @@
 // api/get-invoices.js
 // Retourne les factures Stripe d'un utilisateur via son stripeCustomerId stocké dans Firebase
 
-const FIREBASE_PROJECT = 'altiora-70599';
+const FIREBASE_PROJECT = 'alteore-dev';
 
 async function getStripeCustomerId(uid) {
-  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/users/${uid}?key=${fbKey}`;
   const res = await fetch(url);
   if (!res.ok) return null;
