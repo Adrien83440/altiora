@@ -881,7 +881,7 @@ function renderCharges(rows, key) {
       '<td style="white-space:nowrap;display:flex;gap:4px;align-items:center;padding:5px 7px;">' +
         (isFixe ? '<button class="btn btn-orange btn-sm" style="font-size:10px;padding:3px 8px;" onclick="duplicateFixeLine(' + i + ')">⚡ Année</button>' : '') +
         (!isFixe && key==='leasing' ? '<button class="btn btn-orange btn-sm" style="font-size:10px;padding:3px 8px" onclick="propagateLeasing(' + i + ')">⚡ Propager</button>' : '') +
-        (key==='leasing'||key==='chargesVar'||key==='chargesFixe' ? '<button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 8px" title="Modifier le prix sur plusieurs mois" onclick="openScopeModal({type:\'update\',dataKey:\''+key+'\',rowIdx:'+i+',fournisseur:(_data[\''+key+'\']['+i+'].fournisseur||\'\'),lineType:(_data[\''+key+'\']['+i+'].type||\'\'),currentVal:(_data[\''+key+'\']['+i+'].montantHT||\'\'),tbodyId:\''+tbId+'\',renderFn:function(arr){return renderCharges(arr,\''+key+'\')}})" >✏️</button>' : '') +
+        (key==='leasing'||key==='chargesVar'||key==='chargesFixe' ? '<button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 8px" title="Modifier le prix sur plusieurs mois" onclick="openChargeScopeUpdate(' + JSON.stringify(key) + ',' + i + ')">✏️</button>' : '') +
         '<button class="btn btn-danger btn-sm" onclick="delRow(\'' + key + '\',' + i + ',\'' + tbId + '\',function(r){return renderCharges(r,\'' + key + '\')})">✕</button>' +
       '</td>' +
     '</tr>';
@@ -919,8 +919,8 @@ function renderCredits(rows) {
       '</td>' +
       '<td style="white-space:nowrap">' +
         (isPrincipal ? '<button class="btn btn-orange btn-sm" style="font-size:10px" onclick="propagateCredit(' + i + ')">⚡ Propager</button>' : '') +
-        '<button class="btn btn-outline btn-sm" style="font-size:10px" title="Modifier le montant sur plusieurs mois" onclick="openScopeModal({type:\'update\',dataKey:\'credits\',rowIdx:'+i+',fournisseur:(r.fournisseur||\'\'),ligneType:(r.ligneType||\'principal\'),currentVal:(r.montant||\'\'),tbodyId:\'cred-tbody\',renderFn:null})">✏️</button>' +
-        '<button class="btn btn-danger btn-sm" onclick="delCredit(' + i + ')">✕</button>' +
+        '<button class="btn btn-outline btn-sm" style="font-size:10px" title="Modifier le montant sur plusieurs mois" onclick="openCreditScopeUpdate(' + i + ')">✏️</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="openCreditScopeDel(' + i + ')">✕</button>' +
       '</td>' +
     '</tr>';
   }).join('');
@@ -1315,6 +1315,38 @@ function refreshTotals() {
 }
 
 
+function openCreditScopeUpdate(i) {
+  var r = _data.credits[i];
+  openScopeModal({
+    type: 'update', dataKey: 'credits', rowIdx: i,
+    fournisseur: r.fournisseur || '',
+    ligneType: r.ligneType || 'principal',
+    currentVal: r.montant || '',
+    tbodyId: 'cred-tbody', renderFn: null
+  });
+}
+function openCreditScopeDel(i) {
+  var r = _data.credits[i];
+  openScopeModal({
+    type: 'delete', dataKey: 'credits', rowIdx: i,
+    fournisseur: r.fournisseur || '',
+    ligneType: r.ligneType || 'principal',
+    tbodyId: 'cred-tbody', renderFn: null
+  });
+}
+function openChargeScopeUpdate(key, i) {
+  var r = _data[key][i];
+  var tbId = key==='chargesFixe'?'cf-tbody':key==='chargesVar'?'cv-tbody':'leas-tbody';
+  openScopeModal({
+    type: 'update', dataKey: key, rowIdx: i,
+    fournisseur: r.fournisseur || '',
+    lineType: r.type || '',
+    currentVal: r.montantHT || '',
+    tbodyId: tbId,
+    renderFn: function(arr){ return renderCharges(arr, key); }
+  });
+}
+
 /* ─── MODAL DE PORTÉE (suppr / modif prix) ─── */
 var _scopeAction = null; // {type:'delete'|'update', dataKey, rowIdx, fournisseur, lineKey, newVal}
 
@@ -1369,10 +1401,14 @@ function closeScopeModal() {
 
 async function executeScopeAction() {
   if (!_scopeAction || !window._uid) return;
-  closeScopeModal();
-  var mode = document.querySelector('input[name="scopeMode"]:checked').value;
+  // Lire toutes les valeurs du DOM AVANT de fermer le modal
   var a = _scopeAction;
+  var mode = document.querySelector('input[name="scopeMode"]:checked').value;
   var newPrice = a.type==='update' ? parseFloat((document.getElementById('scope-price-input').value||'').replace(',','.')) : null;
+  var fromM  = parseInt(document.getElementById('scope-from').value);
+  var toM    = parseInt(document.getElementById('scope-to').value);
+  var selY   = parseInt(document.getElementById('scope-year').value);
+  closeScopeModal(); // fermer après avoir tout lu
 
   // Construire la liste des mois à traiter
   var targets = [];
@@ -1381,9 +1417,7 @@ async function executeScopeAction() {
   if (mode === 'current') {
     targets = [{year: window._year, month: curM}];
   } else if (mode === 'period') {
-    var fromM  = parseInt(document.getElementById('scope-from').value);
-    var toM    = parseInt(document.getElementById('scope-to').value);
-    var selY   = parseInt(document.getElementById('scope-year').value);
+    // fromM/toM/selY déjà lus avant closeScopeModal
     if (fromM <= toM) {
       for (var m = fromM; m <= toM; m++) targets.push({year:selY, month:m});
     } else {
