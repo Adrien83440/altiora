@@ -593,11 +593,11 @@ html, body { overflow-x: hidden; max-width: 100vw; }
       <div class="mgrid2">
         <div class="mfield">
           <label>Montant initial (€)</label>
-          <div class="mfield-wrap"><input class="mfield-in" id="m-montant" type="number" placeholder="50000" oninput="calcPreview()"/><span class="mfield-unit">€</span></div>
+          <div class="mfield-wrap"><input class="mfield-in" id="m-montant" type="number" placeholder="50000" oninput="calcPreview();updateHistoriqueSection()"/><span class="mfield-unit">€</span></div>
         </div>
         <div class="mfield">
           <label>Date de début</label>
-          <div class="mfield-wrap"><input class="mfield-in" id="m-debut" type="date"/></div>
+          <div class="mfield-wrap"><input class="mfield-in" id="m-debut" type="date" onchange="updateHistoriqueSection()"/></div>
         </div>
       </div>
 
@@ -610,7 +610,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
           </div>
           <div class="mfield">
             <label>Durée (mois)</label>
-            <div class="mfield-wrap"><input class="mfield-in" id="m-duree" type="number" placeholder="60" oninput="calcPreview()"/><span class="mfield-unit">mois</span></div>
+            <div class="mfield-wrap"><input class="mfield-in" id="m-duree" type="number" placeholder="60" oninput="calcPreview();updateHistoriqueSection()"/><span class="mfield-unit">mois</span></div>
           </div>
         </div>
         <div class="mfield">
@@ -644,7 +644,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
           </div>
           <div class="mfield">
             <label>Durée (mois)</label>
-            <div class="mfield-wrap"><input class="mfield-in" id="m-duree-lea" type="number" placeholder="48" oninput="calcPreview()"/><span class="mfield-unit">mois</span></div>
+            <div class="mfield-wrap"><input class="mfield-in" id="m-duree-lea" type="number" placeholder="48" oninput="calcPreview();updateHistoriqueSection()"/><span class="mfield-unit">mois</span></div>
           </div>
         </div>
       </div>
@@ -666,6 +666,66 @@ html, body { overflow-x: hidden; max-width: 100vw; }
       <div id="preview" style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:12px 14px;display:none;margin-top:4px">
         <div style="font-size:11px;font-weight:700;color:#065f46;margin-bottom:6px">✅ Aperçu calculé</div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px" id="previewContent"></div>
+      </div>
+
+      <!-- HISTORIQUE PAIEMENTS (affiché si date de début dans le passé) -->
+      <div id="historique-section" style="display:none;margin-top:16px;background:#fffbeb;border:1.5px solid #fcd34d;border-radius:12px;padding:14px 16px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-size:16px">📆</span>
+          <div>
+            <div style="font-size:12px;font-weight:700;color:#92400e">Échéances passées détectées</div>
+            <div style="font-size:11px;color:#a16207" id="hist-count-label">Ce crédit a des échéances antérieures au mois en cours.</div>
+          </div>
+        </div>
+        <div style="font-size:11px;font-weight:700;color:#78350f;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Comment gérer les paiements passés ?</div>
+
+        <!-- Option 1 : Tout payé -->
+        <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border-radius:8px;cursor:pointer;border:2px solid transparent;margin-bottom:6px;background:#fff;transition:.15s" id="hist-opt-all-lbl">
+          <input type="radio" name="hist-opt" value="all" id="hist-opt-all" onchange="updateHistOpt()" style="margin-top:2px;accent-color:#10b981">
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--text)">✅ Tout est payé jusqu'au mois en cours</div>
+            <div style="font-size:11px;color:var(--muted)">Toutes les échéances passées seront automatiquement validées</div>
+          </div>
+        </label>
+
+        <!-- Option 2 : Payé jusqu'à une date -->
+        <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border-radius:8px;cursor:pointer;border:2px solid transparent;margin-bottom:6px;background:#fff;transition:.15s" id="hist-opt-until-lbl">
+          <input type="radio" name="hist-opt" value="until" id="hist-opt-until" onchange="updateHistOpt()" style="margin-top:2px;accent-color:#4f7ef8">
+          <div style="flex:1">
+            <div style="font-size:12px;font-weight:700;color:var(--text)">📅 Payé jusqu'à une date précise</div>
+            <div style="font-size:11px;color:var(--muted)">Toutes les échéances jusqu'à cette date seront validées</div>
+            <div id="hist-until-wrap" style="display:none;margin-top:8px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <div class="mfield-wrap" style="flex:1;padding:7px 11px">
+                  <input class="mfield-in" id="hist-until-date" type="month" onchange="updateHistPreview()" style="font-size:13px;font-weight:600"/>
+                </div>
+                <div id="hist-until-count" style="font-size:11px;font-weight:700;color:#4f7ef8;white-space:nowrap"></div>
+              </div>
+            </div>
+          </div>
+        </label>
+
+        <!-- Option 3 : Certaines non payées -->
+        <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border-radius:8px;cursor:pointer;border:2px solid transparent;margin-bottom:6px;background:#fff;transition:.15s" id="hist-opt-partial-lbl">
+          <input type="radio" name="hist-opt" value="partial" id="hist-opt-partial" onchange="updateHistOpt()" style="margin-top:2px;accent-color:#f59e0b">
+          <div style="flex:1">
+            <div style="font-size:12px;font-weight:700;color:var(--text)">⚠️ Certaines échéances ne sont pas payées</div>
+            <div style="font-size:11px;color:var(--muted)">Choisissez les mois à marquer comme impayés ou reportés</div>
+            <div id="hist-partial-wrap" style="display:none;margin-top:10px">
+              <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Cochez les échéances <strong>non payées</strong> (les autres seront validées automatiquement) :</div>
+              <div id="hist-partial-list" style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:4px"></div>
+            </div>
+          </div>
+        </label>
+
+        <!-- Option 4 : Ne rien faire -->
+        <label style="display:flex;align-items:flex-start;gap:10px;padding:10px;border-radius:8px;cursor:pointer;border:2px solid transparent;background:#fff;transition:.15s" id="hist-opt-none-lbl">
+          <input type="radio" name="hist-opt" value="none" id="hist-opt-none" onchange="updateHistOpt()" style="margin-top:2px;accent-color:#6b7280" checked>
+          <div>
+            <div style="font-size:12px;font-weight:700;color:var(--text)">⏭️ Je gèrerai manuellement</div>
+            <div style="font-size:11px;color:var(--muted)">Aucun paiement passé ne sera pré-validé</div>
+          </div>
+        </label>
       </div>
     </div>
     <div class="modal-footer">
@@ -1127,6 +1187,9 @@ function resetModal(){
   ['m-nom','m-montant','m-debut','m-taux','m-duree','m-echeance','m-ref','m-loyer','m-duree-lea','m-plafond','m-taux-dec'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   document.getElementById('m-amort').value='constant';
   document.getElementById('preview').style.display='none';
+  document.getElementById('historique-section').style.display='none';
+  const noneOpt=document.getElementById('hist-opt-none');
+  if(noneOpt)noneOpt.checked=true;
   selectType('emprunt');
 }
 
@@ -1138,6 +1201,142 @@ function selectType(t){
     if(ch)ch.style.display=k===t?'block':'none';
   });
   calcPreview();
+  updateHistoriqueSection();
+}
+
+// ── HISTORIQUE PAIEMENTS ──
+function updateHistoriqueSection(){
+  // Déclenché aussi quand la date change
+  const debut=document.getElementById('m-debut').value;
+  const duree=parseInt(document.getElementById('m-duree').value)||parseInt(document.getElementById('m-duree-lea').value)||0;
+  const section=document.getElementById('historique-section');
+  if(!debut||!duree||_editId){section.style.display='none';return;}
+
+  const debutDate=new Date(debut);
+  const now=new Date();
+  const firstOfCurrentMonth=new Date(now.getFullYear(),now.getMonth(),1);
+
+  // Calculer combien d'échéances passées il y a
+  const tempDette={id:'_preview',type:_selectedType,nom:'',montant:parseFloat(document.getElementById('m-montant').value)||0,
+    debut,taux:parseFloat(document.getElementById('m-taux').value)||0,
+    duree,amort:document.getElementById('m-amort').value,
+    loyer:parseFloat(document.getElementById('m-loyer').value)||0,dureeLea:duree,paiements:[]};
+
+  const ech=calcEcheancier(tempDette);
+  const pastEch=ech.filter(r=>new Date(r.date)<firstOfCurrentMonth);
+
+  if(pastEch.length===0){section.style.display='none';return;}
+
+  section.style.display='block';
+  document.getElementById('hist-count-label').textContent=
+    `Ce crédit a ${pastEch.length} échéance${pastEch.length>1?'s':''} antérieure${pastEch.length>1?'s':''} au mois en cours.`;
+
+  // Initialiser l'option "aucune" par défaut
+  const noneOpt=document.getElementById('hist-opt-none');
+  if(noneOpt&&!['all','until','partial'].some(v=>{const el=document.getElementById('hist-opt-'+v);return el&&el.checked;})){
+    noneOpt.checked=true;
+  }
+
+  // Préremplir la date "jusqu'à" avec le mois précédent
+  const prevMonth=new Date(now.getFullYear(),now.getMonth()-1,1);
+  const pm=prevMonth.getFullYear()+'-'+(String(prevMonth.getMonth()+1).padStart(2,'0'));
+  const untilInput=document.getElementById('hist-until-date');
+  if(untilInput&&!untilInput.value)untilInput.value=pm;
+
+  updateHistOpt();
+}
+
+function updateHistOpt(){
+  const val=['all','until','partial','none'].find(v=>{const el=document.getElementById('hist-opt-'+v);return el&&el.checked;})||'none';
+
+  // Highlight selected option
+  ['all','until','partial','none'].forEach(v=>{
+    const lbl=document.getElementById('hist-opt-'+v+'-lbl');
+    if(lbl)lbl.style.borderColor=v===val?'var(--blue2)':'transparent';
+  });
+
+  // Show/hide sub-options
+  const untilWrap=document.getElementById('hist-until-wrap');
+  const partialWrap=document.getElementById('hist-partial-wrap');
+  if(untilWrap)untilWrap.style.display=val==='until'?'block':'none';
+  if(partialWrap)partialWrap.style.display=val==='partial'?'block':'none';
+
+  if(val==='partial')renderPartialList();
+  if(val==='until')updateHistPreview();
+}
+
+function updateHistPreview(){
+  const debut=document.getElementById('m-debut').value;
+  const duree=parseInt(document.getElementById('m-duree').value)||parseInt(document.getElementById('m-duree-lea').value)||0;
+  const untilVal=document.getElementById('hist-until-date').value;
+  if(!debut||!duree||!untilVal)return;
+
+  const tempDette={id:'_preview',type:_selectedType,nom:'',montant:parseFloat(document.getElementById('m-montant').value)||0,
+    debut,taux:parseFloat(document.getElementById('m-taux').value)||0,duree,
+    amort:document.getElementById('m-amort').value,
+    loyer:parseFloat(document.getElementById('m-loyer').value)||0,dureeLea:duree,paiements:[]};
+
+  const ech=calcEcheancier(tempDette);
+  const [yr,mo]=untilVal.split('-').map(Number);
+  const untilDate=new Date(yr,mo,1); // 1er du mois suivant = exclusif
+  const count=ech.filter(r=>new Date(r.date)<untilDate).length;
+  const el=document.getElementById('hist-until-count');
+  if(el)el.textContent=count>0?`${count} échéance${count>1?'s':''} validée${count>1?'s':''}`:'-';
+}
+
+function renderPartialList(){
+  const debut=document.getElementById('m-debut').value;
+  const duree=parseInt(document.getElementById('m-duree').value)||parseInt(document.getElementById('m-duree-lea').value)||0;
+  if(!debut||!duree)return;
+
+  const tempDette={id:'_preview',type:_selectedType,nom:'',montant:parseFloat(document.getElementById('m-montant').value)||0,
+    debut,taux:parseFloat(document.getElementById('m-taux').value)||0,duree,
+    amort:document.getElementById('m-amort').value,
+    loyer:parseFloat(document.getElementById('m-loyer').value)||0,dureeLea:duree,paiements:[]};
+
+  const ech=calcEcheancier(tempDette);
+  const now=new Date();
+  const firstOfCurrentMonth=new Date(now.getFullYear(),now.getMonth(),1);
+  const pastEch=ech.filter(r=>new Date(r.date)<firstOfCurrentMonth);
+  const list=document.getElementById('hist-partial-list');
+  if(!list)return;
+
+  list.innerHTML=pastEch.map(r=>`
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;background:#fff;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:11px">
+      <input type="checkbox" name="hist-unpaid" value="${r.idx}" style="accent-color:var(--red)" />
+      <span style="font-weight:600">${fdate(r.date)}</span>
+      <span style="color:var(--muted)">—</span>
+      <span style="font-weight:700;color:var(--red)">${fe(r.mensualite)}</span>
+      <span style="font-size:10px;background:#fee2e2;color:#b91c1c;padding:1px 5px;border-radius:4px;margin-left:auto">Non payé / Reporté</span>
+    </label>`).join('');
+}
+
+function getHistPaiements(ech){
+  const val=['all','until','partial','none'].find(v=>{const el=document.getElementById('hist-opt-'+v);return el&&el.checked;})||'none';
+  const now=new Date();
+  const firstOfCurrentMonth=new Date(now.getFullYear(),now.getMonth(),1);
+
+  if(val==='none')return[];
+
+  if(val==='all'){
+    return ech.filter(r=>new Date(r.date)<firstOfCurrentMonth).map(r=>r.idx);
+  }
+
+  if(val==='until'){
+    const untilVal=document.getElementById('hist-until-date').value;
+    if(!untilVal)return[];
+    const [yr,mo]=untilVal.split('-').map(Number);
+    const untilDate=new Date(yr,mo,1);
+    return ech.filter(r=>new Date(r.date)<untilDate).map(r=>r.idx);
+  }
+
+  if(val==='partial'){
+    // Tout marquer payé sauf les cochés "non payés"
+    const unpaidIdxs=new Set([...document.querySelectorAll('input[name="hist-unpaid"]:checked')].map(cb=>parseInt(cb.value)));
+    return ech.filter(r=>new Date(r.date)<firstOfCurrentMonth&&!unpaidIdxs.has(r.idx)).map(r=>r.idx);
+  }
+
+  return[];
 }
 
 function calcPreview(){
@@ -1200,7 +1399,17 @@ function saveDette(){
   }
 
   if(_editId){_dettes=_dettes.map(d=>d.id===_editId?{...d,...data}:d);}
-  else{_dettes.push(data);}
+  else{
+    // Appliquer les paiements historiques sur les nouvelles dettes
+    const ech=calcEcheancier(data);
+    const histPaids=getHistPaiements(ech);
+    data.paiements=[...new Set(histPaids)];
+    _dettes.push(data);
+    if(histPaids.length>0){
+      showToast(`✅ Dette ajoutée · ${histPaids.length} échéance${histPaids.length>1?'s':''} passée${histPaids.length>1?'s':''} validée${histPaids.length>1?'s':''}  !`,'ok');
+      save(); closeModal(); renderAll(); return;
+    }
+  }
   save(); closeModal(); renderAll();
   showToast(_editId?'✅ Dette modifiée':'✅ Dette ajoutée !','ok');
 }
