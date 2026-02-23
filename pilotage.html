@@ -717,10 +717,87 @@ async function saveAll() {
       window._doc(window._db, 'pilotage', window._uid, 'months', getMonthKey()),
       JSON.parse(JSON.stringify(_data))
     );
+    await syncCreditsTosDettes();
     showToast('✅ Sauvegardé — ' + getMonthLabel(), 'success');
   } catch(e) {
     showToast('Erreur sauvegarde', 'warning');
     console.error(e);
+  }
+}
+
+/* ─── SYNC CRÉDITS → DETTES ─── */
+async function syncCreditsTosDettes() {
+  if (!window._uid || !window._getDoc || !window._setDoc || !window._db) return;
+  try {
+    var snap = await window._getDoc(window._doc(window._db, 'dettes', window._uid, 'data', 'all'));
+    var dettes = (snap.exists() && snap.data().list) ? snap.data().list : [];
+
+    var credits = (_data.credits || []).filter(function(c) {
+      return c.ligneType === 'principal' && c.fournisseur && c.fournisseur.trim() && parseFloat(c.montant) > 0;
+    });
+
+    if (credits.length === 0) return;
+
+    var changed = false;
+
+    credits.forEach(function(c) {
+      var montant = parseFloat(c.montant) || 0;
+      var nom     = (c.nom && c.nom.trim()) ? c.nom.trim() : c.fournisseur.trim();
+      var debut   = c.dateDebut || '';
+      var taux    = parseFloat(c.tauxInteret) || 0;
+
+      var duree = 0;
+      if (c.dateDebut && c.dateFin) {
+        var d1 = new Date(c.dateDebut), d2 = new Date(c.dateFin);
+        duree = Math.round((d2 - d1) / (1000 * 60 * 60 * 24 * 30.44));
+        if (duree < 1) duree = 0;
+      }
+
+      var existingIdx = dettes.findIndex(function(d) {
+        return d._pilotageRef === c.fournisseur.trim();
+      });
+
+      var detteData = {
+        type: 'emprunt',
+        nom: nom,
+        montant: montant,
+        debut: debut,
+        taux: taux,
+        duree: duree,
+        amort: taux > 0 ? 'amortissable' : 'infine',
+        active: true,
+        _pilotageRef: c.fournisseur.trim(),
+        paiements: []
+      };
+
+      if (existingIdx >= 0) {
+        var existing = dettes[existingIdx];
+        dettes[existingIdx] = Object.assign({}, existing, {
+          nom: detteData.nom,
+          montant: detteData.montant,
+          debut: detteData.debut || existing.debut,
+          taux: detteData.taux,
+          duree: detteData.duree || existing.duree,
+          amort: detteData.amort,
+          _pilotageRef: detteData._pilotageRef
+        });
+        changed = true;
+      } else {
+        detteData.id = 'pil_' + c.fournisseur.trim().replace(/\s+/g,'_') + '_' + Date.now();
+        dettes.push(detteData);
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      await window._setDoc(
+        window._doc(window._db, 'dettes', window._uid, 'data', 'all'),
+        { list: dettes },
+        { merge: true }
+      );
+    }
+  } catch(e) {
+    console.warn('syncCreditsTosDettes error:', e);
   }
 }
 
