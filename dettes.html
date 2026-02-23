@@ -856,11 +856,16 @@ function calcEcheancier(d){
   return rows;
 }
 
+// ── Considère une échéance comme remboursée si cochée OU si sa date est passée ──
+function isEffectivelyPaid(r, paid, now){
+  return paid.has(r.idx) || new Date(r.date) < now;
+}
+
 function getSoldeRestant(d){
   const ech=calcEcheancier(d);
-  const paid=d.paiements||[];
-  const paidSet=new Set(paid);
-  const remaining=ech.filter(r=>!paidSet.has(r.idx));
+  const paid=new Set(d.paiements||[]);
+  const now=new Date();
+  const remaining=ech.filter(r=>!isEffectivelyPaid(r,paid,now));
   if(!remaining.length)return 0;
   if(d.type==='fournisseur')return remaining.reduce((s,r)=>s+r.mensualite,0);
   return remaining.length>0?remaining[0].solde+(remaining[0].capital||0):0;
@@ -869,18 +874,24 @@ function getSoldeRestant(d){
 function getSoldeRestantPrecis(d){
   const ech=calcEcheancier(d);
   const paid=new Set(d.paiements||[]);
-  // Solde = dernier solde après les paiements effectués
-  let lastPaid=-1;
-  ech.forEach(r=>{if(paid.has(r.idx))lastPaid=r.idx;});
-  if(lastPaid===-1)return parseFloat(d.montant)||0;
-  const row=ech.find(r=>r.idx===lastPaid);
-  return row?row.solde:0;
+  const now=new Date();
+  // Trouver la dernière échéance effectivement payée (cochée ou date passée)
+  let lastPaidRow=null;
+  for(let i=ech.length-1;i>=0;i--){
+    if(isEffectivelyPaid(ech[i],paid,now)){lastPaidRow=ech[i];break;}
+  }
+  if(!lastPaidRow){
+    // Aucune échéance passée → retourner montant initial
+    return parseFloat(d.montant)||0;
+  }
+  return lastPaidRow.solde;
 }
 
 function getTotalRembourse(d){
   const ech=calcEcheancier(d);
   const paid=new Set(d.paiements||[]);
-  return ech.filter(r=>paid.has(r.idx)).reduce((s,r)=>s+(r.capital||r.mensualite||0),0);
+  const now=new Date();
+  return ech.filter(r=>isEffectivelyPaid(r,paid,now)).reduce((s,r)=>s+(r.capital||r.mensualite||0),0);
 }
 
 function getEchCeMois(d){
@@ -889,7 +900,8 @@ function getEchCeMois(d){
   const paid=new Set(d.paiements||[]);
   return ech.filter(r=>{
     const dt=new Date(r.date); const rym=dt.getFullYear()*100+dt.getMonth();
-    return rym===ym&&!paid.has(r.idx);
+    // Ce mois : seulement si pas encore passé ET pas coché
+    return rym===ym&&!paid.has(r.idx)&&dt>=now;
   }).reduce((s,r)=>s+r.mensualite,0);
 }
 
@@ -927,8 +939,9 @@ function renderAlertes(){
     ech.forEach(r=>{
       if(paid.has(r.idx))return;
       const dt=new Date(r.date);
-      if(dt<now)alerts.push({nom:d.nom,date:fdate(r.date),montant:r.mensualite,type:'retard'});
-      else if(dt<=soon)alerts.push({nom:d.nom,date:fdate(r.date),montant:r.mensualite,type:'bientot'});
+      // Passé = considéré payé auto, ne pas alerter
+      if(dt<now)return;
+      if(dt<=soon)alerts.push({nom:d.nom,date:fdate(r.date),montant:r.mensualite,type:'bientot'});
     });
   });
   const bar=document.getElementById('alertBar');
@@ -936,7 +949,7 @@ function renderAlertes(){
   if(!alerts.length){bar.classList.add('hidden');return;}
   bar.classList.remove('hidden');
   items.innerHTML=alerts.slice(0,5).map(a=>
-    `<div>• ${a.nom} — ${a.date} — ${fe(a.montant)} ${a.type==='retard'?'🔴 EN RETARD':'🟡 dans 7 jours'}</div>`
+    `<div>• ${a.nom} — ${a.date} — ${fe(a.montant)} 🟡 dans 7 jours</div>`
   ).join('');
 }
 
@@ -958,10 +971,11 @@ function renderCalendar(){
   calGrid.innerHTML=MONTHS_SHORT.map((m,i)=>{
     const amt=monthly[i];
     const isPast=i<curM; const isCur=i===curM;
-    let cls='cal-month'; if(amt>0)cls+=' has-payment'; if(isPast&&amt>0)cls+=' overdue';
+    // Mois passé = payé auto, donc pas rouge
+    let cls='cal-month'; if(amt>0)cls+=' has-payment';
     return`<div class="${cls}">
       <div class="cal-month-name" style="${isCur?'color:var(--blue);font-weight:800':''}">${m}</div>
-      <div class="cal-month-amount" style="color:${amt>0?(isPast?'var(--red)':'var(--orange)'):'var(--muted)'}">${amt>0?fe(amt,0):'—'}</div>
+      <div class="cal-month-amount" style="color:${amt>0?(isPast?'var(--muted)':'var(--orange)'):'var(--muted)'}">${amt>0?fe(amt,0):'—'}</div>
     </div>`;
   }).join('');
 }
@@ -970,18 +984,22 @@ function renderCalendar(){
 function dc(id){if(_charts[id]){try{_charts[id].destroy();}catch(e){}delete _charts[id];}}
 
 function renderCharts(){
-  // Solde restant dans le temps
+  // Solde restant dans le temps — projection mensuelle
   const now=new Date(); const yr=now.getFullYear();
   const monthly=Array(12).fill(0);
   _dettes.filter(d=>d.active!==false).forEach(d=>{
-    let solde=getSoldeRestantPrecis(d);
     const ech=calcEcheancier(d);
     const paid=new Set(d.paiements||[]);
     for(let i=0;i<12;i++){
-      const month=i;
-      ech.filter(r=>{const dt=new Date(r.date);return dt.getFullYear()===yr&&dt.getMonth()===month&&!paid.has(r.idx);})
-        .forEach(r=>{solde-=(r.capital||0);});
-      monthly[i]+=Math.max(0,solde);
+      const monthStart=new Date(yr,i,1);
+      const monthEnd=new Date(yr,i+1,1);
+      // Solde à la fin du mois i = montant - capital de toutes les échéances avant la fin du mois
+      const capitalPaidByEndOfMonth=ech.filter(r=>{
+        const dt=new Date(r.date);
+        return dt<monthEnd&&(paid.has(r.idx)||dt<now);
+      }).reduce((s,r)=>s+(r.capital||0),0);
+      const solde=Math.max(0,(parseFloat(d.montant)||0)-capitalPaidByEndOfMonth);
+      monthly[i]+=solde;
     }
   });
 
@@ -1029,17 +1047,16 @@ function renderDettes(){
     const now=new Date();
     const ech=calcEcheancier(d);
     const paid=new Set(d.paiements||[]);
-    const hasRetard=ech.some(r=>!paid.has(r.idx)&&new Date(r.date)<now);
-    const hasBientot=!hasRetard&&ech.some(r=>{const dt=new Date(r.date);const soon=new Date(now);soon.setDate(soon.getDate()+7);return!paid.has(r.idx)&&dt>=now&&dt<=soon;});
+    // Bientôt = échéance dans les 7 prochains jours (non passée)
+    const hasBientot=ech.some(r=>{const dt=new Date(r.date);const soon=new Date(now);soon.setDate(soon.getDate()+7);return!paid.has(r.idx)&&dt>=now&&dt<=soon;});
 
-    return`<div class="dette-card ${hasRetard?'alerte':hasBientot?'bientot':''}" id="dc-${d.id}">
+    return`<div class="dette-card ${hasBientot?'bientot':''}" id="dc-${d.id}">
       <div class="dette-head" onclick="toggleDette('${d.id}')">
         <div class="dette-type-icon" style="background:${tc.bg};color:${tc.color}">${tc.icon}</div>
         <div class="dette-info">
           <div class="dette-nom">
             ${d.nom||'Sans nom'}
             <span class="badge badge-${d.type==='emprunt'?'blue':d.type==='fournisseur'?'orange':d.type==='leasing'?'purple':'red'}">${tc.label}</span>
-            ${hasRetard?'<span class="badge badge-red">⚠️ Retard</span>':''}
             ${hasBientot?'<span class="badge badge-orange">📅 Bientôt</span>':''}
             ${solde<=0?'<span class="badge badge-green">✅ Soldée</span>':''}
           </div>
@@ -1117,18 +1134,21 @@ function renderEcheancier(d){
   const now=new Date();
   const rows=ech.map(r=>{
     const dt=new Date(r.date);
-    const isPaid=paid.has(r.idx);
-    const isLate=!isPaid&&dt<now;
-    const isToday=!isPaid&&dt.getFullYear()===now.getFullYear()&&dt.getMonth()===now.getMonth();
-    return`<tr class="${isPaid?'payee':isLate?'en-retard':isToday?'aujourd-hui':''}">
-      <td>${fdate(r.date)}${isLate?' 🔴':isToday?' 📍':''}</td>
+    const isManuallyPaid=paid.has(r.idx);
+    const isPast=dt<now;
+    const isPaid=isManuallyPaid||isPast; // passé = considéré payé
+    const isToday=!isPast&&dt.getFullYear()===now.getFullYear()&&dt.getMonth()===now.getMonth();
+    return`<tr class="${isPaid?'payee':isToday?'aujourd-hui':''}">
+      <td>${fdate(r.date)}</td>
       ${d.type!=='fournisseur'&&d.type!=='leasing'?`<td>${fe(r.capital||0)}</td><td>${fe(r.interet||0)}</td>`:''}
       <td>${fe(r.mensualite)}</td>
       <td style="color:${r.solde>0?'var(--text)':'var(--green)'}">${fe(r.solde)}</td>
       <td>
-        ${isPaid
+        ${isManuallyPaid
           ?`<button class="ech-paid-btn" style="background:#f0fdf4;color:var(--green)" onclick="togglePaid('${d.id}',${r.idx})">✅ Payé</button>`
-          :`<button class="ech-paid-btn" style="background:#f8faff;color:var(--blue2);border:1px solid var(--border)" onclick="togglePaid('${d.id}',${r.idx})">Marquer payé</button>`
+          :isPast
+            ?`<span style="font-size:11px;color:var(--muted);font-style:italic">✅ Payé (auto)</span>`
+            :`<button class="ech-paid-btn" style="background:#f8faff;color:var(--blue2);border:1px solid var(--border)" onclick="togglePaid('${d.id}',${r.idx})">Marquer payé</button>`
         }
       </td>
     </tr>`;
@@ -1167,13 +1187,8 @@ function togglePaid(id,idx){
 
 // ── BULK VALIDATE ──
 function renderBulkBtn(d){
-  const ech=calcEcheancier(d);
-  const paid=new Set(d.paiements||[]);
-  const now=new Date();
-  const firstCurMonth=new Date(now.getFullYear(),now.getMonth(),1);
-  const unpastCount=ech.filter(r=>new Date(r.date)<firstCurMonth&&!paid.has(r.idx)).length;
-  if(unpastCount===0)return'';
-  return`<button class="btn btn-xs" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d" onclick="openBulkValidate('${d.id}')">⚡ Valider les échéances passées <span style="background:#f59e0b;color:#fff;border-radius:99px;padding:1px 6px;font-size:10px;margin-left:2px">${unpastCount}</span></button>`;
+  // Plus nécessaire : les échéances passées sont automatiquement considérées payées
+  return '';
 }
 
 function openBulkValidate(id){
