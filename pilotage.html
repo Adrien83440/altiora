@@ -525,14 +525,21 @@ async function saveAll() {
 
 
 async function saveQuiet() {
-  if (!window._uid || !window._setDoc) return;
+  // Si Firebase pas encore prêt, réessayer dans 500ms
+  if (!window._uid || !window._setDoc) {
+    setTimeout(saveQuiet, 500);
+    return;
+  }
   try {
     await window._setDoc(
       window._doc(window._db, 'pilotage', window._uid, 'months', getMonthKey()),
       JSON.parse(JSON.stringify(_data))
     );
     showToast('✓ Enregistré', 'success');
-  } catch(e) { console.warn('saveQuiet error:', e); }
+  } catch(e) {
+    console.warn('saveQuiet error:', e);
+    showToast('Erreur sauvegarde', 'warning');
+  }
 }
 
 /* ─── RENDU PAGE ─── */
@@ -540,7 +547,7 @@ function renderPage(data, month) {
   var t = calcTotals(data);
   document.getElementById('mainContent').innerHTML =
     '<div class="summary-grid">' +
-      '<div class="sum-card blue"><div class="sum-label">CA HT du mois</div><div class="sum-value" id="s-ca">' + fmt(t.caHT) + '</div><div class="sum-sub">Prévision : ' + fmtE(t.prevCA) + '</div></div>' +
+      '<div class="sum-card blue"><div class="sum-label">CA HT du mois</div><div class="sum-value" id="s-ca">' + fmt(t.caHT) + '</div><div class="sum-sub" id="s-ca-detail">Journalier : ' + fmtE(t.caHT_j) + ' · Factures pro : ' + fmtE(t.caFP_HT) + '</div></div>' +
       '<div class="sum-card orange"><div class="sum-label">Charges totales HT</div><div class="sum-value" id="s-ch">' + fmt(t.chargesHT) + '</div><div class="sum-sub">Fixes ' + fmtE(t.fixesHT) + ' · Var. ' + fmtE(t.varHT) + '</div></div>' +
       '<div class="sum-card ' + (t.resultat>=0?'green':'red') + '"><div class="sum-label">Résultat HT</div><div class="sum-value ' + (t.resultat>=0?'positive':'negative') + '" id="s-res">' + fmt(t.resultat) + '</div><div class="sum-sub">CA − Dépenses</div></div>' +
       '<div class="sum-card purple"><div class="sum-label">TVA collectée</div><div class="sum-value" id="s-tvac">' + fmt(t.tvaCollectee) + '</div></div>' +
@@ -553,7 +560,7 @@ function renderPage(data, month) {
         '<table class="data-table">' +
           '<thead><tr><th>Date</th><th style="color:#10b981">HT 5,5%</th><th style="color:#f97316">HT 10%</th><th style="color:#4f7ef8">HT 20%</th><th>Total HT</th><th>Total TTC</th><th>TVA collectée</th></tr></thead>' +
           '<tbody id="ca-tbody">' + renderCARows(data.ca) + '</tbody>' +
-          '<tfoot><tr><td>TOTAL</td><td style="color:#10b981;font-weight:700"><span id="tot-ca055">' + fmtN(t.caHT055) + '</span> €</td><td style="color:#f97316;font-weight:700"><span id="tot-ca10">' + fmtN(t.caHT10) + '</span> €</td><td style="color:#4f7ef8;font-weight:700"><span id="tot-ca20">' + fmtN(t.caHT20) + '</span> €</td><td><span id="tot-caHT">' + fmtN(t.caHT) + '</span> €</td><td><span id="tot-caTTC">' + fmtN(t.caTTC) + '</span> €</td><td><span id="tot-tvaC">' + fmtN(t.tvaCollectee) + '</span> €</td></tr></tfoot>' +
+          '<tfoot><tr><td>TOTAL</td><td style="color:#10b981;font-weight:700"><span id="tot-ca055">' + fmtN(t.caHT055) + '</span> €</td><td style="color:#f97316;font-weight:700"><span id="tot-ca10">' + fmtN(t.caHT10) + '</span> €</td><td style="color:#4f7ef8;font-weight:700"><span id="tot-ca20">' + fmtN(t.caHT20) + '</span> €</td><td><span id="tot-caHT">' + fmtN(t.caHT_j) + '</span> €</td><td><span id="tot-caTTC">' + fmtN(t.caHT055*1.055+t.caHT10*1.10+t.caHT20*1.20) + '</span> €</td><td><span id="tot-tvaC">' + fmtN(t.caHT055*0.055+t.caHT10*0.10+t.caHT20*0.20) + '</span> €</td></tr></tfoot>' +
         '</table>' +
       '</div>' +
       '<div style="display:flex;flex-direction:column;gap:16px;">' +
@@ -972,17 +979,24 @@ function openFixedModal() {
 
 /* ─── CALCULS ─── */
 function calcTotals(data) {
+  // CA journalier (tableau de saisie quotidienne)
   var caHT055 = data.ca.reduce(function(s,r){return s+(parseFloat(r.ht055)||0);},0);
   var caHT10  = data.ca.reduce(function(s,r){return s+(parseFloat(r.ht10)||0);},0);
   var caHT20  = data.ca.reduce(function(s,r){return s+(parseFloat(r.ht20)||0);},0);
+  var caHT_j = caHT055 + caHT10 + caHT20;
+  // Factures Pro
   var fpRows = data.facturesPro || [];
   var caFP055 = fpRows.reduce(function(s,r){return s+(parseFloat(r.ht055)||0);},0);
   var caFP10  = fpRows.reduce(function(s,r){return s+(parseFloat(r.ht10)||0);},0);
   var caFP20  = fpRows.reduce(function(s,r){return s+(parseFloat(r.ht20)||0);},0);
-  caHT055 += caFP055; caHT10 += caFP10; caHT20 += caFP20;
-  var caHT = caHT055 + caHT10 + caHT20;
-  var caTTC = caHT055*1.055 + caHT10*1.10 + caHT20*1.20;
-  var tvaCollectee = caHT055*0.055 + caHT10*0.10 + caHT20*0.20;
+  var caFP_HT = caFP055 + caFP10 + caFP20;
+  // CA total (journalier + factures pro)
+  var caHT_total055 = caHT055 + caFP055;
+  var caHT_total10  = caHT10  + caFP10;
+  var caHT_total20  = caHT20  + caFP20;
+  var caHT = caHT_j + caFP_HT;
+  var caTTC = caHT_total055*1.055 + caHT_total10*1.10 + caHT_total20*1.20;
+  var tvaCollectee = caHT_total055*0.055 + caHT_total10*0.10 + caHT_total20*0.20;
   var rentreesSupp = data.rentreesSupp.reduce(function(s,r){return s+(parseFloat(r.montant)||0);},0);
   var prevCA = data.previsionCA.reduce(function(s,r){return s+(parseFloat(r.montant)||0);},0);
   var fixesHT=0,fixesTTC=0,fixesTVA=0;
@@ -1007,7 +1021,7 @@ function calcTotals(data) {
   var resultat = caHT+rentreesSupp-chargesHT;
   var cashflow = caHT+rentreesSupp-(fixesTTC+varTTC+creditsPrincipal+creditsInteret+leasingTTC);
   var delta = resultat-(prevCA-chargesHT);
-  return {caHT,caHT055,caHT10,caHT20,caTTC,tvaCollectee,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta,caFP055,caFP10,caFP20};
+  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caTTC,tvaCollectee,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta,caFP055,caFP10,caFP20};
 }
 
 function refreshTotals() {
@@ -1033,6 +1047,8 @@ function refreshTotals() {
   s('cf-prev',fmt(t.prevCA-t.chargesHT));
   s('cf-delta',fmt(t.delta),t.delta>=0?'positive':'negative');
   s('s-ca',fmt(t.caHT));s('s-ch',fmt(t.chargesHT));
+  var detEl=document.getElementById('s-ca-detail');
+  if(detEl) detEl.textContent='Journalier : '+fmtE(t.caHT_j)+' · Factures pro : '+fmtE(t.caFP_HT);
   s('s-res',fmt(t.resultat),t.resultat>=0?'positive':'negative');
   s('s-tvac',fmt(t.tvaCollectee));s('s-tvad',fmt(t.tvaDue),t.tvaDue>=0?'negative':'positive');
 }
