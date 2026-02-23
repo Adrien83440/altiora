@@ -372,7 +372,8 @@ function showToast(msg, type) {
   var t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'toast show ' + (type || '');
-  setTimeout(function() { t.className = 'toast'; }, 3500);
+  var dur = t.classList.contains('success') ? 1200 : 3500;
+  setTimeout(function() { t.className = 'toast'; }, dur);
 }
 
 /* ─── DONNÉES PAR DÉFAUT ─── */
@@ -454,6 +455,18 @@ async function saveAll() {
     showToast('Erreur sauvegarde', 'warning');
     console.error(e);
   }
+}
+
+
+async function saveQuiet() {
+  if (!window._uid || !window._setDoc) return;
+  try {
+    await window._setDoc(
+      window._doc(window._db, 'pilotage', window._uid, 'months', getMonthKey()),
+      JSON.parse(JSON.stringify(_data))
+    );
+    showToast('✓ Enregistré', 'success');
+  } catch(e) { console.warn('saveQuiet error:', e); }
 }
 
 /* ─── RENDU PAGE ─── */
@@ -950,7 +963,24 @@ async function handleLogout() {
   window.location.href = 'index.html';
 }
 </script>
-<script src="nav.js"></script>
+<script src="nav.js">
+/* ─── SAVE ON ENTER ─── */
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter') return;
+  var tag = e.target.tagName;
+  if (tag !== 'INPUT' && tag !== 'TEXTAREA') return;
+  e.preventDefault();
+  saveQuiet();
+  // Passer au champ suivant dans la même ligne ou ligne suivante
+  var inputs = Array.from(document.querySelectorAll('input.cell-input, select.cell-input'));
+  var idx = inputs.indexOf(e.target);
+  if (idx >= 0 && idx < inputs.length - 1) {
+    inputs[idx + 1].focus();
+    inputs[idx + 1].select();
+  }
+});
+
+</script>
 
 </body>
 </html>
