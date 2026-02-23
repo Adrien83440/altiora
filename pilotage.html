@@ -785,6 +785,90 @@ async function syncCreditsTosDettes() {
   }
 }
 
+async function forceSyncDettes() {
+  if (!window._uid) { showToast('Non connecté', 'warning'); return; }
+  showToast('🔄 Synchronisation en cours…', 'success');
+  // Scanner tous les mois pour collecter tous les crédits
+  var allCredits = {};
+  var currentYear = new Date().getFullYear();
+  var fetchPromises = [];
+  for (var y = 2023; y <= currentYear + 2; y++) {
+    for (var m = 1; m <= 12; m++) {
+      var key = y + '-' + String(m).padStart(2,'0');
+      fetchPromises.push(
+        window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', key))
+          .then(function(s) {
+            if (!s.exists()) return;
+            var d = s.data();
+            var credits = migrateCreditsToSingleLine((d.credits || []).slice());
+            credits.forEach(function(c) {
+              if ((c.ligneType === 'principal' || !c.ligneType) && c.fournisseur && c.fournisseur.trim() && parseFloat(c.montant) > 0) {
+                var ref = c.fournisseur.trim();
+                if (!allCredits[ref]) allCredits[ref] = c;
+              }
+            });
+          })
+          .catch(function() {})
+      );
+    }
+  }
+  // Inclure aussi les crédits du mois courant en mémoire
+  (_data.credits || []).forEach(function(c) {
+    if ((c.ligneType === 'principal' || !c.ligneType) && c.fournisseur && c.fournisseur.trim() && parseFloat(c.montant) > 0) {
+      allCredits[c.fournisseur.trim()] = c;
+    }
+  });
+
+  await Promise.all(fetchPromises);
+
+  var creditsList = Object.values(allCredits);
+  if (creditsList.length === 0) { showToast('Aucun crédit trouvé', 'warning'); return; }
+
+  try {
+    var snap = await window._getDoc(window._doc(window._db, 'dettes', window._uid, 'data', 'all'));
+    var dettes = (snap.exists() && snap.data().list) ? snap.data().list : [];
+
+    creditsList.forEach(function(c) {
+      var montant = parseFloat(c.montant) || 0;
+      var nom     = (c.nom && c.nom.trim()) ? c.nom.trim() : c.fournisseur.trim();
+      var debut   = c.dateDebut || '';
+      var taux    = parseFloat(c.tauxInteret) || 0;
+      var duree   = 0;
+      if (c.dateDebut && c.dateFin) {
+        var d1 = new Date(c.dateDebut + '-01'), d2 = new Date(c.dateFin + '-01');
+        duree = Math.round((d2 - d1) / (1000 * 60 * 60 * 24 * 30.44));
+        if (duree < 1) duree = 0;
+      }
+      var existingIdx = dettes.findIndex(function(d) { return d._pilotageRef === c.fournisseur.trim(); });
+      var detteData = {
+        type: 'emprunt', nom: nom, montant: montant, debut: debut,
+        taux: taux, duree: duree, amort: taux > 0 ? 'amortissable' : 'infine',
+        active: true, _pilotageRef: c.fournisseur.trim(), paiements: []
+      };
+      if (existingIdx >= 0) {
+        dettes[existingIdx] = Object.assign({}, dettes[existingIdx], {
+          nom: detteData.nom, montant: detteData.montant,
+          debut: detteData.debut || dettes[existingIdx].debut,
+          taux: detteData.taux, duree: detteData.duree || dettes[existingIdx].duree,
+          amort: detteData.amort, _pilotageRef: detteData._pilotageRef
+        });
+      } else {
+        detteData.id = 'pil_' + c.fournisseur.trim().replace(/\s+/g,'_') + '_' + Date.now();
+        dettes.push(detteData);
+      }
+    });
+
+    await window._setDoc(
+      window._doc(window._db, 'dettes', window._uid, 'data', 'all'),
+      { list: dettes }, { merge: true }
+    );
+    showToast('✅ ' + creditsList.length + ' crédit(s) synchronisé(s) dans Dettes', 'success');
+  } catch(e) {
+    showToast('Erreur sync dettes', 'warning');
+    console.warn('forceSyncDettes error:', e);
+  }
+}
+
 
 async function saveQuiet() {
   // Si Firebase pas encore prêt, réessayer dans 500ms
@@ -892,7 +976,7 @@ function renderPage(data, month) {
 
     '<div class="section-card full" style="margin-bottom:16px">' +
         '<div class="section-head"><div class="section-title">🏦 Crédits & Emprunts <span class="section-title-badge badge-purple">Mensualité auto</span></div>' +
-          '<div class="section-actions"><button class="btn btn-outline btn-sm" onclick="addCredit()">+ Crédit</button></div>' +
+          '<div class="section-actions"><button class="btn btn-outline btn-sm" onclick="addCredit()">+ Crédit</button><button class="btn btn-outline btn-sm" style="color:#6366f1;border-color:#6366f1" onclick="forceSyncDettes()">🔗 Sync → Dettes</button></div>' +
         '</div>' +
         '<div class="info-box">💡 Renseigne Principal + Taux → mensualité calculée automatiquement · TVA déduite sur les intérêts uniquement · Renseigne Début/Fin pour la propagation</div>' +
         '<table class="data-table"><thead><tr><th>Pointé</th><th>Nom crédit</th><th>Principal €</th><th>Taux int. %</th><th>Mensualité HT</th><th>dont Intérêts</th><th>TVA %</th><th>TVA déd.</th><th>Début / Fin</th><th></th></tr></thead>' +
