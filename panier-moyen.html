@@ -602,32 +602,54 @@ const MN=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Se
 const COLORS=['#4f7ef8','#10b981','#f59e0b','#ef4444','#6366f1','#14b8a6','#ec4899','#8b5cf6'];
 let _yr=new Date().getFullYear(), _mi=new Date().getMonth(), _charts={};
 
-// ── STORAGE ──
-function lk(y){return'altiora_pm_'+y}
-function ck(y){return'altiora_pm_cats_'+y}
-function loadM(y){try{const d=localStorage.getItem(lk(y));if(d)return JSON.parse(d)}catch(e){}return Array(12).fill(null).map(()=>({cli:'',ca:'',txn:''}))}
-function saveM(y,d){localStorage.setItem(lk(y),JSON.stringify(d))}
-function loadC(y){try{const d=localStorage.getItem(ck(y));if(d)return JSON.parse(d)}catch(e){}return[]}
-function saveC(y,d){localStorage.setItem(ck(y),JSON.stringify(d))}
-
-let months=loadM(_yr), cats=loadC(_yr);
+// ── STATE (Firebase uniquement — plus de localStorage) ──
+function emptyMonths(){return Array(12).fill(null).map(()=>({cli:'',ca:'',txn:''}))}
+let months=emptyMonths(), cats=[];
 
 // ── UTILS ──
 function fe(n){return(parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'}
 function fi(n){return Math.round(parseFloat(n)||0).toLocaleString('fr-FR')}
 function set(id,v){const e=document.getElementById(id);if(e)e.textContent=v}
-function setC(id,cls){const e=document.getElementById(id);if(e)e.className=cls}
 function calc(m){const c=parseFloat(m.cli)||0,a=parseFloat(m.ca)||0,t=parseFloat(m.txn)||0;return{c,a,t,pv:t>0?a/t:0,pc:c>0?a/c:0,vc:c>0?t/c:0}}
 function toggleSub(){document.getElementById('ksub').classList.toggle('open')}
 function togglePil(el){document.getElementById('psub').classList.toggle('open');el.classList.toggle('on')}
 async function doLogout(){try{if(window._signOut&&window._auth)await window._signOut(window._auth)}catch(e){}location.href='index.html'}
+
+// ── FIREBASE SAVE (avec debounce pour auto-save) ──
+let _saveTimer=null;
+function scheduleSave(){
+  clearTimeout(_saveTimer);
+  _saveTimer=setTimeout(()=>persistFirebase(false),1500);
+}
+async function persistFirebase(showFeedback=true){
+  if(!window._uid||!window._setDoc)return;
+  try{
+    await window._setDoc(
+      window._doc(window._db,'panier',window._uid,'data','all'),
+      {[`y${_yr}`]:{months,cats}},
+      {merge:true}
+    );
+    if(showFeedback)showToast('✅ Sauvegardé !','ok');
+  }catch(e){
+    if(showFeedback)showToast('❌ Erreur de sauvegarde','');
+    console.error('Firebase save error:',e);
+  }
+}
 
 // ── YEAR BAR ──
 function buildYr(){
   document.getElementById('yrBar').innerHTML=[2024,2025,2026,2027].map(y=>
     `<button class="yr ${y===_yr?'on':''}" onclick="switchYr(${y})">${y}</button>`).join('');
 }
-function switchYr(y){saveM(_yr,months);saveC(_yr,cats);_yr=y;months=loadM(y);cats=loadC(y);buildYr();buildStrip();renderAll()}
+async function switchYr(y){
+  // Sauvegarder l'année courante avant de changer
+  await persistFirebase(false);
+  _yr=y;
+  months=emptyMonths();
+  cats=[];
+  buildYr();
+  await loadFromFirebase();
+}
 
 // ── MONTH STRIP ──
 function buildStrip(){
@@ -657,16 +679,15 @@ function onInput(){
   renderKPIs();
   renderCharts();
   prefillSim();
+  scheduleSave(); // auto-save Firestore après 1.5s d'inactivité
 }
 
 function updateResults(){
   const m=months[_mi];
   const c=calc(m);
-  // Panier/vente
   set('r-pv', c.pv>0?fe(c.pv):'—');
   set('r-pc', c.pc>0?fe(c.pc):'—');
   set('r-vc', c.vc>0?c.vc.toFixed(2):'—');
-  // Évolution vs mois précédent
   const prev=months[_mi>0?_mi-1:0];
   const cp=calc(prev);
   const rEvo=document.getElementById('r-evo');
@@ -744,9 +765,9 @@ function renderCats(){
       </div></div>`;
   }).join('')+`<div class="add-cat" onclick="addCat()"><span style="font-size:18px">+</span> Nouvelle catégorie</div>`;
 }
-function addCat(){cats.push({nom:'',ca:'',txn:'',cli:''});renderCats();renderCharts()}
-function delCat(i){cats.splice(i,1);renderCats();renderCharts()}
-function updCat(i,f,v){cats[i][f]=v;renderCats();renderCharts()}
+function addCat(){cats.push({nom:'',ca:'',txn:'',cli:''});renderCats();renderCharts();scheduleSave()}
+function delCat(i){cats.splice(i,1);renderCats();renderCharts();scheduleSave()}
+function updCat(i,f,v){cats[i][f]=v;renderCats();renderCharts();scheduleSave()}
 
 // ── SIMULATEUR ──
 function prefillSim(){
@@ -780,27 +801,38 @@ function calcSim(){
 }
 function resetSim(){['s-pv','s-txn','s-cli'].forEach(id=>document.getElementById(id).value='');document.getElementById('s-mois').value='12';calcSim()}
 
-
+// ── SAVE MANUEL (bouton) ──
 async function saveData(){
-  saveM(_yr,months);saveC(_yr,cats);
-  if(window._uid&&window._setDoc)window._setDoc(window._doc(window._db,'panier',window._uid,'data','all'),{[`y${_yr}`]:{months,cats}},{merge:true}).catch(()=>{});
-  showToast('✅ Sauvegardé !','ok');
+  await persistFirebase(true);
 }
+
 function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');setTimeout(()=>t.className='toast',3000)}
 
 function renderAll(){buildStrip();fillForm();renderKPIs();renderCharts();renderCats();prefillSim()}
-async function tryFirebase(){
+
+// ── CHARGEMENT FIREBASE ──
+async function loadFromFirebase(){
   if(!window._uid||!window._getDoc)return;
   try{
     const snap=await window._getDoc(window._doc(window._db,'panier',window._uid,'data','all'));
-    if(snap.exists()){const d=snap.data()[`y${_yr}`];if(d&&d.months){months=d.months;if(d.cats)cats=d.cats;renderAll()}}
-    const u=window._auth?.currentUser;if(u){const n=u.displayName||u.email?.split('@')[0]||'';document.getElementById('uname').textContent=n;document.getElementById('av').textContent=n[0]?.toUpperCase()||'A'}
-  }catch(e){}
+    if(snap.exists()){
+      const d=snap.data()[`y${_yr}`];
+      if(d&&d.months){
+        months=d.months;
+        // S'assurer que le tableau a bien 12 entrées (compatibilité données anciennes)
+        while(months.length<12)months.push({cli:'',ca:'',txn:''});
+      }
+      if(d&&d.cats)cats=d.cats;
+    }
+  }catch(e){console.error('Firebase load error:',e);}
+  renderAll();
 }
 
-// ── START IMMÉDIAT ──
-buildYr(); renderAll();
-setTimeout(tryFirebase,500);
+// ── START : on affiche l'UI de suite, Firebase charge quand prêt ──
+buildYr();
+buildStrip(); // affiche le sélecteur de mois immédiatement
+// Firebase se connecte via le module type="module" ci-dessous,
+// qui appelle loadFromFirebase() une fois l'auth confirmée
 </script>
 
 <script type="module">
@@ -810,7 +842,17 @@ import{getFirestore,doc,setDoc,getDoc}from"https://www.gstatic.com/firebasejs/10
 const app=initializeApp({apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",authDomain:"altiora-70599.firebaseapp.com",projectId:"altiora-70599",storageBucket:"altiora-70599.firebasestorage.app",messagingSenderId:"120905555746",appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"});
 const auth=getAuth(app),db=getFirestore(app);
 window._auth=auth;window._db=db;window._doc=doc;window._setDoc=setDoc;window._getDoc=getDoc;window._signOut=signOut;
-onAuthStateChanged(auth,user=>{if(!user){location.href='index.html';return}window._uid=user.uid;tryFirebase()});
+onAuthStateChanged(auth,user=>{
+  if(!user){location.href='index.html';return}
+  window._uid=user.uid;
+  // Afficher le nom utilisateur
+  const n=user.displayName||user.email?.split('@')[0]||'';
+  const av=document.getElementById('av');const un=document.getElementById('uname');
+  if(av)av.textContent=n[0]?.toUpperCase()||'A';
+  if(un)un.textContent=n;
+  // Charger les données depuis Firestore (source unique de vérité)
+  loadFromFirebase();
+});
 </script>
 
 <script>
