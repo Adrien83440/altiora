@@ -1049,9 +1049,10 @@ function renderDettes(){
       </div>
       <div class="dette-detail">
         <div class="dette-detail-body">
-          <div style="display:flex;gap:8px;margin-bottom:14px">
+          <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap" id="det-btns-${d.id}">
             <button class="btn btn-o btn-xs" onclick="editDette('${d.id}')">✏️ Modifier</button>
             <button class="btn btn-d btn-xs" onclick="deleteDette('${d.id}')">🗑 Supprimer</button>
+            ${renderBulkBtn(d)}
           </div>
           ${renderDetailStats(d)}
           ${renderEcheancier(d)}
@@ -1145,6 +1146,130 @@ function togglePaid(id,idx){
   const i=d.paiements.indexOf(idx);
   if(i>-1)d.paiements.splice(i,1); else d.paiements.push(idx);
   save(); renderAll(); showToast(i>-1?'Paiement annulé':'✅ Paiement enregistré','ok');
+}
+
+// ── BULK VALIDATE ──
+function renderBulkBtn(d){
+  const ech=calcEcheancier(d);
+  const paid=new Set(d.paiements||[]);
+  const now=new Date();
+  const firstCurMonth=new Date(now.getFullYear(),now.getMonth(),1);
+  const unpastCount=ech.filter(r=>new Date(r.date)<firstCurMonth&&!paid.has(r.idx)).length;
+  if(unpastCount===0)return'';
+  return`<button class="btn btn-xs" style="background:#fef3c7;color:#92400e;border:1px solid #fcd34d" onclick="openBulkValidate('${d.id}')">⚡ Valider les échéances passées <span style="background:#f59e0b;color:#fff;border-radius:99px;padding:1px 6px;font-size:10px;margin-left:2px">${unpastCount}</span></button>`;
+}
+
+function openBulkValidate(id){
+  const d=_dettes.find(x=>x.id===id); if(!d)return;
+  const ech=calcEcheancier(d);
+  const paid=new Set(d.paiements||[]);
+  const now=new Date();
+  const firstCurMonth=new Date(now.getFullYear(),now.getMonth(),1);
+  const pastUnpaid=ech.filter(r=>new Date(r.date)<firstCurMonth&&!paid.has(r.idx));
+  if(!pastUnpaid.length){showToast('✅ Toutes les échéances passées sont déjà validées','ok');return;}
+
+  // Build modal HTML
+  const rows=pastUnpaid.map(r=>`
+    <label style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;border:1px solid var(--border);cursor:pointer;background:#fff;font-size:12px;transition:.1s" onmouseover="this.style.background='#f8faff'" onmouseout="this.style.background='#fff'">
+      <input type="checkbox" checked name="bulk-ech" value="${r.idx}" data-montant="${r.mensualite}" style="accent-color:var(--green);width:15px;height:15px;flex-shrink:0"/>
+      <span style="font-weight:600;min-width:90px">${fdate(r.date)}</span>
+      <span style="color:var(--muted)">—</span>
+      <span style="font-weight:700">${fe(r.mensualite)}</span>
+      <span style="margin-left:auto;font-size:10px;color:var(--muted)">${fe(r.capital||0)} cap.</span>
+    </label>`).join('');
+
+  const total=pastUnpaid.reduce((s,r)=>s+r.mensualite,0);
+
+  const modal=document.createElement('div');
+  modal.className='overlay show';
+  modal.id='bulk-overlay';
+  modal.innerHTML=`
+    <div class="modal" style="max-width:500px">
+      <div class="modal-head">
+        <h3>⚡ Validation groupée — ${d.nom}</h3>
+        <button class="modal-close" onclick="document.getElementById('bulk-overlay').remove()">✕</button>
+      </div>
+      <div class="modal-body" style="padding:16px 20px">
+        <div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:20px">📆</span>
+          <div>
+            <div style="font-size:12px;font-weight:700;color:#92400e">${pastUnpaid.length} échéance${pastUnpaid.length>1?'s':''} passée${pastUnpaid.length>1?'s':''} non validée${pastUnpaid.length>1?'s':''}</div>
+            <div style="font-size:11px;color:#a16207">Sélectionnez celles à marquer comme payées</div>
+          </div>
+          <div style="margin-left:auto;text-align:right">
+            <div style="font-size:10px;color:#a16207;font-weight:600">TOTAL SÉLECTIONNÉ</div>
+            <div style="font-size:15px;font-weight:800;color:#92400e" id="bulk-total">${fe(total)}</div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <button class="btn btn-xs btn-g" onclick="bulkSelectAll(true)">✅ Tout sélectionner</button>
+          <button class="btn btn-xs btn-d" onclick="bulkSelectAll(false)">☐ Tout décocher</button>
+          <div style="margin-left:auto;font-size:11px;color:var(--muted);align-self:center" id="bulk-count-label">${pastUnpaid.length}/${pastUnpaid.length} sélectionnée${pastUnpaid.length>1?'s':''}</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:5px;max-height:300px;overflow-y:auto" id="bulk-list">
+          ${rows}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-o" onclick="document.getElementById('bulk-overlay').remove()">Annuler</button>
+        <button class="btn btn-p" onclick="applyBulkValidate('${id}')">⚡ Valider la sélection</button>
+      </div>
+    </div>`;
+
+  // Update total on change
+  modal.querySelectorAll('input[name="bulk-ech"]').forEach(cb=>{
+    cb.addEventListener('change',()=>{
+      const cbs=[...modal.querySelectorAll('input[name="bulk-ech"]:checked')];
+      const allCbs=[...modal.querySelectorAll('input[name="bulk-ech"]')];
+      const lbl=document.getElementById('bulk-count-label');
+      if(lbl)lbl.textContent=`${cbs.length}/${allCbs.length} sélectionnée${cbs.length>1?'s':''}`;
+      const total=cbs.reduce((s,cb2)=>s+(parseFloat(cb2.dataset.montant)||0),0);
+      const el=document.getElementById('bulk-total');
+      if(el)el.textContent=fe(total);
+    });
+  });
+
+  document.body.appendChild(modal);
+}
+
+function bulkSelectAll(val){
+  document.querySelectorAll('input[name="bulk-ech"]').forEach(cb=>{cb.checked=val;});
+  updateBulkTotal(null,null,true);
+  // Recalculate total from checked values (store amounts as data attrs)
+  const cbs=[...document.querySelectorAll('input[name="bulk-ech"]:checked')];
+  const allCbs=[...document.querySelectorAll('input[name="bulk-ech"]')];
+  const lbl=document.getElementById('bulk-count-label');
+  if(lbl)lbl.textContent=`${cbs.length}/${allCbs.length} sélectionnée${cbs.length>1?'s':''}`;
+  const total=cbs.reduce((s,cb)=>s+(parseFloat(cb.dataset.montant)||0),0);
+  const el=document.getElementById('bulk-total');
+  if(el)el.textContent=fe(total);
+}
+
+function updateBulkTotal(d,ech,skipEch){
+  const cbs=[...document.querySelectorAll('input[name="bulk-ech"]:checked')];
+  const allCbs=[...document.querySelectorAll('input[name="bulk-ech"]')];
+  const lbl=document.getElementById('bulk-count-label');
+  if(lbl)lbl.textContent=`${cbs.length}/${allCbs.length} sélectionnée${cbs.length>1?'s':''}`;
+
+  if(!skipEch&&d&&ech){
+    const idxs=new Set(cbs.map(cb=>parseInt(cb.value)));
+    const total=ech.filter(r=>idxs.has(r.idx)).reduce((s,r)=>s+r.mensualite,0);
+    const el=document.getElementById('bulk-total');
+    if(el)el.textContent=fe(total);
+  }
+}
+
+function applyBulkValidate(id){
+  const d=_dettes.find(x=>x.id===id); if(!d)return;
+  const selected=[...document.querySelectorAll('input[name="bulk-ech"]:checked')].map(cb=>parseInt(cb.value));
+  if(!selected.length){showToast('Aucune échéance sélectionnée','err');return;}
+  if(!d.paiements)d.paiements=[];
+  selected.forEach(idx=>{if(!d.paiements.includes(idx))d.paiements.push(idx);});
+  document.getElementById('bulk-overlay')?.remove();
+  save(); renderAll();
+  showToast(`✅ ${selected.length} échéance${selected.length>1?'s':''} validée${selected.length>1?'s':''} !`,'ok');
 }
 
 function deleteDette(id){
