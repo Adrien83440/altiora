@@ -624,14 +624,14 @@ function renderFacturesPro(rows) {
     var totalTTC = h055*1.055 + h10*1.10 + h20*1.20;
     var totalTVA = h055*0.055 + h10*0.10  + h20*0.20;
     return '<tr>' +
-      '<td><input class="cell-input" style="width:110px" placeholder="Client / société" value="' + (r.client||'') + '" oninput="_data.facturesPro[' + i + '].client=this.value"/></td>' +
-      '<td><input class="cell-input" style="width:140px" placeholder="Description" value="' + (r.description||'') + '" oninput="_data.facturesPro[' + i + '].description=this.value"/></td>' +
+      '<td><input class="cell-input" style="width:110px" placeholder="Client / société" value="' + (r.client||'') + '" oninput="updateFacturePro(' + i + ',\'client\',this.value)"/></td>' +
+      '<td><input class="cell-input" style="width:140px" placeholder="Description" value="' + (r.description||'') + '" oninput="updateFacturePro(' + i + ',\'description\',this.value)"/></td>' +
       '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + (r.ht055||'') + '" oninput="updateFacturePro(' + i + ',\'ht055\',this.value)"/></td>' +
       '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + (r.ht10||'') + '" oninput="updateFacturePro(' + i + ',\'ht10\',this.value)"/></td>' +
       '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + (r.ht20||'') + '" oninput="updateFacturePro(' + i + ',\'ht20\',this.value)"/></td>' +
-      '<td><span class="cell-readonly blue">' + (totalHT  ? fmtN(totalHT)  : '—') + '</span></td>' +
-      '<td><span class="cell-readonly blue">' + (totalTTC ? fmtN(totalTTC) : '—') + '</span></td>' +
-      '<td><span class="cell-readonly green">' + (totalTVA ? fmtN(totalTVA) : '—') + '</span></td>' +
+      '<td><span class="cell-readonly blue" id="fp-ht-' + i + '">' + (totalHT  ? fmtN(totalHT)  : '—') + '</span></td>' +
+      '<td><span class="cell-readonly blue" id="fp-ttc-' + i + '">' + (totalTTC ? fmtN(totalTTC) : '—') + '</span></td>' +
+      '<td><span class="cell-readonly green" id="fp-tva-' + i + '">' + (totalTVA ? fmtN(totalTVA) : '—') + '</span></td>' +
       '<td><button class="btn btn-danger btn-sm" onclick="delFacturePro(' + i + ')">✕</button></td>' +
     '</tr>';
   }).join('');
@@ -712,6 +712,7 @@ function renderCredits(rows) {
 
 function updateCA(i, field, value) {
   _data.ca[i][field] = value;
+  scheduleSave();
   var h055 = parseFloat(_data.ca[i].ht055) || 0;
   var h10  = parseFloat(_data.ca[i].ht10)  || 0;
   var h20  = parseFloat(_data.ca[i].ht20)  || 0;
@@ -808,7 +809,20 @@ function addFacturePro() {
 function updateFacturePro(i, field, val) {
   if (!_data.facturesPro) _data.facturesPro = [];
   _data.facturesPro[i][field] = val;
+  // Recalcul en temps réel des spans de la ligne
+  var r = _data.facturesPro[i];
+  var h055 = parseFloat(r.ht055)||0, h10 = parseFloat(r.ht10)||0, h20 = parseFloat(r.ht20)||0;
+  var ht  = h055 + h10 + h20;
+  var ttc = h055*1.055 + h10*1.10 + h20*1.20;
+  var tva = h055*0.055 + h10*0.10 + h20*0.20;
+  var elHT  = document.getElementById('fp-ht-'  + i);
+  var elTTC = document.getElementById('fp-ttc-' + i);
+  var elTVA = document.getElementById('fp-tva-' + i);
+  if (elHT)  elHT.textContent  = ht  ? fmtN(ht)  : '—';
+  if (elTTC) elTTC.textContent = ttc ? fmtN(ttc) : '—';
+  if (elTVA) elTVA.textContent = tva ? fmtN(tva) : '—';
   refreshTotals();
+  scheduleSave();
 }
 
 function delFacturePro(i) {
@@ -967,19 +981,20 @@ async function handleLogout() {
 }
 </script>
 <script src="nav.js">
-/* ─── AUTOSAVE ON BLUR ─── */
+/* ─── AUTOSAVE ─── */
 var _saveTimer = null;
 function scheduleSave() {
   clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(function() { saveQuiet(); }, 800);
+  _saveTimer = setTimeout(function() { saveQuiet(); }, 1000);
 }
 
-document.addEventListener('change', function(e) {
-  if (e.target.classList.contains('cell-input')) scheduleSave();
+// Délégation sur mainContent (re-créé à chaque renderPage, donc on écoute sur document)
+document.addEventListener('input', function(e) {
+  if (e.target.classList && e.target.classList.contains('cell-input')) scheduleSave();
 });
-document.addEventListener('blur', function(e) {
-  if (e.target.classList.contains('cell-input')) scheduleSave();
-}, true);
+document.addEventListener('change', function(e) {
+  if (e.target.classList && e.target.classList.contains('cell-input')) scheduleSave();
+});
 
 </script>
 
