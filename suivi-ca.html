@@ -435,7 +435,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
   <div class="sidebar-footer">
     <div class="user-card" onclick="location.href='profil.html'" style="cursor:pointer;transition:.15s" title="Mon compte">
       <div class="user-avatar" id="userAvatar">A</div>
-      <div><div class="user-name" id="userName">Utilisateur</div><div class="user-plan">Plan gratuit</div></div>
+      <div><div class="user-name" id="userName">Utilisateur</div><div class="user-plan" id="uplan">Plan gratuit</div></div>
       <button class="logout-btn" onclick="handleLogout()">⎋</button>
     </div>
   </div>
@@ -501,7 +501,8 @@ let _charts=[];
 function toggleMenu(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('open');}
 async function handleLogout(){await window._signOut(window._auth);window.location.href='index.html';}
 
-async function loadYear(){
+async function loadYear(_tries){
+  _tries = _tries||0;
   const year=parseInt(document.getElementById('yearSelect').value);
   document.getElementById('topTitle').textContent=`Suivi CA & Résultats ${year}`;
   document.getElementById('mainContent').innerHTML='<div class="loader"><div class="spin"></div> Chargement des données...</div>';
@@ -510,7 +511,14 @@ async function loadYear(){
   _charts.forEach(c=>{try{c.destroy();}catch(e){}});
   _charts=[];
 
-  if(!window._uid){setTimeout(loadYear,800);return;}
+  if(!window._uid){if(_tries<20){setTimeout(()=>loadYear(_tries+1),300);}return;}
+  if(window._userPlan===undefined){
+    if(_tries<30){setTimeout(()=>loadYear(_tries+1),100);}
+    else{window._userPlan='pro';loadYear(31);}
+    return;
+  }
+  const CAN=['trial','pro','max','master','dev'];
+  if(!CAN.includes(window._userPlan)){return;}
 
   // Load all 12 months
   const months=[];
@@ -525,9 +533,23 @@ async function loadYear(){
   // Compute per-month data
   const data=months.map((d,m)=>{
     if(!d)return{caHT:0,caTTC:0,tvaCollectee:0,fixesHT:0,varHT:0,creditsHT:0,leasingHT:0,chargesHT:0,resultat:0,cashflow:0,prevCA:0};
-    const caHT=d.ca?d.ca.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
-    const caTTC=d.ca?d.ca.reduce((s,r)=>{const h=parseFloat(r.montantHT)||0;return s+h*(1+(r.tvaRate||0)/100);},0):0;
-    const tvaCollectee=d.ca?d.ca.reduce((s,r)=>{const h=parseFloat(r.montantHT)||0;return s+h*(r.tvaRate||0)/100;},0):0;
+    const caHT=d.ca?d.ca.reduce((s,r)=>{
+      const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;
+      const multi=h055+h10+h20;
+      return s+(multi>0?multi:(parseFloat(r.montantHT)||0));
+    },0):0;
+    const caTTC=d.ca?d.ca.reduce((s,r)=>{
+      const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;
+      const multi=h055*1.055+h10*1.10+h20*1.20;
+      if(multi>0)return s+multi;
+      const h=parseFloat(r.montantHT)||0;return s+h*(1+(r.tvaRate||0)/100);
+    },0):0;
+    const tvaCollectee=d.ca?d.ca.reduce((s,r)=>{
+      const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;
+      const multi=h055*0.055+h10*0.10+h20*0.20;
+      if(multi>0)return s+multi;
+      const h=parseFloat(r.montantHT)||0;return s+h*(r.tvaRate||0)/100;
+    },0):0;
     const rentrees=d.rentreesSupp?d.rentreesSupp.reduce((s,r)=>s+(parseFloat(r.montant)||0),0):0;
     const prevCA=d.previsionCA?d.previsionCA.reduce((s,r)=>s+(parseFloat(r.montant)||0),0):0;
     const fixesHT=d.chargesFixe?d.chargesFixe.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
