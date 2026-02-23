@@ -659,7 +659,7 @@ function defaultData(year, month) {
     previsionCA:  [{type:'Ventes clients', montant:''}, {type:'Services', montant:''}, {type:'Aides', montant:''}],
     chargesFixe:  [{fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non'}],
     chargesVar:   [{fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non'}],
-    credits:      [{fournisseur:'', nom:'', ligneType:'principal', montant:'', tvaRate:20, tvaAuto:false, tauxInteret:'', pointe:'Non'}],
+    credits:      [{fournisseur:'', nom:'', ligneType:'principal', montant:'', tvaRate:20, tvaAuto:false, tauxInteret:'', pointe:'Non', amort:'constant'}],
     leasing:      [{fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non'}],
     facturesPro:  [{client:'', description:'', ht055:'', ht10:'', ht20:''}]
   };
@@ -757,7 +757,7 @@ async function syncCreditsTosDettes() {
       var capital = duree > 0 ? montant * duree : montant;
       var detteData = {
         type: 'emprunt', nom: nom, montant: capital, mensualite: montant, debut: debut,
-        taux: taux, duree: duree, amort: taux > 0 ? 'amortissable' : 'infine',
+        taux: taux, duree: duree, amort: c.amort || 'constant',
         active: true, _pilotageRef: c.fournisseur.trim(), paiements: []
       };
       if (existingIdx >= 0) {
@@ -846,7 +846,7 @@ async function forceSyncDettes() {
       var existingIdx = dettes.findIndex(function(d) { return d._pilotageRef === c.fournisseur.trim(); });
       var detteData = {
         type: 'emprunt', nom: nom, montant: capital, mensualite: montant, debut: debut,
-        taux: taux, duree: duree, amort: taux > 0 ? 'amortissable' : 'infine',
+        taux: taux, duree: duree, amort: c.amort || 'constant',
         active: true, _pilotageRef: c.fournisseur.trim(), paiements: []
       };
       if (existingIdx >= 0) {
@@ -983,10 +983,10 @@ function renderPage(data, month) {
           '<div class="section-actions"><button class="btn btn-outline btn-sm" onclick="addCredit()">+ Crédit</button><button class="btn btn-outline btn-sm" style="color:#6366f1;border-color:#6366f1" onclick="forceSyncDettes()">🔗 Sync → Dettes</button></div>' +
         '</div>' +
         '<div class="info-box">💡 Renseigne Principal + Taux → mensualité calculée automatiquement · TVA déduite sur les intérêts uniquement · Renseigne Début/Fin pour la propagation</div>' +
-        '<table class="data-table"><thead><tr><th>Pointé</th><th>Nom crédit</th><th>Principal €</th><th>Taux int. %</th><th>Mensualité HT</th><th>dont Intérêts</th><th>TVA %</th><th>TVA déd.</th><th>Début / Fin</th><th></th></tr></thead>' +
+        '<table class="data-table"><thead><tr><th>Pointé</th><th>Nom crédit</th><th>Principal €</th><th>Taux int. %</th><th>Amortissement</th><th>Mensualité HT</th><th>dont Intérêts</th><th>TVA %</th><th>TVA déd.</th><th>Début / Fin</th><th></th></tr></thead>' +
         '<tbody id="cred-tbody">' + renderCredits(data.credits) + '</tbody>' +
-        '<tfoot><tr><td colspan="2">TOTAL CRÉDITS</td><td><span id="tot-credP">' + fmtN(t.creditsPrincipal) + '</span> €</td><td>—</td><td><span id="tot-credMens">' + fmtN(t.creditsPrincipal+t.creditsInteret) + '</span> €</td><td><span id="tot-credInt">' + fmtN(t.creditsInteret) + '</span> €</td><td>—</td><td>TVA déd. : <span id="tot-credTVA">' + fmtN(t.creditsTVA) + '</span> €</td><td colspan="2"></td></tr>' +
-        '<tr><td colspan="10" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCredit()">+ Crédit</button></td></tr></tfoot>' +
+        '<tfoot><tr><td colspan="2">TOTAL CRÉDITS</td><td><span id="tot-credP">' + fmtN(t.creditsPrincipal) + '</span> €</td><td>—</td><td>—</td><td><span id="tot-credMens">' + fmtN(t.creditsPrincipal+t.creditsInteret) + '</span> €</td><td><span id="tot-credInt">' + fmtN(t.creditsInteret) + '</span> €</td><td>—</td><td>TVA déd. : <span id="tot-credTVA">' + fmtN(t.creditsTVA) + '</span> €</td><td colspan="2"></td></tr>' +
+        '<tr><td colspan="11" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCredit()">+ Crédit</button></td></tr></tfoot>' +
         '</table>' +
     '</div>' +
     '<div class="section-card full" style="margin-bottom:16px">' +
@@ -1162,6 +1162,12 @@ function renderCredits(rows) {
       '<td>' + catalogInputHtml('clients', 'credN-'+i, r.fournisseur||'', 'width:120px', 'Nom crédit', 'updateCreditField('+i+',\'fournisseur\',this.value)') + '</td>' +
       '<td><input class="cell-input" style="width:85px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="updateCreditMontant(' + i + ',this.value)"/></td>' +
       '<td><input class="cell-input" style="width:65px" type="text" inputmode="decimal" placeholder="%" value="' + (r.tauxInteret||'') + '" oninput="updateCreditTaux(' + i + ',this.value)"/></td>' +
+      '<td><select class="cell-input" style="width:110px" onchange="_data.credits[' + i + '].amort=this.value;scheduleSave()">' +
+        '<option value="constant"' + ((r.amort||'constant')==='constant'?' selected':'') + '>Mensualités constantes</option>' +
+        '<option value="lineaire"' + (r.amort==='lineaire'?' selected':'') + '>Capital constant</option>' +
+        '<option value="fixe"' + (r.amort==='fixe'?' selected':'') + '>Intérêts fixes</option>' +
+        '<option value="infine"' + (r.amort==='infine'?' selected':'') + '>In fine</option>' +
+      '</select></td>' +
       '<td><span class="cell-readonly orange" id="cred-mens-' + i + '">' + (mensualite > 0 ? fmtN(mensualite) + ' €' : '—') + '</span></td>' +
       '<td><span class="cell-readonly green" id="cred-int-' + i + '">' + (interet > 0 ? fmtN(interet) + ' €' : '—') + '</span></td>' +
       '<td><select class="cell-input" style="width:58px" onchange="_data.credits[' + i + '].tvaRate=parseFloat(this.value);refreshCreditsCalc()">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + ((r.tvaRate||20)==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select></td>' +
@@ -1277,7 +1283,7 @@ function addCharge(key, tbodyId) {
 }
 
 function addCredit() {
-  _data.credits.push({fournisseur:'', nom:'', ligneType:'principal', montant:'', tvaRate:20, tvaAuto:false, tauxInteret:'', pointe:'Non', dateDebut:'', dateFin:''});
+  _data.credits.push({fournisseur:'', nom:'', ligneType:'principal', montant:'', tvaRate:20, tvaAuto:false, tauxInteret:'', pointe:'Non', dateDebut:'', dateFin:'', amort:'constant'});
   refreshCredits();
 }
 function delCredit(i) {
@@ -1291,7 +1297,7 @@ function delCredit(i) {
     });
   } else {
     _data.credits.splice(i, 1);
-    if (_data.credits.length === 0) _data.credits.push({fournisseur:'', nom:'', ligneType:'principal', montant:'', tvaRate:20, tvaAuto:false, tauxInteret:'', pointe:'Non', dateDebut:'', dateFin:''});
+    if (_data.credits.length === 0) _data.credits.push({fournisseur:'', nom:'', ligneType:'principal', montant:'', tvaRate:20, tvaAuto:false, tauxInteret:'', pointe:'Non', dateDebut:'', dateFin:'', amort:'constant'});
     refreshCredits();
     scheduleSave();
   }
