@@ -1117,26 +1117,28 @@ function calcCreditInteret(r) {
 
 function migrateCreditsToSingleLine(rows) {
   if (!rows || rows.length === 0) return rows;
+  // Si aucune ligne 'interet' → déjà au bon format, rien à faire
   var hasPairs = rows.some(function(r) { return r.ligneType === 'interet'; });
   if (!hasPairs) return rows;
+  // Fusionner les paires principal+interet en ligne unique
   var result = [];
-  var processed = {};
-  rows.forEach(function(r) {
-    if (r.ligneType === 'principal' || !r.ligneType) {
-      var key = (r.fournisseur || r.nom || '');
-      if (!processed[key]) {
-        var interetRow = rows.find(function(x) { return x.ligneType === 'interet' && x.fournisseur === r.fournisseur; });
-        var merged = Object.assign({}, r);
-        merged.ligneType = 'principal';
-        if (interetRow) {
-          if (!merged.tauxInteret && interetRow.tauxInteret) merged.tauxInteret = interetRow.tauxInteret;
-          if (interetRow.tvaRate) merged.tvaRate = interetRow.tvaRate;
-          merged.tvaAuto = true;
-        }
-        result.push(merged);
-        processed[key] = true;
-      }
+  var usedInteret = {};
+  rows.forEach(function(r, i) {
+    if (r.ligneType === 'interet') return; // traités via leur principal
+    var merged = Object.assign({}, r);
+    merged.ligneType = 'principal';
+    // Chercher la ligne intérêts liée (même fournisseur, pas encore utilisée)
+    var interetIdx = rows.findIndex(function(x, xi) {
+      return x.ligneType === 'interet' && x.fournisseur === r.fournisseur && !usedInteret[xi];
+    });
+    if (interetIdx >= 0) {
+      var interetRow = rows[interetIdx];
+      usedInteret[interetIdx] = true;
+      if (!merged.tauxInteret && interetRow.tauxInteret) merged.tauxInteret = interetRow.tauxInteret;
+      if (interetRow.tvaRate) merged.tvaRate = interetRow.tvaRate;
+      merged.tvaAuto = true;
     }
+    result.push(merged);
   });
   if (typeof _data !== 'undefined') _data.credits = result;
   return result;
