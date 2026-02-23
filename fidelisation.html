@@ -927,11 +927,12 @@ function genCode(){return Math.random().toString(36).slice(2,8).toUpperCase()}
 
 // ═══ LOAD / SAVE ═══
 function load(){
-  try{clients=JSON.parse(localStorage.getItem('altiora_fid_clients')||'[]')}catch(e){clients=[]}
-  try{paliers=JSON.parse(localStorage.getItem('altiora_fid_paliers')||'null')||defaultPaliers()}catch(e){paliers=defaultPaliers()}
-  try{coupons=JSON.parse(localStorage.getItem('altiora_fid_coupons')||'[]')}catch(e){coupons=[]}
-  try{campagnes=JSON.parse(localStorage.getItem('altiora_fid_campagnes')||'[]')}catch(e){campagnes=[]}
-  try{cfg=JSON.parse(localStorage.getItem('altiora_fid_cfg')||'{}')}catch(e){cfg={}}
+  // Initialiser avec des valeurs par défaut — Firebase remplace après auth
+  if(!clients.length) clients=[];
+  if(!paliers.length) paliers=defaultPaliers();
+  if(!coupons.length) coupons=[];
+  if(!campagnes.length) campagnes=[];
+  if(!cfg || !Object.keys(cfg).length) cfg={};
   // Appliquer config
   document.getElementById('cfg-tampons').value=cfg.tampons||10;
   document.getElementById('cfg-reward').value=cfg.reward||'1 produit offert';
@@ -952,10 +953,7 @@ function load(){
   document.getElementById('badge-coupons').textContent=coupons.filter(c=>c.status==='active').length;
 }
 function save(clientsToSync){
-  localStorage.setItem('altiora_fid_clients',JSON.stringify(clients));
-  localStorage.setItem('altiora_fid_coupons',JSON.stringify(coupons));
-  localStorage.setItem('altiora_fid_campagnes',JSON.stringify(campagnes));
-  localStorage.setItem('altiora_fid_paliers',JSON.stringify(paliers));
+  // Plus de localStorage — Firebase est la source unique de vérité
   document.getElementById('badge-clients').textContent=clients.length;
   document.getElementById('badge-coupons').textContent=coupons.filter(c=>c.status==='active').length;
   // Sync Firebase en arrière-plan
@@ -999,13 +997,13 @@ function saveConfig(){
     notifPalier:document.getElementById('cfg-notif-palier').checked,
     notifCoupon:document.getElementById('cfg-notif-coupon').checked,
   };
-  localStorage.setItem('altiora_fid_cfg',JSON.stringify(cfg));
+  // Firebase uniquement (source de vérité)
   // Sync Firebase config
   if(window._uid && window._fbSaveConfig){
     window._fbSaveConfig(window._uid, cfg).catch(e=>console.warn('cfg sync err',e));
   }
 }
-function setCfgColor(c){cfg.cardColor=c;localStorage.setItem('altiora_fid_cfg',JSON.stringify(cfg));renderFidCard()}
+function setCfgColor(c){cfg.cardColor=c;renderFidCard();if(window._uid&&window._fbSaveConfig)window._fbSaveConfig(window._uid,cfg).catch(()=>{})}
 function defaultPaliers(){return[
   {id:uid(),pts:100,reward:'Café offert',icon:'☕'},
   {id:uid(),pts:500,reward:'-10% sur votre prochain achat',icon:'🎁'},
@@ -1328,10 +1326,10 @@ function addPalier(){
   const reward=document.getElementById('np-reward').value.trim();
   if(!pts||!reward){toast('Remplissez tous les champs','err');return}
   paliers.push({id:uid(),pts,reward,icon:document.getElementById('np-icon').value});
-  localStorage.setItem('altiora_fid_paliers',JSON.stringify(paliers));
+  if(window._uid&&window._fbSavePaliers)window._fbSavePaliers(window._uid,paliers).catch(()=>{});
   renderPaliers();closeModal();toast('Palier ajouté !');
 }
-function deletePalier(id){paliers=paliers.filter(p=>p.id!==id);localStorage.setItem('altiora_fid_paliers',JSON.stringify(paliers));renderPaliers()}
+function deletePalier(id){paliers=paliers.filter(p=>p.id!==id);if(window._uid&&window._fbSavePaliers)window._fbSavePaliers(window._uid,paliers).catch(()=>{});renderPaliers()}
 
 // ═══ COUPONS ═══
 async function addCoupon(){
@@ -2043,7 +2041,6 @@ onAuthStateChanged(auth, async user=>{
     const fbClients = snap.docs.map(d=>d.data());
     if(fbClients.length > 0){
       clients = fbClients;
-      localStorage.setItem('altiora_fid_clients', JSON.stringify(clients));
     }
 
     // 3. Charger config
@@ -2053,7 +2050,6 @@ onAuthStateChanged(auth, async user=>{
       delete fbCfg._ping;
       if(Object.keys(fbCfg).length > 0){
         cfg = {...cfg, ...fbCfg};
-        localStorage.setItem('altiora_fid_cfg', JSON.stringify(cfg));
         applyConfig();
       }
     }
@@ -2063,9 +2059,8 @@ onAuthStateChanged(auth, async user=>{
       const pubCfgSnap = await getDoc(doc(db,'fidelite_public_cfg',user.uid));
       if(pubCfgSnap.exists() && pubCfgSnap.data().paliers?.length){
         paliers = pubCfgSnap.data().paliers;
-        localStorage.setItem('altiora_fid_paliers', JSON.stringify(paliers));
       }
-    }catch(e2){ /* paliers depuis localStorage si erreur */ }
+    }catch(e2){ /* paliers par défaut si erreur */ }
 
     window._firebaseReady = true;
     window.renderDashboard();

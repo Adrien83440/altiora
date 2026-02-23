@@ -750,11 +750,10 @@ const TYPE_CONFIG={
 };
 let _dettes=[], _filter='tous', _editId=null, _selectedType='emprunt', _charts={};
 
-// ── STORAGE ──
-function load(){try{const d=localStorage.getItem('altiora_dettes');if(d)_dettes=JSON.parse(d);}catch(e){}_dettes=_dettes||[];}
+// ── STORAGE (Firebase uniquement) ──
+function load(){_dettes=_dettes||[];}
 
 async function save(){
-  localStorage.setItem('altiora_dettes',JSON.stringify(_dettes));
   if(window.saveFirebase) window.saveFirebase();
 }
 
@@ -1562,14 +1561,14 @@ function saveDette(){
 function renderAll(){renderKPIs();renderAlertes();renderCalendar();renderCharts();renderDettes();}
 
 // ── START ──
-load(); renderAll();
+renderAll(); // Afficher vide, Firebase remplit dès auth
 
 // Firebase optionnel
 async function tryFirebase(){
   if(!window._uid||!window._getDoc)return;
   try{
     const snap=await window._getDoc(window._doc(window._db,'dettes',window._uid,'data','all'));
-    if(snap.exists()&&snap.data().list){_dettes=snap.data().list;save();renderAll();}
+    if(snap.exists()&&snap.data().list){_dettes=snap.data().list;renderAll();}
     const u=window._auth?.currentUser;
     if(u){const n=u.displayName||u.email?.split('@')[0]||'';document.getElementById('uname').textContent=n;document.getElementById('av').textContent=n[0]?.toUpperCase()||'A';}
   }catch(e){}
@@ -1608,8 +1607,6 @@ function closeSidebar() {
   if (btn) btn.classList.remove('open');
 }
 
-setTimeout(tryFirebase,500);
-
 </script>
 
 <script type="module">
@@ -1623,10 +1620,14 @@ onAuthStateChanged(auth,user=>{
   if(!user){location.href='index.html';return;}
   window._uid=user.uid;
   window._firebaseReady = true;
+  // Charger les données depuis Firebase (source unique de vérité)
   window.tryFirebase();
-  // Auto-save Firebase quand on sauvegarde localement
-  const origSave=window.save;
+  // Save Firebase
   window.saveFirebase=()=>{if(window._setDoc)window._setDoc(window._doc(db,'dettes',user.uid,'data','all'),{list:_dettes},{merge:true}).catch(()=>{});};
+  // Màj nom utilisateur
+  const n=user.displayName||user.email?.split('@')[0]||'';
+  const av=document.getElementById('av'); if(av)av.textContent=n[0]?.toUpperCase()||'A';
+  const un=document.getElementById('uname'); if(un)un.textContent=n;
 });
 </script>
 <script src="nav.js"></script>

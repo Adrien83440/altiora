@@ -748,10 +748,14 @@ function doImport(){
   let count=0,errors=0;
 
   if(_dest==='ca'){
-    // Charger données existantes
-    let data;
-    try{data=JSON.parse(localStorage.getItem('altiora_suivi_'+year)||'null')}catch(e){}
-    if(!data){data={months:Array(12).fill(null).map(()=>({ca:'',charges:'',resultat:''}))}}
+    // Charger données existantes depuis Firebase (ou créer structure vide)
+    let data={months:Array(12).fill(null).map(()=>({ca:'',charges:'',resultat:''}))};
+    if(window._uid&&window._getDoc){
+      try{
+        const snap=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'data','all'));
+        if(snap.exists()&&snap.data()[`y${year}`]?.months) data=snap.data()[`y${year}`];
+      }catch(e){}
+    }
     _rows.forEach(r=>{
       const moisVal=_mapping['mois']?r[_mapping['mois']]:'';
       const m=parseMois(moisVal);
@@ -760,12 +764,18 @@ function doImport(){
       if(_mapping['prevision']&&r[_mapping['prevision']]!=='')data.months[m].prevision=parseFloat(String(r[_mapping['prevision']]).replace(',','.'))||0;
       count++;
     });
-    localStorage.setItem('altiora_suivi_'+year,JSON.stringify(data));
+    if(window._uid&&window._setDoc){
+      await window._setDoc(window._doc(window._db,'pilotage',window._uid,'data','all'),{[`y${year}`]:data},{merge:true}).catch(()=>{});
+    }
   }
   else if(_dest==='charges'){
-    let data;
-    try{data=JSON.parse(localStorage.getItem('altiora_pilotage_'+year)||'null')}catch(e){}
-    if(!data)data={months:Array(12).fill(null).map(()=>({chargesFixed:[],chargesVar:[]}))}
+    let data={months:Array(12).fill(null).map(()=>({chargesFixed:[],chargesVar:[]}))};
+    if(window._uid&&window._getDoc){
+      try{
+        const snap=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'data','all'));
+        if(snap.exists()&&snap.data()[`y${year}`]?.months) data=snap.data()[`y${year}`];
+      }catch(e){}
+    }
     _rows.forEach(r=>{
       const moisVal=_mapping['mois']?r[_mapping['mois']]:'';
       const m=parseMois(moisVal);
@@ -773,20 +783,28 @@ function doImport(){
       const montant=parseFloat(String((_mapping['montant']?r[_mapping['montant']]:0)||0).replace(',','.'))||0;
       const type=(_mapping['type']?String(r[_mapping['type']]).toLowerCase():'fixe').includes('var')?'var':'fixe';
       if(m>=0){
+        if(!data.months[m].chargesFixed)data.months[m].chargesFixed=[];
+        if(!data.months[m].chargesVar)data.months[m].chargesVar=[];
         const arr=type==='var'?data.months[m].chargesVar:data.months[m].chargesFixed;
         arr.push({nom,montant,id:Date.now()+'_'+Math.random().toString(36).slice(2)});
       } else {
-        // Sans mois → charger sur tous les mois si fixe
-        if(type==='fixe'){data.months.forEach(mo=>mo.chargesFixed.push({nom,montant,id:Date.now()+'_'+Math.random().toString(36).slice(2)}))}
+        if(type==='fixe'){data.months.forEach(mo=>{if(!mo.chargesFixed)mo.chargesFixed=[];mo.chargesFixed.push({nom,montant,id:Date.now()+'_'+Math.random().toString(36).slice(2)})})}
         errors++;
       }
       count++;
     });
-    localStorage.setItem('altiora_pilotage_'+year,JSON.stringify(data));
+    if(window._uid&&window._setDoc){
+      await window._setDoc(window._doc(window._db,'pilotage',window._uid,'data','all'),{[`y${year}`]:data},{merge:true}).catch(()=>{});
+    }
   }
   else if(_dest==='dettes'){
-    let dettes;
-    try{dettes=JSON.parse(localStorage.getItem('altiora_dettes')||'[]')}catch(e){dettes=[]}
+    let dettes=[];
+    if(window._uid&&window._getDoc){
+      try{
+        const snap=await window._getDoc(window._doc(window._db,'dettes',window._uid,'data','all'));
+        if(snap.exists()&&snap.data().list) dettes=snap.data().list;
+      }catch(e){}
+    }
     _rows.forEach(r=>{
       const nom=_mapping['nom']?r[_mapping['nom']]||'Import':'Import';
       const montant=parseFloat(String((_mapping['montant']?r[_mapping['montant']]:0)||0).replace(',','.'))||0;
@@ -799,16 +817,9 @@ function doImport(){
       dettes.push({id:Date.now()+'_'+Math.random().toString(36).slice(2),nom,montant,taux,duree,debut,type,amort:'constant',paiements:[],active:true});
       count++;
     });
-    localStorage.setItem('altiora_dettes',JSON.stringify(dettes));
-  }
-
-  // Sync Firebase si connecté
-  if(window._uid&&window._setDoc){
-    const key=_dest==='dettes'?'dettes':'pilotage';
-    const val=_dest==='dettes'
-      ?{list:JSON.parse(localStorage.getItem('altiora_dettes'))}
-      :{[`y${new Date().getFullYear()}`]:JSON.parse(localStorage.getItem(`altiora_${_dest==='ca'?'suivi':'pilotage'}_${new Date().getFullYear()}`))};
-    window._setDoc(window._doc(window._db,key,window._uid,'data','all'),val,{merge:true}).catch(()=>{});
+    if(window._uid&&window._setDoc){
+      await window._setDoc(window._doc(window._db,'dettes',window._uid,'data','all'),{list:dettes},{merge:true}).catch(()=>{});
+    }
   }
 
   // Succès

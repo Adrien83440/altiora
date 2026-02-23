@@ -487,7 +487,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-  import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   const app = initializeApp({
     apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
     authDomain:"altiora-70599.firebaseapp.com",
@@ -498,9 +498,9 @@ html, body { overflow-x: hidden; max-width: 100vw; }
   });
   const auth = getAuth(app);
   const db = getFirestore(app);
-  window._auth=auth; window._db=db; window._doc=doc; window._getDoc=getDoc; window._signOut=signOut;
+  window._auth=auth; window._db=db; window._doc=doc; window._getDoc=getDoc; window._setDoc=setDoc; window._signOut=signOut;
 
-  onAuthStateChanged(auth, user=>{
+  onAuthStateChanged(auth, async user=>{
     if(!user){window.location.href='index.html';return;}
     window._uid=user.uid;
     const name=user.displayName||user.email.split('@')[0];
@@ -509,12 +509,21 @@ html, body { overflow-x: hidden; max-width: 100vw; }
     const urlYear=new URLSearchParams(window.location.search).get('year');
     if(urlYear)document.getElementById('yearSelect').value=urlYear;
     window._firebaseReady = true;
+    // Charger les préférences viewMode/fiscalStart depuis Firebase
+    try {
+      const snap = await getDoc(doc(db,'users',user.uid));
+      if(snap.exists()) {
+        const d = snap.data();
+        if(d.viewMode) _viewMode = d.viewMode;
+        if(d.fiscalStart !== undefined) _fiscalStart = parseInt(d.fiscalStart);
+      }
+    } catch(e) {}
     window.loadYear();
-  setTimeout(function(){
-    setViewMode(_viewMode);
-    var sel = document.querySelector('#exercice-config select');
-    if(sel) sel.value = _fiscalStart;
-  }, 100);
+    setTimeout(function(){
+      setViewMode(_viewMode);
+      var sel = document.querySelector('#exercice-config select');
+      if(sel) sel.value = _fiscalStart;
+    }, 100);
   });
 </script>
 
@@ -862,12 +871,18 @@ function fmtPct(n){return (parseFloat(n)||0).toFixed(1)+'%';}
 
 
 /* ─── GESTION EXERCICE COMPTABLE ─── */
-var _viewMode = localStorage.getItem('alteore_viewMode') || 'civil'; // 'civil' | 'exercice'
-var _fiscalStart = parseInt(localStorage.getItem('alteore_fiscalStart') || '0'); // 0=Jan ... 11=Dec
+var _viewMode = 'civil'; // sera chargé depuis Firebase
+var _fiscalStart = 0;    // sera chargé depuis Firebase
+
+function saveViewPrefs() {
+  if(window._uid && window._setDoc) {
+    window._setDoc(window._doc(window._db,'users',window._uid),{viewMode:_viewMode,fiscalStart:_fiscalStart},{merge:true}).catch(()=>{});
+  }
+}
 
 function setViewMode(mode) {
   _viewMode = mode;
-  localStorage.setItem('alteore_viewMode', mode);
+  saveViewPrefs();
   document.querySelectorAll('.view-toggle button').forEach(function(b) {
     b.classList.toggle('active', b.dataset.mode === mode);
   });
@@ -877,7 +892,7 @@ function setViewMode(mode) {
 
 function setFiscalStart(val) {
   _fiscalStart = parseInt(val);
-  localStorage.setItem('alteore_fiscalStart', val);
+  saveViewPrefs();
   if (typeof reloadView === 'function') reloadView();
 }
 

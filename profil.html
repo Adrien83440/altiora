@@ -969,8 +969,11 @@ function handleLogo(input) {
   const reader = new FileReader();
   reader.onload = e => {
     const src = e.target.result;
-    localStorage.setItem('altiora_logo', src);
     applyLogo(src);
+    // Sauvegarder le logo dans Firebase si connecté
+    if(window._uid && window._setDoc) {
+      window._setDoc(window._doc(window._db,'profil',window._uid,'data','profil'),{logo:src},{merge:true}).catch(()=>{});
+    }
   };
   reader.readAsDataURL(file);
 }
@@ -1018,25 +1021,38 @@ function saveProfile() {
   const fields = ['nom','commercial','secteur','forme','siret','tva','desc','adresse','cp','ville','tel','email','web','banque','titulaire','iban','bic'];
   const data = {};
   fields.forEach(f => { const el = document.getElementById('p-'+f); if (el) data[f] = el.value; });
-  localStorage.setItem('altiora_profil', JSON.stringify(data));
   document.getElementById('lastSaved').textContent = '✅ Enregistré le ' + new Date().toLocaleString('fr-FR');
   showToastMsg('✅ Profil enregistré !', 'ok');
   updateHero();
-  // Firebase sync
+  // Firebase uniquement
   if (window._uid && window._setDoc) {
     window._setDoc(window._doc(window._db,'profil',window._uid,'data','profil'), data, {merge:true}).catch(() => {});
   }
 }
 
 function loadProfile() {
+  // Données chargées via tryFirebase() après auth
+  // Fallback legacy localStorage (migration one-time pour les anciens utilisateurs)
   try {
     const raw = localStorage.getItem('altiora_profil');
-    if (!raw) return;
-    const data = JSON.parse(raw);
-    Object.keys(data).forEach(f => { const el = document.getElementById('p-'+f); if (el) el.value = data[f] || ''; });
-    updateHero();
-    const logo = localStorage.getItem('altiora_logo');
-    if (logo) applyLogo(logo);
+    if (raw) {
+      const data = JSON.parse(raw);
+      Object.keys(data).forEach(f => { const el = document.getElementById('p-'+f); if (el) el.value = data[f] || ''; });
+      updateHero();
+      const logo = localStorage.getItem('altiora_logo');
+      if (logo) applyLogo(logo);
+      // Migrer vers Firebase dès que l'auth est prête
+      const migrateLegacy = () => {
+        if(window._uid && window._setDoc) {
+          const migrData = {...data};
+          if(logo) migrData.logo = logo;
+          window._setDoc(window._doc(window._db,'profil',window._uid,'data','profil'),migrData,{merge:true})
+            .then(()=>{ localStorage.removeItem('altiora_profil'); localStorage.removeItem('altiora_logo'); })
+            .catch(()=>{});
+        } else { setTimeout(migrateLegacy, 300); }
+      };
+      setTimeout(migrateLegacy, 1000);
+    }
   } catch (e) {}
 }
 
@@ -1079,10 +1095,11 @@ function renderFactures() {
 
 // ── SECURITE ──
 function exportData() {
-  const data = {
-    profil: JSON.parse(localStorage.getItem('altiora_profil')||'{}'),
-    dettes: JSON.parse(localStorage.getItem('altiora_dettes')||'[]'),
-  };
+  // Exporter depuis les données en mémoire (déjà chargées depuis Firebase)
+  const profilFields = ['nom','commercial','secteur','forme','siret','tva','desc','adresse','cp','ville','tel','email','web','banque','titulaire','iban','bic'];
+  const profilData = {};
+  profilFields.forEach(f => { const el = document.getElementById('p-'+f); if(el) profilData[f] = el.value; });
+  const data = { profil: profilData };
   const blob = new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href=url; a.download='altiora-export.json'; a.click();
@@ -1090,6 +1107,10 @@ function exportData() {
 }
 
 function clearData() {
+  if(!window._uid || !window._setDoc) { showToastMsg('Non connecté','err'); return; }
+  // Effacer dans Firebase
+  window._setDoc(window._doc(window._db,'profil',window._uid,'data','profil'),{},{merge:false}).catch(()=>{});
+  // Nettoyer aussi les éventuels restes localStorage legacy
   ['altiora_profil','altiora_logo','altiora_dettes','altiora_pm_2025','altiora_pm_2026'].forEach(k => localStorage.removeItem(k));
   showToastMsg('🗑️ Données effacées','ok');
   setTimeout(() => location.reload(), 1200);
@@ -1108,11 +1129,14 @@ async function tryFirebase() {
       document.getElementById('s-since').value = created;
       document.getElementById('heroMember').textContent = 'Membre depuis ' + created;
     }
-    // Load profil
+    // Load profil depuis Firebase (source unique de vérité)
     const snap = await window._getDoc(window._doc(window._db,'profil',window._uid,'data','profil'));
     if (snap.exists()) {
       const data = snap.data();
-      Object.keys(data).forEach(f => { const el = document.getElementById('p-'+f); if (el) el.value = data[f]||''; });
+      Object.keys(data).forEach(f => {
+        if (f === 'logo') { applyLogo(data[f]); return; }
+        const el = document.getElementById('p-'+f); if (el) el.value = data[f]||'';
+      });
       updateHero();
     }
     // Plan géré directement dans le module Firebase
