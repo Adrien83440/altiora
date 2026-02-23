@@ -733,11 +733,10 @@ async function syncCreditsTosDettes() {
     var dettes = (snap.exists() && snap.data().list) ? snap.data().list : [];
 
     var credits = (_data.credits || []).filter(function(c) {
-      return c.ligneType === 'principal' && c.fournisseur && c.fournisseur.trim() && parseFloat(c.montant) > 0;
+      return (c.ligneType === 'principal' || !c.ligneType) && c.fournisseur && c.fournisseur.trim() && parseFloat(c.montant) > 0;
     });
 
     if (credits.length === 0) return;
-
     var changed = false;
 
     credits.forEach(function(c) {
@@ -745,41 +744,27 @@ async function syncCreditsTosDettes() {
       var nom     = (c.nom && c.nom.trim()) ? c.nom.trim() : c.fournisseur.trim();
       var debut   = c.dateDebut || '';
       var taux    = parseFloat(c.tauxInteret) || 0;
-
-      var duree = 0;
+      var duree   = 0;
       if (c.dateDebut && c.dateFin) {
-        var d1 = new Date(c.dateDebut), d2 = new Date(c.dateFin);
+        var d1 = new Date(c.dateDebut + '-01'), d2 = new Date(c.dateFin + '-01');
         duree = Math.round((d2 - d1) / (1000 * 60 * 60 * 24 * 30.44));
         if (duree < 1) duree = 0;
       }
-
       var existingIdx = dettes.findIndex(function(d) {
         return d._pilotageRef === c.fournisseur.trim();
       });
-
       var detteData = {
-        type: 'emprunt',
-        nom: nom,
-        montant: montant,
-        debut: debut,
-        taux: taux,
-        duree: duree,
-        amort: taux > 0 ? 'amortissable' : 'infine',
-        active: true,
-        _pilotageRef: c.fournisseur.trim(),
-        paiements: []
+        type: 'emprunt', nom: nom, montant: montant, debut: debut,
+        taux: taux, duree: duree, amort: taux > 0 ? 'amortissable' : 'infine',
+        active: true, _pilotageRef: c.fournisseur.trim(), paiements: []
       };
-
       if (existingIdx >= 0) {
         var existing = dettes[existingIdx];
         dettes[existingIdx] = Object.assign({}, existing, {
-          nom: detteData.nom,
-          montant: detteData.montant,
+          nom: detteData.nom, montant: detteData.montant,
           debut: detteData.debut || existing.debut,
-          taux: detteData.taux,
-          duree: detteData.duree || existing.duree,
-          amort: detteData.amort,
-          _pilotageRef: detteData._pilotageRef
+          taux: detteData.taux, duree: detteData.duree || existing.duree,
+          amort: detteData.amort, _pilotageRef: detteData._pilotageRef
         });
         changed = true;
       } else {
@@ -792,8 +777,7 @@ async function syncCreditsTosDettes() {
     if (changed) {
       await window._setDoc(
         window._doc(window._db, 'dettes', window._uid, 'data', 'all'),
-        { list: dettes },
-        { merge: true }
+        { list: dettes }, { merge: true }
       );
     }
   } catch(e) {
@@ -907,14 +891,14 @@ function renderPage(data, month) {
     '</div>' +
 
     '<div class="section-card full" style="margin-bottom:16px">' +
-        '<div class="section-head"><div class="section-title">🏦 Crédits & Emprunts <span class="section-title-badge badge-purple">Principal + Intérêts</span></div>' +
-          '<div class="section-actions"><button class="btn btn-outline btn-sm" onclick="addCredit(\'principal\')">+ Principal</button><button class="btn btn-outline btn-sm" onclick="addCredit(\'interet\')">+ Intérêts</button></div>' +
+        '<div class="section-head"><div class="section-title">🏦 Crédits & Emprunts <span class="section-title-badge badge-purple">Mensualité auto</span></div>' +
+          '<div class="section-actions"><button class="btn btn-outline btn-sm" onclick="addCredit()">+ Crédit</button></div>' +
         '</div>' +
-        '<div class="info-box">💡 Principal = sans TVA · Intérêts = TVA déductible · Renseigne Début/Fin pour le calcul dynamique et la propagation</div>' +
-        '<table class="data-table"><thead><tr><th>Pointé</th><th>Fournisseur</th><th>Ligne</th><th>Montant</th><th>Taux int. %</th><th>TVA %</th><th>TVA déd.</th><th>Début / Fin</th><th></th></tr></thead>' +
+        '<div class="info-box">💡 Renseigne Principal + Taux → mensualité calculée automatiquement · TVA déduite sur les intérêts uniquement · Renseigne Début/Fin pour la propagation</div>' +
+        '<table class="data-table"><thead><tr><th>Pointé</th><th>Nom crédit</th><th>Principal €</th><th>Taux int. %</th><th>Mensualité HT</th><th>dont Intérêts</th><th>TVA %</th><th>TVA déd.</th><th>Début / Fin</th><th></th></tr></thead>' +
         '<tbody id="cred-tbody">' + renderCredits(data.credits) + '</tbody>' +
-        '<tfoot><tr><td colspan="3">TOTAL CRÉDITS</td><td><span id="tot-credP">' + fmtN(t.creditsPrincipal+t.creditsInteret) + '</span> €</td><td>—</td><td>—</td><td>TVA déd. : <span id="tot-credTVA">' + fmtN(t.creditsTVA) + '</span> €</td><td colspan="2"></td></tr>' +
-        '<tr><td colspan="9" style="padding:6px 9px;display:flex;gap:6px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCredit(\'principal\')">+ Principal</button><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCredit(\'interet\')">+ Intérêts</button></td></tr></tfoot>' +
+        '<tfoot><tr><td colspan="2">TOTAL CRÉDITS</td><td><span id="tot-credP">' + fmtN(t.creditsPrincipal) + '</span> €</td><td>—</td><td><span id="tot-credMens">' + fmtN(t.creditsPrincipal+t.creditsInteret) + '</span> €</td><td><span id="tot-credInt">' + fmtN(t.creditsInteret) + '</span> €</td><td>—</td><td>TVA déd. : <span id="tot-credTVA">' + fmtN(t.creditsTVA) + '</span> €</td><td colspan="2"></td></tr>' +
+        '<tr><td colspan="10" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCredit()">+ Crédit</button></td></tr></tfoot>' +
         '</table>' +
     '</div>' +
     '<div class="section-card full" style="margin-bottom:16px">' +
@@ -1036,39 +1020,64 @@ function renderCharges(rows, key) {
   }).join('');
 }
 
-function renderCredits(rows) {
-  return rows.map(function(r, i) {
-    var isPrincipal = r.ligneType === 'principal';
-    var montant = parseFloat((r.montant||'').toString().replace(',','.')) || 0;
-    var taux    = parseFloat((r.tauxInteret||'').toString().replace(',','.')) || 0;
-    var montantCalc = montant;
-    var tvaAmount = 0;
-    if (!isPrincipal) {
-      if (r.tvaAuto && taux > 0) {
-        var principal = _data.credits.slice(0, i).reverse().find(function(c) { return c.fournisseur === r.fournisseur && c.ligneType === 'principal'; });
-        if (principal) montantCalc = (parseFloat((principal.montant||'').toString().replace(',','.'))||0) * taux / 100 / 12;
+function calcCreditInteret(r) {
+  var principal = parseFloat((r.montant||'').toString().replace(',','.')) || 0;
+  var taux      = parseFloat((r.tauxInteret||'').toString().replace(',','.')) || 0;
+  if (principal <= 0 || taux <= 0) return 0;
+  return principal * taux / 100 / 12;
+}
+
+function migrateCreditsToSingleLine(rows) {
+  if (!rows || rows.length === 0) return rows;
+  var hasPairs = rows.some(function(r) { return r.ligneType === 'interet'; });
+  if (!hasPairs) return rows;
+  var result = [];
+  var processed = {};
+  rows.forEach(function(r) {
+    if (r.ligneType === 'principal' || !r.ligneType) {
+      var key = (r.fournisseur || r.nom || '');
+      if (!processed[key]) {
+        var interetRow = rows.find(function(x) { return x.ligneType === 'interet' && x.fournisseur === r.fournisseur; });
+        var merged = Object.assign({}, r);
+        merged.ligneType = 'principal';
+        if (interetRow) {
+          if (!merged.tauxInteret && interetRow.tauxInteret) merged.tauxInteret = interetRow.tauxInteret;
+          if (interetRow.tvaRate) merged.tvaRate = interetRow.tvaRate;
+          merged.tvaAuto = true;
+        }
+        result.push(merged);
+        processed[key] = true;
       }
-      tvaAmount = montantCalc * (parseFloat(r.tvaRate)||20) / 100;
     }
-    return '<tr class="' + (isPrincipal?'row-principal':'row-interet') + '" id="cred-row-' + i + '">' +
+  });
+  if (typeof _data !== 'undefined') _data.credits = result;
+  return result;
+}
+
+function renderCredits(rows) {
+  rows = migrateCreditsToSingleLine(rows);
+  return rows.map(function(r, i) {
+    var principal  = parseFloat((r.montant||'').toString().replace(',','.')) || 0;
+    var interet    = calcCreditInteret(r);
+    var mensualite = principal + interet;
+    var tvaAmount  = interet * (parseFloat(r.tvaRate)||20) / 100;
+    return '<tr class="row-principal" id="cred-row-' + i + '">' +
       '<td><select class="cell-input" style="width:58px" onchange="_data.credits[' + i + '].pointe=this.value"><option' + (r.pointe==='Oui'?' selected':'') + '>Oui</option><option' + (r.pointe==='Non'?' selected':'') + '>Non</option></select></td>' +
-      '<td><input class="cell-input" style="width:110px" placeholder="Nom crédit" value="' + (r.fournisseur||'') + '" oninput="updateCreditField(' + i + ',\'fournisseur\',this.value)"/></td>' +
-      '<td><span class="row-type-label ' + (isPrincipal?'principal':'interet') + '">' + (isPrincipal?'💳 Principal':'💹 Intérêts') + '</span></td>' +
-      '<td>' + (isPrincipal
-        ? '<input class="cell-input" style="width:80px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="updateCreditMontant(' + i + ',this.value)"/>'
-        : (r.tvaAuto ? '<span class="cell-readonly orange" id="cred-calc-' + i + '">' + fmtN(montantCalc) + ' €</span>' : '<input class="cell-input" style="width:80px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="updateCreditMontant(' + i + ',this.value)"/>')
-      ) + '</td>' +
-      '<td>' + (!isPrincipal ? '<input class="cell-input" style="width:65px" type="text" inputmode="decimal" placeholder="%" value="' + (r.tauxInteret||'') + '" oninput="updateCreditTaux(' + i + ',this.value)"/>' : '<span style="color:var(--muted);font-size:12px">—</span>') + '</td>' +
-      '<td>' + (!isPrincipal ? '<select class="cell-input" style="width:58px" onchange="_data.credits[' + i + '].tvaRate=parseFloat(this.value);refreshCreditsCalc()">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + ((r.tvaRate||20)==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select>' : '<span style="color:var(--muted);font-size:12px">Sans TVA</span>') + '</td>' +
-      '<td><span class="cell-readonly ' + (isPrincipal?'':'green') + '" id="cred-tva-' + i + '">' + (isPrincipal ? '—' : fmtN(tvaAmount) + ' €') + '</span></td>' +
+      '<td>' + catalogInputHtml('clients', 'credN-'+i, r.fournisseur||'', 'width:120px', 'Nom crédit', 'updateCreditField('+i+',\'fournisseur\',this.value)') + '</td>' +
+      '<td><input class="cell-input" style="width:85px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="updateCreditMontant(' + i + ',this.value)"/></td>' +
+      '<td><input class="cell-input" style="width:65px" type="text" inputmode="decimal" placeholder="%" value="' + (r.tauxInteret||'') + '" oninput="updateCreditTaux(' + i + ',this.value)"/></td>' +
+      '<td><span class="cell-readonly orange" id="cred-mens-' + i + '">' + (mensualite > 0 ? fmtN(mensualite) + ' €' : '—') + '</span></td>' +
+      '<td><span class="cell-readonly green" id="cred-int-' + i + '">' + (interet > 0 ? fmtN(interet) + ' €' : '—') + '</span></td>' +
+      '<td><select class="cell-input" style="width:58px" onchange="_data.credits[' + i + '].tvaRate=parseFloat(this.value);refreshCreditsCalc()">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + ((r.tvaRate||20)==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select></td>' +
+      '<td><span class="cell-readonly green" id="cred-tva-' + i + '">' + (tvaAmount > 0 ? fmtN(tvaAmount) + ' €' : '—') + '</span></td>' +
       '<td style="white-space:nowrap;min-width:130px">' +
         mpHtml('mpC-'+i+'-deb','credit',i,'dateDebut',r.dateDebut||'') +
         '<div style="margin-top:4px">' + mpHtml('mpC-'+i+'-fin','credit',i,'dateFin',r.dateFin||'') + '</div>' +
       '</td>' +
       '<td style="white-space:nowrap">' +
-        (isPrincipal ? '<button class="btn btn-orange btn-sm" style="font-size:10px" onclick="propagateCredit(' + i + ')">⚡ Propager</button>' : '') +
-        '<button class="btn btn-outline btn-sm" style="font-size:10px" title="Modifier le montant sur plusieurs mois" onclick="openCreditScopeUpdate(' + i + ')">✏️</button>' +
-        '<button class="btn btn-danger btn-sm" onclick="openCreditScopeDel(' + i + ')">✕</button>' +
+        '<button class="btn btn-orange btn-sm" style="font-size:10px" onclick="propagateCredit(' + i + ')">\u26a1 Propager</button> ' +
+        '<button class="btn btn-outline btn-sm" style="font-size:10px" onclick="openCreditScopeUpdate(' + i + ')">\u270f\ufe0f</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="openCreditScopeDel(' + i + ')">×</button>' +
       '</td>' +
     '</tr>';
   }).join('');
@@ -1100,10 +1109,7 @@ async function propagateCredit(i) {
   if (!window._uid) { showToast('Non connecté','warning'); return; }
   var r = _data.credits[i];
   if (!r.dateDebut || !r.dateFin) { showToast('Renseigne une date de début et de fin','warning'); return; }
-  // Trouver aussi la ligne intérêts liée (même fournisseur)
-  var linesToPropagate = _data.credits.filter(function(c) {
-    return c.fournisseur === r.fournisseur;
-  });
+  var linesToPropagate = [r];
   var start = r.dateDebut; // 'YYYY-MM'
   var end   = r.dateFin;
   var count = 0;
@@ -1174,8 +1180,8 @@ function addCharge(key, tbodyId) {
   refreshTotals();
 }
 
-function addCredit(type) {
-  _data.credits.push({fournisseur:'', nom:'', ligneType:type, montant:'', tvaRate:20, tvaAuto:false, tauxInteret:'', pointe:'Non', dateDebut:'', dateFin:''});
+function addCredit() {
+  _data.credits.push({fournisseur:'', nom:'', ligneType:'principal', montant:'', tvaRate:20, tvaAuto:false, tauxInteret:'', pointe:'Non', dateDebut:'', dateFin:''});
   refreshCredits();
 }
 function delCredit(i) {
@@ -1184,7 +1190,7 @@ function delCredit(i) {
   if (r && (r.dateDebut || r.dateFin || (r.fournisseur && r.fournisseur.length > 0))) {
     openScopeModal({
       type:'delete', dataKey:'credits', rowIdx:i,
-      fournisseur: r.fournisseur, ligneType: r.ligneType||'principal',
+      fournisseur: r.fournisseur, ligneType: 'principal',
       tbodyId:'cred-tbody', renderFn: null
     });
   } else {
@@ -1222,19 +1228,17 @@ function updateCreditTaux(i, value) {
 // Recalcule uniquement les valeurs calculées (TVA, montant auto) sans toucher aux inputs
 function refreshCreditsCalc() {
   _data.credits.forEach(function(r, i) {
-    if (r.ligneType === 'interet') {
-      var taux = parseFloat((r.tauxInteret||'').toString().replace(',','.')) || 0;
-      var montantCalc = parseFloat((r.montant||'').toString().replace(',','.')) || 0;
-      if (r.tvaAuto && taux > 0) {
-        var principal = _data.credits.slice(0, i).reverse().find(function(c) { return c.fournisseur === r.fournisseur && c.ligneType === 'principal'; });
-        if (principal) montantCalc = (parseFloat((principal.montant||'').toString().replace(',','.'))||0) * taux / 100 / 12;
-        var calcEl = document.getElementById('cred-calc-' + i);
-        if (calcEl) calcEl.textContent = fmtN(montantCalc) + ' €';
-      }
-      var tvaAmount = montantCalc * (parseFloat(r.tvaRate)||20) / 100;
-      var tvaEl = document.getElementById('cred-tva-' + i);
-      if (tvaEl) tvaEl.textContent = fmtN(tvaAmount) + ' €';
-    }
+    var principal  = parseFloat((r.montant||'').toString().replace(',','.')) || 0;
+    var taux       = parseFloat((r.tauxInteret||'').toString().replace(',','.')) || 0;
+    var interet    = (principal > 0 && taux > 0) ? principal * taux / 100 / 12 : 0;
+    var mensualite = principal + interet;
+    var tvaAmount  = interet * (parseFloat(r.tvaRate)||20) / 100;
+    var mensEl = document.getElementById('cred-mens-' + i);
+    var intEl  = document.getElementById('cred-int-'  + i);
+    var tvaEl  = document.getElementById('cred-tva-'  + i);
+    if (mensEl) mensEl.textContent = mensualite > 0 ? fmtN(mensualite) + ' €' : '—';
+    if (intEl)  intEl.textContent  = interet    > 0 ? fmtN(interet)    + ' €' : '—';
+    if (tvaEl)  tvaEl.textContent  = tvaAmount  > 0 ? fmtN(tvaAmount)  + ' €' : '—';
   });
   refreshTotals();
 }
@@ -1406,20 +1410,19 @@ function calcTotals(data) {
   });
   var creditsPrincipal=0,creditsInteret=0,creditsTVA=0;
   var curMonthKey = getMonthKey ? getMonthKey() : '';
-  data.credits.forEach(function(r,i){
+  // Migrer si ancienne structure paires principal+interet
+  var creditsToCalc = migrateCreditsToSingleLine ? migrateCreditsToSingleLine(data.credits.slice()) : data.credits;
+  creditsToCalc.forEach(function(r){
     // Filtre dynamique : si dates renseignées, ne compter que si le mois est dans la plage
     if (r.dateDebut && r.dateFin && curMonthKey) {
-      if (curMonthKey < r.dateDebut || curMonthKey > r.dateFin) return;
+      if (curMonthKey < r.dateDebut.slice(0,7) || curMonthKey > r.dateFin.slice(0,7)) return;
     }
     var parseVal = function(v){ return parseFloat((v||'').toString().replace(',','.')) || 0; };
-    // Compatibilité ancien format : si pas de ligneType, traiter comme principal
-    var isP = r.ligneType==='principal' || !r.ligneType;
-    if(isP){creditsPrincipal+=parseVal(r.montant);}
-    else{
-      var m2=parseVal(r.montant);
-      if(r.tvaAuto&&parseVal(r.tauxInteret)>0){var p=data.credits.slice(0,i).reverse().find(function(c){return c.fournisseur===r.fournisseur&&c.ligneType==='principal';});if(p)m2=parseVal(p.montant)*parseVal(r.tauxInteret)/100/12;}
-      creditsInteret+=m2;creditsTVA+=m2*(parseFloat(r.tvaRate)||20)/100;
-    }
+    var principal = parseVal(r.montant);
+    var interet   = (function(){ var p=principal, taux=parseVal(r.tauxInteret); return (p>0&&taux>0)?p*taux/100/12:0; })();
+    creditsPrincipal += principal;
+    creditsInteret   += interet;
+    creditsTVA       += interet * (parseFloat(r.tvaRate)||20) / 100;
   });
   var chargesHT = fixesHT+varHT+creditsPrincipal+creditsInteret+leasingHT;
   var tvaDed = fixesTVA+varTVA+creditsTVA+leasingTVA;
@@ -1450,7 +1453,7 @@ function refreshTotals() {
   s('tot-fixHT',t.fixesHT);s('tot-fixTTC',t.fixesTTC);s('tot-fixTVA',t.fixesTVA);
   s('tot-varHT',t.varHT);s('tot-varTTC',t.varTTC);s('tot-varTVA',t.varTVA);
   s('tot-leasHT',t.leasingHT);s('tot-leasTTC',t.leasingTTC);
-  s('tot-credP',t.creditsPrincipal+t.creditsInteret);s('tot-credTVA',t.creditsTVA);
+  s('tot-credP',t.creditsPrincipal);s('tot-credMens',t.creditsPrincipal+t.creditsInteret);s('tot-credInt',t.creditsInteret);s('tot-credTVA',t.creditsTVA);
   s('tva-c',fmtN(t.tvaCollectee)+' €');s('tva-d',fmtN(t.tvaDed)+' €');s('tva-due',fmtN(Math.abs(t.tvaDue))+' €');
   s('cf-val',fmt(t.cashflow),t.cashflow>=0?'positive':'negative');
   s('cf-prev',fmt(t.prevCA-t.chargesHT));
