@@ -10,9 +10,11 @@
   const CAN_IMPORT       = ['pro', 'max', 'master', 'dev'];
   const CAN_CORE         = ['trial', 'pro', 'max', 'master', 'dev'];
 
-  // Masquer le <main> immédiatement pour éviter le flash
   const mainEl = document.querySelector('main');
-  if (mainEl) mainEl.style.visibility = 'hidden';
+  // Masquer brièvement pour éviter le flash uniquement si Firebase est déjà prêt
+  if (mainEl && !window._firebaseReady) mainEl.style.visibility = 'hidden';
+  // Failsafe: toujours visible après 2s max
+  setTimeout(function() { if (mainEl) mainEl.style.visibility = 'visible'; }, 2000);
 
   // ── Injecter la modale upgrade ──
   function injectUpgradeModal() {
@@ -87,9 +89,10 @@
     tries = tries || 0;
     if (window._uid && window._getDoc && window._db && window._doc) {
       cb();
-    } else if (tries < 60) {
+    } else if (tries < 30) {
       setTimeout(function() { waitForFirebase(cb, tries + 1); }, 100);
     } else {
+      // Timeout 3s — afficher quand même
       if (mainEl) mainEl.style.visibility = 'visible';
     }
   }
@@ -202,8 +205,10 @@
       applyNavPlan(plan);
       handleProfilParams();
     } catch(e) {
-      console.warn('nav.js error:', e);
+      // Firebase offline ou erreur — afficher la page quand même
       if (mainEl) mainEl.style.visibility = 'visible';
+      // Plan inconnu = accès total en cas d'erreur réseau (Firestore rules protègent côté serveur)
+      applyNavPlan('pro');
     }
   });
 
