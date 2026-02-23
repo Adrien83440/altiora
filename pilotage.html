@@ -246,19 +246,72 @@
 <!-- MODAL charges fixes -->
 <div class="modal-overlay" id="fixedModal">
   <div class="modal">
-    <h3>⚡ Appliquer les charges fixes sur l'année</h3>
-    <p>Les <strong id="modal-nb-lignes">X</strong> lignes de charges fixes seront copiées sur tous les autres mois de l'année.</p>
+    <h3>⚡ Appliquer les charges fixes</h3>
+    <p>Les <strong id="modal-nb-lignes">X</strong> lignes de charges fixes du mois en cours seront copiées sur la période choisie.</p>
+
+    <div style="margin:14px 0">
+      <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Période de duplication</div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label style="font-size:11px;color:var(--muted);font-weight:600">De</label>
+          <select id="modal-from" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;background:#fff;min-width:130px">
+          <option value="0">Janvier</option>
+          <option value="1">Février</option>
+          <option value="2">Mars</option>
+          <option value="3">Avril</option>
+          <option value="4">Mai</option>
+          <option value="5">Juin</option>
+          <option value="6">Juillet</option>
+          <option value="7">Août</option>
+          <option value="8">Septembre</option>
+          <option value="9">Octobre</option>
+          <option value="10">Novembre</option>
+          <option value="11">Décembre</option>
+          </select>
+        </div>
+        <div style="font-size:18px;color:var(--muted);padding-top:18px">→</div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label style="font-size:11px;color:var(--muted);font-weight:600">À</label>
+          <select id="modal-to" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;background:#fff;min-width:130px">
+          <option value="0">Janvier</option>
+          <option value="1">Février</option>
+          <option value="2">Mars</option>
+          <option value="3">Avril</option>
+          <option value="4">Mai</option>
+          <option value="5">Juin</option>
+          <option value="6">Juillet</option>
+          <option value="7">Août</option>
+          <option value="8">Septembre</option>
+          <option value="9">Octobre</option>
+          <option value="10">Novembre</option>
+          <option value="11">Décembre</option>
+          </select>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <label style="font-size:11px;color:var(--muted);font-weight:600">Année</label>
+          <select id="modal-year" style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);font-size:13px;background:#fff">
+            <option id="modal-year-cur"></option>
+            <option id="modal-year-next"></option>
+          </select>
+        </div>
+      </div>
+    </div>
+
     <div style="margin:12px 0;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Mode</div>
       <label style="display:flex;align-items:center;gap:10px;font-size:13px;cursor:pointer">
         <input type="radio" name="applyMode" value="empty" checked style="accent-color:#f97316">
         <span>Copier uniquement sur les mois <strong>sans charges</strong></span>
       </label>
       <label style="display:flex;align-items:center;gap:10px;font-size:13px;cursor:pointer">
         <input type="radio" name="applyMode" value="all" style="accent-color:#f97316">
-        <span>Remplacer les charges fixes sur <strong>tous les mois</strong></span>
+        <span><strong>Remplacer</strong> les charges fixes sur tous les mois sélectionnés</span>
       </label>
     </div>
-    <div style="background:#fff7ed;border-radius:10px;padding:12px 16px;font-size:12px;color:#c2410c;font-weight:600;border:1px solid #fed7aa">⚠️ En mode "Remplacer tout", les charges existantes seront écrasées.</div>
+
+    <div style="background:#fff7ed;border-radius:10px;padding:10px 14px;font-size:12px;color:#c2410c;font-weight:600;border:1px solid #fed7aa">
+      ⚠️ Le mois en cours ne sera pas modifié. En mode "Remplacer", les charges existantes seront écrasées.
+    </div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal()">Annuler</button>
       <button class="btn btn-orange" onclick="applyFixedCharges()">⚡ Appliquer</button>
@@ -874,24 +927,47 @@ function updateChargeTVARate(key, i, value) {
   refreshTotals();
 }
 
-async function duplicateFixeLine(i) {
-  if (!window._uid) { showToast('Non connecté','warning'); return; }
+var _dupLineIdx = null;
+function duplicateFixeLine(i) {
+  _dupLineIdx = i;
+  var ligne = _data.chargesFixe[i];
+  var label = (ligne.fournisseur||'') + (ligne.type?' – '+ligne.type:'');
+  var el = document.getElementById('modal-nb-lignes');
+  if(el) el.textContent = '"' + (label||'cette ligne') + '"';
   var currentM = parseInt(document.getElementById('monthSelect').value);
-  var ligne = JSON.parse(JSON.stringify(_data.chargesFixe[i]));
-  var count = 0;
-  for (var m = 0; m < 12; m++) {
-    if (m === currentM) continue;
-    var key = window._year + '-' + String(m+1).padStart(2,'0');
-    try {
-      var snap = await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
-      var md = defaultData(window._year, m);
-      if (snap.exists()) md = Object.assign({}, md, snap.data());
-      if (!md.chargesFixe) md.chargesFixe = [];
-      var exists = md.chargesFixe.some(function(c) { return c.fournisseur===ligne.fournisseur && c.type===ligne.type; });
-      if (!exists) { md.chargesFixe.push(ligne); await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md); count++; }
-    } catch(e) { console.warn(e); }
-  }
-  showToast('⚡ Appliquée sur ' + count + ' mois', 'success');
+  var fromSel = document.getElementById('modal-from');
+  var toSel = document.getElementById('modal-to');
+  var yearSel = document.getElementById('modal-year');
+  var yearCur = document.getElementById('modal-year-cur');
+  var yearNext = document.getElementById('modal-year-next');
+  if(fromSel) fromSel.value = (currentM + 1) % 12;
+  if(toSel) toSel.value = 11;
+  if(yearCur) { yearCur.value = window._year; yearCur.textContent = window._year; }
+  if(yearNext) { yearNext.value = window._year+1; yearNext.textContent = window._year+1; }
+  if(yearSel) yearSel.value = window._year;
+  // Changer le bouton appliquer pour mode ligne unique
+  document.getElementById('fixedModal').classList.add('show');
+  document.getElementById('fixedModal').dataset.mode = 'line';
+}
+
+function openFixedModal() {
+  _dupLineIdx = null;
+  var nb = _data.chargesFixe.filter(function(c){return c.fournisseur||c.montantHT;}).length;
+  var el = document.getElementById('modal-nb-lignes');
+  if(el) el.textContent = nb + ' ligne' + (nb>1?'s':'');
+  var currentM = parseInt(document.getElementById('monthSelect').value);
+  var fromSel = document.getElementById('modal-from');
+  var toSel = document.getElementById('modal-to');
+  var yearSel = document.getElementById('modal-year');
+  var yearCur = document.getElementById('modal-year-cur');
+  var yearNext = document.getElementById('modal-year-next');
+  if(fromSel) fromSel.value = (currentM + 1) % 12;
+  if(toSel) toSel.value = 11;
+  if(yearCur) { yearCur.value = window._year; yearCur.textContent = window._year; }
+  if(yearNext) { yearNext.value = window._year+1; yearNext.textContent = window._year+1; }
+  if(yearSel) yearSel.value = window._year;
+  document.getElementById('fixedModal').dataset.mode = 'all';
+  document.getElementById('fixedModal').classList.add('show');
 }
 
 /* ─── CALCULS ─── */
@@ -966,6 +1042,18 @@ function openFixedModal() {
   var nb = _data.chargesFixe.filter(function(c){return c.fournisseur||c.montantHT;}).length;
   var el = document.getElementById('modal-nb-lignes');
   if(el) el.textContent = nb + ' ligne' + (nb>1?'s':'');
+  var currentM = parseInt(document.getElementById('monthSelect').value);
+  // Pré-remplir : de mois suivant à décembre par défaut
+  var fromSel = document.getElementById('modal-from');
+  var toSel = document.getElementById('modal-to');
+  var yearSel = document.getElementById('modal-year');
+  var yearCur = document.getElementById('modal-year-cur');
+  var yearNext = document.getElementById('modal-year-next');
+  if(fromSel) fromSel.value = (currentM + 1) % 12;
+  if(toSel) toSel.value = 11;
+  if(yearCur) { yearCur.value = window._year; yearCur.textContent = window._year; }
+  if(yearNext) { yearNext.value = window._year+1; yearNext.textContent = window._year+1; }
+  if(yearSel) yearSel.value = window._year;
   document.getElementById('fixedModal').classList.add('show');
 }
 function closeModal()     { document.getElementById('fixedModal').classList.remove('show'); }
@@ -973,34 +1061,57 @@ async function applyFixedCharges() {
   closeModal();
   if (!window._uid) return;
   var currentM = parseInt(document.getElementById('monthSelect').value);
-  // Copier uniquement les lignes avec contenu (exclure lignes vides)
-  var fixedCharges = JSON.parse(JSON.stringify(
-    _data.chargesFixe.filter(function(c){return c.fournisseur||c.montantHT;})
-  ));
+  var isLineMode = document.getElementById('fixedModal').dataset.mode === 'line';
+  var fixedCharges;
+  if (isLineMode && _dupLineIdx !== null) {
+    var l = _data.chargesFixe[_dupLineIdx];
+    fixedCharges = (l.fournisseur||l.montantHT) ? [JSON.parse(JSON.stringify(l))] : [];
+  } else {
+    fixedCharges = JSON.parse(JSON.stringify(
+      _data.chargesFixe.filter(function(c){return c.fournisseur||c.montantHT;})
+    ));
+  }
   if (!fixedCharges.length) { showToast('Aucune charge à dupliquer', 'warning'); return; }
-  // Lire le mode sélectionné
   var modeEl = document.querySelector('input[name="applyMode"]:checked');
-  var mode = modeEl ? modeEl.value : 'empty'; // 'empty' ou 'all'
+  var mode = modeEl ? modeEl.value : 'empty';
+  var fromM  = parseInt(document.getElementById('modal-from').value);
+  var toM    = parseInt(document.getElementById('modal-to').value);
+  var selYear = parseInt(document.getElementById('modal-year').value);
+  // Construire la liste des mois à traiter (gère le cas fromM > toM si chevauchement d'année)
+  var targets = [];
+  if (fromM <= toM) {
+    for (var m = fromM; m <= toM; m++) targets.push({year: selYear, month: m});
+  } else {
+    // ex: nov → mars = nov,dec (année N) + jan,fev,mar (année N+1)
+    for (var m = fromM; m <= 11; m++) targets.push({year: selYear, month: m});
+    for (var m = 0; m <= toM; m++)    targets.push({year: selYear+1, month: m});
+  }
   var count = 0;
-  for (var m = 0; m < 12; m++) {
-    if (m === currentM) continue;
-    var key = window._year + '-' + String(m+1).padStart(2,'0');
+  for (var t = 0; t < targets.length; t++) {
+    var tgt = targets[t];
+    if (tgt.year === window._year && tgt.month === currentM) continue; // skip mois courant
+    var key = tgt.year + '-' + String(tgt.month+1).padStart(2,'0');
     try {
       var snap = await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
-      // Merge propre : partir des données existantes ou du défaut
-      var md = defaultData(window._year, m);
+      var md = defaultData(tgt.year, tgt.month);
       if (snap.exists()) {
         var existing = snap.data();
-        // Merger tous les champs existants dans md
         Object.keys(existing).forEach(function(k){ md[k] = existing[k]; });
       }
       var hasCharges = md.chargesFixe && md.chargesFixe.some(function(c){return c.fournisseur||c.montantHT;});
+      if (isLineMode) {
+        // Mode ligne : ajouter si n'existe pas déjà
+        if(!md.chargesFixe) md.chargesFixe = [];
+        var already = md.chargesFixe.some(function(c){return c.fournisseur===fixedCharges[0].fournisseur && c.type===fixedCharges[0].type;});
+        if(!already) { md.chargesFixe.push(fixedCharges[0]); await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md); count++; }
+        continue;
+      }
       if (mode === 'all' || !hasCharges) {
         md.chargesFixe = fixedCharges;
         await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md);
         count++;
       }
-    } catch(e) { console.warn('applyFixedCharges erreur mois', m, e); }
+    } catch(e) { console.warn('applyFixedCharges erreur', key, e); }
   }
   showToast('⚡ Appliqué sur ' + count + ' mois !', 'success');
 }
