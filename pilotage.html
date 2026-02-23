@@ -246,12 +246,22 @@
 <!-- MODAL charges fixes -->
 <div class="modal-overlay" id="fixedModal">
   <div class="modal">
-    <h3>⚡ Appliquer les charges fixes</h3>
-    <p>Les charges fixes de ce mois seront copiées sur tous les mois <strong>sans charges saisies</strong> pour l'année en cours.</p>
-    <div style="background:var(--blue-ghost);border-radius:10px;padding:12px 16px;font-size:12px;color:var(--blue-main);font-weight:600;">⚠️ Les mois déjà renseignés ne seront pas écrasés.</div>
+    <h3>⚡ Appliquer les charges fixes sur l'année</h3>
+    <p>Les <strong id="modal-nb-lignes">X</strong> lignes de charges fixes seront copiées sur tous les autres mois de l'année.</p>
+    <div style="margin:12px 0;display:flex;flex-direction:column;gap:8px">
+      <label style="display:flex;align-items:center;gap:10px;font-size:13px;cursor:pointer">
+        <input type="radio" name="applyMode" value="empty" checked style="accent-color:#f97316">
+        <span>Copier uniquement sur les mois <strong>sans charges</strong></span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;font-size:13px;cursor:pointer">
+        <input type="radio" name="applyMode" value="all" style="accent-color:#f97316">
+        <span>Remplacer les charges fixes sur <strong>tous les mois</strong></span>
+      </label>
+    </div>
+    <div style="background:#fff7ed;border-radius:10px;padding:12px 16px;font-size:12px;color:#c2410c;font-weight:600;border:1px solid #fed7aa">⚠️ En mode "Remplacer tout", les charges existantes seront écrasées.</div>
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeModal()">Annuler</button>
-      <button class="btn btn-orange" onclick="applyFixedCharges()">Appliquer sur toute l'année</button>
+      <button class="btn btn-orange" onclick="applyFixedCharges()">⚡ Appliquer</button>
     </div>
   </div>
 </div>
@@ -952,26 +962,47 @@ function refreshTotals() {
 }
 
 /* ─── MODAL CHARGES FIXES ─── */
-function openFixedModal() { document.getElementById('fixedModal').classList.add('show'); }
+function openFixedModal() {
+  var nb = _data.chargesFixe.filter(function(c){return c.fournisseur||c.montantHT;}).length;
+  var el = document.getElementById('modal-nb-lignes');
+  if(el) el.textContent = nb + ' ligne' + (nb>1?'s':'');
+  document.getElementById('fixedModal').classList.add('show');
+}
 function closeModal()     { document.getElementById('fixedModal').classList.remove('show'); }
 async function applyFixedCharges() {
   closeModal();
   if (!window._uid) return;
   var currentM = parseInt(document.getElementById('monthSelect').value);
-  var fixedCharges = JSON.parse(JSON.stringify(_data.chargesFixe));
+  // Copier uniquement les lignes avec contenu (exclure lignes vides)
+  var fixedCharges = JSON.parse(JSON.stringify(
+    _data.chargesFixe.filter(function(c){return c.fournisseur||c.montantHT;})
+  ));
+  if (!fixedCharges.length) { showToast('Aucune charge à dupliquer', 'warning'); return; }
+  // Lire le mode sélectionné
+  var modeEl = document.querySelector('input[name="applyMode"]:checked');
+  var mode = modeEl ? modeEl.value : 'empty'; // 'empty' ou 'all'
   var count = 0;
   for (var m = 0; m < 12; m++) {
     if (m === currentM) continue;
     var key = window._year + '-' + String(m+1).padStart(2,'0');
     try {
       var snap = await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
+      // Merge propre : partir des données existantes ou du défaut
       var md = defaultData(window._year, m);
-      if (snap.exists()) md = snap.data();
-      var has = md.chargesFixe && md.chargesFixe.some(function(c){return c.fournisseur||c.montantHT;});
-      if (!has) { md.chargesFixe = fixedCharges; await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md); count++; }
-    } catch(e) { console.warn(e); }
+      if (snap.exists()) {
+        var existing = snap.data();
+        // Merger tous les champs existants dans md
+        Object.keys(existing).forEach(function(k){ md[k] = existing[k]; });
+      }
+      var hasCharges = md.chargesFixe && md.chargesFixe.some(function(c){return c.fournisseur||c.montantHT;});
+      if (mode === 'all' || !hasCharges) {
+        md.chargesFixe = fixedCharges;
+        await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md);
+        count++;
+      }
+    } catch(e) { console.warn('applyFixedCharges erreur mois', m, e); }
   }
-  showToast('⚡ Charges fixes appliquées sur ' + count + ' mois !', 'success');
+  showToast('⚡ Appliqué sur ' + count + ' mois !', 'success');
 }
 
 /* ─── LOGOUT ─── */
