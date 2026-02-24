@@ -31,116 +31,189 @@ module.exports = async function handler(req, res) {
 
     content.push({
       type: 'text',
-      text: `Tu es un expert-comptable français. Analyse ce bilan comptable et extrait les chiffres EXACTS.
+      text: `Tu es un expert-comptable français. Analyse ce document comptable et extrait les chiffres EXACTS.
 
-═══════════════════════════════════════════════════
-ÉTAPE 1 — IDENTIFIE LA DATE DE CLÔTURE
-═══════════════════════════════════════════════════
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ÉTAPE 1 — IDENTIFIE LA DATE DE CLÔTURE ET L'EXERCICE N
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Lis la page de garde. La période indiquée (ex: "du 01/01/2022 au 31/12/2022") te donne la date de clôture : 31/12/2022.
-C'est L'UNIQUE exercice dont tu dois extraire les chiffres.
+Lis la page de garde ou l'en-tête du document.
+La période indiquée (ex: "Du 01/01/2023 au 31/12/2023" ou "Du 01/07/2023 au 30/06/2024") te donne :
+- La DATE DE CLÔTURE : la dernière date mentionnée
+- L'EXERCICE N : c'est cet exercice dont tu dois extraire les chiffres
+- L'EXERCICE N-1 : toutes les autres colonnes de chiffres → IGNORE
 
-═══════════════════════════════════════════════════
-ÉTAPE 2 — BILAN ACTIF : STRUCTURE EXACTE DU FORMAT PCG FRANÇAIS
-═══════════════════════════════════════════════════
+L'exercice peut avoir une durée atypique (18 mois pour une création d'entreprise, clôture au 30/06, etc.).
+Extrais les chiffres tels quels SANS les annualiser.
 
-Le bilan actif au format PCG a TOUJOURS exactement 4 colonnes dans cet ordre :
-  [BRUT] [AMORT./DÉPRÉC.] [NET exercice N] [NET exercice N-1]
+L'année dans le champ "annee" = année de la date de clôture (ex: 2024 si clôture au 30/06/2024).
 
-Exemple réel que tu verras :
-  TOTAL ACTIF IMMOBILISE | 69 332 | 18 058 | 51 274 | 37 511
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ÉTAPE 2 — BILAN ACTIF : LECTURE DES COLONNES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-→ 69 332 = Brut         ← IGNORE
-→ 18 058 = Amortissements ← IGNORE  
-→ 51 274 = NET 31/12/2022 ← PRENDS CETTE VALEUR ✓
-→ 37 511 = NET 31/12/2021 ← IGNORE
+Le bilan actif PCG a TOUJOURS les colonnes dans cet ordre de gauche à droite :
+  [BRUT (N)] [AMORT./DÉPRÉC. (N)] [NET (N)] [NET (N-1)]
 
-RÈGLE ABSOLUE ACTIF : prends TOUJOURS la 3ème valeur numérique (avant-dernière), jamais la 4ème.
+RÈGLE ABSOLUE — Tu veux NET(N) = la 3ème colonne de montants = avant-dernière valeur numérique.
 
-Autre exemple :
-  TOTAL GENERAL | 101 452 | 18 058 | 83 394 | 61 334
-→ totalActif = 83 394 ✓ (pas 61 334, pas 101 452)
+Exemples tirés de vrais bilans :
 
-═══════════════════════════════════════════════════
-ÉTAPE 3 — BILAN PASSIF : STRUCTURE EXACTE DU FORMAT PCG FRANÇAIS
-═══════════════════════════════════════════════════
+  TOTAL ACTIF IMMOBILISÉ  | 357 510 | 52 325 | 305 185 | 328 941
+  → totalActifImmobilise = 305 185 ✓  (pas 357 510, pas 52 325, pas 328 941)
 
-Le bilan passif au format PCG a TOUJOURS exactement 2 colonnes :
-  [exercice N = 31/12/2022] [exercice N-1 = 31/12/2021]
+  TOTAL GÉNÉRAL           | 412 428 | 52 325 | 360 102 | 370 161
+  → totalActif = 360 102 ✓
 
-Exemple réel que tu verras :
-  TOTAL CAPITAUX PROPRES | -6 508 | -696
+  Fonds commercial        |  80 000 |   vide |  80 000 |  80 000
+  → La colonne Amort peut être VIDE (fonds de commerce non amortissable) : Net = Brut, Amort = 0 ✓
 
-→ -6 508 = 31/12/2022 ← PRENDS CETTE VALEUR ✓
-→ -696   = 31/12/2021 ← IGNORE
+PIÈGE — COLONNES % INTERCALÉES :
+Certains cabinets insèrent des colonnes "% de l'actif" entre les colonnes de montants.
+Ces colonnes contiennent de petits nombres avec virgule (ex: 84,75 ou 5,96 ou 88,86).
+IGNORE-LES COMPLÈTEMENT — ne les compte pas comme des colonnes de montants.
 
-  TOTAL DETTES | 89 902 | 62 031
-→ 89 902 = 31/12/2022 ← PRENDS CETTE VALEUR ✓
-→ 62 031 = 31/12/2021 ← IGNORE
+  Exemple avec colonnes % intercalées :
+  TOTAL ACTIF IMMOBILISÉ | 357 510 | 52 325 | 305 185 | 84,75 | 328 941 | 88,86
+  → Ignore 84,75 et 88,86 → totalActifImmobilise = 305 185 ✓ (toujours la 3ème colonne de montants réels)
 
-  TOTAL GENERAL | 83 394 | 61 334
-→ totalPassif = 83 394 ✓ (pas 61 334)
+ACTIF CIRCULANT — pas de colonnes Brut/Amort :
+Les stocks, créances et disponibilités ne s'amortissent pas.
+Le tableau a seulement 2 colonnes : [NET(N)] [NET(N-1)] → prends toujours la 1ère.
 
-RÈGLE ABSOLUE PASSIF : prends TOUJOURS la 1ère valeur numérique, jamais la 2ème.
+  Disponibilités   | 74 669 | 52 182  →  tresorerieActive += 74 669 ✓
+  Stocks marchand. |  5 900 |  5 890  →  stocks += 5 900 ✓
 
-═══════════════════════════════════════════════════
-ÉTAPE 4 — COMPTE DE RÉSULTAT
-═══════════════════════════════════════════════════
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ÉTAPE 3 — BILAN PASSIF : LECTURE DES COLONNES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Le compte de résultat a 2 colonnes de montants (+ colonnes variation) :
-  [exercice N (12 mois)] [exercice N-1 (19 mois ou autre durée)]
+Le bilan passif a TOUJOURS 2 colonnes de montants nets :
+  [exercice N] [exercice N-1]
 
-Exemple :
-  Chiffre d'affaires net | 237 155 | 133 939 | 103 217 | 77,06%
-→ CA = 237 155 ✓ (première colonne de montant)
+RÈGLE ABSOLUE : prends TOUJOURS la 1ère valeur numérique (exercice N).
 
-RÈGLE ABSOLUE CR : prends TOUJOURS la 1ère colonne de montant.
+  TOTAL CAPITAUX PROPRES | -130 761 | -78 736  →  totalCapitauxPropres = -130 761 ✓
+  TOTAL DETTES           |  490 864 | 448 897  →  totalDettes = 490 864 ✓
+  TOTAL GÉNÉRAL          |  360 102 | 370 161  →  totalPassif = 360 102 ✓
 
-═══════════════════════════════════════════════════
-ÉTAPE 5 — VÉRIFICATION OBLIGATOIRE AVANT DE RÉPONDRE
-═══════════════════════════════════════════════════
+Valeurs négatives au passif — NORMALES, ne pas les corriger :
+- totalCapitauxPropres négatif → pertes accumulées > capitaux (situation nette dégradée)
+- resultatExercice négatif → perte de l'exercice en cours
+- reportANouveau négatif → reports de pertes des exercices précédents
 
-Vérifie que : totalActif = totalPassif (exactement)
-Si ce n'est pas le cas, tu as lu la mauvaise colonne → recommence depuis l'étape 2.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ÉTAPE 4 — COMPTE DE RÉSULTAT ET SIG : LECTURE DES COLONNES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Les valeurs correctes pour ce bilan sont cohérentes quand actif = passif au centime près.
+Plusieurs formats coexistent. Lis les EN-TÊTES pour identifier l'exercice N, puis :
 
-═══════════════════════════════════════════════════
+FORMAT A — Standard à 2 colonnes + variation :
+  [N] [N-1] [Variation €] [Variation %]
+  → prends la 1ère colonne
+
+  Chiffre d'affaires | 187 588 | 175 858 | 11 730 | 6,67%
+  → chiffreAffaires = 187 588 ✓
+
+FORMAT B — France / Exportation / Total :
+  [France] [Exportation] [Total N] [Total N-1]
+  → prends la colonne "Total" = 3ème valeur numérique
+  → "Exportation" est souvent vide pour les commerces locaux, ce n'est pas une erreur
+
+  Ventes de marchandises | 439 351 | (vide) | 439 351 | 360 600
+  → chiffreAffaires = 439 351 ✓
+
+FORMAT C — Colonnes N% intercalées :
+  [N montant] [N %CA] [N-1 montant] [N-1 %CA]
+  → prends la 1ère colonne, ignore les %
+
+  Chiffre d'affaires | 187 588 | 100,00 | 175 858 | 100,00
+  → chiffreAffaires = 187 588 ✓
+
+FORMAT D — SIG avec symboles opératoires :
+  Une colonne "+/-/+" à gauche des libellés indique les opérations comptables.
+  Ces symboles ne sont PAS des signes pour les montants — ignore-les pour lire les chiffres.
+  Les montants négatifs (ex: EBE = -23 985) sont réels et doivent être conservés tels quels.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ÉTAPE 5 — EXTRACTION BRUT / AMORT POUR L'ACTIF IMMOBILISÉ
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+En plus du Net, extrais Brut et Amortissements pour les immobilisations (1ère et 2ème colonnes).
+
+  Install. tech., matériel | 91 938 | 26 797 | 65 141 | 52 949
+  → immoCorporellesBrut = 91 938, immoCorporellesAmort = 26 797, immoCorporelles = 65 141 ✓
+
+  Fonds commercial         | 80 000 |  (vide)| 80 000 | 80 000
+  → immosIncorporellesBrut = 80 000, Amort = 0, Net = 80 000 ✓
+
+tauxAmortissement = (totalActifImmobiliseAmort / totalActifImmobiliseBrut) * 100
+Si totalActifImmobiliseBrut = 0, alors tauxAmortissement = 0.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ÉTAPE 6 — VÉRIFICATIONS OBLIGATOIRES AVANT DE RÉPONDRE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+CHECK 1 — Actif = Passif (tolérance < 1%)
+  totalActif doit être égal à totalPassif.
+  Si écart > 1% → tu as lu la mauvaise colonne → recommence depuis l'étape 2.
+
+CHECK 2 — Brut − Amort ≈ Net (tolérance < 3%)
+  totalActifImmobiliseBrut - totalActifImmobiliseAmort doit ≈ totalActifImmobilise.
+  Si écart > 3% → tu as confondu des colonnes dans l'actif immobilisé.
+
+CHECK 3 — Résultat cohérent
+  resultatExercice (passif) doit correspondre à resultatNet (compte de résultat).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le JSON brut).
 
 {
-  "annee": "2022",
-  "dateCloture": "31/12/2022",
+  "annee": "2024",
+  "dateCloture": "30/06/2024",
   "entreprise": "Nom de l'entreprise",
-  "formeJuridique": "SARL/SAS/etc",
-  
+  "formeJuridique": "SARL/SAS/EI/etc",
+
   "actif": {
+    "immobilisationsIncorporellesBrut": 0,
+    "immobilisationsIncorporellesAmort": 0,
     "immobilisationsIncorporelles": 0,
+    "immobilisationsCorporellesBrut": 0,
+    "immobilisationsCorporellesAmort": 0,
     "immobilisationsCorporelles": 0,
+    "immobilisationsFinancieresBrut": 0,
+    "immobilisationsFinancieresAmort": 0,
     "immobilisationsFinancieres": 0,
+    "totalActifImmobiliseBrut": 0,
+    "totalActifImmobiliseAmort": 0,
     "totalActifImmobilise": 0,
+    "tauxAmortissement": 0,
     "stocks": 0,
     "creancesClients": 0,
     "autresCreances": 0,
     "tresorerieActive": 0,
+    "chargesConstateesDavance": 0,
     "totalActifCirculant": 0,
     "totalActif": 0
   },
-  
+
   "passif": {
     "capitalSocial": 0,
     "reserves": 0,
+    "reportANouveau": 0,
     "resultatExercice": 0,
     "totalCapitauxPropres": 0,
+    "provisions": 0,
     "dettesFinancieres": 0,
     "dettesFournisseurs": 0,
     "dettesFiscalesSociales": 0,
     "autresDettes": 0,
+    "produitsConstatesAvance": 0,
     "totalDettes": 0,
     "totalPassif": 0
   },
-  
+
   "compteResultat": {
     "chiffreAffaires": 0,
     "achatsChargesExternes": 0,
@@ -154,7 +227,7 @@ Retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le 
     "impotSocietes": 0,
     "resultatNet": 0
   },
-  
+
   "ratios": {
     "tauxMargeBrute": 0,
     "tauxEBE": 0,
@@ -180,19 +253,21 @@ Retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le 
     },
     "commentaire": "Phrase résumant la position par rapport au secteur"
   },
-  
+
   "conseils": [
     {"type": "force|faiblesse|opportunite|vigilance", "titre": "Titre court", "detail": "Explication actionnable"}
   ],
-  
-  "resumeIA": "Résumé global en français accessible pour un commerçant."
+
+  "resumeIA": "Résumé global en français accessible pour un commerçant non-comptable."
 }
 
-Règles :
-- Montants en euros (nombre entier, PAS de string, PAS de séparateurs)
-- Ratios en % (ex: 15.5), BFR en jours de CA
-- 4 à 8 conseils
-- SECTEUR : identifie le code NAF/APE ou déduis-le. Compare avec moyennes sectorielles françaises.${contextYears}`
+Règles de format JSON :
+- Tous les montants sont des nombres entiers (pas de string, pas d'espaces, pas de virgules de milliers)
+- Les montants négatifs sont des nombres négatifs (ex: -130761)
+- tauxAmortissement et ratios en % décimal (ex: 14.65 pour 14,65%)
+- bfrJours en jours entiers
+- 4 à 8 conseils variés et actionnables
+- SECTEUR : déduis le code NAF depuis l'activité, compare avec moyennes sectorielles BPI/Banque de France${contextYears}`
     });
 
     const response = await client.messages.create({
@@ -214,12 +289,29 @@ Règles :
     const totalA = actif.totalActif || 0;
     const totalP = passif.totalPassif || 0;
 
-    // Vérifier Actif = Passif (tolérance 2%)
+    // Vérifier Actif = Passif (tolérance 1%)
     if (totalA > 0 && totalP > 0) {
       const ecart = Math.abs(totalA - totalP) / Math.max(totalA, totalP);
-      if (ecart > 0.02) {
-        data._avertissement = "Écart détecté entre total actif (" + totalA + "€) et total passif (" + totalP + "€). Les chiffres peuvent contenir des imprécisions de lecture.";
+      if (ecart > 0.01) {
+        data._avertissement = "Écart détecté entre total actif (" + totalA + "€) et total passif (" + totalP + "€). Possible erreur de lecture de colonne.";
       }
+    }
+
+    // Vérifier Brut - Amort = Net pour l'actif immobilisé (tolérance 3%)
+    const actifImmo = data.actif || {};
+    const brut = actifImmo.totalActifImmobiliseBrut || 0;
+    const amort = actifImmo.totalActifImmobiliseAmort || 0;
+    const net = actifImmo.totalActifImmobilise || 0;
+    if (brut > 0 && net > 0) {
+      const ecartImmo = Math.abs((brut - amort) - net) / net;
+      if (ecartImmo > 0.03) {
+        data._avertissement = (data._avertissement || '') + " Incohérence Brut-Amort-Net dans l'actif immobilisé (possible confusion de colonnes).";
+      }
+    }
+
+    // Calculer tauxAmortissement si absent ou 0
+    if (brut > 0 && (!actifImmo.tauxAmortissement || actifImmo.tauxAmortissement === 0)) {
+      data.actif.tauxAmortissement = Math.round((amort / brut) * 10000) / 100;
     }
 
     // Vérifier cohérence interne actif
@@ -234,7 +326,7 @@ Règles :
     // Vérifier cohérence interne passif
     const sumPassif = (passif.totalCapitauxPropres || 0) + (passif.totalDettes || 0);
     if (Math.abs(sumPassif) > 0 && totalP > 0) {
-      const ecartPassif = Math.abs(sumPassif - totalP) / totalP;
+      const ecartPassif = Math.abs(Math.abs(sumPassif) - totalP) / totalP;
       if (ecartPassif > 0.05) {
         data._avertissement = (data._avertissement || '') + " Incohérence dans la décomposition du passif.";
       }
