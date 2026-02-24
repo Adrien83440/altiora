@@ -484,26 +484,43 @@ function getDailyQuote(){
 }
 
 /* ─── MÉTÉO (Open-Meteo, sans clé) ─── */
+async function fetchWeatherFromCoords(lat, lon){
+  try{
+    // Géocodage inverse pour nom ville
+    const geoRes=await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`,{headers:{'Accept-Language':'fr'}});
+    const geo=await geoRes.json();
+    const city=geo.address.city||geo.address.town||geo.address.village||geo.address.county||'Votre position';
+    // Météo Open-Meteo
+    const meteoRes=await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,relative_humidity_2m&wind_speed_unit=kmh&timezone=auto`);
+    const meteo=await meteoRes.json();
+    return{city,data:meteo.current};
+  }catch(e){return null;}
+}
+
 async function fetchWeather(){
-  return new Promise((resolve)=>{
+  // 1. Essayer la géolocalisation navigateur
+  const geoResult=await new Promise((resolve)=>{
     if(!navigator.geolocation){resolve(null);return;}
-    navigator.geolocation.getCurrentPosition(async pos=>{
-      try{
-        const lat=pos.coords.latitude.toFixed(4);
-        const lon=pos.coords.longitude.toFixed(4);
-        // Géocodage inverse pour nom ville
-        const geoUrl=`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`;
-        const geoRes=await fetch(geoUrl,{headers:{'Accept-Language':'fr'}});
-        const geo=await geoRes.json();
-        const city=geo.address.city||geo.address.town||geo.address.village||geo.address.county||'Votre position';
-        // Météo Open-Meteo
-        const meteoUrl=`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,relative_humidity_2m&wind_speed_unit=kmh&timezone=auto`;
-        const meteoRes=await fetch(meteoUrl);
-        const meteo=await meteoRes.json();
-        resolve({city,data:meteo.current});
-      }catch(e){resolve(null);}
-    },()=>resolve(null),{timeout:5000});
+    navigator.geolocation.getCurrentPosition(
+      pos=>resolve({lat:pos.coords.latitude.toFixed(4),lon:pos.coords.longitude.toFixed(4)}),
+      ()=>resolve(null),
+      {timeout:5000,maximumAge:300000}
+    );
   });
+  if(geoResult){
+    const w=await fetchWeatherFromCoords(geoResult.lat,geoResult.lon);
+    if(w)return w;
+  }
+  // 2. Fallback : position par IP (ip-api.com, gratuit, sans clé)
+  try{
+    const ipRes=await fetch('https://ip-api.com/json/?lang=fr&fields=lat,lon,city',{signal:AbortSignal.timeout(4000)});
+    const ip=await ipRes.json();
+    if(ip.lat&&ip.lon){
+      const w=await fetchWeatherFromCoords(ip.lat.toFixed(4),ip.lon.toFixed(4));
+      if(w)return{...w,city:ip.city||w.city};
+    }
+  }catch(e){}
+  return null;
 }
 function getWeatherIcon(code){
   if(code===0)return'☀️';
