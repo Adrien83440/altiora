@@ -8,30 +8,74 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
   try {
-    const { pages, fileName, existingYears } = req.body;
-    if (!pages || !Array.isArray(pages) || pages.length === 0) {
-      return res.status(400).json({ error: 'Aucune page du PDF reçue' });
+    // Support mode texte (pdfText) OU mode images (pages) selon ce qu'envoie le client
+    const { pages, pdfText, mode, fileName, existingYears } = req.body;
+
+    const hasText = mode === 'text' && pdfText && pdfText.trim().length > 200;
+    const hasImages = pages && Array.isArray(pages) && pages.length > 0;
+
+    if (!hasText && !hasImages) {
+      return res.status(400).json({ error: 'Aucune donnée PDF reçue' });
     }
 
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+    // Retry avec backoff exponentiel sur RateLimitError (429)
+    async function callWithRetry(params, maxRetries = 3) {
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          return await client.messages.create(params);
+        } catch (err) {
+          if ((err.status === 429 || err.name === 'RateLimitError') && attempt < maxRetries - 1) {
+            const delay = Math.pow(2, attempt) * 3000; // 3s -> 6s -> 12s
+            console.log('Rate limit hit, retry ' + (attempt + 1) + '/' + (maxRetries - 1) + ' in ' + delay + 'ms');
+            await new Promise(function(r) { setTimeout(r, delay); });
+            continue;
+          }
+          throw err;
+        }
+      }
+    }
+
     let contextYears = '';
     if (existingYears && Object.keys(existingYears).length > 0) {
-      contextYears = `\n\nDonnées des bilans précédents déjà enregistrés pour comparaison :\n${JSON.stringify(existingYears, null, 2)}\nCompare avec ces données et indique les évolutions.`;
+      contextYears = '\n\nDonnées des bilans précédents déjà enregistrés pour comparaison :\n' +
+        JSON.stringify(existingYears, null, 2) + '\nCompare avec ces données et indique les évolutions.';
     }
 
-    // Construire le contenu avec les images des pages
+    // Construire le contenu selon le mode
     const content = [];
-    for (let i = 0; i < pages.length; i++) {
+
+    if (hasText) {
+      // MODE TEXTE — ultra léger (~300 tokens/page vs ~1600 en image)
+      // Tronquer à 80 000 caractères max
+      const truncated = pdfText.length > 80000
+        ? pdfText.slice(0, 80000) + '\n[... document tronqué ...]'
+        : pdfText;
       content.push({
-        type: 'image',
-        source: { type: 'base64', media_type: 'image/jpeg', data: pages[i] }
+        type: 'text',
+        text: 'Voici le contenu textuel extrait d\'un bilan comptable PDF :\n\n' + truncated
       });
+    } else {
+      // MODE IMAGES — fallback pour les PDFs scannés (pas de texte extractible)
+      const pagesToSend = pages.slice(0, 20); // max 20 pages
+      for (let i = 0; i < pagesToSend.length; i++) {
+        content.push({
+          type: 'image',
+          source: { type: 'base64', media_type: 'image/jpeg', data: pagesToSend[i] }
+        });
+      }
     }
 
+    // Prompt principal
     content.push({
       type: 'text',
       text: `Tu es un expert-comptable français. Analyse ce document comptable et extrait les chiffres EXACTS.
+
+REMARQUE IMPORTANTE SUR LE FORMAT D'ENTRÉE :
+${hasText
+  ? 'Ce document est fourni en mode TEXTE extrait du PDF. Les tableaux sont représentés en texte brut avec des espaces/tabulations comme séparateurs de colonnes. Lis attentivement la structure des colonnes en te basant sur l\'alignement et les en-têtes.'
+  : 'Ce document est fourni en mode IMAGES. Lis les tableaux visuellement.'}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ÉTAPE 1 — IDENTIFIE LA DATE DE CLÔTURE ET L'EXERCICE N
@@ -112,23 +156,14 @@ FORMAT A — Standard à 2 colonnes + variation :
   [N] [N-1] [Variation €] [Variation %]
   → prends la 1ère colonne
 
-  Chiffre d'affaires | 187 588 | 175 858 | 11 730 | 6,67%
-  → chiffreAffaires = 187 588 ✓
-
 FORMAT B — France / Exportation / Total :
   [France] [Exportation] [Total N] [Total N-1]
   → prends la colonne "Total" = 3ème valeur numérique
   → "Exportation" est souvent vide pour les commerces locaux, ce n'est pas une erreur
 
-  Ventes de marchandises | 439 351 | (vide) | 439 351 | 360 600
-  → chiffreAffaires = 439 351 ✓
-
 FORMAT C — Colonnes N% intercalées :
   [N montant] [N %CA] [N-1 montant] [N-1 %CA]
   → prends la 1ère colonne, ignore les %
-
-  Chiffre d'affaires | 187 588 | 100,00 | 175 858 | 100,00
-  → chiffreAffaires = 187 588 ✓
 
 FORMAT D — SIG avec symboles opératoires :
   Une colonne "+/-/+" à gauche des libellés indique les opérations comptables.
@@ -144,11 +179,10 @@ En plus du Net, extrais Brut et Amortissements pour les immobilisations (1ère e
   Install. tech., matériel | 91 938 | 26 797 | 65 141 | 52 949
   → immoCorporellesBrut = 91 938, immoCorporellesAmort = 26 797, immoCorporelles = 65 141 ✓
 
-  Fonds commercial         | 80 000 |  (vide)| 80 000 | 80 000
+  Fonds commercial         | 80 000 | (vide) | 80 000 | 80 000
   → immosIncorporellesBrut = 80 000, Amort = 0, Net = 80 000 ✓
 
 tauxAmortissement = (totalActifImmobiliseAmort / totalActifImmobiliseBrut) * 100
-Si totalActifImmobiliseBrut = 0, alors tauxAmortissement = 0.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ÉTAPE 6 — VÉRIFICATIONS OBLIGATOIRES AVANT DE RÉPONDRE
@@ -160,7 +194,6 @@ CHECK 1 — Actif = Passif (tolérance < 1%)
 
 CHECK 2 — Brut − Amort ≈ Net (tolérance < 3%)
   totalActifImmobiliseBrut - totalActifImmobiliseAmort doit ≈ totalActifImmobilise.
-  Si écart > 3% → tu as confondu des colonnes dans l'actif immobilisé.
 
 CHECK 3 — Résultat cohérent
   resultatExercice (passif) doit correspondre à resultatNet (compte de résultat).
@@ -174,72 +207,30 @@ Retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le 
   "dateCloture": "30/06/2024",
   "entreprise": "Nom de l'entreprise",
   "formeJuridique": "SARL/SAS/EI/etc",
-
   "actif": {
-    "immobilisationsIncorporellesBrut": 0,
-    "immobilisationsIncorporellesAmort": 0,
-    "immobilisationsIncorporelles": 0,
-    "immobilisationsCorporellesBrut": 0,
-    "immobilisationsCorporellesAmort": 0,
-    "immobilisationsCorporelles": 0,
-    "immobilisationsFinancieresBrut": 0,
-    "immobilisationsFinancieresAmort": 0,
-    "immobilisationsFinancieres": 0,
-    "totalActifImmobiliseBrut": 0,
-    "totalActifImmobiliseAmort": 0,
-    "totalActifImmobilise": 0,
-    "tauxAmortissement": 0,
-    "stocks": 0,
-    "creancesClients": 0,
-    "autresCreances": 0,
-    "tresorerieActive": 0,
-    "chargesConstateesDavance": 0,
-    "totalActifCirculant": 0,
-    "totalActif": 0
+    "immobilisationsIncorporellesBrut": 0, "immobilisationsIncorporellesAmort": 0, "immobilisationsIncorporelles": 0,
+    "immobilisationsCorporellesBrut": 0, "immobilisationsCorporellesAmort": 0, "immobilisationsCorporelles": 0,
+    "immobilisationsFinancieresBrut": 0, "immobilisationsFinancieresAmort": 0, "immobilisationsFinancieres": 0,
+    "totalActifImmobiliseBrut": 0, "totalActifImmobiliseAmort": 0, "totalActifImmobilise": 0,
+    "tauxAmortissement": 0, "stocks": 0, "creancesClients": 0, "autresCreances": 0,
+    "tresorerieActive": 0, "chargesConstateesDavance": 0, "totalActifCirculant": 0, "totalActif": 0
   },
-
   "passif": {
-    "capitalSocial": 0,
-    "reserves": 0,
-    "reportANouveau": 0,
-    "resultatExercice": 0,
-    "totalCapitauxPropres": 0,
-    "provisions": 0,
-    "dettesFinancieres": 0,
-    "dettesFournisseurs": 0,
-    "dettesFiscalesSociales": 0,
-    "autresDettes": 0,
-    "produitsConstatesAvance": 0,
-    "totalDettes": 0,
-    "totalPassif": 0
+    "capitalSocial": 0, "reserves": 0, "reportANouveau": 0, "resultatExercice": 0,
+    "totalCapitauxPropres": 0, "provisions": 0, "dettesFinancieres": 0, "dettesFournisseurs": 0,
+    "dettesFiscalesSociales": 0, "autresDettes": 0, "produitsConstatesAvance": 0,
+    "totalDettes": 0, "totalPassif": 0
   },
-
   "compteResultat": {
-    "chiffreAffaires": 0,
-    "achatsChargesExternes": 0,
-    "valeurAjoutee": 0,
-    "chargesPersonnel": 0,
-    "ebe": 0,
-    "dotationsAmortissements": 0,
-    "resultatExploitation": 0,
-    "resultatFinancier": 0,
-    "resultatExceptionnel": 0,
-    "impotSocietes": 0,
-    "resultatNet": 0
+    "chiffreAffaires": 0, "achatsChargesExternes": 0, "valeurAjoutee": 0, "chargesPersonnel": 0,
+    "ebe": 0, "dotationsAmortissements": 0, "resultatExploitation": 0, "resultatFinancier": 0,
+    "resultatExceptionnel": 0, "impotSocietes": 0, "resultatNet": 0
   },
-
   "ratios": {
-    "tauxMargeBrute": 0,
-    "tauxEBE": 0,
-    "tauxResultatNet": 0,
-    "ratioEndettement": 0,
-    "capaciteAutofinancement": 0,
-    "tresorerieNette": 0,
-    "bfrJours": 0,
-    "ratioLiquiditeGenerale": 0,
-    "rentabiliteCapitauxPropres": 0
+    "tauxMargeBrute": 0, "tauxEBE": 0, "tauxResultatNet": 0, "ratioEndettement": 0,
+    "capaciteAutofinancement": 0, "tresorerieNette": 0, "bfrJours": 0,
+    "ratioLiquiditeGenerale": 0, "rentabiliteCapitauxPropres": 0
   },
-
   "secteur": {
     "codeNAF": "47.11B",
     "libelle": "Commerce de détail alimentaire",
@@ -253,11 +244,9 @@ Retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le 
     },
     "commentaire": "Phrase résumant la position par rapport au secteur"
   },
-
   "conseils": [
     {"type": "force|faiblesse|opportunite|vigilance", "titre": "Titre court", "detail": "Explication actionnable"}
   ],
-
   "resumeIA": "Résumé global en français accessible pour un commerçant non-comptable."
 }
 
@@ -270,7 +259,7 @@ Règles de format JSON :
 - SECTEUR : déduis le code NAF depuis l'activité, compare avec moyennes sectorielles BPI/Banque de France${contextYears}`
     });
 
-    const response = await client.messages.create({
+    const response = await callWithRetry({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 4096,
       messages: [{ role: 'user', content: content }]
@@ -282,62 +271,54 @@ Règles de format JSON :
     }
 
     const data = JSON.parse(text);
+    data._mode = hasText ? 'text' : 'image';
 
-    // VÉRIFICATION DE COHÉRENCE côté serveur
+    // Vérifications de cohérence
     const actif = data.actif || {};
     const passif = data.passif || {};
     const totalA = actif.totalActif || 0;
     const totalP = passif.totalPassif || 0;
 
-    // Vérifier Actif = Passif (tolérance 1%)
     if (totalA > 0 && totalP > 0) {
       const ecart = Math.abs(totalA - totalP) / Math.max(totalA, totalP);
       if (ecart > 0.01) {
-        data._avertissement = "Écart détecté entre total actif (" + totalA + "€) et total passif (" + totalP + "€). Possible erreur de lecture de colonne.";
+        data._avertissement = 'Écart actif (' + totalA + '€) ≠ passif (' + totalP + '€). Possible erreur de lecture de colonne.';
       }
     }
 
-    // Vérifier Brut - Amort = Net pour l'actif immobilisé (tolérance 3%)
-    const actifImmo = data.actif || {};
-    const brut = actifImmo.totalActifImmobiliseBrut || 0;
-    const amort = actifImmo.totalActifImmobiliseAmort || 0;
-    const net = actifImmo.totalActifImmobilise || 0;
+    const brut = actif.totalActifImmobiliseBrut || 0;
+    const amort = actif.totalActifImmobiliseAmort || 0;
+    const net = actif.totalActifImmobilise || 0;
     if (brut > 0 && net > 0) {
       const ecartImmo = Math.abs((brut - amort) - net) / net;
       if (ecartImmo > 0.03) {
-        data._avertissement = (data._avertissement || '') + " Incohérence Brut-Amort-Net dans l'actif immobilisé (possible confusion de colonnes).";
+        data._avertissement = (data._avertissement || '') + ' Incohérence Brut−Amort−Net dans l\'actif immobilisé.';
       }
     }
 
-    // Calculer tauxAmortissement si absent ou 0
-    if (brut > 0 && (!actifImmo.tauxAmortissement || actifImmo.tauxAmortissement === 0)) {
+    if (brut > 0 && (!actif.tauxAmortissement || actif.tauxAmortissement === 0)) {
       data.actif.tauxAmortissement = Math.round((amort / brut) * 10000) / 100;
     }
 
-    // Vérifier cohérence interne actif
     const sumActif = (actif.totalActifImmobilise || 0) + (actif.totalActifCirculant || 0);
-    if (sumActif > 0 && totalA > 0) {
-      const ecartActif = Math.abs(sumActif - totalA) / totalA;
-      if (ecartActif > 0.05) {
-        data._avertissement = (data._avertissement || '') + " Incohérence dans la décomposition de l'actif.";
-      }
+    if (sumActif > 0 && totalA > 0 && Math.abs(sumActif - totalA) / totalA > 0.05) {
+      data._avertissement = (data._avertissement || '') + ' Incohérence décomposition actif.';
     }
 
-    // Vérifier cohérence interne passif
     const sumPassif = (passif.totalCapitauxPropres || 0) + (passif.totalDettes || 0);
-    if (Math.abs(sumPassif) > 0 && totalP > 0) {
-      const ecartPassif = Math.abs(Math.abs(sumPassif) - totalP) / totalP;
-      if (ecartPassif > 0.05) {
-        data._avertissement = (data._avertissement || '') + " Incohérence dans la décomposition du passif.";
-      }
+    if (totalP > 0 && Math.abs(Math.abs(sumPassif) - totalP) / totalP > 0.05) {
+      data._avertissement = (data._avertissement || '') + ' Incohérence décomposition passif.';
     }
 
     return res.status(200).json({ success: true, data });
 
   } catch (err) {
     console.error('Erreur analyze-bilan:', err);
+    const isRateLimit = err.status === 429 || err.name === 'RateLimitError';
     return res.status(500).json({
-      error: 'Erreur lors de l\'analyse du bilan',
+      error: isRateLimit
+        ? 'Limite de requêtes atteinte. Veuillez patienter 1 minute avant de réessayer.'
+        : 'Erreur lors de l\'analyse du bilan',
       detail: err.message
     });
   }
