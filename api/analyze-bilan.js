@@ -260,7 +260,9 @@ Règles de format JSON :
     });
 
     const response = await callWithRetry({
-      model: 'claude-sonnet-4-20250514',
+      // Haiku pour mode texte (rapide, limites TPM élevées, largement suffisant pour lire des chiffres)
+      // Sonnet pour mode images (meilleure vision sur tableaux scannés)
+      model: hasText ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-20250514',
       max_tokens: 4096,
       messages: [{ role: 'user', content: content }]
     });
