@@ -490,16 +490,16 @@ async function fetchWeatherFromCoords(lat, lon, cityHint){
   }catch(e){return null;}
 }
 async function fetchWeather(){
-  // Priorité 1 : IP géoloc (rapide, aucune popup, toujours dispo)
+  // Priorité 1 : /api/geo (serveur Vercel → pas de restriction HTTPS)
   try{
-    const r=await fetch('https://ip-api.com/json/?lang=fr&fields=status,lat,lon,city,regionName',{signal:AbortSignal.timeout(4000)});
+    const r=await fetch('/api/geo',{signal:AbortSignal.timeout(5000)});
     const ip=await r.json();
     if(ip.status==='success'&&ip.lat){
       const w=await fetchWeatherFromCoords(ip.lat.toFixed(4),ip.lon.toFixed(4),ip.city||ip.regionName||'Ma position');
       if(w)return w;
     }
   }catch(e){}
-  // Priorité 2 : GPS navigateur (si ip-api échoue)
+  // Priorité 2 : GPS navigateur (fallback)
   try{
     const pos=await new Promise((res,rej)=>navigator.geolocation
       ?navigator.geolocation.getCurrentPosition(res,rej,{timeout:4000})
@@ -539,24 +539,14 @@ function getWeatherDesc(code){
 /* ─── ACTUALITÉS (RSS via AllOrigins proxy) ─── */
 async function fetchNews(){
   try{
-    // On utilise AllOrigins pour contourner CORS sur le RSS du Monde
-    const rssUrl=encodeURIComponent('https://www.lemonde.fr/economie/rss_full.xml');
-    const proxyUrl=`https://api.allorigins.win/get?url=${rssUrl}`;
-    const res=await fetch(proxyUrl,{signal:AbortSignal.timeout(5000)});
+    // Appel serveur Vercel → pas de restriction CORS/HTTPS
+    const res=await fetch('/api/news',{signal:AbortSignal.timeout(8000)});
     const data=await res.json();
-    const parser=new DOMParser();
-    const xml=parser.parseFromString(data.contents,'text/xml');
-    const items=xml.querySelectorAll('item');
-    const news=[];
-    items.forEach((item,i)=>{
-      if(i>=5)return;
-      const title=item.querySelector('title')?.textContent||'';
-      const link=item.querySelector('link')?.textContent||'#';
-      const pubDate=item.querySelector('pubDate')?.textContent||'';
-      const dateStr=pubDate?new Date(pubDate).toLocaleDateString('fr-FR',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
-      news.push({title,link,dateStr});
+    if(!data.ok||!data.items?.length)return null;
+    return data.items.map(item=>{
+      const dateStr=item.pubDate?new Date(item.pubDate).toLocaleDateString('fr-FR',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+      return{title:item.title,link:item.link,dateStr};
     });
-    return news.length>0?news:null;
   }catch(e){return null;}
 }
 
