@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+  <title>ALTEORE — Analyse de Bilan</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --blue-dark:#0f1f5c;--blue-main:#1a3dce;--blue-light:#4f7ef8;
+      --blue-ghost:#f0f4ff;--white:#fff;--text:#1a1f36;--muted:#6b7280;
+      --border:#e2e8f0;--bg:#f5f7ff;--sidebar-w:252px;--radius:14px;
+      --green:#10b981;--orange:#f59e0b;--red:#ef4444;--purple:#6366f1;
+    }
+    body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;}
+
+    /* SIDEBAR */
+    .sidebar{width:var(--sidebar-w);min-height:100vh;background:linear-gradient(180deg,#0f1f5c 0%,#162366 100%);display:flex;flex-direction:column;position:fixed;left:0;top:0;z-index:100;padding-bottom:24px;overflow-y:auto;}
+    .sidebar-logo{display:flex;align-items:center;gap:10px;padding:26px 20px 22px;border-bottom:1px solid rgba(255,255,255,0.08);margin-bottom:10px;}
+    .sidebar-logo-icon{width:36px;height:36px;background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;}
+    .sidebar-logo-text{font-size:18px;font-weight:800;color:white;letter-spacing:1px;}
+    .sidebar-section-label{font-size:10px;font-weight:700;color:rgba(255,255,255,0.3);letter-spacing:1.2px;text-transform:uppercase;padding:14px 20px 5px;}
+    .nav-item{display:flex;align-items:center;gap:11px;padding:10px 20px;color:rgba(255,255,255,0.6);font-size:13px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:all 0.18s;user-select:none;}
+    .nav-item:hover{color:white;background:rgba(255,255,255,0.06);}
+    .nav-item.active{color:white;background:rgba(255,255,255,0.1);border-left-color:#4f7ef8;}
+    .nav-icon{font-size:15px;width:18px;text-align:center;flex-shrink:0;}
+    .nav-label{flex:1;}
+    .nav-badge{background:rgba(79,126,248,0.3);color:#a5b4fc;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;}
+    .nav-chevron{font-size:11px;color:rgba(255,255,255,0.3);transition:transform 0.25s;margin-left:auto;}
+    .submenu{overflow:hidden;max-height:0;transition:max-height 0.3s ease;}
+    .submenu.open{max-height:300px;}
+    .sub-item{display:flex;align-items:center;gap:9px;padding:8px 20px 8px 44px;color:rgba(255,255,255,0.45);font-size:12.5px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:all 0.18s;}
+    .sub-item:hover{color:rgba(255,255,255,0.8);background:rgba(255,255,255,0.05);}
+    .sub-item.active{color:white;background:rgba(79,126,248,0.15);border-left-color:rgba(79,126,248,0.6);}
+    .sub-dot{width:5px;height:5px;background:rgba(255,255,255,0.3);border-radius:50%;flex-shrink:0;}
+    .sub-item.active .sub-dot{background:#4f7ef8;}
+    .sub-year-badge{margin-left:auto;font-size:10px;color:rgba(255,255,255,0.25);font-weight:600;}
+    .sidebar-footer{margin-top:auto;padding:16px 20px 0;border-top:1px solid rgba(255,255,255,0.08);}
+    .user-card{display:flex;align-items:center;gap:10px;padding:10px;background:rgba(255,255,255,0.07);border-radius:10px;}
+    .user-avatar{width:32px;height:32px;background:linear-gradient(135deg,var(--blue-light),#6366f1);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:white;flex-shrink:0;}
+    .user-name{font-size:12px;font-weight:600;color:white;}
+    .user-plan{font-size:10px;color:rgba(255,255,255,0.4);}
+    .logout-btn{margin-left:auto;background:none;border:none;color:rgba(255,255,255,0.3);cursor:pointer;font-size:14px;padding:4px;}
+    .logout-btn:hover{color:rgba(255,255,255,0.7);}
+    .nav-section-label{font-size:10px;font-weight:700;color:rgba(255,255,255,.28);letter-spacing:1px;text-transform:uppercase;padding:12px 20px 4px}
+
+    /* MAIN */
+    .main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;min-height:100vh;}
+    .topbar{background:white;border-bottom:1px solid var(--border);padding:16px 32px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
+    .topbar-left h1{font-size:18px;font-weight:700;}
+    .topbar-left p{font-size:12px;color:var(--muted);margin-top:1px;}
+    .topbar-right{display:flex;align-items:center;gap:12px;}
+    .btn{padding:8px 16px;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:.2s;}
+    .btn-primary{background:linear-gradient(135deg,var(--blue-main),var(--blue-light));color:white;box-shadow:0 3px 10px rgba(26,61,206,0.3);}
+    .btn-primary:hover{box-shadow:0 5px 16px rgba(26,61,206,0.4);transform:translateY(-1px);}
+    .btn-outline{background:white;color:var(--blue-main);border:1.5px solid var(--border);}
+    .btn-outline:hover{border-color:var(--blue-main);background:var(--blue-ghost);}
+    .btn-danger{background:#fef2f2;color:#ef4444;border:1.5px solid #fecaca;}
+    .btn-danger:hover{background:#fee2e2;}
+
+    .content{padding:28px 32px;flex:1;animation:fadeIn 0.3s ease both;}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+
+    /* SECTION LABELS */
+    .section-label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;display:flex;align-items:center;gap:8px;}
+    .section-label::after{content:'';flex:1;height:1px;background:var(--border);}
+
+    /* KPI CARDS */
+    .kpi-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px;}
+    .kpi-grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:28px;}
+    .kpi-card{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:20px;position:relative;overflow:hidden;transition:box-shadow 0.2s,transform 0.2s;}
+    .kpi-card:hover{box-shadow:0 6px 24px rgba(26,61,206,0.08);transform:translateY(-1px);}
+    .kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
+    .kpi-card.blue::before{background:linear-gradient(90deg,var(--blue-main),var(--blue-light));}
+    .kpi-card.green::before{background:linear-gradient(90deg,#10b981,#34d399);}
+    .kpi-card.orange::before{background:linear-gradient(90deg,#f59e0b,#fbbf24);}
+    .kpi-card.purple::before{background:linear-gradient(90deg,#6366f1,#a5b4fc);}
+    .kpi-card.red::before{background:linear-gradient(90deg,#ef4444,#f87171);}
+    .kpi-card.teal::before{background:linear-gradient(90deg,#14b8a6,#2dd4bf);}
+    .kpi-icon{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px;margin-bottom:12px;}
+    .kpi-card.blue .kpi-icon{background:#eff6ff;}
+    .kpi-card.green .kpi-icon{background:#f0fdf4;}
+    .kpi-card.orange .kpi-icon{background:#fffbeb;}
+    .kpi-card.purple .kpi-icon{background:#eef2ff;}
+    .kpi-card.red .kpi-icon{background:#fef2f2;}
+    .kpi-card.teal .kpi-icon{background:#f0fdfa;}
+    .kpi-label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:5px;}
+    .kpi-value{font-size:21px;font-weight:800;color:var(--text);margin-bottom:6px;letter-spacing:-0.5px;}
+    .kpi-value.positive{color:var(--green);}
+    .kpi-value.negative{color:var(--red);}
+    .kpi-sub{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;}
+    .kpi-sub .up{color:var(--green);}
+    .kpi-sub .down{color:var(--red);}
+
+    /* CHARTS */
+    .charts-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:24px;}
+    .chart-card{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:22px;}
+    .chart-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px;}
+    .chart-title{font-size:14px;font-weight:700;color:var(--text);}
+    .chart-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+    .chart-tag{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;}
+    .tag-blue{background:var(--blue-ghost);color:var(--blue-main);}
+    .tag-green{background:#f0fdf4;color:#10b981;}
+    .tag-purple{background:#eef2ff;color:#6366f1;}
+    .chart-wrap{position:relative;}
+    .chart-wrap.h220{height:220px;}
+    .chart-wrap.h250{height:250px;}
+
+    /* UPLOAD ZONE */
+    .upload-zone{background:white;border:2px dashed var(--border);border-radius:var(--radius);padding:60px 40px;text-align:center;cursor:pointer;transition:all 0.3s;}
+    .upload-zone:hover,.upload-zone.dragover{border-color:var(--blue-main);background:var(--blue-ghost);}
+    .upload-zone-icon{font-size:48px;margin-bottom:16px;}
+    .upload-zone-title{font-size:16px;font-weight:700;color:var(--text);margin-bottom:6px;}
+    .upload-zone-sub{font-size:13px;color:var(--muted);margin-bottom:16px;}
+    .upload-zone input[type="file"]{display:none;}
+    .upload-zone .btn{display:inline-flex;align-items:center;gap:6px;}
+
+    /* CONSEILS */
+    .conseil-card{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;display:flex;gap:14px;align-items:flex-start;transition:box-shadow 0.2s;}
+    .conseil-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.06);}
+    .conseil-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;}
+    .conseil-icon.force{background:#f0fdf4;color:#10b981;}
+    .conseil-icon.faiblesse{background:#fef2f2;color:#ef4444;}
+    .conseil-icon.opportunite{background:#eff6ff;color:#1a3dce;}
+    .conseil-icon.vigilance{background:#fffbeb;color:#f59e0b;}
+    .conseil-titre{font-size:13px;font-weight:700;margin-bottom:3px;}
+    .conseil-detail{font-size:12px;color:var(--muted);line-height:1.5;}
+
+    /* RESUME IA */
+    .resume-card{background:linear-gradient(135deg,#0f1f5c,#1a3dce);border-radius:var(--radius);padding:28px;color:white;margin-bottom:24px;position:relative;overflow:hidden;}
+    .resume-card::before{content:'';position:absolute;top:-50%;right:-20%;width:300px;height:300px;background:radial-gradient(circle,rgba(79,126,248,0.3),transparent);border-radius:50%;}
+    .resume-badge{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.15);border-radius:20px;padding:5px 14px;font-size:11px;font-weight:600;margin-bottom:14px;position:relative;}
+    .resume-text{font-size:14px;line-height:1.7;position:relative;opacity:0.92;}
+
+    /* TABLE */
+    .table-card{background:white;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:24px;}
+    .table-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;}
+    .table-title{font-size:13px;font-weight:700;}
+    table{width:100%;border-collapse:collapse;}
+    th{padding:9px 18px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;background:#f8faff;border-bottom:1px solid var(--border);}
+    td{padding:11px 18px;font-size:12px;border-bottom:1px solid #f8f9fa;}
+    tr:last-child td{border-bottom:none;}
+    .td-pos{color:var(--green);font-weight:700;}
+    .td-neg{color:var(--red);font-weight:700;}
+    .td-muted{color:var(--muted);}
+    .status-pill{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;}
+    .sp-ok{background:#f0fdf4;color:#10b981;}
+    .sp-warn{background:#fffbeb;color:#f59e0b;}
+    .sp-bad{background:#fef2f2;color:#ef4444;}
+
+    /* YEAR TABS */
+    .year-tabs{display:flex;gap:8px;margin-bottom:24px;flex-wrap:wrap;}
+    .year-tab{padding:8px 18px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;border:1.5px solid var(--border);background:white;color:var(--muted);transition:.2s;}
+    .year-tab:hover{border-color:var(--blue-main);color:var(--blue-main);}
+    .year-tab.active{background:var(--blue-main);color:white;border-color:var(--blue-main);}
+    .year-tab .year-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:6px;}
+
+    /* LOADER ANALYSE */
+    .analyze-loader{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 40px;gap:20px;}
+    .analyze-spinner{width:48px;height:48px;border:3px solid var(--border);border-top-color:var(--blue-main);border-radius:50%;animation:spin .8s linear infinite;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .analyze-text{font-size:14px;color:var(--muted);font-weight:500;text-align:center;}
+    .analyze-step{font-size:12px;color:var(--blue-main);font-weight:600;}
+
+    /* COMPARATIF */
+    .evol-badge{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:700;padding:2px 8px;border-radius:12px;}
+    .evol-up{background:#f0fdf4;color:#10b981;}
+    .evol-down{background:#fef2f2;color:#ef4444;}
+    .evol-neutral{background:#f3f4f6;color:var(--muted);}
+
+    /* LOADER */
+    .loader{display:flex;align-items:center;justify-content:center;min-height:400px;color:var(--muted);gap:10px;font-size:13px;}
+    .spin{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--blue-main);border-radius:50%;animation:spin .7s linear infinite;}
+
+    /* HAMBURGER */
+    .hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#0f1f5c;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;box-shadow:0 4px 16px rgba(15,31,92,.45);-webkit-tap-highlight-color:transparent;transition:background .2s;}
+    .hamburger:active{background:#1a3dce;}
+    .hamburger span{display:block;width:20px;height:2.5px;background:#fff;border-radius:2px;transition:all .25s ease;pointer-events:none;}
+    .hamburger.open span:nth-child(1){transform:translateY(7.5px) rotate(45deg);}
+    .hamburger.open span:nth-child(2){opacity:0;transform:scaleX(0);}
+    .hamburger.open span:nth-child(3){transform:translateY(-7.5px) rotate(-45deg);}
+    .nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;-webkit-tap-highlight-color:transparent;}
+    .nav-overlay.show{display:block;}
+
+    html,body{overflow-x:hidden;max-width:100vw;}
+
+    /* MOBILE */
+    @media(max-width:768px){
+      .hamburger{display:flex!important;}
+      nav,aside.sidebar,.sidebar{position:fixed!important;top:0!important;left:0!important;height:100vh!important;width:min(280px,84vw)!important;z-index:1001!important;transform:translateX(-105%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1)!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;margin:0!important;}
+      nav.open,aside.sidebar.open,.sidebar.open{transform:translateX(0)!important;box-shadow:8px 0 32px rgba(0,0,0,.3)!important;}
+      .main,main,div.main,.main-content{margin-left:0!important;width:100vw!important;overflow-x:hidden!important;}
+      .topbar{padding:10px 10px 10px 62px!important;flex-wrap:wrap!important;gap:6px!important;}
+      .topbar h1,.topbar-left h1{font-size:14px!important;}
+      .topbar p,.topbar-left p{font-size:10px!important;}
+      .topbar-right{width:100%!important;flex-wrap:wrap!important;gap:6px!important;}
+      .topbar-right .btn{flex:1 1 auto!important;font-size:11px!important;padding:7px 8px!important;}
+      .content{padding:12px 10px!important;}
+      .kpi-grid-4,.kpi-grid-3{grid-template-columns:1fr 1fr!important;gap:8px!important;margin-bottom:12px!important;}
+      .charts-grid{grid-template-columns:1fr!important;gap:12px!important;}
+      .upload-zone{padding:30px 16px!important;}
+      .resume-card{padding:18px!important;}
+      .year-tabs{gap:6px!important;}
+      .year-tab{padding:6px 12px!important;font-size:12px!important;}
+      .overlay,.modal-overlay{align-items:flex-end!important;padding:0!important;}
+      .modal{width:100%!important;max-width:100%!important;margin:0!important;border-radius:18px 18px 0 0!important;max-height:92vh!important;}
+    }
+    @media(max-width:420px){
+      .kpi-grid-4,.kpi-grid-3{grid-template-columns:1fr!important;}
+    }
+  </style>
+</head>
+<body>
+  <button class="hamburger" id="hamburger" onclick="toggleSidebar()" aria-label="Menu">
+    <span></span><span></span><span></span>
+  </button>
+  <div class="nav-overlay" id="navOverlay" onclick="closeSidebar()"></div>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <div class="sidebar-logo-icon">📊</div>
+    <div class="sidebar-logo-text">ALTEORE</div>
+  </div>
+  <div class="sidebar-section-label">Principal</div>
+  <div class="nav-item" onclick="location.href='dashboard.html'"><span class="nav-icon">🏠</span><span class="nav-label">Tableau de bord</span></div>
+  <div class="nav-item" onclick="location.href='suivi-ca.html'"><span class="nav-icon">📈</span><span class="nav-label">Suivi CA & Résultats</span></div>
+  <div class="nav-item" id="kpis-nav" onclick="toggleMenu('kpis-menu',this)"><span class="nav-icon">🎯</span><span class="nav-label">KPIs Clés</span><span class="nav-chevron">›</span></div>
+  <div class="submenu" id="kpis-menu">
+    <div class="sub-item" onclick="location.href='cout-revient.html'"><span class="sub-dot"></span>Coût de revient</div>
+    <div class="sub-item" onclick="location.href='marges.html'"><span class="sub-dot"></span>Marge brute & nette</div>
+    <div class="sub-item" onclick="location.href='panier-moyen.html'"><span class="sub-dot"></span>Panier moyen</div>
+  </div>
+  <div class="nav-item" onclick="toggleMenu('pilotage-menu',this)"><span class="nav-icon">🧭</span><span class="nav-label">Pilotage</span><span class="nav-chevron">›</span></div>
+  <div class="submenu" id="pilotage-menu">
+    <div class="sub-item" onclick="location.href='pilotage.html?year=2025'"><span class="sub-dot"></span>Pilotage 2025</div>
+    <div class="sub-item" onclick="location.href='pilotage.html?year=2026'"><span class="sub-dot"></span>Pilotage 2026</div>
+    <div class="sub-item" onclick="location.href='pilotage.html?year=2027'"><span class="sub-dot"></span>Pilotage 2027</div>
+    <div class="sub-item" onclick="location.href='cashflow.html'" style="border-top:1px solid rgba(255,255,255,.06);margin-top:4px;padding-top:8px"><span class="sub-dot" style="background:#0d9488"></span>💧 Cashflow</div>
+  </div>
+  <div class="nav-item" onclick="location.href='dettes.html'"><span class="nav-icon">🏦</span><span class="nav-label">Dettes & Emprunts</span></div>
+
+  <div class="nav-section-label">Intelligence IA</div>
+  <div class="nav-item active"><span class="nav-icon">🤖</span><span class="nav-label">Analyse de Bilan</span><span class="nav-badge">IA</span></div>
+
+  <div class="nav-section-label">Fidélisation</div>
+  <div class="nav-item" onclick="toggleFidNav(this)" style="justify-content:space-between">
+    <span style="display:flex;align-items:center;gap:8px"><span class="nav-icon">💎</span><span class="nav-label">Fidélisation</span></span>
+    <span class="nav-chev" style="font-size:11px;color:rgba(255,255,255,.3);transition:transform .25s">›</span>
+  </div>
+  <div class="nav-fid-sub" style="overflow:hidden;max-height:0;transition:max-height .35s ease">
+    <div class="nav-sub-item" onclick="location.href='fidelisation.html'" style="display:flex;align-items:center;gap:7px;padding:7px 18px 7px 38px;color:rgba(255,255,255,.4);font-size:12px;cursor:pointer;border-left:3px solid transparent;transition:.15s" onmouseover="this.style.color='rgba(255,255,255,.75)'" onmouseout="this.style.color='rgba(255,255,255,.4)'"><span style="width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.25);display:inline-block;flex-shrink:0"></span>Dashboard fidélité</div>
+  </div>
+  <div class="nav-item" onclick="location.href='import.html'" style="border-top:1px solid rgba(255,255,255,.08);padding-top:10px"><span class="nav-icon">📥</span><span class="nav-label">Import de données</span></div>
+  <div class="sidebar-footer">
+    <div class="user-card" onclick="location.href='profil.html'" style="cursor:pointer">
+      <div class="user-avatar" id="userAvatar">A</div>
+      <div><div class="user-name" id="userName">Utilisateur</div><div class="user-plan" id="uplan">Plan gratuit</div></div>
+      <button class="logout-btn" onclick="event.stopPropagation();handleLogout()">⎋</button>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>🤖 Analyse de Bilan Comptable</h1>
+      <p>Module IA — Importez votre bilan et obtenez une analyse complète</p>
+    </div>
+    <div class="topbar-right" id="topbarRight">
+      <!-- Boutons dynamiques -->
+    </div>
+  </div>
+  <div class="content" id="mainContent">
+    <div class="loader"><div class="spin"></div>Chargement...</div>
+  </div>
+</div>
+
+<!-- Firebase -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  const app = initializeApp({
+    apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain:"altiora-70599.firebaseapp.com",
+    projectId:"altiora-70599",
+    storageBucket:"altiora-70599.firebasestorage.app",
+    messagingSenderId:"120905555746",
+    appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+  });
+  const auth=getAuth(app);
+  const db=getFirestore(app);
+  window._auth=auth;window._db=db;window._doc=doc;window._getDoc=getDoc;window._setDoc=setDoc;window._deleteDoc=deleteDoc;window._collection=collection;window._getDocs=getDocs;window._signOut=signOut;
+  onAuthStateChanged(auth,async user=>{
+    if(!user){window.location.href='index.html';return;}
+    window._uid=user.uid;
+    const name=user.displayName||user.email.split('@')[0];
+    document.getElementById('userName').textContent=name;
+    document.getElementById('userAvatar').textContent=name.charAt(0).toUpperCase();
+    window._firebaseReady=true;
+    window.initBilan();
+  });
+</script>
+
+<script>
+/* ═══════════════════════════════════════════
+   ANALYSE DE BILAN — SCRIPT PRINCIPAL
+   ═══════════════════════════════════════════ */
+
+var _bilans = {}; // { '2024': { data... }, '2023': { data... } }
+var _selectedYear = null;
+var _charts = [];
+
+function toggleMenu(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('open');}
+async function handleLogout(){await window._signOut(window._auth);window.location.href='index.html';}
+function toggleFidNav(el){var sub=el.nextElementSibling;var chev=el.querySelector('.nav-chev');var open=sub.style.maxHeight&&sub.style.maxHeight!=='0px';sub.style.maxHeight=open?'0px':'300px';if(chev)chev.style.transform=open?'':'rotate(90deg)';}
+
+// ─── INIT ───
+window.initBilan = async function() {
+  if(!window._uid) return;
+
+  // Vérifier plan Master
+  try {
+    const usnap = await window._getDoc(window._doc(window._db,'users',window._uid));
+    if(usnap.exists()){
+      const plan = usnap.data().plan || 'free';
+      if(!['master','trial','dev'].includes(plan)){
+        showUpgradeModal();
+        return;
+      }
+    }
+  } catch(e){}
+
+  // Charger bilans existants
+  await loadBilans();
+  renderMain();
+};
+
+async function loadBilans() {
+  _bilans = {};
+  try {
+    const snap = await window._getDocs(window._collection(window._db,'bilans',window._uid,'years'));
+    snap.forEach(function(d) {
+      _bilans[d.id] = d.data();
+    });
+  } catch(e) {
+    console.error('Erreur chargement bilans:', e);
+  }
+}
+
+// ─── RENDER PRINCIPAL ───
+function renderMain() {
+  const years = Object.keys(_bilans).sort().reverse();
+  const hasData = years.length > 0;
+
+  if(!_selectedYear && hasData) _selectedYear = years[0];
+
+  // Topbar buttons
+  document.getElementById('topbarRight').innerHTML = `
+    <button class="btn btn-primary" onclick="document.getElementById('pdfInput').click()">📄 Importer un bilan PDF</button>
+    <input type="file" id="pdfInput" accept=".pdf" style="display:none" onchange="handlePdfUpload(event)">
+  `;
+
+  if(!hasData) {
+    renderUploadView();
+    return;
+  }
+
+  // Render year tabs + selected year data
+  const content = document.getElementById('mainContent');
+  content.innerHTML = `
+    <div class="year-tabs" id="yearTabs">
+      ${years.map(function(y){
+        return `<div class="year-tab ${y===_selectedYear?'active':''}" onclick="selectYear('${y}')">
+          <span class="year-dot" style="background:${y===_selectedYear?'white':'var(--blue-main)'}"></span>
+          Bilan ${y}
+        </div>`;
+      }).join('')}
+      <div class="year-tab" onclick="document.getElementById('pdfInput').click()" style="border-style:dashed;color:var(--blue-main);">+ Ajouter</div>
+    </div>
+    <div id="bilanContent"></div>
+  `;
+
+  renderBilanYear(_selectedYear);
+}
+
+function selectYear(y) {
+  _selectedYear = y;
+  renderMain();
+}
+
+// ─── VUE UPLOAD (aucun bilan) ───
+function renderUploadView() {
+  document.getElementById('mainContent').innerHTML = `
+    <div style="max-width:600px;margin:40px auto;">
+      <div class="upload-zone" id="uploadZone" onclick="document.getElementById('pdfInput').click()">
+        <div class="upload-zone-icon">📄</div>
+        <div class="upload-zone-title">Importez votre bilan comptable</div>
+        <div class="upload-zone-sub">Glissez-déposez votre PDF ou cliquez pour sélectionner.<br>L'IA analysera automatiquement votre bilan et extraira les données clés.</div>
+        <button class="btn btn-primary" onclick="event.stopPropagation();document.getElementById('pdfInput').click()">📎 Sélectionner un fichier PDF</button>
+      </div>
+      <div style="text-align:center;margin-top:20px;">
+        <p style="font-size:12px;color:var(--muted);">Formats acceptés : PDF · Bilans comptables, liasses fiscales, comptes annuels</p>
+        <p style="font-size:11px;color:var(--muted);margin-top:6px;">🔒 Vos données sont sécurisées et ne sont jamais partagées</p>
+      </div>
+    </div>
+  `;
+
+  // Drag & drop
+  const zone = document.getElementById('uploadZone');
+  zone.addEventListener('dragover', function(e){e.preventDefault();zone.classList.add('dragover');});
+  zone.addEventListener('dragleave', function(){zone.classList.remove('dragover');});
+  zone.addEventListener('drop', function(e){
+    e.preventDefault();zone.classList.remove('dragover');
+    if(e.dataTransfer.files.length>0 && e.dataTransfer.files[0].type==='application/pdf'){
+      processPdf(e.dataTransfer.files[0]);
+    }
+  });
+}
+
+// ─── UPLOAD PDF ───
+function handlePdfUpload(event) {
+  const file = event.target.files[0];
+  if(!file) return;
+  if(file.type !== 'application/pdf'){
+    alert('Veuillez sélectionner un fichier PDF.');
+    return;
+  }
+  if(file.size > 20 * 1024 * 1024){
+    alert('Le fichier est trop volumineux (max 20 Mo).');
+    return;
+  }
+  processPdf(file);
+  event.target.value = ''; // reset pour pouvoir re-upload
+}
+
+async function processPdf(file) {
+  // Afficher loader
+  document.getElementById('mainContent').innerHTML = `
+    <div class="analyze-loader">
+      <div class="analyze-spinner"></div>
+      <div class="analyze-text">Analyse du bilan en cours...</div>
+      <div class="analyze-step" id="analyzeStep">📄 Lecture du document PDF</div>
+    </div>
+  `;
+
+  try {
+    // Convertir en base64
+    const base64 = await fileToBase64(file);
+    updateStep('🤖 Envoi à l\'intelligence artificielle...');
+
+    // Préparer les données existantes pour comparaison
+    const existingYears = {};
+    for(var y in _bilans) {
+      existingYears[y] = {
+        ca: _bilans[y].compteResultat?.chiffreAffaires || 0,
+        resultatNet: _bilans[y].compteResultat?.resultatNet || 0,
+        totalActif: _bilans[y].actif?.totalActif || 0,
+        capitauxPropres: _bilans[y].passif?.totalCapitauxPropres || 0,
+        dettes: _bilans[y].passif?.totalDettes || 0,
+        tresorerie: _bilans[y].actif?.tresorerieActive || 0,
+        ebe: _bilans[y].compteResultat?.ebe || 0
+      };
+    }
+
+    // Appeler l'API
+    updateStep('🧠 Analyse des données financières...');
+    const resp = await fetch('/api/analyze-bilan', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        pdfBase64: base64,
+        fileName: file.name,
+        existingYears: existingYears
+      })
+    });
+
+    if(!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.error || 'Erreur serveur');
+    }
+
+    const result = await resp.json();
+    if(!result.success || !result.data) throw new Error('Réponse invalide de l\'IA');
+
+    updateStep('💾 Sauvegarde des données...');
+    const data = result.data;
+    const year = data.annee || new Date().getFullYear().toString();
+
+    // Sauvegarder dans Firestore
+    await window._setDoc(
+      window._doc(window._db, 'bilans', window._uid, 'years', year),
+      data
+    );
+
+    _bilans[year] = data;
+    _selectedYear = year;
+    renderMain();
+
+  } catch(err) {
+    console.error('Erreur analyse:', err);
+    document.getElementById('mainContent').innerHTML = `
+      <div style="text-align:center;padding:60px 20px;">
+        <div style="font-size:48px;margin-bottom:16px;">⚠️</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px;">Erreur lors de l'analyse</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">${err.message}</div>
+        <button class="btn btn-primary" onclick="renderMain()">← Retour</button>
+      </div>
+    `;
+  }
+}
+
+function updateStep(text) {
+  var el = document.getElementById('analyzeStep');
+  if(el) el.textContent = text;
+}
+
+function fileToBase64(file) {
+  return new Promise(function(resolve, reject) {
+    var reader = new FileReader();
+    reader.onload = function() {
+      resolve(reader.result.split(',')[1]);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// ─── RENDER BILAN ANNÉE ───
+function renderBilanYear(year) {
+  const d = _bilans[year];
+  if(!d) return;
+
+  // Destroy old charts
+  _charts.forEach(function(c){try{c.destroy();}catch(e){}});
+  _charts = [];
+
+  const cr = d.compteResultat || {};
+  const actif = d.actif || {};
+  const passif = d.passif || {};
+  const ratios = d.ratios || {};
+  const conseils = d.conseils || [];
+
+  // Trouver l'année précédente pour comparaison
+  const prevYear = String(parseInt(year) - 1);
+  const prev = _bilans[prevYear];
+  const hasPrev = !!prev;
+
+  const container = document.getElementById('bilanContent');
+  container.innerHTML = `
+    <!-- RESUME IA -->
+    <div class="resume-card">
+      <div class="resume-badge">🤖 Analyse IA — Bilan ${year}${d.entreprise ? ' · '+d.entreprise : ''}</div>
+      <div class="resume-text">${d.resumeIA || 'Aucun résumé disponible.'}</div>
+    </div>
+
+    <!-- KPIs PRINCIPAUX -->
+    <div class="section-label">📊 Indicateurs clés — ${year}</div>
+    <div class="kpi-grid-4">
+      <div class="kpi-card blue">
+        <div class="kpi-icon">💰</div>
+        <div class="kpi-label">Chiffre d'affaires</div>
+        <div class="kpi-value">${fmtE(cr.chiffreAffaires)}</div>
+        <div class="kpi-sub">${evolBadge(cr.chiffreAffaires, prev?.compteResultat?.chiffreAffaires)}</div>
+      </div>
+      <div class="kpi-card ${(cr.resultatNet||0)>=0?'green':'red'}">
+        <div class="kpi-icon">📈</div>
+        <div class="kpi-label">Résultat net</div>
+        <div class="kpi-value ${(cr.resultatNet||0)>=0?'positive':'negative'}">${fmtE(cr.resultatNet)}</div>
+        <div class="kpi-sub">${evolBadge(cr.resultatNet, prev?.compteResultat?.resultatNet)}</div>
+      </div>
+      <div class="kpi-card orange">
+        <div class="kpi-icon">⚡</div>
+        <div class="kpi-label">EBE</div>
+        <div class="kpi-value">${fmtE(cr.ebe)}</div>
+        <div class="kpi-sub">${evolBadge(cr.ebe, prev?.compteResultat?.ebe)}</div>
+      </div>
+      <div class="kpi-card purple">
+        <div class="kpi-icon">🏦</div>
+        <div class="kpi-label">Trésorerie</div>
+        <div class="kpi-value">${fmtE(actif.tresorerieActive)}</div>
+        <div class="kpi-sub">${evolBadge(actif.tresorerieActive, prev?.actif?.tresorerieActive)}</div>
+      </div>
+    </div>
+
+    <!-- RATIOS -->
+    <div class="section-label">📐 Ratios financiers</div>
+    <div class="kpi-grid-4">
+      <div class="kpi-card teal">
+        <div class="kpi-icon">📊</div>
+        <div class="kpi-label">Taux résultat net</div>
+        <div class="kpi-value">${fmtP(ratios.tauxResultatNet)}</div>
+        <div class="kpi-sub"><span class="${(ratios.tauxResultatNet||0)>=5?'up':'down'}">${(ratios.tauxResultatNet||0)>=5?'✓ Bon':'⚠ À surveiller'}</span></div>
+      </div>
+      <div class="kpi-card ${(ratios.ratioEndettement||0)<=100?'green':'red'}">
+        <div class="kpi-icon">⚖️</div>
+        <div class="kpi-label">Ratio endettement</div>
+        <div class="kpi-value">${fmtP(ratios.ratioEndettement)}</div>
+        <div class="kpi-sub"><span class="${(ratios.ratioEndettement||0)<=100?'up':'down'}">${(ratios.ratioEndettement||0)<=100?'✓ Sain':'⚠ Élevé'}</span></div>
+      </div>
+      <div class="kpi-card blue">
+        <div class="kpi-icon">💧</div>
+        <div class="kpi-label">Liquidité générale</div>
+        <div class="kpi-value">${(ratios.ratioLiquiditeGenerale||0).toFixed(2)}</div>
+        <div class="kpi-sub"><span class="${(ratios.ratioLiquiditeGenerale||0)>=1?'up':'down'}">${(ratios.ratioLiquiditeGenerale||0)>=1?'✓ OK':'⚠ Insuffisant'}</span></div>
+      </div>
+      <div class="kpi-card orange">
+        <div class="kpi-icon">📅</div>
+        <div class="kpi-label">BFR (jours CA)</div>
+        <div class="kpi-value">${(ratios.bfrJours||0).toFixed(0)} j</div>
+        <div class="kpi-sub"><span class="${(ratios.bfrJours||0)<=60?'up':'down'}">${(ratios.bfrJours||0)<=60?'✓ Maîtrisé':'⚠ Élevé'}</span></div>
+      </div>
+    </div>
+
+    <!-- GRAPHIQUES -->
+    <div class="charts-grid">
+      <div class="chart-card">
+        <div class="chart-header">
+          <div><div class="chart-title">Structure du bilan</div><div class="chart-sub">Actif vs Passif</div></div>
+          <span class="chart-tag tag-blue">Bilan ${year}</span>
+        </div>
+        <div class="chart-wrap h250"><canvas id="bilanStructChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-header">
+          <div><div class="chart-title">Répartition des charges</div><div class="chart-sub">Compte de résultat</div></div>
+          <span class="chart-tag tag-purple">Résultat</span>
+        </div>
+        <div class="chart-wrap h250"><canvas id="chargesChart"></canvas></div>
+      </div>
+    </div>
+
+    ${hasPrev ? renderComparatif(year, prevYear) : ''}
+
+    <!-- DÉTAIL BILAN -->
+    <div class="section-label">📋 Détail du bilan — ${year}</div>
+    <div class="charts-grid" style="margin-bottom:24px;">
+      <!-- ACTIF -->
+      <div class="table-card">
+        <div class="table-head">
+          <div class="table-title">Actif</div>
+          <span class="chart-tag tag-blue">${fmtE(actif.totalActif)}</span>
+        </div>
+        <table>
+          <thead><tr><th>Poste</th><th style="text-align:right">Montant</th></tr></thead>
+          <tbody>
+            <tr><td><b>Actif immobilisé</b></td><td style="text-align:right;font-weight:700">${fmtE(actif.totalActifImmobilise)}</td></tr>
+            <tr><td class="td-muted" style="padding-left:28px">Immob. incorporelles</td><td style="text-align:right" class="td-muted">${fmtE(actif.immobilisationsIncorporelles)}</td></tr>
+            <tr><td class="td-muted" style="padding-left:28px">Immob. corporelles</td><td style="text-align:right" class="td-muted">${fmtE(actif.immobilisationsCorporelles)}</td></tr>
+            <tr><td class="td-muted" style="padding-left:28px">Immob. financières</td><td style="text-align:right" class="td-muted">${fmtE(actif.immobilisationsFinancieres)}</td></tr>
+            <tr><td><b>Actif circulant</b></td><td style="text-align:right;font-weight:700">${fmtE(actif.totalActifCirculant)}</td></tr>
+            <tr><td class="td-muted" style="padding-left:28px">Stocks</td><td style="text-align:right" class="td-muted">${fmtE(actif.stocks)}</td></tr>
+            <tr><td class="td-muted" style="padding-left:28px">Créances clients</td><td style="text-align:right" class="td-muted">${fmtE(actif.creancesClients)}</td></tr>
+            <tr><td class="td-muted" style="padding-left:28px">Trésorerie</td><td style="text-align:right" class="td-muted">${fmtE(actif.tresorerieActive)}</td></tr>
+            <tr style="background:#f8faff"><td><b>TOTAL ACTIF</b></td><td style="text-align:right;font-weight:800;color:var(--blue-main)">${fmtE(actif.totalActif)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <!-- PASSIF -->
+      <div class="table-card">
+        <div class="table-head">
+          <div class="table-title">Passif</div>
+          <span class="chart-tag tag-purple">${fmtE(passif.totalPassif)}</span>
+        </div>
+        <table>
+          <thead><tr><th>Poste</th><th style="text-align:right">Montant</th></tr></thead>
+          <tbody>
+            <tr><td><b>Capitaux propres</b></td><td style="text-align:right;font-weight:700">${fmtE(passif.totalCapitauxPropres)}</td></tr>
+            <tr><td class="td-muted" style="padding-left:28px">Capital social</td><td style="text-align:right" class="td-muted">${fmtE(passif.capitalSocial)}</td></tr>
+            <tr><td class="td-muted" style="padding-left:28px">Réserves</td><td style="text-align:right" class="td-muted">${fmtE(passif.reserves)}</td></tr>
+            <tr><td class="td-muted" style="padding-left:28px">Résultat exercice</td><td style="text-align:right" class="${(passif.resultatExercice||0)>=0?'td-pos':'td-neg'}">${fmtE(passif.resultatExercice)}</td></tr>
+            <tr><td><b>Dettes</b></td><td style="text-align:right;font-weight:700">${fmtE(passif.totalDettes)}</td></tr>
+            <tr><td class="td-muted" style="padding-left:28px">Dettes financières</td><td style="text-align:right" class="td-muted">${fmtE(passif.dettesFinancieres)}</td></tr>
+            <tr><td class="td-muted" style="padding-left:28px">Fournisseurs</td><td style="text-align:right" class="td-muted">${fmtE(passif.dettesFournisseurs)}</td></tr>
+            <tr><td class="td-muted" style="padding-left:28px">Fiscales & sociales</td><td style="text-align:right" class="td-muted">${fmtE(passif.dettesFiscalesSociales)}</td></tr>
+            <tr style="background:#f8faff"><td><b>TOTAL PASSIF</b></td><td style="text-align:right;font-weight:800;color:var(--purple)">${fmtE(passif.totalPassif)}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- COMPTE DE RÉSULTAT -->
+    <div class="section-label">📊 Compte de résultat</div>
+    <div class="table-card" style="margin-bottom:24px;">
+      <div class="table-head">
+        <div class="table-title">Soldes intermédiaires de gestion</div>
+        <span class="chart-tag tag-green">Exercice ${year}</span>
+      </div>
+      <table>
+        <thead><tr><th>Poste</th><th style="text-align:right">Montant</th><th style="text-align:right">% du CA</th></tr></thead>
+        <tbody>
+          <tr><td><b>Chiffre d'affaires</b></td><td style="text-align:right;font-weight:700">${fmtE(cr.chiffreAffaires)}</td><td style="text-align:right" class="td-muted">100%</td></tr>
+          <tr><td class="td-muted">− Achats & charges externes</td><td style="text-align:right" class="td-neg">${fmtE(cr.achatsChargesExternes)}</td><td style="text-align:right" class="td-muted">${pctCA(cr.achatsChargesExternes, cr.chiffreAffaires)}</td></tr>
+          <tr style="background:#f8faff"><td><b>= Valeur ajoutée</b></td><td style="text-align:right;font-weight:700">${fmtE(cr.valeurAjoutee)}</td><td style="text-align:right" class="td-muted">${pctCA(cr.valeurAjoutee, cr.chiffreAffaires)}</td></tr>
+          <tr><td class="td-muted">− Charges de personnel</td><td style="text-align:right" class="td-neg">${fmtE(cr.chargesPersonnel)}</td><td style="text-align:right" class="td-muted">${pctCA(cr.chargesPersonnel, cr.chiffreAffaires)}</td></tr>
+          <tr style="background:#fffbeb"><td><b>= EBE (Excédent Brut d'Exploitation)</b></td><td style="text-align:right;font-weight:700;color:var(--orange)">${fmtE(cr.ebe)}</td><td style="text-align:right" class="td-muted">${pctCA(cr.ebe, cr.chiffreAffaires)}</td></tr>
+          <tr><td class="td-muted">− Dotations amortissements</td><td style="text-align:right" class="td-muted">${fmtE(cr.dotationsAmortissements)}</td><td style="text-align:right" class="td-muted">${pctCA(cr.dotationsAmortissements, cr.chiffreAffaires)}</td></tr>
+          <tr><td><b>= Résultat d'exploitation</b></td><td style="text-align:right;font-weight:700">${fmtE(cr.resultatExploitation)}</td><td style="text-align:right" class="td-muted">${pctCA(cr.resultatExploitation, cr.chiffreAffaires)}</td></tr>
+          <tr><td class="td-muted">+/− Résultat financier</td><td style="text-align:right" class="${(cr.resultatFinancier||0)>=0?'td-pos':'td-neg'}">${fmtE(cr.resultatFinancier)}</td><td></td></tr>
+          <tr><td class="td-muted">+/− Résultat exceptionnel</td><td style="text-align:right" class="${(cr.resultatExceptionnel||0)>=0?'td-pos':'td-neg'}">${fmtE(cr.resultatExceptionnel)}</td><td></td></tr>
+          <tr><td class="td-muted">− Impôt sur les sociétés</td><td style="text-align:right" class="td-neg">${fmtE(cr.impotSocietes)}</td><td></td></tr>
+          <tr style="background:${(cr.resultatNet||0)>=0?'#f0fdf4':'#fef2f2'}"><td><b>= RÉSULTAT NET</b></td><td style="text-align:right;font-weight:800;font-size:14px;color:${(cr.resultatNet||0)>=0?'var(--green)':'var(--red)'}">${fmtE(cr.resultatNet)}</td><td style="text-align:right;font-weight:700">${pctCA(cr.resultatNet, cr.chiffreAffaires)}</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- CONSEILS IA -->
+    <div class="section-label">💡 Conseils & Recommandations IA</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px;" id="conseilsGrid">
+      ${conseils.map(function(c){
+        var icon = c.type==='force'?'✅':c.type==='faiblesse'?'⚠️':c.type==='opportunite'?'💡':'🔔';
+        return `<div class="conseil-card">
+          <div class="conseil-icon ${c.type}">${icon}</div>
+          <div>
+            <div class="conseil-titre">${c.titre}</div>
+            <div class="conseil-detail">${c.detail}</div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+
+    <!-- SUPPRIMER -->
+    <div style="text-align:center;padding:20px 0 40px;">
+      <button class="btn btn-danger" onclick="deleteBilan('${year}')">🗑 Supprimer le bilan ${year}</button>
+    </div>
+  `;
+
+  buildBilanCharts(d, year);
+}
+
+// ─── COMPARATIF N / N-1 ───
+function renderComparatif(year, prevYear) {
+  const d = _bilans[year];
+  const p = _bilans[prevYear];
+  if(!d || !p) return '';
+
+  const rows = [
+    {label:"Chiffre d'affaires", cur:d.compteResultat?.chiffreAffaires, prev:p.compteResultat?.chiffreAffaires},
+    {label:"Valeur ajoutée", cur:d.compteResultat?.valeurAjoutee, prev:p.compteResultat?.valeurAjoutee},
+    {label:"EBE", cur:d.compteResultat?.ebe, prev:p.compteResultat?.ebe},
+    {label:"Résultat net", cur:d.compteResultat?.resultatNet, prev:p.compteResultat?.resultatNet},
+    {label:"Total actif", cur:d.actif?.totalActif, prev:p.actif?.totalActif},
+    {label:"Capitaux propres", cur:d.passif?.totalCapitauxPropres, prev:p.passif?.totalCapitauxPropres},
+    {label:"Dettes totales", cur:d.passif?.totalDettes, prev:p.passif?.totalDettes},
+    {label:"Trésorerie", cur:d.actif?.tresorerieActive, prev:p.actif?.tresorerieActive},
+  ];
+
+  return `
+    <div class="section-label">📈 Comparatif ${prevYear} → ${year}</div>
+    <div class="table-card" style="margin-bottom:24px;">
+      <div class="table-head">
+        <div class="table-title">Évolution des indicateurs</div>
+        <span class="chart-tag tag-green">N / N-1</span>
+      </div>
+      <table>
+        <thead><tr><th>Indicateur</th><th style="text-align:right">${prevYear}</th><th style="text-align:right">${year}</th><th style="text-align:right">Évolution</th></tr></thead>
+        <tbody>
+          ${rows.map(function(r){
+            var cur = r.cur||0, prev = r.prev||0;
+            var diff = prev!==0 ? ((cur-prev)/Math.abs(prev)*100) : 0;
+            var cls = diff>0?'td-pos':diff<0?'td-neg':'td-muted';
+            return `<tr>
+              <td><b>${r.label}</b></td>
+              <td style="text-align:right" class="td-muted">${fmtE(prev)}</td>
+              <td style="text-align:right;font-weight:600">${fmtE(cur)}</td>
+              <td style="text-align:right"><span class="evol-badge ${diff>0?'evol-up':diff<0?'evol-down':'evol-neutral'}">${diff>0?'▲':'▼'} ${Math.abs(diff).toFixed(1)}%</span></td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// ─── CHARTS ───
+function buildBilanCharts(d, year) {
+  var actif = d.actif || {};
+  var passif = d.passif || {};
+  var cr = d.compteResultat || {};
+  var font = {size:11, family:'Plus Jakarta Sans'};
+
+  // Structure du bilan - Bar chart
+  var c1 = new Chart(document.getElementById('bilanStructChart'), {
+    type: 'bar',
+    data: {
+      labels: ['Immob.', 'Stocks', 'Créances', 'Tréso.', 'Cap. propres', 'Dettes fin.', 'Fournisseurs', 'Autres dettes'],
+      datasets: [
+        {
+          label: 'Actif',
+          data: [actif.totalActifImmobilise||0, actif.stocks||0, actif.creancesClients||0, actif.tresorerieActive||0, 0, 0, 0, 0],
+          backgroundColor: ['#1a3dce','#4f7ef8','#93b4ff','#c7d7ff','transparent','transparent','transparent','transparent'],
+          borderRadius: 5
+        },
+        {
+          label: 'Passif',
+          data: [0, 0, 0, 0, passif.totalCapitauxPropres||0, passif.dettesFinancieres||0, passif.dettesFournisseurs||0, (passif.dettesFiscalesSociales||0)+(passif.autresDettes||0)],
+          backgroundColor: ['transparent','transparent','transparent','transparent','#6366f1','#f59e0b','#f97316','#fbbf24'],
+          borderRadius: 5
+        }
+      ]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {legend:{position:'bottom',labels:{font,color:'#6b7280',padding:10,boxWidth:10}}},
+      scales: {
+        x:{grid:{display:false},ticks:{font,color:'#9ca3af',maxRotation:45}},
+        y:{grid:{color:'#f1f5f9'},ticks:{font,color:'#9ca3af',callback:function(v){return fmtK(v);}}}
+      }
+    }
+  });
+  _charts.push(c1);
+
+  // Répartition charges - Doughnut
+  var hasCharges = (cr.achatsChargesExternes||0)>0 || (cr.chargesPersonnel||0)>0 || (cr.dotationsAmortissements||0)>0;
+  var c2 = new Chart(document.getElementById('chargesChart'), {
+    type: 'doughnut',
+    data: {
+      labels: ['Achats & ext.','Personnel','Amortissements','Financier','IS'],
+      datasets: [{
+        data: hasCharges ?
+          [cr.achatsChargesExternes||0, cr.chargesPersonnel||0, cr.dotationsAmortissements||0, Math.abs(cr.resultatFinancier||0), cr.impotSocietes||0] :
+          [1,1,1,1,1],
+        backgroundColor: ['#1a3dce','#6366f1','#f59e0b','#ef4444','#10b981'],
+        borderWidth: 0,
+        hoverOffset: 6
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: '60%',
+      plugins: {legend:{position:'bottom',labels:{font,color:'#6b7280',padding:10,boxWidth:10}}}
+    }
+  });
+  _charts.push(c2);
+}
+
+// ─── SUPPRIMER BILAN ───
+async function deleteBilan(year) {
+  if(!confirm('Supprimer définitivement le bilan ' + year + ' ?')) return;
+  try {
+    await window._deleteDoc(window._doc(window._db, 'bilans', window._uid, 'years', year));
+    delete _bilans[year];
+    var years = Object.keys(_bilans).sort().reverse();
+    _selectedYear = years[0] || null;
+    renderMain();
+  } catch(e) {
+    alert('Erreur lors de la suppression.');
+  }
+}
+
+// ─── MODAL UPGRADE ───
+function showUpgradeModal() {
+  document.getElementById('mainContent').innerHTML = `
+    <div style="text-align:center;padding:80px 20px;">
+      <div style="font-size:64px;margin-bottom:20px;">🔒</div>
+      <h2 style="font-size:22px;font-weight:800;margin-bottom:10px;">Module Analyse de Bilan</h2>
+      <p style="color:var(--muted);font-size:14px;margin-bottom:24px;max-width:450px;margin-left:auto;margin-right:auto;">
+        L'analyse de bilan par intelligence artificielle est réservée au plan <b>Master</b>.<br>
+        Importez vos bilans comptables et obtenez une analyse complète avec des conseils personnalisés.
+      </p>
+      <a href="pricing.html" class="btn btn-primary" style="display:inline-flex;padding:12px 28px;font-size:14px;">⭐ Passer au plan Master</a>
+    </div>
+  `;
+}
+
+// ─── HELPERS ───
+function fmtE(n){return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
+function fmtK(v){var n=parseFloat(v)||0;return Math.abs(n)>=1000?(n/1000).toFixed(0)+'k€':n.toFixed(0)+'€';}
+function fmtP(n){return (parseFloat(n)||0).toFixed(1)+' %';}
+
+function pctCA(val, ca) {
+  if(!ca || ca===0) return '';
+  return ((parseFloat(val)||0)/ca*100).toFixed(1) + '%';
+}
+
+function evolBadge(cur, prev) {
+  if(prev === undefined || prev === null) return '<span class="td-muted">—</span>';
+  cur = parseFloat(cur)||0;
+  prev = parseFloat(prev)||0;
+  if(prev === 0) return '<span class="td-muted">—</span>';
+  var diff = (cur - prev) / Math.abs(prev) * 100;
+  if(diff > 0) return '<span class="evol-badge evol-up">▲ ' + diff.toFixed(1) + '% vs N-1</span>';
+  if(diff < 0) return '<span class="evol-badge evol-down">▼ ' + Math.abs(diff).toFixed(1) + '% vs N-1</span>';
+  return '<span class="evol-badge evol-neutral">= stable</span>';
+}
+
+// Expose functions
+window.handlePdfUpload = handlePdfUpload;
+window.selectYear = selectYear;
+window.deleteBilan = deleteBilan;
+window.renderMain = renderMain;
+window.toggleMenu = toggleMenu;
+window.handleLogout = handleLogout;
+window.toggleFidNav = toggleFidNav;
+</script>
+
+<!-- Sidebar toggle -->
+<script>
+(function(){
+  function getSidebar(){return document.querySelector('.sidebar');}
+  function toggleSidebar(){
+    var s=getSidebar(),b=document.getElementById('hamburger'),o=document.getElementById('navOverlay');
+    var open=s.classList.contains('open');
+    s.classList.toggle('open',!open);b.classList.toggle('open',!open);
+    o.classList.toggle('show',!open);
+    document.body.style.overflow=open?'':'hidden';
+  }
+  function closeSidebar(){
+    var s=getSidebar(),b=document.getElementById('hamburger'),o=document.getElementById('navOverlay');
+    s.classList.remove('open');b.classList.remove('open');o.classList.remove('show');
+    document.body.style.overflow='';
+  }
+  window.toggleSidebar=toggleSidebar;window.closeSidebar=closeSidebar;
+  document.addEventListener('DOMContentLoaded',function(){
+    var s=getSidebar();if(!s)return;
+    s.querySelectorAll('.nav-item,.sub-item').forEach(function(el){
+      el.addEventListener('click',function(){if(window.innerWidth<=768)closeSidebar();});
+    });
+  });
+})();
+</script>
+<script src="nav.js"></script>
+</body>
+</html>
