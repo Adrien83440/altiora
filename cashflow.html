@@ -143,6 +143,27 @@ main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
 .alert.info{background:#f0f4ff;border:1px solid #c7d2fe;color:#3730a3}
 .alert-icon{font-size:15px;flex-shrink:0;margin-top:1px}
 
+/* ── PRÉVISIONNEL ── */
+.prev-section{background:linear-gradient(135deg,#fffbf0 0%,#fff8e7 100%);border:1.5px solid #fcd34d;border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.prev-section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px}
+.prev-title{font-size:14px;font-weight:800;color:#92400e;display:flex;align-items:center;gap:8px}
+.prev-badge{font-size:10px;font-weight:700;background:#f59e0b;color:#fff;padding:2px 8px;border-radius:20px}
+.prev-kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.prev-kpi{background:rgba(255,255,255,.8);border:1px solid #fcd34d;border-radius:10px;padding:14px}
+.prev-kpi-lbl{font-size:10px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.prev-kpi-val{font-size:19px;font-weight:900;margin-bottom:2px}
+.prev-kpi-sub{font-size:10px;color:#b45309}
+.prev-chart-row{display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px}
+.prev-table{width:100%;border-collapse:collapse;font-size:12px}
+.prev-table th{background:rgba(245,158,11,.1);padding:7px 10px;text-align:left;font-weight:700;color:#92400e;font-size:10px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #fcd34d}
+.prev-table td{padding:7px 10px;border-bottom:1px solid rgba(252,211,77,.3);vertical-align:middle}
+.prev-table tr:last-child td{border-bottom:none}
+.prev-table tr:hover td{background:rgba(245,158,11,.04)}
+.prev-table tfoot td{font-weight:800;background:rgba(245,158,11,.12);color:#92400e;border-top:1.5px solid #fcd34d}
+.prev-pos{color:#059669;font-weight:700}
+.prev-neg{color:#dc2626;font-weight:700}
+.prev-neu{color:#b45309}
+
 /* ── LOADER ── */
 .loader-wrap{display:flex;align-items:center;justify-content:center;padding:80px;color:var(--muted);gap:10px;flex-direction:column}
 .spin{width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--blue2);border-radius:50%;animation:spin .7s linear infinite}
@@ -156,8 +177,13 @@ main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
   main{margin-left:0}
   .kpi-row{grid-template-columns:repeat(2,1fr)}
   .grid-2,.grid-3{grid-template-columns:1fr}
+  .prev-kpi-row{grid-template-columns:repeat(2,1fr)!important}
+  .prev-chart-row{grid-template-columns:1fr!important}
 }
-@media(max-width:420px){.kpi-row{grid-template-columns:1fr}}
+@media(max-width:420px){
+  .kpi-row{grid-template-columns:1fr}
+  .prev-kpi-row{grid-template-columns:1fr!important}
+}
 </style>
 </head>
 <body>
@@ -506,6 +532,102 @@ function calcMonth(m, raw, isFuture) {
     cashflow, tvaCollectee: isFuture?0:tvaC, tvaDed: isFuture?0:tvaDed, tvaDue: isFuture?0:tvaDue };
 }
 
+/* ── SECTION PRÉVISIONNELLE ── */
+function buildPrevSection(data, labels, year) {
+  const futurMois = data.filter(d => d.isFuture);
+  if (futurMois.length === 0) return '';
+
+  const prevCA_tot     = futurMois.reduce((s,d) => s + (d.prevCA||0), 0);
+  const prevCharges_tot= futurMois.reduce((s,d) => s + (d.prevCharges||0), 0);
+  const prevResultat   = prevCA_tot - prevCharges_tot;
+  const prevCF_tot     = futurMois.reduce((s,d) => s + (d.prevCA||0) - (d.prevCharges||0), 0);
+
+  // Solde cumulé réel à fin du dernier mois réel
+  const realMois = data.filter(d => !d.isFuture && d.hasData);
+  const soldeCumulReel = realMois.reduce((s,d) => s + d.cashflow, 0);
+
+  // Projection solde cumulé avec prévisionnel
+  let cumul = soldeCumulReel;
+  const cumulPrev = data.map(d => {
+    if (!d.isFuture && d.hasData) { cumul = data.slice(0, data.indexOf(d)+1).filter(x=>!x.isFuture&&x.hasData).reduce((s,x)=>s+x.cashflow,0); return null; }
+    if (!d.isFuture && !d.hasData) return null;
+    cumul += (d.prevCA||0) - (d.prevCharges||0);
+    return cumul;
+  });
+
+  const scoreColor = prevResultat > 0 ? '#059669' : prevResultat < 0 ? '#dc2626' : '#f59e0b';
+
+  const rows = futurMois.map(d => {
+    const res = (d.prevCA||0) - (d.prevCharges||0);
+    const idx = data.indexOf(d);
+    const mLabel = labels[idx] || MS[d.m];
+    return `<tr>
+      <td style="font-weight:700;color:#92400e">${mLabel}</td>
+      <td class="${(d.prevCA||0)>0?'prev-pos':'prev-neu'}">${(d.prevCA||0)>0?fmt(d.prevCA):'<span style="color:#d1d5db">Non saisi</span>'}</td>
+      <td class="prev-neu">${(d.prevCharges||0)>0?fmt(d.prevCharges):'—'}</td>
+      <td class="${res>0?'prev-pos':res<0?'prev-neg':'prev-neu'}">${(d.prevCA||0)>0||(d.prevCharges||0)>0?fmt(res):'—'}</td>
+      <td><a href="pilotage.html" style="color:#f59e0b;text-decoration:none;font-size:11px;font-weight:700">Saisir →</a></td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="prev-section">
+    <div class="prev-section-head">
+      <div class="prev-title">🔮 Projection prévisionnelle <span class="prev-badge">${futurMois.length} mois à venir</span></div>
+      <div style="font-size:11px;color:#b45309">Basé sur les charges saisies dans le Pilotage · Saisir un CA prévisionnel pour affiner</div>
+    </div>
+
+    <div class="prev-kpi-row">
+      <div class="prev-kpi">
+        <div class="prev-kpi-lbl">CA prévisionnel</div>
+        <div class="prev-kpi-val" style="color:#1a3dce">${prevCA_tot>0?fmtK(prevCA_tot):'<span style="color:#d1d5db;font-size:14px">Non saisi</span>'}</div>
+        <div class="prev-kpi-sub">Objectifs CA restants</div>
+      </div>
+      <div class="prev-kpi">
+        <div class="prev-kpi-lbl">Charges prévisionnelles</div>
+        <div class="prev-kpi-val" style="color:#f59e0b">${prevCharges_tot>0?fmtK(prevCharges_tot):'<span style="color:#d1d5db;font-size:14px">—</span>'}</div>
+        <div class="prev-kpi-sub">Fixes + Var + Crédits + Leasing</div>
+      </div>
+      <div class="prev-kpi">
+        <div class="prev-kpi-lbl">Résultat prévisionnel</div>
+        <div class="prev-kpi-val" style="color:${scoreColor}">${prevCA_tot>0||prevCharges_tot>0?fmtK(prevResultat):'<span style="color:#d1d5db;font-size:14px">—</span>'}</div>
+        <div class="prev-kpi-sub">CA prévi − Charges prévi</div>
+      </div>
+      <div class="prev-kpi">
+        <div class="prev-kpi-lbl">Solde cumulé projeté</div>
+        <div class="prev-kpi-val" style="color:${soldeCumulReel+prevCF_tot>=0?'#059669':'#dc2626'}">${fmtK(soldeCumulReel+prevCF_tot)}</div>
+        <div class="prev-kpi-sub">Réel ${fmtK(soldeCumulReel)} + prévi ${fmtK(prevCF_tot)}</div>
+      </div>
+    </div>
+
+    <div class="prev-chart-row">
+      <div style="background:rgba(255,255,255,.7);border:1px solid #fcd34d;border-radius:10px;padding:16px">
+        <div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:12px">📈 Cashflow projeté — mois à venir</div>
+        <div style="height:200px;position:relative"><canvas id="prevChart"></canvas></div>
+      </div>
+      <div style="background:rgba(255,255,255,.7);border:1px solid #fcd34d;border-radius:10px;padding:16px">
+        <div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:12px">📊 Répartition prévision</div>
+        <div style="height:200px;position:relative"><canvas id="prevDoughnut"></canvas></div>
+      </div>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table class="prev-table">
+        <thead><tr><th>Mois</th><th>CA prévi.</th><th>Charges prévi.</th><th>Résultat prévi.</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot>
+          <tr>
+            <td>Total prévisionnel</td>
+            <td>${prevCA_tot>0?fmt(prevCA_tot):'—'}</td>
+            <td>${prevCharges_tot>0?fmt(prevCharges_tot):'—'}</td>
+            <td class="${prevResultat>=0?'prev-pos':'prev-neg'}">${prevCA_tot>0||prevCharges_tot>0?fmt(prevResultat):'—'}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>`;
+}
+
 /* ── RENDER ── */
 function renderPage(data, dettes, year, labels, labelPeriode) {
   if (!labels) labels = MS; // fallback
@@ -613,6 +735,8 @@ function renderPage(data, dettes, year, labels, labelPeriode) {
       </div>
     </div>
 
+    ${buildPrevSection(data, labels, year)}
+
     <div class="card" style="margin-bottom:16px">
       <div class="card-head">
         <div><div class="card-title">🗓 Détail mensuel <span class="badge badge-blue">${year}</span></div><div class="card-sub">Vue complète mois par mois</div></div>
@@ -667,20 +791,27 @@ function renderPage(data, dettes, year, labels, labelPeriode) {
 
   document.getElementById('main-content').innerHTML = html;
 
-  // Chart cashflow
+  // Chart cashflow — réel + prévisionnel superposé
   const cfCtx = document.getElementById('cfChart');
   if (cfCtx) {
+    const caReelData   = data.map(d => (!d.isFuture && d.hasData) ? d.caTotal : null);
+    const caPreviData  = data.map(d => d.isFuture ? (d.prevCA||null) : null);
+    const cfReelData   = data.map(d => (!d.isFuture && d.hasData) ? d.cashflow : null);
+    const cfPreviData  = data.map(d => d.isFuture ? ((d.prevCA||0) - (d.prevCharges||0)) : null);
+
     new Chart(cfCtx, {
       data: {
         labels: labels,
         datasets: [
-          { type:'line', label:'CA HT', data: data.map(d=>d.hasData?d.caTotal:null), borderColor:'#4f7ef8', backgroundColor:'rgba(79,126,248,.08)', borderWidth:2, pointRadius:4, pointBackgroundColor:'#4f7ef8', tension:.4, fill:false, spanGaps:false },
-          { type:'bar',  label:'Cashflow', data: data.map(d=>d.hasData?d.cashflow:null), backgroundColor: data.map(d=>d.hasData?(d.cashflow>=0?'rgba(16,185,129,.8)':'rgba(239,68,68,.8)'):'transparent'), borderRadius:5 }
+          { type:'line', label:'CA HT réel',     data: caReelData,  borderColor:'#4f7ef8', backgroundColor:'rgba(79,126,248,.06)',  borderWidth:2, pointRadius:4, pointBackgroundColor:'#4f7ef8', tension:.4, fill:false, spanGaps:false },
+          { type:'line', label:'CA prévisionnel', data: caPreviData, borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,.08)', borderWidth:2, borderDash:[5,4], pointRadius:4, pointBackgroundColor:'#f59e0b', tension:.4, fill:false, spanGaps:false },
+          { type:'bar',  label:'Cashflow réel',   data: cfReelData,  backgroundColor: data.map(d=>(!d.isFuture&&d.hasData)?(d.cashflow>=0?'rgba(16,185,129,.8)':'rgba(239,68,68,.8)'):'transparent'), borderRadius:5 },
+          { type:'bar',  label:'Cashflow prévi.', data: cfPreviData, backgroundColor: data.map(d=>d.isFuture?((d.prevCA||0)-(d.prevCharges||0)>=0?'rgba(245,158,11,.45)':'rgba(239,68,68,.35)'):'transparent'), borderRadius:5, borderWidth:1.5, borderColor: data.map(d=>d.isFuture?'#f59e0b':'transparent') }
         ]
       },
       options: {
         responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{ display:true, position:'top', labels:{ font:{ family:'Plus Jakarta Sans', size:11 }, boxWidth:12 } }, tooltip:{ callbacks:{ label: ctx => ctx.raw!==null ? ctx.dataset.label+': '+ctx.raw.toLocaleString('fr-FR',{maximumFractionDigits:0})+' €' : 'Pas de données' } } },
+        plugins:{ legend:{ display:true, position:'top', labels:{ font:{ family:'Plus Jakarta Sans', size:11 }, boxWidth:12, padding:10 } }, tooltip:{ callbacks:{ label: ctx => ctx.raw!==null ? ctx.dataset.label+': '+ctx.raw.toLocaleString('fr-FR',{maximumFractionDigits:0})+' €' : null, filter: item => item.raw !== null } } },
         scales:{ y:{ ticks:{ callback: v => Math.abs(v)>=1000?(v/1000).toFixed(0)+'k€':v+'€', font:{size:10} }, grid:{color:'#f0f4ff'} }, x:{ ticks:{font:{size:11}}, grid:{display:false} } }
       }
     });
@@ -699,6 +830,55 @@ function renderPage(data, dettes, year, labels, labelPeriode) {
         responsive:true, maintainAspectRatio:false,
         plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => ctx.raw!==null ? 'Solde: '+ctx.raw.toLocaleString('fr-FR',{maximumFractionDigits:0})+' €' : '—' } } },
         scales:{ y:{ ticks:{ callback: v => Math.abs(v)>=1000?(v/1000).toFixed(0)+'k€':v+'€', font:{size:10} }, grid:{color:'#f0f4ff'} }, x:{ ticks:{font:{size:11}}, grid:{display:false} } }
+      }
+    });
+  }
+
+  // Graphique prévisionnel (si section visible)
+  const prevCtx = document.getElementById('prevChart');
+  if (prevCtx) {
+    const futurMois = data.filter(d => d.isFuture);
+    const futurLabels = futurMois.map((d,i) => labels[data.indexOf(d)] || MS[d.m]);
+    const caP = futurMois.map(d => d.prevCA||0);
+    const chP = futurMois.map(d => d.prevCharges||0);
+    const cfP = futurMois.map(d => (d.prevCA||0) - (d.prevCharges||0));
+    new Chart(prevCtx, {
+      data: {
+        labels: futurLabels,
+        datasets: [
+          { type:'bar',  label:'CA prévi.',      data:caP, backgroundColor:'rgba(59,130,246,.65)', borderRadius:5 },
+          { type:'bar',  label:'Charges prévi.', data:chP, backgroundColor:'rgba(245,158,11,.65)', borderRadius:5 },
+          { type:'line', label:'Résultat prévi.', data:cfP, borderColor: cfP.map(v=>v>=0?'#059669':'#dc2626'), borderWidth:2, pointRadius:5, pointBackgroundColor:cfP.map(v=>v>=0?'#059669':'#dc2626'), fill:false, tension:.3, order:1 }
+        ]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{ display:true, position:'bottom', labels:{ font:{family:'Plus Jakarta Sans',size:10}, boxWidth:10, padding:8 } }, tooltip:{ callbacks:{ label: ctx => ctx.raw!==null?ctx.dataset.label+': '+ctx.raw.toLocaleString('fr-FR',{maximumFractionDigits:0})+' €':null } } },
+        scales:{ y:{ ticks:{ callback: v=>Math.abs(v)>=1000?(v/1000).toFixed(0)+'k€':v+'€', font:{size:10} }, grid:{color:'rgba(252,211,77,.3)'} }, x:{ ticks:{font:{size:10}}, grid:{display:false} } }
+      }
+    });
+  }
+
+  // Doughnut prévisionnel
+  const prevDCtx = document.getElementById('prevDoughnut');
+  if (prevDCtx) {
+    const futurMois = data.filter(d => d.isFuture);
+    const prevCA_tot = futurMois.reduce((s,d)=>s+(d.prevCA||0),0);
+    const prevCharges_tot = futurMois.reduce((s,d)=>s+(d.prevCharges||0),0);
+    const prevResultat = prevCA_tot - prevCharges_tot;
+    new Chart(prevDCtx, {
+      type:'doughnut',
+      data:{
+        labels:['CA prévisionnel','Charges prévi.','Résultat prévi.'],
+        datasets:[{
+          data: [prevCA_tot, prevCharges_tot, Math.max(prevResultat,0)],
+          backgroundColor:['#3b82f6','#f59e0b', prevResultat>=0?'#10b981':'#ef4444'],
+          borderWidth:0, hoverOffset:6
+        }]
+      },
+      options:{
+        responsive:true, maintainAspectRatio:false, cutout:'60%',
+        plugins:{ legend:{ position:'bottom', labels:{ font:{family:'Plus Jakarta Sans',size:10}, boxWidth:10, padding:8 } } }
       }
     });
   }
