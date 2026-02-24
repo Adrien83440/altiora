@@ -6,6 +6,8 @@
   <title>ALTEORE — Analyse de Bilan</title>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
@@ -449,8 +451,11 @@ async function processPdf(file) {
   `;
 
   try {
-    // Convertir en base64
-    const base64 = await fileToBase64(file);
+    // Extraire le texte du PDF côté client (évite le 413 Payload Too Large)
+    const pdfText = await extractPdfText(file);
+    if(!pdfText || pdfText.trim().length < 50) {
+      throw new Error('Impossible d\'extraire le texte du PDF. Vérifiez que le fichier n\'est pas scanné/image.');
+    }
     updateStep('🤖 Envoi à l\'intelligence artificielle...');
 
     // Préparer les données existantes pour comparaison
@@ -467,20 +472,20 @@ async function processPdf(file) {
       };
     }
 
-    // Appeler l'API
+    // Appeler l'API avec le texte extrait (beaucoup plus léger que le base64)
     updateStep('🧠 Analyse des données financières...');
     const resp = await fetch('/api/analyze-bilan', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
-        pdfBase64: base64,
+        pdfText: pdfText,
         fileName: file.name,
         existingYears: existingYears
       })
     });
 
     if(!resp.ok) {
-      const err = await resp.json();
+      const err = await resp.json().catch(function(){ return {error:'Erreur serveur ('+resp.status+')'}; });
       throw new Error(err.error || 'Erreur serveur');
     }
 
@@ -519,15 +524,18 @@ function updateStep(text) {
   if(el) el.textContent = text;
 }
 
-function fileToBase64(file) {
-  return new Promise(function(resolve, reject) {
-    var reader = new FileReader();
-    reader.onload = function() {
-      resolve(reader.result.split(',')[1]);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+// Extraire le texte d'un PDF avec pdf.js (côté client)
+async function extractPdfText(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+  var fullText = '';
+  for(var i = 1; i <= pdf.numPages; i++) {
+    var page = await pdf.getPage(i);
+    var content = await page.getTextContent();
+    var pageText = content.items.map(function(item){ return item.str; }).join(' ');
+    fullText += pageText + '\n';
+  }
+  return fullText;
 }
 
 // ─── RENDER BILAN ANNÉE ───
