@@ -366,25 +366,48 @@ async function changeYear(y) {
 }
 
 async function loadYear(year) {
-  const el = document.getElementById('rapportBody');
+  var el = document.getElementById('rapportBody');
   if (!el) return;
-  el.innerHTML = `<div class="loader-wrap"><div class="spinner"></div><span>Chargement ${year}...</span></div>`;
+  el.innerHTML = '<div class="loader-wrap"><div class="spinner"></div><span>Chargement ' + year + '...</span></div>';
 
   try {
-    const monthsRef = window._collection(window._db, 'pilotage', window._uid, 'months');
-    const snap = await window._getDocs(monthsRef);
-    _allData = {};
-    snap.forEach(d => { _allData[d.id] = d.data(); });
+    // Charger les 12 mois un par un (identique au pattern pilotage.html)
+    // On charge aussi l'année précédente et suivante pour les comparaisons éventuelles
+    var fetchPromises = [];
+    for (var m = 1; m <= 12; m++) {
+      var key = year + '-' + String(m).padStart(2, '0');
+      fetchPromises.push(
+        window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', key))
+          .then((function(k){ return function(snap) {
+            if (snap.exists()) _allData[k] = snap.data();
+          }; })(key))
+          .catch(function(e) { console.warn('loadYear month error:', e); })
+      );
+    }
 
-    // dettes
-    try {
-      const dSnap = await window._getDoc(window._doc(window._db, 'dettes', window._uid, 'data', 'all'));
-      _dettesData = dSnap.exists() ? (dSnap.data().list || []) : [];
-    } catch(e) { _dettesData = []; }
+    // Dettes en parallèle
+    var dettePromise = window._getDoc(window._doc(window._db, 'dettes', window._uid, 'data', 'all'))
+      .then(function(dSnap) { _dettesData = dSnap.exists() ? (dSnap.data().list || []) : []; })
+      .catch(function() { _dettesData = []; });
+
+    // Nom du commerce depuis users/{uid}
+    var nomPromise = window._getDoc(window._doc(window._db, 'users', window._uid))
+      .then(function(uSnap) {
+        if (uSnap.exists() && uSnap.data().nomCommerce) {
+          _nomCommerce = uSnap.data().nomCommerce;
+          var inp = document.getElementById('nomCommerce');
+          if (inp) inp.value = _nomCommerce;
+        }
+      })
+      .catch(function() {});
+
+    _allData = {};
+    await Promise.all(fetchPromises.concat([dettePromise, nomPromise]));
 
     renderRapport(year);
   } catch(e) {
-    el.innerHTML = `<div class="empty-state"><div class="big">⚠️</div><h3>Erreur de chargement</h3><p>${e.message}</p></div>`;
+    console.error('loadYear error:', e);
+    el.innerHTML = '<div class="empty-state"><div class="big">⚠️</div><h3>Erreur de chargement</h3><p>' + e.message + '</p></div>';
   }
 }
 
@@ -393,16 +416,79 @@ function getMonthData(year, month) {
   return _allData[key] || null;
 }
 
-function computeMonth(d) {
-  if (!d) return { caHT: 0, fixe: 0, variable: 0, credit: 0, leasing: 0, charges: 0, resultat: 0 };
-  const caHT = (d.ca || []).reduce((s, r) => s + parseCA(r), 0);
-  const fixe = (d.chargesFixe || []).reduce((s, r) => s + (parseFloat(r.montant)||0), 0);
-  const variable = (d.chargesVar || []).reduce((s, r) => s + (parseFloat(r.montant)||0), 0);
-  const credit = (d.credits || []).reduce((s, r) => s + (parseFloat(r.mensualite)||0), 0);
-  const leasing = (d.leasing || []).reduce((s, r) => s + (parseFloat(r.loyer)||0), 0);
-  const charges = fixe + variable + credit + leasing;
-  const resultat = caHT - charges;
-  return { caHT, fixe, variable, credit, leasing, charges, resultat };
+function pf(v) { return parseFloat((v||'').toString().replace(',','.')) || 0; }
+
+function computeMonth(d, monthKey) {
+  if (!d) return { caHT: 0, caJournalier: 0, caFacturesPro: 0, rentreesSupp: 0,
+                   fixe: 0, variable: 0, credit: 0, leasing: 0, charges: 0, resultat: 0 };
+
+  // CA journalier (multi-TVA + ancien format)
+  var caHT055=0, caHT10=0, caHT20=0;
+  (d.ca || []).forEach(function(r) {
+    var h055=parseFloat(r.ht055)||0, h10=parseFloat(r.ht10)||0, h20=parseFloat(r.ht20)||0;
+    var multi = h055+h10+h20;
+    if (multi > 0) { caHT055+=h055; caHT10+=h10; caHT20+=h20; }
+    else { caHT20 += parseFloat(r.montantHT)||0; }
+  });
+  var caHT_j = caHT055 + caHT10 + caHT20;
+
+  // Factures Pro (autres CA : B2B, coffrets, traiteur...)
+  var fp055=0, fp10=0, fp20=0;
+  (d.facturesPro || []).forEach(function(r) {
+    fp055 += parseFloat(r.ht055)||0;
+    fp10  += parseFloat(r.ht10)||0;
+    fp20  += parseFloat(r.ht20)||0;
+  });
+  var caFP_HT = fp055 + fp10 + fp20;
+
+  // CA total = journalier + factures pro
+  var caHT = caHT_j + caFP_HT;
+
+  // Rentrees supplementaires (aides, apports, remboursements...)
+  var rentreesSupp = (d.rentreesSupp || []).reduce(function(s,r){ return s+(parseFloat(r.montant)||0); }, 0);
+
+  // Charges fixes (champ montantHT)
+  var fixesHT = 0;
+  (d.chargesFixe || []).forEach(function(r) { fixesHT += pf(r.montantHT); });
+
+  // Charges variables (champ montantHT)
+  var varHT = 0;
+  (d.chargesVar || []).forEach(function(r) { varHT += pf(r.montantHT); });
+
+  // Credits & Emprunts : mensualite = principal + interets calcules
+  var creditsPrincipal=0, creditsInteret=0;
+  (d.credits || []).filter(function(r){ return !r.ligneType || r.ligneType==='principal'; })
+  .forEach(function(r) {
+    if (monthKey && r.dateDebut && r.dateFin) {
+      var deb=r.dateDebut.slice(0,7), fin=r.dateFin.slice(0,7);
+      if (monthKey < deb || monthKey > fin) return;
+    }
+    var principal = pf(r.montant);
+    var taux = pf(r.tauxInteret);
+    var interet = (principal>0 && taux>0) ? principal*taux/100/12 : 0;
+    creditsPrincipal += principal;
+    creditsInteret   += interet;
+  });
+  var creditTotal = creditsPrincipal + creditsInteret;
+
+  // Leasing / LOA / LLD (champ montantHT)
+  var leasingHT = 0;
+  (d.leasing || []).forEach(function(r) {
+    if (monthKey && r.dateDebut && r.dateFin) {
+      if (monthKey < r.dateDebut || monthKey > r.dateFin) return;
+    }
+    leasingHT += pf(r.montantHT);
+  });
+
+  var charges  = fixesHT + varHT + creditTotal + leasingHT;
+  var resultat = caHT + rentreesSupp - charges;
+
+  return {
+    caHT: caHT, caJournalier: caHT_j, caFacturesPro: caFP_HT,
+    rentreesSupp: rentreesSupp,
+    fixe: fixesHT, variable: varHT, credit: creditTotal, leasing: leasingHT,
+    charges: charges, resultat: resultat
+  };
 }
 
 function renderRapport(year) {
@@ -414,9 +500,11 @@ function renderRapport(year) {
   let totCA = 0, totFixe = 0, totVar = 0, totCredit = 0, totLeasing = 0, totCharges = 0, totResultat = 0;
   let meilleurMois = null, pireResultat = null;
 
+  let totRentrees = 0, totFP = 0;
   for (let m = 0; m < 12; m++) {
     const d = getMonthData(year, m);
-    const r = computeMonth(d);
+    const mKey = year + '-' + String(m + 1).padStart(2, '0');
+    const r = computeMonth(d, mKey);
     months.push({ m, ...r, hasData: !!d });
     totCA += r.caHT;
     totFixe += r.fixe;
@@ -425,8 +513,10 @@ function renderRapport(year) {
     totLeasing += r.leasing;
     totCharges += r.charges;
     totResultat += r.resultat;
+    totRentrees += r.rentreesSupp;
+    totFP += r.caFacturesPro;
 
-    if (r.hasData || r.caHT > 0) {
+    if (d || r.caHT > 0) {
       if (!meilleurMois || r.caHT > meilleurMois.caHT) meilleurMois = { ...r, m };
       if (!pireResultat || r.resultat < pireResultat.resultat) pireResultat = { ...r, m };
     }
@@ -543,11 +633,17 @@ function renderRapport(year) {
         <!-- Analyse -->
         <div class="summary-box">
           <h3>📊 Analyse de l'exercice</h3>
-          <div class="summary-item"><span>Chiffre d'affaires HT</span><span>${fmt(totCA)}</span></div>
-          <div class="summary-item"><span>Dont charges fixes</span><span>${fmt(totFixe)}</span></div>
-          <div class="summary-item"><span>Dont charges variables</span><span>${fmt(totVar)}</span></div>
-          <div class="summary-item"><span>Dont crédits & leasing</span><span>${fmt(totCredit + totLeasing)}</span></div>
-          <div class="summary-item"><span>Total charges</span><span>${fmt(totCharges)}</span></div>
+          <div class="summary-item" style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding-bottom:4px"><span>Recettes</span></div>
+          <div class="summary-item"><span>↳ CA journalier HT</span><span>${fmt(totCA - totFP)}</span></div>
+          ${totFP > 0 ? `<div class="summary-item"><span>↳ Factures Pro / B2B</span><span>${fmt(totFP)}</span></div>` : ''}
+          ${totRentrees > 0 ? `<div class="summary-item"><span>↳ Rentrées supplémentaires</span><span>${fmt(totRentrees)}</span></div>` : ''}
+          <div class="summary-item" style="font-weight:700"><span>CA Total HT</span><span>${fmt(totCA)}</span></div>
+          <div class="summary-item" style="font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding-top:8px;padding-bottom:4px"><span>Charges</span></div>
+          <div class="summary-item"><span>↳ Charges fixes</span><span>${fmt(totFixe)}</span></div>
+          <div class="summary-item"><span>↳ Charges variables</span><span>${fmt(totVar)}</span></div>
+          <div class="summary-item"><span>↳ Crédits & Emprunts</span><span>${fmt(totCredit)}</span></div>
+          <div class="summary-item"><span>↳ Leasing / LOA / LLD</span><span>${fmt(totLeasing)}</span></div>
+          <div class="summary-item" style="font-weight:700"><span>Total Charges HT</span><span>${fmt(totCharges)}</span></div>
           <div class="summary-item" style="border-top:2px solid var(--border);padding-top:12px;margin-top:4px">
             <span style="font-weight:700;color:var(--text)">Résultat net estimé</span>
             <span style="font-size:17px;color:${totResultat >= 0 ? 'var(--green)' : 'var(--red)'}">${fmt(totResultat)}</span>
@@ -673,14 +769,17 @@ async function exportPDF() {
     let totCA = 0, totFixe = 0, totVar = 0, totCredit = 0, totLeasing = 0, totCharges = 0, totResultat = 0;
     let meilleurMois = null, moisAvecDonnees = 0;
 
+    let totRentrees = 0, totFP = 0;
     for (let m = 0; m < 12; m++) {
       const d = getMonthData(year, m);
-      const r = computeMonth(d);
+      const mKey = year + '-' + String(m + 1).padStart(2, '0');
+      const r = computeMonth(d, mKey);
       months.push({ m, ...r, hasData: !!d });
       totCA += r.caHT; totFixe += r.fixe; totVar += r.variable;
       totCredit += r.credit; totLeasing += r.leasing;
       totCharges += r.charges; totResultat += r.resultat;
-      if (r.hasData || r.caHT > 0) {
+      totRentrees += r.rentreesSupp; totFP += r.caFacturesPro;
+      if (d || r.caHT > 0) {
         moisAvecDonnees++;
         if (!meilleurMois || r.caHT > meilleurMois.caHT) meilleurMois = { ...r, m };
       }
@@ -815,14 +914,18 @@ async function exportPDF() {
     doc.text('Analyse financière', margin + 4, y + 7);
 
     const analyseRows = [
-      ['Chiffre d\'affaires HT', fmt(totCA)],
-      ['Charges fixes', fmt(totFixe)],
-      ['Charges variables', fmt(totVar)],
-      ['Crédits & Leasing', fmt(totCredit + totLeasing)],
-      ['Total charges', fmt(totCharges)],
-      ['Taux de charges / CA', tauxCharges.toFixed(1) + ' %'],
+      ['CA journalier HT', fmt(totCA - totFP)],
+      totFP > 0 ? ['Factures Pro / B2B', fmt(totFP)] : null,
+      totRentrees > 0 ? ['Rentrées supplémentaires', fmt(totRentrees)] : null,
+      ['CA Total HT', fmt(totCA)],
+      ['— Charges fixes HT', fmt(totFixe)],
+      ['— Charges variables HT', fmt(totVar)],
+      ['— Crédits & Emprunts', fmt(totCredit)],
+      ['— Leasing / LOA / LLD', fmt(totLeasing)],
+      ['Total charges HT', fmt(totCharges)],
+      ['Taux charges / CA', tauxCharges.toFixed(1) + ' %'],
       ['Marge nette', margeNette.toFixed(1) + ' %'],
-      meilleurMois ? ['Meilleur mois (CA)', `${MONTHS_FR[meilleurMois.m]} — ${fmt(meilleurMois.caHT)}`] : null,
+      meilleurMois ? ['Meilleur mois (CA)', MONTHS_FR[meilleurMois.m] + ' — ' + fmt(meilleurMois.caHT)] : null,
       moisAvecDonnees > 0 ? ['CA mensuel moyen', fmt(totCA / moisAvecDonnees)] : null,
     ].filter(Boolean);
 
