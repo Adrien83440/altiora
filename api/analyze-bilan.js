@@ -1,7 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk').default || require('@anthropic-ai/sdk');
 
 module.exports = async function handler(req, res) {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -16,7 +15,6 @@ module.exports = async function handler(req, res) {
 
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-    // Contexte des années précédentes pour comparaison
     let contextYears = '';
     if (existingYears && Object.keys(existingYears).length > 0) {
       contextYears = `\n\nDonnées des bilans précédents déjà enregistrés pour comparaison :\n${JSON.stringify(existingYears, null, 2)}\nCompare avec ces données et indique les évolutions.`;
@@ -27,22 +25,33 @@ module.exports = async function handler(req, res) {
     for (let i = 0; i < pages.length; i++) {
       content.push({
         type: 'image',
-        source: {
-          type: 'base64',
-          media_type: 'image/jpeg',
-          data: pages[i]
-        }
+        source: { type: 'base64', media_type: 'image/jpeg', data: pages[i] }
       });
     }
 
-    // Ajouter le prompt texte
     content.push({
       type: 'text',
-      text: `Tu es un expert-comptable et analyste financier. Tu viens de voir les pages d'un bilan comptable (fichier: ${fileName || 'bilan.pdf'}).
+      text: `Tu es un expert-comptable. Tu viens de voir les pages d'un bilan comptable (fichier: ${fileName || 'bilan.pdf'}).
 
-Analyse ce bilan et retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le JSON brut).
+MISSION CRITIQUE : extraire les chiffres EXACTS du bilan. La précision des montants est FONDAMENTALE.
 
-Structure exacte attendue :
+ATTENTION AUX COLONNES — Dans les bilans français :
+- Il y a souvent 2 colonnes de chiffres : l'exercice N (le plus récent, souvent à gauche) et l'exercice N-1 (à droite)
+- Il y a parfois 3 colonnes : BRUT | AMORTISSEMENTS | NET — prends TOUJOURS la colonne NET
+- La date de clôture est indiquée en haut du tableau (ex: "31/12/2022" et "31/12/2021")
+- Tu dois extraire UNIQUEMENT les chiffres de l'exercice le plus récent (celui de la date de clôture principale)
+- NE MÉLANGE JAMAIS les chiffres des deux exercices
+
+VÉRIFICATIONS OBLIGATOIRES avant de répondre :
+1. TOTAL ACTIF doit être ÉGAL à TOTAL PASSIF (c'est une règle comptable absolue — si ce n'est pas le cas, tu as fait une erreur)
+2. totalActif = totalActifImmobilise + totalActifCirculant
+3. totalPassif = totalCapitauxPropres + totalDettes
+4. Les totaux intermédiaires doivent correspondre à la somme de leurs composants
+5. Si un montant est négatif dans le bilan (entre parenthèses ou avec un signe -), reporte-le comme négatif
+
+SI TU AS UN DOUTE SUR UN CHIFFRE : relis la page correspondante. Mieux vaut mettre 0 que d'inventer un montant.
+
+Retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le JSON brut).
 
 {
   "annee": "2024",
@@ -124,23 +133,15 @@ Structure exacte attendue :
     }
   ],
   
-  "resumeIA": "Un paragraphe de résumé global de la santé financière, rédigé simplement pour un commerçant non-expert."
+  "resumeIA": "Résumé global en français, accessible, avec recommandations concrètes."
 }
 
-Règles IMPORTANTES :
-- Lis attentivement CHAQUE chiffre dans les tableaux du bilan. Fais attention aux colonnes (exercice N vs N-1, brut vs amortissements vs net)
-- Prends toujours les valeurs de la colonne "Net" ou "Exercice N" (l'exercice le plus récent)
-- Tous les montants en euros (nombre, pas de string). Pas de séparateurs de milliers
-- Si une donnée n'est pas trouvée dans le bilan, mettre 0
-- Les ratios en pourcentage (ex: 15.5 pour 15.5%)
-- BFR en jours de CA
-- Minimum 4 conseils, maximum 8
-- Le résumé IA doit être en français, accessible, avec des recommandations concrètes
-- L'année doit correspondre à la date de clôture du bilan
-- VÉRIFIE que totalActif = totalActifImmobilise + totalActifCirculant (à peu près)
-- VÉRIFIE que totalPassif = totalCapitauxPropres + totalDettes (à peu près)
-- SECTEUR : identifie le code NAF/APE sur le bilan. Si absent, déduis le secteur d'activité depuis la raison sociale, les achats ou la nature de l'activité. Utilise tes connaissances des moyennes sectorielles françaises (INSEE, Banque de France, greffes) pour remplir le benchmark. Les moyennes doivent être réalistes pour le secteur identifié. La position compare le ratio de l'entreprise à la moyenne du secteur.
-- Intègre la comparaison sectorielle dans les conseils quand c'est pertinent (ex: "Votre marge est supérieure à la moyenne du secteur")${contextYears}`
+Règles STRICTES :
+- Tous les montants en euros (nombre entier, PAS de string, PAS de séparateurs de milliers)
+- Ratios en pourcentage (ex: 15.5 pour 15.5%), BFR en jours de CA
+- 4 à 8 conseils
+- VÉRIFIE QUE totalActif == totalPassif (règle comptable fondamentale)
+- SECTEUR : identifie le code NAF/APE ou déduis-le. Compare avec les moyennes sectorielles françaises.${contextYears}`
     });
 
     const response = await client.messages.create({
@@ -149,21 +150,55 @@ Règles IMPORTANTES :
       messages: [{ role: 'user', content: content }]
     });
 
-    // Extraire le JSON de la réponse
     let text = response.content[0].text.trim();
-    // Nettoyage si Claude ajoute des backticks
     if (text.startsWith('```')) {
       text = text.replace(/^```json?\n?/, '').replace(/\n?```$/, '');
     }
 
     const data = JSON.parse(text);
+
+    // VÉRIFICATION DE COHÉRENCE côté serveur
+    const actif = data.actif || {};
+    const passif = data.passif || {};
+    const totalA = actif.totalActif || 0;
+    const totalP = passif.totalPassif || 0;
+
+    // Vérifier Actif = Passif (tolérance 2%)
+    if (totalA > 0 && totalP > 0) {
+      const ecart = Math.abs(totalA - totalP) / Math.max(totalA, totalP);
+      if (ecart > 0.02) {
+        // Forcer la cohérence : prendre le total le plus fiable
+        // Le total général est souvent le plus fiable
+        const totalRef = Math.min(totalA, totalP) > 0 ? Math.round((totalA + totalP) / 2) : Math.max(totalA, totalP);
+        data._avertissement = "Écart détecté entre total actif (" + totalA + "€) et total passif (" + totalP + "€). Les chiffres peuvent contenir des imprécisions de lecture.";
+      }
+    }
+
+    // Vérifier cohérence interne actif
+    const sumActif = (actif.totalActifImmobilise || 0) + (actif.totalActifCirculant || 0);
+    if (sumActif > 0 && totalA > 0) {
+      const ecartActif = Math.abs(sumActif - totalA) / totalA;
+      if (ecartActif > 0.05) {
+        data._avertissement = (data._avertissement || '') + " Incohérence dans la décomposition de l'actif.";
+      }
+    }
+
+    // Vérifier cohérence interne passif
+    const sumPassif = (passif.totalCapitauxPropres || 0) + (passif.totalDettes || 0);
+    if (Math.abs(sumPassif) > 0 && totalP > 0) {
+      const ecartPassif = Math.abs(sumPassif - totalP) / totalP;
+      if (ecartPassif > 0.05) {
+        data._avertissement = (data._avertissement || '') + " Incohérence dans la décomposition du passif.";
+      }
+    }
+
     return res.status(200).json({ success: true, data });
 
   } catch (err) {
     console.error('Erreur analyze-bilan:', err);
-    return res.status(500).json({ 
+    return res.status(500).json({
       error: 'Erreur lors de l\'analyse du bilan',
-      detail: err.message 
+      detail: err.message
     });
   }
 };
