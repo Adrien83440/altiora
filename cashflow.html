@@ -164,6 +164,18 @@ main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
 .prev-neg{color:#dc2626;font-weight:700}
 .prev-neu{color:#b45309}
 
+/* ── TRÉSORERIE MODALE ── */
+.treso-modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;align-items:center;justify-content:center}
+.treso-modal-bg.show{display:flex}
+.treso-modal{background:#fff;border-radius:16px;padding:28px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,.25);margin:16px}
+.treso-modal h3{font-size:16px;font-weight:800;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.treso-modal p{font-size:12px;color:var(--muted);margin-bottom:18px;line-height:1.5}
+.treso-modal label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px}
+.treso-modal input{width:100%;padding:11px 14px;border:1.5px solid var(--border);border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:16px;font-weight:700;color:var(--text);outline:none;transition:.2s;margin-bottom:6px}
+.treso-modal input:focus{border-color:var(--blue2);box-shadow:0 0 0 3px rgba(79,126,248,.12)}
+.treso-modal .treso-hint{font-size:10px;color:var(--muted);margin-bottom:18px}
+.treso-modal-actions{display:flex;gap:8px;justify-content:flex-end}
+
 /* ── LOADER ── */
 .loader-wrap{display:flex;align-items:center;justify-content:center;padding:80px;color:var(--muted);gap:10px;flex-direction:column}
 .spin{width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--blue2);border-radius:50%;animation:spin .7s linear infinite}
@@ -175,13 +187,13 @@ main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
   nav{transform:translateX(-105%);transition:transform .3s cubic-bezier(.4,0,.2,1)}
   nav.open{transform:translateX(0)}
   main{margin-left:0}
-  .kpi-row{grid-template-columns:repeat(2,1fr)}
+  .kpi-row{grid-template-columns:repeat(2,1fr)!important}
   .grid-2,.grid-3{grid-template-columns:1fr}
   .prev-kpi-row{grid-template-columns:repeat(2,1fr)!important}
   .prev-chart-row{grid-template-columns:1fr!important}
 }
 @media(max-width:420px){
-  .kpi-row{grid-template-columns:1fr}
+  .kpi-row{grid-template-columns:1fr!important}
   .prev-kpi-row{grid-template-columns:1fr!important}
 }
 </style>
@@ -262,11 +274,29 @@ main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
   </div>
 </main>
 
+<!-- ── TRÉSORERIE MODALE ── -->
+<div class="treso-modal-bg" id="tresoModalBg" onclick="if(event.target===this)closeTresoModal()">
+  <div class="treso-modal">
+    <h3>💰 Trésorerie disponible</h3>
+    <p>Indiquez le solde de votre compte bancaire professionnel à ce jour. Cette valeur sert de point de départ pour calculer votre cashflow futur réel.</p>
+    <label>Solde disponible (€)</label>
+    <input type="text" inputmode="decimal" id="tresoInput" placeholder="Ex: 12 500" />
+    <div class="treso-hint">Montant en euros — peut être négatif (ex: découvert)</div>
+    <label>Date de mise à jour</label>
+    <input type="date" id="tresoDate" />
+    <div style="height:12px"></div>
+    <div class="treso-modal-actions">
+      <button class="btn btn-o" onclick="closeTresoModal()">Annuler</button>
+      <button class="btn btn-p" onclick="saveTresorerieDisponible()">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── FIREBASE ── -->
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
   import { getAuth, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-  import { getFirestore, doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+  import { getFirestore, doc, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
   const app = initializeApp({
     apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
@@ -284,6 +314,7 @@ main{margin-left:var(--sw);flex:1;display:flex;flex-direction:column}
   window._auth    = auth;
   window._doc     = doc;
   window._getDoc  = getDoc;
+  window._setDoc  = setDoc;
   window._signOut = signOut;
   window._firebaseReady = true;
 
@@ -436,6 +467,16 @@ async function loadYear(year) {
     }
   } catch(e) {}
 
+  // Trésorerie disponible
+  let tresorerieConfig = { solde: null, date: null };
+  try {
+    const snap = await window._getDoc(window._doc(window._db, 'cashflow', uid, 'config', 'tresorerie'));
+    if (snap.exists()) {
+      tresorerieConfig = snap.data();
+    }
+  } catch(e) {}
+  window._tresorerieConfig = tresorerieConfig;
+
   // Labels X adaptés au mode
   var labels = monthKeys.map(function(mk) { return MS[mk.m]; });
 
@@ -445,7 +486,7 @@ async function loadYear(year) {
     r.key = mo.key;
     return r;
   });
-  renderPage(computed, dettes, year, labels, labelPeriode);
+  renderPage(computed, dettes, year, labels, labelPeriode, tresorerieConfig);
 }
 
 function calcMonth(m, raw, isFuture) {
@@ -533,7 +574,7 @@ function calcMonth(m, raw, isFuture) {
 }
 
 /* ── SECTION PRÉVISIONNELLE ── */
-function buildPrevSection(data, labels, year) {
+function buildPrevSection(data, labels, year, tresoDisponible) {
   const futurMois = data.filter(d => d.isFuture);
   if (futurMois.length === 0) return '';
 
@@ -546,14 +587,22 @@ function buildPrevSection(data, labels, year) {
   const realMois = data.filter(d => !d.isFuture && d.hasData);
   const soldeCumulReel = realMois.reduce((s,d) => s + d.cashflow, 0);
 
+  // Point de départ : trésorerie réelle si renseignée, sinon cashflow cumulé
+  const startingBalance = tresoDisponible !== null && tresoDisponible !== undefined ? tresoDisponible : soldeCumulReel;
+  const startingLabel = tresoDisponible !== null && tresoDisponible !== undefined
+    ? `Trésorerie réelle : ${fmtK(tresoDisponible)}`
+    : `Cashflow cumulé : ${fmtK(soldeCumulReel)}`;
+
   // Projection solde cumulé avec prévisionnel
-  let cumul = soldeCumulReel;
+  let cumul = startingBalance;
   const cumulPrev = data.map(d => {
-    if (!d.isFuture && d.hasData) { cumul = data.slice(0, data.indexOf(d)+1).filter(x=>!x.isFuture&&x.hasData).reduce((s,x)=>s+x.cashflow,0); return null; }
+    if (!d.isFuture && d.hasData) { return null; }
     if (!d.isFuture && !d.hasData) return null;
     cumul += (d.prevCA||0) - (d.prevCharges||0);
     return cumul;
   });
+
+  const soldeFinalProjeté = startingBalance + prevCF_tot;
 
   const scoreColor = prevResultat > 0 ? '#059669' : prevResultat < 0 ? '#dc2626' : '#f59e0b';
 
@@ -593,9 +642,9 @@ function buildPrevSection(data, labels, year) {
         <div class="prev-kpi-sub">CA prévi − Charges prévi</div>
       </div>
       <div class="prev-kpi">
-        <div class="prev-kpi-lbl">Solde cumulé projeté</div>
-        <div class="prev-kpi-val" style="color:${soldeCumulReel+prevCF_tot>=0?'#059669':'#dc2626'}">${fmtK(soldeCumulReel+prevCF_tot)}</div>
-        <div class="prev-kpi-sub">Réel ${fmtK(soldeCumulReel)} + prévi ${fmtK(prevCF_tot)}</div>
+        <div class="prev-kpi-lbl">Solde projeté fin de période</div>
+        <div class="prev-kpi-val" style="color:${soldeFinalProjeté>=0?'#059669':'#dc2626'}">${fmtK(soldeFinalProjeté)}</div>
+        <div class="prev-kpi-sub">${startingLabel} + prévi ${fmtK(prevCF_tot)}</div>
       </div>
     </div>
 
@@ -629,8 +678,11 @@ function buildPrevSection(data, labels, year) {
 }
 
 /* ── RENDER ── */
-function renderPage(data, dettes, year, labels, labelPeriode) {
+function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) {
   if (!labels) labels = MS; // fallback
+  tresorerieConfig = tresorerieConfig || { solde: null, date: null };
+  const tresoDisponible = tresorerieConfig.solde !== null && tresorerieConfig.solde !== undefined ? parseFloat(tresorerieConfig.solde) : null;
+  const tresoDate = tresorerieConfig.date || null;
   // Mois courant : position dans le tableau data qui correspond au mois actuel
   const _now = new Date();
   const _curY = _now.getFullYear();
@@ -657,8 +709,9 @@ function renderPage(data, dettes, year, labels, labelPeriode) {
   const totalLeas   = filled.reduce((s,d) => s+d.leasingHT, 0);
   const totalCred   = filled.reduce((s,d) => s+d.creditsPrincipal+d.creditsInteret, 0);
 
-  // Solde cumulé
-  let cumul = 0;
+  // Solde cumulé — part de la trésorerie réelle si disponible
+  let cumul = tresoDisponible !== null ? tresoDisponible : 0;
+  const cumulBase = cumul;
   const cumulArr = data.map(d => { if (d.hasData) cumul += d.cashflow; return d.hasData ? cumul : null; });
 
   // Score santé
@@ -683,7 +736,13 @@ function renderPage(data, dettes, year, labels, labelPeriode) {
   if (filled.length === 0)                    alerts.push({type:'info', icon:'ℹ️', txt:`Aucune donnée pour ${year}. Saisissez vos mois dans le Pilotage.`});
 
   const html = `
-    <div class="kpi-row">
+    <div class="kpi-row" style="grid-template-columns:repeat(6,1fr)">
+      <div class="kpi ${tresoDisponible===null?'blue':tresoDisponible>=0?'green':'red'}" style="cursor:pointer" onclick="openTresoModal()" title="Cliquer pour mettre à jour">
+        <div class="kpi-icon">🏦</div>
+        <div class="kpi-label">Trésorerie disponible <span style="font-size:9px;opacity:.6">✏️</span></div>
+        <div class="kpi-val ${tresoDisponible===null?'blue':tresoDisponible>=0?'green':'red'}">${tresoDisponible!==null?fmtK(tresoDisponible):'<span style="font-size:13px;color:#d1d5db">Non renseigné</span>'}</div>
+        <div class="kpi-sub">${tresoDate?'Mis à jour le '+tresoDate:'Cliquer pour saisir votre solde'}</div>
+      </div>
       <div class="kpi blue"><div class="kpi-icon">💰</div><div class="kpi-label">CA Total HT</div><div class="kpi-val blue">${fmtK(totCA)}</div><div class="kpi-sub">${filled.length} mois enregistrés</div></div>
       <div class="kpi ${totCharges>totCA?'red':'orange'}"><div class="kpi-icon">📦</div><div class="kpi-label">Charges réelles HT</div><div class="kpi-val ${totCharges>totCA?'red':'orange'}">${fmtK(totCharges)}</div><div class="kpi-sub">${totPrevCharges>0?`<span style="color:#b45309">+ ${fmtK(totPrevCharges)} prévi</span>`:(totCA>0?Math.round((totCharges/totCA)*100)+'% du CA':'—')}</div></div>
       <div class="kpi ${totCF>=0?'green':'red'}"><div class="kpi-icon">💧</div><div class="kpi-label">Cashflow Net</div><div class="kpi-val ${totCF>=0?'green':'red'}">${fmtK(totCF)}</div><div class="kpi-sub">${totCF>=0?'Excédent':'Déficit'} annuel</div></div>
@@ -735,7 +794,7 @@ function renderPage(data, dettes, year, labels, labelPeriode) {
       </div>
     </div>
 
-    ${buildPrevSection(data, labels, year)}
+    ${buildPrevSection(data, labels, year, tresoDisponible)}
 
     <div class="card" style="margin-bottom:16px">
       <div class="card-head">
@@ -883,6 +942,44 @@ function renderPage(data, dettes, year, labels, labelPeriode) {
     });
   }
 }
+/* ── TRÉSORERIE MODALE ── */
+function openTresoModal() {
+  const cfg = window._tresorerieConfig || {};
+  document.getElementById('tresoInput').value = cfg.solde !== null && cfg.solde !== undefined ? cfg.solde : '';
+  // Set date to today if not set
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('tresoDate').value = cfg.date || today;
+  document.getElementById('tresoModalBg').classList.add('show');
+  setTimeout(() => document.getElementById('tresoInput').focus(), 100);
+}
+function closeTresoModal() {
+  document.getElementById('tresoModalBg').classList.remove('show');
+}
+async function saveTresorerieDisponible() {
+  const raw = document.getElementById('tresoInput').value.replace(',', '.').replace(/\s/g, '');
+  const solde = parseFloat(raw);
+  if (isNaN(solde) && raw !== '' && raw !== '-') {
+    document.getElementById('tresoInput').style.borderColor = '#ef4444';
+    return;
+  }
+  document.getElementById('tresoInput').style.borderColor = '';
+  const date = document.getElementById('tresoDate').value;
+  const cfg = { solde: isNaN(solde) ? null : solde, date: date || new Date().toISOString().split('T')[0] };
+  try {
+    await window._setDoc(window._doc(window._db, 'cashflow', window._uid, 'config', 'tresorerie'), cfg);
+    window._tresorerieConfig = cfg;
+    closeTresoModal();
+    // Recharger la page
+    const year = parseInt(document.getElementById('yearSelect').value);
+    loadYear(year);
+  } catch(e) {
+    alert('Erreur lors de la sauvegarde : ' + e.message);
+  }
+}
+// Fermer avec Escape
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeTresoModal();
+});
 </script>
 <script src="nav.js"></script>
 </body>
