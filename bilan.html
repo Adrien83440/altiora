@@ -451,12 +451,13 @@ async function processPdf(file) {
   `;
 
   try {
-    // Extraire le texte du PDF côté client (évite le 413 Payload Too Large)
-    const pdfText = await extractPdfText(file);
-    if(!pdfText || pdfText.trim().length < 50) {
-      throw new Error('Impossible d\'extraire le texte du PDF. Vérifiez que le fichier n\'est pas scanné/image.');
+    // Convertir les pages PDF en images (Claude lit mieux les tableaux en mode vision)
+    updateStep('📄 Conversion des pages en images...');
+    const pages = await pdfToImages(file);
+    if(!pages || pages.length === 0) {
+      throw new Error('Impossible de lire le PDF.');
     }
-    updateStep('🤖 Envoi à l\'intelligence artificielle...');
+    updateStep('🤖 Envoi à l\'intelligence artificielle (' + pages.length + ' pages)...');
 
     // Préparer les données existantes pour comparaison
     const existingYears = {};
@@ -472,13 +473,13 @@ async function processPdf(file) {
       };
     }
 
-    // Appeler l'API avec le texte extrait (beaucoup plus léger que le base64)
+    // Appeler l'API avec les images des pages
     updateStep('🧠 Analyse des données financières...');
     const resp = await fetch('/api/analyze-bilan', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
-        pdfText: pdfText,
+        pages: pages,
         fileName: file.name,
         existingYears: existingYears
       })
@@ -524,18 +525,71 @@ function updateStep(text) {
   if(el) el.textContent = text;
 }
 
-// Extraire le texte d'un PDF avec pdf.js (côté client)
-async function extractPdfText(file) {
+// Convertir un PDF en images JPEG via pdf.js + canvas
+// Compression automatique progressive pour TOUJOURS rester sous la limite Vercel (4.5 Mo)
+async function pdfToImages(file) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
-  var fullText = '';
-  for(var i = 1; i <= pdf.numPages; i++) {
-    var page = await pdf.getPage(i);
-    var content = await page.getTextContent();
-    var pageText = content.items.map(function(item){ return item.str; }).join(' ');
-    fullText += pageText + '\n';
+
+  // Max 25 pages (largement suffisant pour un bilan)
+  if(pdf.numPages > 25) {
+    throw new Error('Le bilan ne doit pas dépasser 25 pages. Votre document fait ' + pdf.numPages + ' pages.');
   }
-  return fullText;
+
+  var numPages = pdf.numPages;
+  var MAX_TOTAL = 3200000; // 3.2 Mo en base64 → laisse marge pour le JSON
+
+  // Niveaux de compression : on essaie du plus beau au plus compressé
+  var configs = [
+    {scale: 1.5, quality: 0.65},
+    {scale: 1.2, quality: 0.50},
+    {scale: 1.0, quality: 0.40},
+    {scale: 0.85, quality: 0.30},
+    {scale: 0.7,  quality: 0.25}
+  ];
+
+  for(var c = 0; c < configs.length; c++) {
+    var cfg = configs[c];
+    var images = [];
+    var totalSize = 0;
+    var tooLarge = false;
+
+    for(var i = 1; i <= numPages; i++) {
+      var page = await pdf.getPage(i);
+      var viewport = page.getViewport({scale: cfg.scale});
+      var canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      var ctx = canvas.getContext('2d');
+      await page.render({canvasContext: ctx, viewport: viewport}).promise;
+
+      var base64 = canvas.toDataURL('image/jpeg', cfg.quality).split(',')[1];
+      totalSize += base64.length;
+      images.push(base64);
+
+      // Arrêter tôt si déjà trop gros → passer au niveau suivant
+      if(totalSize > MAX_TOTAL) { tooLarge = true; break; }
+    }
+
+    if(!tooLarge) return images; // ça passe → on envoie
+  }
+
+  // Si même la compression maximale ne suffit pas : on prend les 12 premières pages
+  // (un bilan a toujours les données clés au début)
+  var lastCfg = configs[configs.length - 1];
+  var finalImages = [];
+  var maxEssential = Math.min(numPages, 12);
+  for(var k = 1; k <= maxEssential; k++) {
+    var pg = await pdf.getPage(k);
+    var vp = pg.getViewport({scale: lastCfg.scale});
+    var cv = document.createElement('canvas');
+    cv.width = vp.width;
+    cv.height = vp.height;
+    var cx = cv.getContext('2d');
+    await pg.render({canvasContext: cx, viewport: vp}).promise;
+    finalImages.push(cv.toDataURL('image/jpeg', lastCfg.quality).split(',')[1]);
+  }
+  return finalImages;
 }
 
 // ─── RENDER BILAN ANNÉE ───
