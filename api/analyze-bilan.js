@@ -9,9 +9,9 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
   try {
-    const { pdfText, fileName, existingYears } = req.body;
-    if (!pdfText || pdfText.trim().length < 50) {
-      return res.status(400).json({ error: 'Texte du bilan manquant ou trop court' });
+    const { pages, fileName, existingYears } = req.body;
+    if (!pages || !Array.isArray(pages) || pages.length === 0) {
+      return res.status(400).json({ error: 'Aucune page du PDF reçue' });
     }
 
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -22,20 +22,25 @@ module.exports = async function handler(req, res) {
       contextYears = `\n\nDonnées des bilans précédents déjà enregistrés pour comparaison :\n${JSON.stringify(existingYears, null, 2)}\nCompare avec ces données et indique les évolutions.`;
     }
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
-      messages: [
-        {
-          role: 'user',
-          content: `Tu es un expert-comptable et analyste financier. Voici le texte extrait d'un bilan comptable (fichier: ${fileName || 'bilan.pdf'}).
+    // Construire le contenu avec les images des pages
+    const content = [];
+    for (let i = 0; i < pages.length; i++) {
+      content.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/jpeg',
+          data: pages[i]
+        }
+      });
+    }
 
-Analyse ce bilan et retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le JSON).
+    // Ajouter le prompt texte
+    content.push({
+      type: 'text',
+      text: `Tu es un expert-comptable et analyste financier. Tu viens de voir les pages d'un bilan comptable (fichier: ${fileName || 'bilan.pdf'}).
 
-TEXTE DU BILAN :
----
-${pdfText.substring(0, 30000)}
----
+Analyse ce bilan et retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le JSON brut).
 
 Structure exacte attendue :
 
@@ -96,6 +101,20 @@ Structure exacte attendue :
     "ratioLiquiditeGenerale": 0,
     "rentabiliteCapitauxPropres": 0
   },
+
+  "secteur": {
+    "codeNAF": "47.11B",
+    "libelle": "Commerce de détail alimentaire",
+    "benchmark": {
+      "tauxMargeBrute": {"moyenne": 0, "position": "au-dessus|en-dessous|dans la moyenne"},
+      "tauxEBE": {"moyenne": 0, "position": "au-dessus|en-dessous|dans la moyenne"},
+      "tauxResultatNet": {"moyenne": 0, "position": "au-dessus|en-dessous|dans la moyenne"},
+      "ratioEndettement": {"moyenne": 0, "position": "au-dessus|en-dessous|dans la moyenne"},
+      "bfrJours": {"moyenne": 0, "position": "au-dessus|en-dessous|dans la moyenne"},
+      "ratioLiquiditeGenerale": {"moyenne": 0, "position": "au-dessus|en-dessous|dans la moyenne"}
+    },
+    "commentaire": "Phrase résumant la position de l'entreprise par rapport à son secteur"
+  },
   
   "conseils": [
     {
@@ -108,16 +127,26 @@ Structure exacte attendue :
   "resumeIA": "Un paragraphe de résumé global de la santé financière, rédigé simplement pour un commerçant non-expert."
 }
 
-Règles :
-- Tous les montants en euros (nombre, pas de string)
+Règles IMPORTANTES :
+- Lis attentivement CHAQUE chiffre dans les tableaux du bilan. Fais attention aux colonnes (exercice N vs N-1, brut vs amortissements vs net)
+- Prends toujours les valeurs de la colonne "Net" ou "Exercice N" (l'exercice le plus récent)
+- Tous les montants en euros (nombre, pas de string). Pas de séparateurs de milliers
 - Si une donnée n'est pas trouvée dans le bilan, mettre 0
 - Les ratios en pourcentage (ex: 15.5 pour 15.5%)
 - BFR en jours de CA
 - Minimum 4 conseils, maximum 8
 - Le résumé IA doit être en français, accessible, avec des recommandations concrètes
-- L'année doit correspondre à la date de clôture du bilan${contextYears}`
-        }
-      ]
+- L'année doit correspondre à la date de clôture du bilan
+- VÉRIFIE que totalActif = totalActifImmobilise + totalActifCirculant (à peu près)
+- VÉRIFIE que totalPassif = totalCapitauxPropres + totalDettes (à peu près)
+- SECTEUR : identifie le code NAF/APE sur le bilan. Si absent, déduis le secteur d'activité depuis la raison sociale, les achats ou la nature de l'activité. Utilise tes connaissances des moyennes sectorielles françaises (INSEE, Banque de France, greffes) pour remplir le benchmark. Les moyennes doivent être réalistes pour le secteur identifié. La position compare le ratio de l'entreprise à la moyenne du secteur.
+- Intègre la comparaison sectorielle dans les conseils quand c'est pertinent (ex: "Votre marge est supérieure à la moyenne du secteur")${contextYears}`
+    });
+
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: content }]
     });
 
     // Extraire le JSON de la réponse
