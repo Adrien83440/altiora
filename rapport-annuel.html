@@ -664,7 +664,8 @@ function renderRapport(){
   var ratioEndett=T.caHT>0?totDettes/T.caHT*100:0;
 
   // N-1 comparaison
-  var evCA=TN1.caHT>0?(T.caHT-TN1.caHT)/TN1.caHT*100:null;
+  // N-1 valide seulement si données significatives (au moins 20% du CA actuel, et au moins 1 mois)
+  var evCA=(TN1.caHT>0&&TN1.moisData>0&&TN1.caHT>T.caHT*0.05)?(T.caHT-TN1.caHT)/TN1.caHT*100:null;
   var evRes=TN1.caHT>0?(T.resultat-TN1.resultat):null;
   var evCharges=TN1.charges>0?(T.charges-TN1.charges)/TN1.charges*100:null;
 
@@ -692,8 +693,8 @@ function renderRapport(){
   if(ratioEndett>150)alertes.push({type:'bad',msg:'🔴 Endettement important : l\'encours dettes représente '+ratioEndett.toFixed(0)+'% du CA.'});
   else if(ratioEndett>80)alertes.push({type:'warn',msg:'⚠️ Endettement à surveiller : '+ratioEndett.toFixed(0)+'% du CA en encours.'});
   if(moisBene<T.moisData/2)alertes.push({type:'warn',msg:'📊 Moins de la moitié des mois sont bénéficiaires ('+moisBene+'/'+T.moisData+').'});
-  if(evCA!==null&&evCA<-10)alertes.push({type:'bad',msg:'📉 CA en baisse de '+Math.abs(evCA).toFixed(1)+'% vs année précédente.'});
-  if(evCA!==null&&evCA>10)alertes.push({type:'good',msg:'📈 CA en hausse de '+evCA.toFixed(1)+'% vs année précédente — belle progression !'});
+  if(evCA!==null&&evCA<-10&&Math.abs(evCA)<500)alertes.push({type:'bad',msg:'📉 CA en baisse de '+Math.abs(evCA).toFixed(1)+'% vs année précédente.'});
+  if(evCA!==null&&evCA>10&&evCA<500)alertes.push({type:'good',msg:'📈 CA en hausse de '+evCA.toFixed(1)+'% vs année précédente — belle progression !'});
   if(T.tvaCollectee>T.tvaDed*1.5&&T.tvaCollectee>500)alertes.push({type:'info',msg:'ℹ️ TVA due estimée : '+fmt(T.tvaDue)+' sur la période. Veillez à la provisionner.'});
 
   var html='';
@@ -888,7 +889,7 @@ function renderRapport(){
     var scoreGlobal=0; // 0-100
 
     // CA & croissance
-    if(evCA!==null){
+    if(evCA!==null&&Math.abs(evCA)<500){
       if(evCA>15){scoreGlobal+=20;analyse.push({type:'good',titre:'Croissance CA solide',texte:'Le chiffre d\'affaires progresse de <strong>+'+evCA.toFixed(1)+'%</strong> par rapport à la même période N-1 ('+fmt(TN1.caHT)+' → '+fmt(T.caHT)+'). Cette dynamique est encourageante et témoigne d\'une activité en développement.'});}
       else if(evCA>5){scoreGlobal+=12;analyse.push({type:'good',titre:'CA en légère hausse',texte:'Le CA est en progression de <strong>+'+evCA.toFixed(1)+'%</strong> vs N-1. La croissance est modérée mais positive — à maintenir.'});}
       else if(evCA<-10){scoreGlobal-=15;analyse.push({type:'bad',titre:'Baisse significative du CA',texte:'Le CA recule de <strong>'+evCA.toFixed(1)+'%</strong> par rapport à N-1 ('+fmt(TN1.caHT)+' → '+fmt(T.caHT)+'). Une analyse des causes s\'impose : perte de clientèle, baisse des prix, saisonnalité ?'});}
@@ -1357,7 +1358,8 @@ function exportPDF(){
     var dA=_dettesData.filter(function(d){return d.statut!=='soldee'&&d.statut!=='soldé';});
     var totD=dA.reduce(function(s,d){return s+(parseFloat(d.montantRestant||d.montant)||0);},0);
     var totM=dA.reduce(function(s,d){return s+(parseFloat(d.mensualite)||0);},0);
-    var evCA=TN1.caHT>0?(T.caHT-TN1.caHT)/TN1.caHT*100:null;
+    // N-1 valide seulement si données significatives (au moins 20% du CA actuel, et au moins 1 mois)
+  var evCA=(TN1.caHT>0&&TN1.moisData>0&&TN1.caHT>T.caHT*0.05)?(T.caHT-TN1.caHT)/TN1.caHT*100:null;
 
     var BD=[15,31,92],BL=[26,61,206],GR=[16,185,129],RD=[239,68,68],OR=[245,158,11],PU=[99,102,241];
     var WH=[255,255,255],TX=[26,31,54],MT=[107,114,128],GY=[248,250,252],BR=[226,232,240];
@@ -1583,7 +1585,7 @@ function exportPDF(){
         sf('normal',7,TX);doc.text(fmtP(m.fixe),mc[5].x+mc[5].w,y+4.5,{align:'right'});
         sf('normal',7,TX);doc.text(fmtP(m.variable),mc[6].x+mc[6].w,y+4.5,{align:'right'});
         sf('normal',7,TX);doc.text(m.credit>0?fmtP(m.credit):'—',mc[7].x+mc[7].w,y+4.5,{align:'right'});
-        sf('normal',6.5,[180,180,180]);doc.text(n1r.hasData?fmtP(n1r.caHT):'—',mc[8].x+mc[8].w,y+4.5,{align:'right'});
+        sf('normal',6.5,[180,180,180]);doc.text(n1r.hasData?fmtP(n1r.caHT):'—',mc[7].x+mc[7].w,y+4.5,{align:'right'});
       }else{
         for(var ci=1;ci<mc.length;ci++){sf('normal',7,[209,213,219]);doc.text('—',mc[ci].x+mc[ci].w,y+4.5,{align:'right'});}
       }
@@ -1599,7 +1601,7 @@ function exportPDF(){
     doc.text(fmtPctP(mgTot,true),mc[4].x+mc[4].w,y+5,{align:'right'});
     doc.text(fmtP(T.fixe),mc[5].x+mc[5].w,y+5,{align:'right'});
     doc.text(fmtP(T.variable),mc[6].x+mc[6].w,y+5,{align:'right'});
-    if(TN1.moisData>0){sf('normal',7,[200,210,230]);doc.text(fmtP(TN1.caHT),mc[8].x+mc[8].w,y+5,{align:'right'});}
+    if(TN1.moisData>0){sf('normal',7,[200,210,230]);doc.text(fmtP(TN1.caHT),mc[7].x+mc[7].w,y+5,{align:'right'});}
     y+=12;
 
     //  TOP CHARGES
