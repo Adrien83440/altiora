@@ -31,45 +31,79 @@ module.exports = async function handler(req, res) {
 
     content.push({
       type: 'text',
-      text: `Tu es un expert-comptable. Tu viens de voir les pages d'un bilan comptable (fichier: ${fileName || 'bilan.pdf'}).
-
-MISSION CRITIQUE : extraire les chiffres EXACTS du bilan. La précision des montants est FONDAMENTALE.
+      text: `Tu es un expert-comptable français. Analyse ce bilan comptable et extrait les chiffres EXACTS.
 
 ═══════════════════════════════════════════════════
-RÈGLE N°1 — IDENTIFICATION DE LA BONNE COLONNE (CRITIQUE)
+ÉTAPE 1 — IDENTIFIE LA DATE DE CLÔTURE
 ═══════════════════════════════════════════════════
 
-ÉTAPE 1 : Identifier la date de clôture principale du bilan
-→ Elle est sur la page de garde (ex: "Période du 01/01/2022 au 31/12/2022")
-→ La date de FIN (31/12/2022) = c'est l'exercice à extraire
-
-ÉTAPE 2 : Pour CHAQUE tableau (actif, passif, compte de résultat), LIS L'EN-TÊTE DES COLONNES
-→ Les en-têtes indiquent les dates : ex "31/12/2022" et "31/12/2021"  
-→ La position varie selon les cabinets : parfois N est à gauche, parfois à droite
-→ NE SUPPOSE JAMAIS la position. LIS la date en en-tête de chaque colonne.
-
-ÉTAPE 3 : Extraire UNIQUEMENT les chiffres de la colonne dont la date correspond à la clôture principale
-→ Si clôture = 31/12/2022, prends TOUS les chiffres sous l'en-tête "31/12/2022" 
-→ IGNORE TOTALEMENT l'autre colonne (N-1)
-
-CAS SPÉCIAL — Bilan actif avec colonnes BRUT | AMORTISSEMENTS | NET :
-→ Prends la colonne NET de l'exercice N (pas le brut, pas les amortissements)
-→ La colonne NET est celle qui donne le montant final après amortissements
-
-PIÈGE FRÉQUENT : ne pas confondre la colonne "Exercice N" et "Exercice N-1". 
-Si tes chiffres Total Actif ≠ Total Passif, tu as probablement mélangé les colonnes → recommence.
+Lis la page de garde. La période indiquée (ex: "du 01/01/2022 au 31/12/2022") te donne la date de clôture : 31/12/2022.
+C'est L'UNIQUE exercice dont tu dois extraire les chiffres.
 
 ═══════════════════════════════════════════════════
-RÈGLE N°2 — VÉRIFICATIONS DE COHÉRENCE OBLIGATOIRES
+ÉTAPE 2 — BILAN ACTIF : STRUCTURE EXACTE DU FORMAT PCG FRANÇAIS
 ═══════════════════════════════════════════════════
 
-AVANT de répondre, vérifie ces 3 égalités :
-1. totalActif DOIT ÊTRE EXACTEMENT ÉGAL à totalPassif (sinon tu as mélangé les colonnes !)
-2. totalActif = totalActifImmobilise + totalActifCirculant (±1€ d'arrondi max)
-3. totalPassif = totalCapitauxPropres + totalDettes (±1€ d'arrondi max)
+Le bilan actif au format PCG a TOUJOURS exactement 4 colonnes dans cet ordre :
+  [BRUT] [AMORT./DÉPRÉC.] [NET exercice N] [NET exercice N-1]
 
-Si une de ces vérifications échoue : RELIS les tableaux, vérifie quelle colonne tu lis.
-Le TOTAL GÉNÉRAL du bilan (dernière ligne "TOTAL GENERAL" ou "TOTAL ACTIF"/"TOTAL PASSIF") est toujours le chiffre le plus fiable → pars de là et remonte.
+Exemple réel que tu verras :
+  TOTAL ACTIF IMMOBILISE | 69 332 | 18 058 | 51 274 | 37 511
+
+→ 69 332 = Brut         ← IGNORE
+→ 18 058 = Amortissements ← IGNORE  
+→ 51 274 = NET 31/12/2022 ← PRENDS CETTE VALEUR ✓
+→ 37 511 = NET 31/12/2021 ← IGNORE
+
+RÈGLE ABSOLUE ACTIF : prends TOUJOURS la 3ème valeur numérique (avant-dernière), jamais la 4ème.
+
+Autre exemple :
+  TOTAL GENERAL | 101 452 | 18 058 | 83 394 | 61 334
+→ totalActif = 83 394 ✓ (pas 61 334, pas 101 452)
+
+═══════════════════════════════════════════════════
+ÉTAPE 3 — BILAN PASSIF : STRUCTURE EXACTE DU FORMAT PCG FRANÇAIS
+═══════════════════════════════════════════════════
+
+Le bilan passif au format PCG a TOUJOURS exactement 2 colonnes :
+  [exercice N = 31/12/2022] [exercice N-1 = 31/12/2021]
+
+Exemple réel que tu verras :
+  TOTAL CAPITAUX PROPRES | -6 508 | -696
+
+→ -6 508 = 31/12/2022 ← PRENDS CETTE VALEUR ✓
+→ -696   = 31/12/2021 ← IGNORE
+
+  TOTAL DETTES | 89 902 | 62 031
+→ 89 902 = 31/12/2022 ← PRENDS CETTE VALEUR ✓
+→ 62 031 = 31/12/2021 ← IGNORE
+
+  TOTAL GENERAL | 83 394 | 61 334
+→ totalPassif = 83 394 ✓ (pas 61 334)
+
+RÈGLE ABSOLUE PASSIF : prends TOUJOURS la 1ère valeur numérique, jamais la 2ème.
+
+═══════════════════════════════════════════════════
+ÉTAPE 4 — COMPTE DE RÉSULTAT
+═══════════════════════════════════════════════════
+
+Le compte de résultat a 2 colonnes de montants (+ colonnes variation) :
+  [exercice N (12 mois)] [exercice N-1 (19 mois ou autre durée)]
+
+Exemple :
+  Chiffre d'affaires net | 237 155 | 133 939 | 103 217 | 77,06%
+→ CA = 237 155 ✓ (première colonne de montant)
+
+RÈGLE ABSOLUE CR : prends TOUJOURS la 1ère colonne de montant.
+
+═══════════════════════════════════════════════════
+ÉTAPE 5 — VÉRIFICATION OBLIGATOIRE AVANT DE RÉPONDRE
+═══════════════════════════════════════════════════
+
+Vérifie que : totalActif = totalPassif (exactement)
+Si ce n'est pas le cas, tu as lu la mauvaise colonne → recommence depuis l'étape 2.
+
+Les valeurs correctes pour ce bilan sont cohérentes quand actif = passif au centime près.
 
 ═══════════════════════════════════════════════════
 
@@ -184,9 +218,6 @@ Règles :
     if (totalA > 0 && totalP > 0) {
       const ecart = Math.abs(totalA - totalP) / Math.max(totalA, totalP);
       if (ecart > 0.02) {
-        // Forcer la cohérence : prendre le total le plus fiable
-        // Le total général est souvent le plus fiable
-        const totalRef = Math.min(totalA, totalP) > 0 ? Math.round((totalA + totalP) / 2) : Math.max(totalA, totalP);
         data._avertissement = "Écart détecté entre total actif (" + totalA + "€) et total passif (" + totalP + "€). Les chiffres peuvent contenir des imprécisions de lecture.";
       }
     }
