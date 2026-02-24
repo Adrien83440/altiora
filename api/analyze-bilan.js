@@ -9,8 +9,10 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
   try {
-    const { pdfBase64, fileName, existingYears } = req.body;
-    if (!pdfBase64) return res.status(400).json({ error: 'PDF manquant' });
+    const { pdfText, fileName, existingYears } = req.body;
+    if (!pdfText || pdfText.trim().length < 50) {
+      return res.status(400).json({ error: 'Texte du bilan manquant ou trop court' });
+    }
 
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -26,18 +28,14 @@ module.exports = async function handler(req, res) {
       messages: [
         {
           role: 'user',
-          content: [
-            {
-              type: 'document',
-              source: {
-                type: 'base64',
-                media_type: 'application/pdf',
-                data: pdfBase64
-              }
-            },
-            {
-              type: 'text',
-              text: `Tu es un expert-comptable et analyste financier. Analyse ce bilan comptable et retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le JSON).
+          content: `Tu es un expert-comptable et analyste financier. Voici le texte extrait d'un bilan comptable (fichier: ${fileName || 'bilan.pdf'}).
+
+Analyse ce bilan et retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le JSON).
+
+TEXTE DU BILAN :
+---
+${pdfText.substring(0, 30000)}
+---
 
 Structure exacte attendue :
 
@@ -118,8 +116,6 @@ Règles :
 - Minimum 4 conseils, maximum 8
 - Le résumé IA doit être en français, accessible, avec des recommandations concrètes
 - L'année doit correspondre à la date de clôture du bilan${contextYears}`
-            }
-          ]
         }
       ]
     });
