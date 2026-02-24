@@ -382,12 +382,19 @@ function renderMain() {
           Bilan ${y}
         </div>`;
       }).join('')}
+      ${years.length >= 2 ? `<div class="year-tab ${_selectedYear==='global'?'active':''}" onclick="selectYear('global')" style="background:${_selectedYear==='global'?'linear-gradient(135deg,#7c3aed,#a855f7)':'linear-gradient(135deg,rgba(124,58,237,0.08),rgba(168,85,247,0.08))'};color:${_selectedYear==='global'?'white':'#7c3aed'};border-color:${_selectedYear==='global'?'transparent':'rgba(124,58,237,0.2)'};font-weight:700;">
+        <span style="margin-right:4px;">📊</span> Analyse globale
+      </div>` : ''}
       <div class="year-tab" onclick="document.getElementById('pdfInput').click()" style="border-style:dashed;color:var(--blue-main);">+ Ajouter</div>
     </div>
     <div id="bilanContent"></div>
   `;
 
-  renderBilanYear(_selectedYear);
+  if(_selectedYear === 'global') {
+    renderGlobalAnalysis(years);
+  } else {
+    renderBilanYear(_selectedYear);
+  }
 }
 
 function selectYear(y) {
@@ -537,6 +544,7 @@ async function pdfToImages(file) {
 
   // Niveaux de compression : on essaie du plus beau au plus compressé
   var configs = [
+    {scale: 1.8, quality: 0.75},
     {scale: 1.5, quality: 0.65},
     {scale: 1.2, quality: 0.50},
     {scale: 1.0, quality: 0.40},
@@ -627,6 +635,10 @@ function renderBilanYear(year) {
       <div class="resume-badge">🤖 Analyse IA — Bilan ${year}${d.entreprise ? ' · '+d.entreprise : ''}</div>
       <div class="resume-text">${d.resumeIA || 'Aucun résumé disponible.'}</div>
     </div>
+    ${d._avertissement ? `<div style="background:#fef3c7;border:1px solid #f59e0b;border-radius:10px;padding:14px 18px;margin-bottom:18px;display:flex;align-items:flex-start;gap:10px;">
+      <span style="font-size:18px;flex-shrink:0;">⚠️</span>
+      <div style="font-size:12px;color:#92400e;line-height:1.6;"><b>Attention :</b> ${d._avertissement} Vérifiez les chiffres avec votre document source.</div>
+    </div>` : ''}
 
     <!-- KPIs PRINCIPAUX -->
     <div class="section-label">📊 Indicateurs clés — ${year}</div>
@@ -938,6 +950,251 @@ function showUpgradeModal() {
       <a href="pricing.html" class="btn btn-primary" style="display:inline-flex;padding:12px 28px;font-size:14px;">⭐ Passer au plan Master</a>
     </div>
   `;
+}
+
+// ─── ANALYSE GLOBALE MULTI-ANNÉES ───
+var _globalAnalysisCache = null;
+
+function renderGlobalAnalysis(years) {
+  var container = document.getElementById('bilanContent');
+  var sortedYears = years.slice().sort();
+
+  // Vérifier le cache
+  var cacheKey = sortedYears.join(',');
+  if(_globalAnalysisCache && _globalAnalysisCache.key === cacheKey) {
+    displayGlobalAnalysis(_globalAnalysisCache.data, sortedYears);
+    return;
+  }
+
+  // Loader
+  container.innerHTML = `
+    <div class="analyze-loader">
+      <div class="analyze-spinner"></div>
+      <div class="analyze-text">Analyse comparative en cours...</div>
+      <div class="analyze-step" id="analyzeStep">🧠 Comparaison de ${sortedYears.length} exercices (${sortedYears[0]} → ${sortedYears[sortedYears.length-1]})</div>
+    </div>
+  `;
+
+  // Préparer les données de tous les bilans
+  var allData = {};
+  sortedYears.forEach(function(y) {
+    var b = _bilans[y];
+    allData[y] = {
+      ca: b.compteResultat?.chiffreAffaires || 0,
+      achats: b.compteResultat?.achatsChargesExternes || 0,
+      va: b.compteResultat?.valeurAjoutee || 0,
+      chargesPersonnel: b.compteResultat?.chargesPersonnel || 0,
+      ebe: b.compteResultat?.ebe || 0,
+      resultatExploitation: b.compteResultat?.resultatExploitation || 0,
+      resultatNet: b.compteResultat?.resultatNet || 0,
+      totalActif: b.actif?.totalActif || 0,
+      totalActifImmobilise: b.actif?.totalActifImmobilise || 0,
+      totalActifCirculant: b.actif?.totalActifCirculant || 0,
+      stocks: b.actif?.stocks || 0,
+      creancesClients: b.actif?.creancesClients || 0,
+      tresorerieActive: b.actif?.tresorerieActive || 0,
+      totalCapitauxPropres: b.passif?.totalCapitauxPropres || 0,
+      totalDettes: b.passif?.totalDettes || 0,
+      dettesFinancieres: b.passif?.dettesFinancieres || 0,
+      dettesFournisseurs: b.passif?.dettesFournisseurs || 0,
+      tauxResultatNet: b.ratios?.tauxResultatNet || 0,
+      tauxEBE: b.ratios?.tauxEBE || 0,
+      ratioEndettement: b.ratios?.ratioEndettement || 0,
+      bfrJours: b.ratios?.bfrJours || 0,
+      ratioLiquiditeGenerale: b.ratios?.ratioLiquiditeGenerale || 0,
+      entreprise: b.entreprise || '',
+      secteur: b.secteur?.libelle || ''
+    };
+  });
+
+  // Appeler l'API
+  fetch('/api/analyze-bilan-global', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ bilansData: allData })
+  })
+  .then(function(resp) {
+    if(!resp.ok) throw new Error('Erreur serveur');
+    return resp.json();
+  })
+  .then(function(result) {
+    if(!result.success || !result.data) throw new Error('Réponse invalide');
+    _globalAnalysisCache = { key: cacheKey, data: result.data };
+    displayGlobalAnalysis(result.data, sortedYears);
+  })
+  .catch(function(err) {
+    console.error('Erreur analyse globale:', err);
+    container.innerHTML = `
+      <div style="text-align:center;padding:60px 20px;">
+        <div style="font-size:48px;margin-bottom:16px;">⚠️</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px;">Erreur lors de l'analyse globale</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">${err.message}</div>
+        <button class="btn btn-primary" onclick="selectYear('${sortedYears[sortedYears.length-1]}')">← Retour au dernier bilan</button>
+      </div>
+    `;
+  });
+}
+
+function displayGlobalAnalysis(data, sortedYears) {
+  var container = document.getElementById('bilanContent');
+  var yFirst = sortedYears[0], yLast = sortedYears[sortedYears.length-1];
+
+  // Préparer les données pour les graphiques d'évolution
+  var caData = sortedYears.map(function(y){ return _bilans[y].compteResultat?.chiffreAffaires || 0; });
+  var rnData = sortedYears.map(function(y){ return _bilans[y].compteResultat?.resultatNet || 0; });
+  var ebeData = sortedYears.map(function(y){ return _bilans[y].compteResultat?.ebe || 0; });
+  var tresoData = sortedYears.map(function(y){ return _bilans[y].actif?.tresorerieActive || 0; });
+  var detteData = sortedYears.map(function(y){ return _bilans[y].passif?.totalDettes || 0; });
+  var cpData = sortedYears.map(function(y){ return _bilans[y].passif?.totalCapitauxPropres || 0; });
+
+  container.innerHTML = `
+    <!-- RÉSUMÉ IA GLOBAL -->
+    <div style="background:linear-gradient(135deg,#7c3aed,#a855f7);border-radius:16px;padding:28px;color:white;margin-bottom:24px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <span style="font-size:28px;">📊</span>
+        <div>
+          <div style="font-size:18px;font-weight:800;">Analyse globale ${yFirst} → ${yLast}</div>
+          <div style="font-size:12px;opacity:.7;">${sortedYears.length} exercices analysés par l'IA</div>
+        </div>
+        <span style="margin-left:auto;background:rgba(255,255,255,.2);padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;">🤖 Analyse IA</span>
+      </div>
+      <div style="font-size:13px;line-height:1.8;opacity:.95;">${data.resumeGlobal || ''}</div>
+    </div>
+
+    <!-- TENDANCES CLÉS -->
+    ${data.tendances ? `
+    <div class="section-label">📈 Tendances clés</div>
+    <div class="kpi-grid" style="margin-bottom:24px;">
+      ${data.tendances.map(function(t){
+        var color = t.direction === 'hausse' ? 'green' : t.direction === 'baisse' ? 'red' : 'blue';
+        var arrow = t.direction === 'hausse' ? '📈' : t.direction === 'baisse' ? '📉' : '➡️';
+        return '<div class="kpi-card ' + color + '">' +
+          '<div class="kpi-label">' + arrow + ' ' + t.indicateur + '</div>' +
+          '<div class="kpi-value">' + t.evolution + '</div>' +
+          '<div class="kpi-sub">' + t.commentaire + '</div>' +
+        '</div>';
+      }).join('')}
+    </div>` : ''}
+
+    <!-- GRAPHIQUES ÉVOLUTION -->
+    <div class="section-label">📊 Évolution sur ${sortedYears.length} ans</div>
+    <div class="charts-grid" style="margin-bottom:24px;">
+      <div class="chart-card">
+        <div class="chart-header">
+          <div><div class="chart-title">Chiffre d'affaires & Résultat Net</div><div class="chart-sub">Évolution ${yFirst} → ${yLast}</div></div>
+        </div>
+        <canvas id="globalChartCA" height="220"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-header">
+          <div><div class="chart-title">Trésorerie & Dettes</div><div class="chart-sub">Évolution ${yFirst} → ${yLast}</div></div>
+        </div>
+        <canvas id="globalChartTreso" height="220"></canvas>
+      </div>
+    </div>
+
+    <!-- TABLEAU COMPARATIF -->
+    <div class="section-label">📋 Tableau comparatif complet</div>
+    <div class="table-card" style="margin-bottom:24px;overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Indicateur</th>
+            ${sortedYears.map(function(y){ return '<th style="text-align:right">' + y + '</th>'; }).join('')}
+            <th style="text-align:right">Évolution</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${buildGlobalTableRows(sortedYears)}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ANALYSE DÉTAILLÉE PAR THÈME -->
+    ${data.analyses ? `
+    <div class="section-label">🔍 Analyse détaillée</div>
+    ${data.analyses.map(function(a){
+      var icons = {croissance:'🚀', rentabilite:'💰', structure:'🏗️', tresorerie:'💧', endettement:'⚖️', investissement:'📌'};
+      var colors = {positif:'#10b981', negatif:'#ef4444', neutre:'#6366f1', vigilance:'#f59e0b'};
+      return '<div style="background:white;border-radius:14px;padding:20px;margin-bottom:14px;border:1px solid var(--border);">' +
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">' +
+          '<span style="font-size:22px;">' + (icons[a.theme] || '📊') + '</span>' +
+          '<div style="font-size:15px;font-weight:700;color:var(--text);">' + a.titre + '</div>' +
+          '<span style="margin-left:auto;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:' + (colors[a.tonalite] || colors.neutre) + '20;color:' + (colors[a.tonalite] || colors.neutre) + ';">' + (a.tonalite === 'positif' ? '✅ Positif' : a.tonalite === 'negatif' ? '⚠️ Attention' : a.tonalite === 'vigilance' ? '👀 Vigilance' : 'ℹ️ Neutre') + '</span>' +
+        '</div>' +
+        '<div style="font-size:13px;color:var(--muted);line-height:1.7;">' + a.detail + '</div>' +
+      '</div>';
+    }).join('')}` : ''}
+
+    <!-- RECOMMANDATIONS -->
+    ${data.recommandations ? `
+    <div class="section-label">💡 Recommandations stratégiques</div>
+    <div style="background:linear-gradient(135deg,rgba(124,58,237,0.04),rgba(168,85,247,0.04));border:1px solid rgba(124,58,237,0.15);border-radius:14px;padding:20px;margin-bottom:24px;">
+      ${data.recommandations.map(function(r, i){
+        return '<div style="display:flex;gap:12px;align-items:flex-start;' + (i > 0 ? 'margin-top:14px;padding-top:14px;border-top:1px solid rgba(124,58,237,0.1);' : '') + '">' +
+          '<span style="font-size:18px;flex-shrink:0;">' + (r.priorite === 'haute' ? '🔴' : r.priorite === 'moyenne' ? '🟡' : '🟢') + '</span>' +
+          '<div>' +
+            '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px;">' + r.titre + '</div>' +
+            '<div style="font-size:12px;color:var(--muted);line-height:1.6;">' + r.detail + '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('')}
+    </div>` : ''}
+  `;
+
+  // Dessiner les graphiques
+  new Chart(document.getElementById('globalChartCA'), {
+    type: 'bar',
+    data: {
+      labels: sortedYears,
+      datasets: [
+        {label:'Chiffre d\'affaires', data: caData, backgroundColor:'rgba(26,61,206,0.7)', borderRadius:6},
+        {label:'EBE', data: ebeData, backgroundColor:'rgba(16,185,129,0.7)', borderRadius:6},
+        {label:'Résultat Net', data: rnData, backgroundColor:'rgba(245,158,11,0.7)', borderRadius:6}
+      ]
+    },
+    options: {responsive:true, plugins:{legend:{position:'bottom',labels:{usePointStyle:true,font:{size:11}}}}, scales:{y:{ticks:{callback:function(v){return (v/1000).toFixed(0)+'k€'}}}}}
+  });
+
+  new Chart(document.getElementById('globalChartTreso'), {
+    type: 'line',
+    data: {
+      labels: sortedYears,
+      datasets: [
+        {label:'Trésorerie', data: tresoData, borderColor:'#10b981', backgroundColor:'rgba(16,185,129,0.1)', fill:true, tension:0.3, pointRadius:5},
+        {label:'Dettes totales', data: detteData, borderColor:'#ef4444', backgroundColor:'rgba(239,68,68,0.1)', fill:true, tension:0.3, pointRadius:5},
+        {label:'Capitaux propres', data: cpData, borderColor:'#6366f1', borderDash:[5,5], tension:0.3, pointRadius:5}
+      ]
+    },
+    options: {responsive:true, plugins:{legend:{position:'bottom',labels:{usePointStyle:true,font:{size:11}}}}, scales:{y:{ticks:{callback:function(v){return (v/1000).toFixed(0)+'k€'}}}}}
+  });
+}
+
+function buildGlobalTableRows(sortedYears) {
+  var rows = [
+    {label:'Chiffre d\'affaires', key:'chiffreAffaires', section:'compteResultat'},
+    {label:'Valeur ajoutée', key:'valeurAjoutee', section:'compteResultat'},
+    {label:'EBE', key:'ebe', section:'compteResultat'},
+    {label:'Résultat d\'exploitation', key:'resultatExploitation', section:'compteResultat'},
+    {label:'Résultat net', key:'resultatNet', section:'compteResultat'},
+    {label:'Total actif', key:'totalActif', section:'actif'},
+    {label:'Trésorerie', key:'tresorerieActive', section:'actif'},
+    {label:'Capitaux propres', key:'totalCapitauxPropres', section:'passif'},
+    {label:'Dettes totales', key:'totalDettes', section:'passif'},
+  ];
+
+  return rows.map(function(r){
+    var vals = sortedYears.map(function(y){
+      return (_bilans[y][r.section] && _bilans[y][r.section][r.key]) || 0;
+    });
+    var first = vals[0], last = vals[vals.length-1];
+    var evol = first !== 0 ? ((last - first) / Math.abs(first) * 100) : 0;
+    var evolStr = evol > 0 ? '<span class="evol-badge evol-up">+' + evol.toFixed(1) + '%</span>' : evol < 0 ? '<span class="evol-badge evol-down">' + evol.toFixed(1) + '%</span>' : '<span class="evol-badge evol-neutral">-</span>';
+
+    return '<tr><td><b>' + r.label + '</b></td>' +
+      vals.map(function(v){ return '<td style="text-align:right">' + fmtE(v) + '</td>'; }).join('') +
+      '<td style="text-align:right">' + evolStr + '</td></tr>';
+  }).join('');
 }
 
 // ─── BENCHMARK SECTORIEL ───
