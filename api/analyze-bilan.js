@@ -106,7 +106,15 @@ Montants = entiers. Ratios = décimal (ex: 14.65). 4-6 conseils variés.${contex
     // Nettoyer les éventuels caractères de contrôle qui cassent JSON.parse
     text = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
 
-    const data = JSON.parse(text);
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (parseErr) {
+      // Claude a répondu du texte au lieu de JSON (ex: "document illisible", "OCR de mauvaise qualité")
+      // On le renvoie comme erreur lisible pour l'utilisateur
+      const shortText = text.slice(0, 300).replace(/"/g, '\'');
+      throw new Error('Le document PDF semble être un scan de mauvaise qualité. Essayez un PDF natif issu directement du logiciel comptable. Détail: ' + shortText);
+    }
     data._mode = hasText ? 'text' : 'image';
 
     // Vérifications de cohérence
