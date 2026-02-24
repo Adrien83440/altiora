@@ -1344,8 +1344,11 @@ function exportPDF(){
     if(!jsPDF){alert('Librairie PDF non chargee.');return;}
     var doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
 
-    // ── Constantes layout ──────────────────────────────────────
-    var W=210,H=297,MG=12,CW=186,y=MG;   // CW = largeur utile = W - 2*MG
+    // ── Layout ───────────────────────────────────────────────
+    var W=210, H=297, MG=14, CW=182;
+    var HFOOTER=10, HMARGIN_TOP=14;
+    var pageBottom = H - HFOOTER - 4; // y max utilisable
+
     var year=_selectedYear;
     var keys=getPeriodKeys(year);
     var keysN1=[];
@@ -1355,13 +1358,11 @@ function exportPDF(){
       var cy2=rs1.year,cm2=rs1.month;
       while(cy2<re1.year||(cy2===re1.year&&cm2<=re1.month)){
         keysN1.push(cy2+'-'+String(cm2+1).padStart(2,'0'));
-        cm2++;if(cm2>11){cm2=0;cy2++;}
-        if(keysN1.length>36)break;
+        cm2++;if(cm2>11){cm2=0;cy2++;}if(keysN1.length>36)break;
       }
     } else { keysN1=getPeriodKeys(year-1); }
 
-    var agg=aggregateKeys(keys);
-    var aggN1=aggregateKeys(keysN1);
+    var agg=aggregateKeys(keys), aggN1=aggregateKeys(keysN1);
     var T=agg.T, TN1=aggN1.T, monthly=agg.monthly, topCharges=agg.topChargesList;
     var nom=_nomCommerce||'Mon Commerce';
     var periodLabel=getPeriodLabel(year);
@@ -1370,244 +1371,316 @@ function exportPDF(){
     var caMens=T.moisData>0?T.caHT/T.moisData:0;
     var chargesMens=T.moisData>0?T.charges/T.moisData:0;
     var txVar=T.caHT>0?T.variable/T.caHT*100:0;
+    var txFixe=T.caHT>0?T.fixe/T.caHT*100:0;
     var dA=_dettesData.filter(function(d){return d.statut!=='soldee'&&d.statut!=='solde';});
     var totD=dA.reduce(function(s,d){return s+(parseFloat(d.montantRestant||d.montant)||0);},0);
     var totM=dA.reduce(function(s,d){return s+(parseFloat(d.mensualite)||0);},0);
     var evCA=(TN1.caHT>0&&TN1.moisData>0&&TN1.caHT>T.caHT*0.05)?(T.caHT-TN1.caHT)/TN1.caHT*100:null;
     var ratioEndett=T.caHT>0?totD/T.caHT*100:0;
 
-    // ── Couleurs ──────────────────────────────────────────────
-    var BD=[15,31,92], BL=[26,61,206], GR=[16,185,129], RD=[239,68,68], OR=[245,158,11];
-    var WH=[255,255,255], TX=[26,31,54], MT=[107,114,128], GY=[248,250,252], BR=[226,232,240];
-    var LGR=[240,253,244], LRD=[255,241,242], LBL=[239,246,255], LOR=[255,251,235];
+    // ── Couleurs ─────────────────────────────────────────────
+    var cBD=[15,31,92], cBL=[26,61,206], cGR=[16,185,129], cRD=[239,68,68], cOR=[245,158,11];
+    var cWH=[255,255,255], cTX=[26,31,54], cMT=[107,114,128], cGY=[248,250,252], cBR=[226,232,240];
+    var cLGR=[240,253,244], cLRD=[255,241,242], cLBL=[239,246,255], cLOR=[255,251,235];
+    var cPU=[99,102,241];
 
-    // ── Helpers ───────────────────────────────────────────────
-    function sf(st,sz,cl){doc.setFont('helvetica',st||'normal');doc.setFontSize(sz||9);var c=cl||TX;doc.setTextColor(c[0],c[1],c[2]);}
+    // ── State ────────────────────────────────────────────────
+    var y = HMARGIN_TOP;
+    var pageNum = 1;
+
+    // ── Fonctions utilitaires ─────────────────────────────────
+    function sf(style,size,c){
+      doc.setFont('helvetica',style||'normal');
+      doc.setFontSize(size||9);
+      c=c||cTX;doc.setTextColor(c[0],c[1],c[2]);
+    }
     function fill(c){doc.setFillColor(c[0],c[1],c[2]);}
     function stroke(c,w){doc.setDrawColor(c[0],c[1],c[2]);doc.setLineWidth(w||0.3);}
+    function txt(t,x,yy,opts){doc.text(String(t),x,yy,opts||{});}
 
-    function footer(){
-      var pg=doc.getCurrentPageInfo().pageNumber;
-      fill(BD);doc.rect(0,H-8,W,8,'F');
-      sf('normal',6,WH);
-      doc.text('ALTEORE  |  '+nom+'  |  '+periodLabel+'  |  Document indicatif non officiel',MG,H-3);
-      sf('bold',6.5,WH);doc.text(''+pg,W-MG,H-3,{align:'right'});
+    // ── Footer (appelé en fin de chaque page) ────────────────
+    function drawFooter(){
+      fill(cBD);doc.rect(0,H-HFOOTER,W,HFOOTER,'F');
+      fill(cBL);doc.rect(W*0.7,H-HFOOTER,W*0.3,HFOOTER,'F');
+      sf('normal',6,cWH);
+      txt('ALTEORE  |  '+nom+'  |  '+periodLabel,MG,H-3.5);
+      sf('bold',7,cWH);
+      txt(''+pageNum,W-MG,H-3.5,{align:'right'});
     }
-    function chk(n){if(y+n>H-12){doc.addPage();y=MG;footer();}}
 
-    function sectionTitle(t){
-      chk(13);y+=2;
-      fill(BL);doc.rect(MG,y,3,7,'F');
-      sf('bold',8.5,BD);doc.text(t,MG+6,y+5.2);
-      stroke(BR,0.4);
+    // ── Nouvelle page ────────────────────────────────────────
+    function newPage(){
+      drawFooter();
+      doc.addPage();
+      pageNum++;
+      y=HMARGIN_TOP;
+    }
+
+    // ── Vérification espace restant ──────────────────────────
+    // Retourne true si on peut dessiner 'needed' mm sans déborder
+    function fits(needed){ return y+needed <= pageBottom; }
+
+    // ── Saut de page si nécessaire (safe break) ──────────────
+    function ensureFits(needed){
+      if(!fits(needed)) newPage();
+    }
+
+    // ── Titre de section ─────────────────────────────────────
+    // Protège: titre + au moins 20mm de contenu sur la même page
+    function sectionTitle(t, minContent){
+      minContent = minContent||20;
+      ensureFits(12 + minContent);
+      y+=3;
+      // Barre bleue gauche
+      fill(cBL);doc.rect(MG,y,3.5,8,'F');
+      // Fond titre léger
+      fill(cLBL);doc.rect(MG+3.5,y,CW-3.5,8,'F');
+      sf('bold',9,cBD);txt(t,MG+8,y+5.6);
+      // Ligne décorative
+      stroke(cBR,0.5);
       var tw=doc.getTextWidth(t);
-      doc.line(MG+8+tw,y+3.5,MG+CW,y+3.5);
-      y+=10;
+      doc.line(MG+11+tw,y+4,MG+CW,y+4);
+      y+=12;
     }
 
-    // Tableau helper: définir colonnes comme [{x,w,label,r,color?}]
-    // x = position absolue depuis bord gauche doc, w = largeur
-    function tHead(cols){
-      chk(9);
-      fill(BD);doc.rect(MG,y,CW,7,'F');
-      fill(BL);doc.rect(MG+CW*0.6,y,CW*0.4,7,'F');
-      sf('bold',6,WH);
+    // ── Rendu d'un tableau ────────────────────────────────────
+    // cols: [{label,x,w,r?}]  — x et w absolus depuis bord gauche
+    // Calcul automatique de l'hauteur totale pour protection pagination
+    var ROW_H = 6.5;
+    var HEAD_H = 8;
+    var TOTAL_H = 8;
+
+    function tableHeader(cols){
+      ensureFits(HEAD_H + ROW_H); // header + au moins une ligne
+      fill(cBD);doc.rect(MG,y,CW,HEAD_H,'F');
+      // Dégradé droite
+      fill(cBL);doc.rect(MG+CW*0.55,y,CW*0.45,HEAD_H,'F');
+      sf('bold',6.5,cWH);
       cols.forEach(function(c){
-        var tx2=c.r?(c.x+c.w-1):(c.x+2);
-        doc.text(c.label,tx2,y+4.8,{align:c.r?'right':'left'});
+        var tx = c.r ? (c.x+c.w-1.5) : (c.x+2.5);
+        txt(c.label, tx, y+5.5, {align:c.r?'right':'left'});
       });
-      y+=7;
+      y+=HEAD_H;
     }
-    function tRow(cols,vals,ri,opts){
+
+    function tableRow(cols, vals, ri, opts){
       opts=opts||{};
-      chk(7);
-      var bg=ri%2===0?WH:GY;
-      fill(opts.bg||bg);doc.rect(MG,y,CW,6.5,'F');
-      if(opts.accent){fill(opts.accent);doc.rect(MG,y,2,6.5,'F');}
-      stroke(BR,0.15);doc.line(MG,y+6.5,MG+CW,y+6.5);
+      // Ne jamais couper une ligne à mi-chemin
+      // Si plus de place, nouvelle page + re-draw header
+      if(!fits(ROW_H)){
+        newPage();
+        // Re-draw header sur nouvelle page
+        if(opts.reHead) opts.reHead();
+      }
+      var bg=opts.bg||(ri%2===0?cWH:cGY);
+      fill(bg);doc.rect(MG,y,CW,ROW_H,'F');
+      // Accent couleur gauche
+      if(opts.accent){fill(opts.accent);doc.rect(MG,y,2,ROW_H,'F');}
+      // Ligne séparatrice fine
+      stroke(cBR,0.15);doc.line(MG,y+ROW_H,MG+CW,y+ROW_H);
       cols.forEach(function(c,i){
-        var v=vals[i];if(v===null||v===undefined)v='-';
-        var cl=opts.colors&&opts.colors[i]?opts.colors[i]:TX;
+        var v=vals[i]; if(v===null||v===undefined)v='-';
+        var cl=(opts.colors&&opts.colors[i])||cTX;
         sf(opts.bold?'bold':'normal',6.5,cl);
-        var tx2=c.r?(c.x+c.w-1):(c.x+2);
-        doc.text(String(v),tx2,y+4.5,{align:c.r?'right':'left'});
+        var tx = c.r ? (c.x+c.w-1.5) : (c.x+2.5);
+        txt(String(v), tx, y+4.5, {align:c.r?'right':'left'});
       });
-      y+=6.5;
+      y+=ROW_H;
     }
-    function tTotal(cols,vals,opts){
+
+    function tableTotal(cols, vals, opts){
       opts=opts||{};
-      chk(9);
-      fill(opts.bg||BD);doc.rect(MG,y,CW,7.5,'F');
-      sf('bold',7,opts.tc||WH);
+      ensureFits(TOTAL_H);
+      fill(opts.bg||cBD);doc.rect(MG,y,CW,TOTAL_H,'F');
+      // Top accent line
+      fill(cBL);doc.rect(MG,y,CW,1.5,'F');
+      sf('bold',7,opts.tc||cWH);
       cols.forEach(function(c,i){
-        var v=vals[i];if(v===null||v===undefined)v='';
-        var tx2=c.r?(c.x+c.w-1):(c.x+2);
-        doc.text(String(v),tx2,y+5.2,{align:c.r?'right':'left'});
+        var v=vals[i]; if(v===null||v===undefined)v='';
+        var tx = c.r ? (c.x+c.w-1.5) : (c.x+2.5);
+        txt(String(v), tx, y+5.5, {align:c.r?'right':'left'});
       });
-      y+=7.5;
+      y+=TOTAL_H;
     }
 
-    // ── PAGE 1 HEADER ────────────────────────────────────────
-    fill(BD);doc.rect(0,0,W,56,'F');
-    fill(BL);doc.rect(W*0.52,0,W*0.48,56,'F');
-    fill([79,126,248]);doc.rect(W-3,0,3,56,'F');
-    sf('bold',22,WH);doc.text(nom.length>26?nom.slice(0,24)+'..':nom,MG,20);
-    sf('normal',8.5,[180,200,230]);doc.text('Situation Intermediaire  |  '+periodLabel+'  |  '+T.moisData+' mois',MG,30);
-    sf('normal',7.5,[160,185,220]);doc.text('Document indicatif - non officiel',MG,39);
-    sf('bold',13,WH);doc.text('ALTEORE',W-MG,18,{align:'right'});
-    sf('normal',7.5,[160,185,220]);doc.text('alteore.com',W-MG,26,{align:'right'});
-    sf('normal',7,[140,165,205]);doc.text(new Date().toLocaleDateString('fr-FR'),W-MG,34,{align:'right'});
-    footer();y=64;
+    // ── PAGE 1 – COUVERTURE ──────────────────────────────────
+    // Fond en deux blocs
+    fill(cBD);doc.rect(0,0,W,62,'F');
+    fill(cBL);doc.rect(W*0.5,0,W*0.5,62,'F');
+    // Bande déco droite
+    fill([79,126,248]);doc.rect(W-3,0,3,62,'F');
+    // Logo / Nom commerce
+    sf('bold',22,cWH);txt(nom.length>26?nom.slice(0,24)+'..':nom, MG,22);
+    sf('bold',8,[200,215,240]);txt('SITUATION INTERMEDIAIRE',MG,31);
+    sf('normal',8,[170,190,225]);txt(periodLabel+'   |   '+T.moisData+' mois',MG,40);
+    sf('normal',7,[150,175,215]);txt('Document indicatif — non officiel',MG,49);
+    // Branding droite
+    sf('bold',15,cWH);txt('ALTEORE',W-MG,20,{align:'right'});
+    sf('normal',7.5,[170,195,235]);txt('alteore.com',W-MG,29,{align:'right'});
+    sf('normal',7,[140,165,205]);txt(new Date().toLocaleDateString('fr-FR'),W-MG,38,{align:'right'});
 
-    // ── KPIs LIGNE 1 ─────────────────────────────────────────
-    sectionTitle('INDICATEURS CLES');
-    var kw=(CW-9)/4,kh=24;
+    // KPIs bloc sous le header (fond blanc, ombre simulée)
     var kpis=[
-      {v:fmtP(T.caHT),   lbl:'CA Total HT',      cl:BL, sub:evCA!==null?(evCA>=0?'+':'')+evCA.toFixed(1)+'% vs N-1':T.moisData+' mois'},
-      {v:fmtP(T.charges), lbl:'Total Charges HT',  cl:OR, sub:fmtPctP(txCh,true)+' du CA'},
-      {v:fmtP(T.resultat),lbl:T.resultat>=0?'Benefice estime':'Perte estimee', cl:T.resultat>=0?GR:RD, sub:fmtPctP(Math.abs(mgN),true)+' de marge'},
-      {v:fmtP(totD),      lbl:'Encours Dettes',    cl:[99,102,241], sub:totM>0?fmtP(totM)+'/mois':'Aucune dette'},
+      {v:fmtP(T.caHT),  lbl:'CA Total HT',  sub:evCA!==null?(evCA>=0?'+':'')+evCA.toFixed(1)+'% vs N-1':T.moisData+' mois', cl:cBL},
+      {v:fmtP(T.charges),lbl:'Charges HT',  sub:fmtPctP(txCh,true)+' du CA', cl:cOR},
+      {v:fmtP(T.resultat),lbl:T.resultat>=0?'Benefice':'Perte', sub:fmtPctP(Math.abs(mgN),true)+' de marge', cl:T.resultat>=0?cGR:cRD},
+      {v:fmtP(totD),     lbl:'Encours dettes',sub:totM>0?fmtP(totM)+'/mois':'Aucune', cl:cPU},
     ];
+    var kw=(CW-9)/4;
+    y=68;
     kpis.forEach(function(k,i){
       var kx=MG+i*(kw+3);
-      fill(GY);doc.roundedRect(kx,y,kw,kh,2,2,'F');
-      fill(k.cl);doc.rect(kx,y,kw,2.5,'F');
-      stroke(BR,0.25);doc.roundedRect(kx,y,kw,kh,2,2,'S');
-      sf('normal',5.5,MT);doc.text(k.lbl,kx+3,y+8);
-      sf('bold',9.5,k.cl);doc.text(k.v,kx+3,y+17);
-      sf('normal',5.5,MT);doc.text(k.sub,kx+3,y+22);
+      fill(cWH);doc.roundedRect(kx,y,kw,24,2,2,'F');
+      fill(k.cl);doc.rect(kx,y,kw,3,'F');
+      stroke(cBR,0.3);doc.roundedRect(kx,y,kw,24,2,2,'S');
+      sf('normal',5.5,cMT);txt(k.lbl,kx+3,y+8.5);
+      sf('bold',10,k.cl);txt(k.v,kx+3,y+17);
+      sf('normal',5.5,cMT);txt(k.sub,kx+3,y+22.5);
     });
-    y+=kh+5;
+    y+=30;
 
-    // KPIs ligne 2 (6 cases)
+    // KPIs ligne 2 (6 blocs)
     var kpis2=[
-      [fmtP(caMens),'CA moy./mois'],
-      [fmtP(caMens/30),'CA moy./jour'],
-      [fmtPctP(T.caHT>0?T.fixe/T.caHT*100:0,true),'Fixes / CA'],
-      [fmtPctP(txVar,true),'Variables / CA'],
+      [fmtP(caMens),'CA moyen/mois'],
+      [fmtP(caMens/30),'CA moyen/jour'],
+      [fmtPctP(txFixe,true),'Charges fixes/CA'],
+      [fmtPctP(txVar,true),'Charges var./CA'],
       [fmtP(T.tvaCollectee),'TVA collectee'],
       [T.tvaDue<=0?'Credit '+fmtP(Math.abs(T.tvaDue)):fmtP(T.tvaDue),'TVA due'],
     ];
     var kw2=(CW-10)/6;
     kpis2.forEach(function(k,i){
       var kx=MG+i*(kw2+2);
-      fill(GY);doc.roundedRect(kx,y,kw2,14,1.5,1.5,'F');
-      stroke(BR,0.2);doc.roundedRect(kx,y,kw2,14,1.5,1.5,'S');
-      sf('normal',5,MT);doc.text(k[1],kx+2.5,y+5.5);
-      sf('bold',7.5,BD);doc.text(k[0],kx+2.5,y+12);
+      fill(cGY);doc.roundedRect(kx,y,kw2,15,1.5,1.5,'F');
+      stroke(cBR,0.2);doc.roundedRect(kx,y,kw2,15,1.5,1.5,'S');
+      sf('normal',5,cMT);txt(k[1],kx+2.5,y+6);
+      sf('bold',8,cBD);txt(k[0],kx+2.5,y+13);
     });
-    y+=19;
+    y+=21;
 
-    // ── COMPTE DE RESULTAT ───────────────────────────────────
-    sectionTitle('COMPTE DE RESULTAT SIMPLIFIE');
-    // Colonnes: Libelle|Montant|%CA|N-1  — largeurs: 90+40+26+30 = 186 ✓
-    var cA=MG, cB=MG+90, cC=MG+130, cD=MG+156;
-    var cAw=88, cBw=39, cCw=25, cDw=30;
-    // Header
-    fill(BD);doc.rect(MG,y,CW,7,'F');
-    fill(BL);doc.rect(MG+CW*0.5,y,CW*0.5,7,'F');
-    sf('bold',6.5,WH);
-    doc.text('Poste',cA+2,y+4.8);
-    doc.text('Montant HT',cB+cBw,y+4.8,{align:'right'});
-    doc.text('% CA',cC+cCw,y+4.8,{align:'right'});
-    if(TN1.moisData>0)doc.text('N-1',cD+cDw,y+4.8,{align:'right'});
-    y+=7;
+    // ── COMPTE DE RÉSULTAT ────────────────────────────────────
+    // Colonnes: Poste(90) | Montant(40) | %CA(28) | N-1(24) = 182 ✓
+    var rC=[
+      {label:'Poste',     x:MG,    w:88, r:false},
+      {label:'Montant HT',x:MG+88, w:42, r:true},
+      {label:'% CA',      x:MG+130,w:26, r:true},
+      {label:'N-1',       x:MG+156,w:26, r:true},
+    ];
+    sectionTitle('COMPTE DE RESULTAT SIMPLIFIE', 60);
+    // Header manuel (design spécial)
+    fill(cBD);doc.rect(MG,y,CW,HEAD_H,'F');
+    fill(cBL);doc.rect(MG+CW*0.5,y,CW*0.5,HEAD_H,'F');
+    sf('bold',6.5,cWH);
+    txt('Poste',MG+2.5,y+5.5);
+    txt('Montant HT',rC[1].x+rC[1].w-1.5,y+5.5,{align:'right'});
+    txt('% CA',rC[2].x+rC[2].w-1.5,y+5.5,{align:'right'});
+    if(TN1.moisData>0) txt('N-1',rC[3].x+rC[3].w-1.5,y+5.5,{align:'right'});
+    y+=HEAD_H;
 
-    function prow(lbl,val,pct,n1,opts){
-      opts=opts||{};
-      chk(7.5);
-      var bg=opts.res?(val>=0?LGR:LRD):(opts.bold?LBL:WH);
-      fill(bg);doc.rect(MG,y,CW,7,'F');
-      if(opts.bold){fill(BL);doc.rect(MG,y,2.5,7,'F');}
-      stroke(BR,0.15);doc.line(MG,y+7,MG+CW,y+7);
-      sf(opts.bold?'bold':'normal',7,TX);
-      doc.text(lbl,cA+(opts.bold?5:3),y+4.8);
+    function prowR(lbl,val,pct,n1,isBold,isRes){
+      if(!fits(ROW_H)) newPage();
+      var bg=isRes?(val>=0?cLGR:cLRD):(isBold?cLBL:cWH);
+      fill(bg);doc.rect(MG,y,CW,ROW_H,'F');
+      if(isBold){fill(cBL);doc.rect(MG,y,2.5,ROW_H,'F');}
+      stroke(cBR,0.15);doc.line(MG,y+ROW_H,MG+CW,y+ROW_H);
+      sf(isBold?'bold':'normal',isBold?7:6.5,cTX);
+      txt(lbl,MG+(isBold?5.5:3),y+4.5);
       if(typeof val==='number'){
-        var vc=opts.res?(val>=0?GR:RD):(opts.bold?BD:TX);
-        sf(opts.bold?'bold':'normal',opts.bold?7.5:7,vc);
-        doc.text(fmtP(val),cB+cBw,y+4.8,{align:'right'});
+        var vc=isRes?(val>=0?cGR:cRD):(isBold?cBD:cTX);
+        sf(isBold?'bold':'normal',isBold?7.5:7,vc);
+        txt(fmtP(val),rC[1].x+rC[1].w-1.5,y+4.5,{align:'right'});
       }
-      sf('normal',6,MT);doc.text(pct||'',cC+cCw,y+4.8,{align:'right'});
+      sf('normal',6,cMT);txt(pct||'',rC[2].x+rC[2].w-1.5,y+4.5,{align:'right'});
       if(TN1.moisData>0&&n1!==undefined){
-        sf('normal',6,[180,185,200]);
-        doc.text(typeof n1==='number'?fmtP(n1):'-',cD+cDw,y+4.8,{align:'right'});
+        sf('normal',6,[185,190,205]);
+        txt(typeof n1==='number'?fmtP(n1):'-',rC[3].x+rC[3].w-1.5,y+4.5,{align:'right'});
       }
-      y+=7;
+      y+=ROW_H;
     }
-
-    prow('CA journalier (caisse)',T.caJ,T.caHT>0?fmtPctP(T.caJ/T.caHT*100,true):'',TN1.caJ);
-    if(T.caFP>0)prow('  + Factures Pro / B2B',T.caFP,T.caHT>0?fmtPctP(T.caFP/T.caHT*100,true):'',TN1.caFP);
-    if(T.rentrees>0)prow('  + Rentrees supplementaires',T.rentrees,'',TN1.rentrees);
-    prow('TOTAL PRODUITS HT',T.caHT,'100%',TN1.caHT,{bold:true});
-    y+=3;
-    prow('Charges fixes HT',T.fixe,T.caHT>0?fmtPctP(T.fixe/T.caHT*100,true):'',TN1.fixe);
-    prow('Charges variables HT',T.variable,T.caHT>0?fmtPctP(T.variable/T.caHT*100,true):'',TN1.variable);
-    if(T.credit>0)prow('Credits & Emprunts',T.credit,T.caHT>0?fmtPctP(T.credit/T.caHT*100,true):'',TN1.credit);
-    if(T.leasing>0)prow('Leasing / LOA / LLD',T.leasing,'',TN1.leasing);
-    prow('TOTAL CHARGES HT',T.charges,fmtPctP(txCh,true),TN1.charges,{bold:true});
-    y+=3;
-    prow(T.resultat>=0?'BENEFICE ESTIME':'PERTE ESTIMEE',T.resultat,fmtPctP(Math.abs(mgN),true),TN1.resultat,{bold:true,res:true});
-    y+=8;
+    prowR('CA journalier (caisse)',T.caJ,T.caHT>0?fmtPctP(T.caJ/T.caHT*100,true):'',TN1.caJ);
+    if(T.caFP>0)prowR('  + Factures Pro / B2B',T.caFP,T.caHT>0?fmtPctP(T.caFP/T.caHT*100,true):'',TN1.caFP);
+    if(T.rentrees>0)prowR('  + Rentrees supplementaires',T.rentrees,'',TN1.rentrees);
+    prowR('TOTAL PRODUITS HT',T.caHT,'100%',TN1.caHT,true);
+    y+=2;
+    prowR('Charges fixes HT',T.fixe,T.caHT>0?fmtPctP(T.fixe/T.caHT*100,true):'',TN1.fixe);
+    prowR('Charges variables HT',T.variable,T.caHT>0?fmtPctP(T.variable/T.caHT*100,true):'',TN1.variable);
+    if(T.credit>0)prowR('Credits & Emprunts',T.credit,T.caHT>0?fmtPctP(T.credit/T.caHT*100,true):'',TN1.credit);
+    if(T.leasing>0)prowR('Leasing / LOA / LLD',T.leasing,'',TN1.leasing);
+    prowR('TOTAL CHARGES HT',T.charges,fmtPctP(txCh,true),TN1.charges,true);
+    y+=2;
+    prowR(T.resultat>=0?'BENEFICE ESTIME':'PERTE ESTIMEE',T.resultat,fmtPctP(Math.abs(mgN),true),TN1.resultat,true,true);
+    y+=10;
 
     // ── TVA ──────────────────────────────────────────────────
-    sectionTitle('SITUATION TVA ESTIMEE');
+    // 3 blocs + tableau: besoin ~65mm → forcer nouvelle page si < 65mm
+    sectionTitle('SITUATION TVA ESTIMEE', 65);
     var tw3=(CW-6)/3;
     var tvaB=[
-      [fmtP(T.tvaCollectee),'TVA Collectee','Sur ventes',OR],
-      [fmtP(T.tvaDed),'TVA Deductible','Sur achats & charges',GR],
-      [T.tvaDue<=0?fmtP(Math.abs(T.tvaDue)):fmtP(T.tvaDue),T.tvaDue<=0?'Credit de TVA':'TVA a reverser',T.tvaDue<=0?'Remboursable':'A provisionner !',T.tvaDue<=0?GR:RD],
+      {v:fmtP(T.tvaCollectee), l1:'TVA Collectee',    l2:'Sur ventes CA',           cl:cOR},
+      {v:fmtP(T.tvaDed),       l1:'TVA Deductible',   l2:'Sur achats & charges',    cl:cGR},
+      {v:T.tvaDue<=0?fmtP(Math.abs(T.tvaDue)):fmtP(T.tvaDue),
+       l1:T.tvaDue<=0?'Credit de TVA':'TVA a reverser',
+       l2:T.tvaDue<=0?'Remboursable':'A provisionner', cl:T.tvaDue<=0?cGR:cRD},
     ];
     tvaB.forEach(function(b,i){
       var bx=MG+i*(tw3+3);
-      fill(GY);doc.roundedRect(bx,y,tw3,18,2,2,'F');
-      fill(b[3]);doc.rect(bx,y,tw3,2.5,'F');
-      stroke(BR,0.2);doc.roundedRect(bx,y,tw3,18,2,2,'S');
-      sf('normal',5.5,MT);doc.text(b[1],bx+3,y+7);
-      sf('bold',10,b[3]);doc.text(b[0],bx+3,y+14);
-      sf('normal',5,MT);doc.text(b[2],bx+3,y+17.5);
+      fill(cWH);doc.roundedRect(bx,y,tw3,20,2,2,'F');
+      fill(b.cl);doc.rect(bx,y,tw3,3,'F');
+      stroke(cBR,0.25);doc.roundedRect(bx,y,tw3,20,2,2,'S');
+      sf('normal',6,cMT);txt(b.l1,bx+3.5,y+8);
+      sf('bold',11,b.cl);txt(b.v,bx+3.5,y+16);
+      sf('normal',5.5,cMT);txt(b.l2,bx+3.5,y+19.5);
     });
-    y+=22;
-    // TVA par taux
-    var tcols=[
-      {x:MG,   w:80,label:'Taux',   r:false},
-      {x:MG+80,w:42,label:'Base HT',r:true},
-      {x:MG+122,w:38,label:'TVA',   r:true},
-      {x:MG+160,w:26,label:'% base',r:true},
+    y+=24;
+    // Tableau TVA par taux: 82+42+38+20 = 182 ✓
+    var tCols=[
+      {label:'Taux',   x:MG,     w:82, r:false},
+      {label:'Base HT',x:MG+82,  w:42, r:true},
+      {label:'TVA',    x:MG+124, w:38, r:true},
+      {label:'% base', x:MG+162, w:20, r:true},
     ];
-    tHead(tcols);
     var trows=[];
     if(T.caHT055>0)trows.push(['5,5%',fmtP(T.caHT055),fmtP(T.caHT055*0.055),fmtPctP(T.caHT>0?T.caHT055/T.caHT*100:0,true)]);
     if(T.caHT10>0) trows.push(['10%', fmtP(T.caHT10), fmtP(T.caHT10*0.10), fmtPctP(T.caHT>0?T.caHT10/T.caHT*100:0,true)]);
     if(T.caHT20>0) trows.push(['20%', fmtP(T.caHT20), fmtP(T.caHT20*0.20), fmtPctP(T.caHT>0?T.caHT20/T.caHT*100:0,true)]);
-    if(trows.length===0)trows.push(['Aucun CA TVA enregistre','-','-','-']);
-    trows.forEach(function(r,i){tRow(tcols,r,i);});
-    tTotal(tcols,['TOTAL',fmtP(T.caHT),fmtP(T.tvaCollectee),'100%']);
-    y+=8;
+    if(!trows.length)trows.push(['Aucun CA TVA enregistre','-','-','-']);
+    tableHeader(tCols);
+    trows.forEach(function(r,i){tableRow(tCols,r,i,{reHead:function(){tableHeader(tCols);}});});
+    tableTotal(tCols,['TOTAL',fmtP(T.caHT),fmtP(T.tvaCollectee),'100%']);
+    y+=10;
 
-    // ── DETAIL MENSUEL ───────────────────────────────────────
-    sectionTitle('DETAIL MENSUEL');
-    // 8 colonnes: Mois|CA HT|Charges|Resultat|Marge|Fixes|Var.|N-1
-    // largeurs: 16+26+26+25+18+25+22+28 = 186 ✓
-    var mc=[
-      {x:MG,    w:16,label:'Mois',    r:false},
-      {x:MG+16, w:26,label:'CA HT',   r:true},
-      {x:MG+42, w:26,label:'Charges', r:true},
-      {x:MG+68, w:25,label:'Resultat',r:true},
-      {x:MG+93, w:18,label:'Marge',   r:true},
-      {x:MG+111,w:25,label:'Fixes',   r:true},
-      {x:MG+136,w:22,label:'Var.',    r:true},
-      {x:MG+158,w:28,label:'N-1 CA',  r:true},
+    // ── DETAIL MENSUEL ────────────────────────────────────────
+    // 8 cols: 16+26+26+25+18+25+24+22 = 182 ✓
+    var mCols=[
+      {label:'Mois',    x:MG,     w:16, r:false},
+      {label:'CA HT',   x:MG+16,  w:26, r:true},
+      {label:'Charges', x:MG+42,  w:26, r:true},
+      {label:'Resultat',x:MG+68,  w:25, r:true},
+      {label:'Marge',   x:MG+93,  w:18, r:true},
+      {label:'Fixes',   x:MG+111, w:25, r:true},
+      {label:'Var.',    x:MG+136, w:24, r:true},
+      {label:'N-1 CA',  x:MG+160, w:22, r:true},
     ];
-    // Vérif: mc[7].x + mc[7].w = MG+158+28 = MG+186 = 12+186 = 198 < 210 ✓
-    tHead(mc);
+    // Detail mensuel: header + rows + total. Si ≤ 15 mois: tenter de tenir ensemble
+    var detailH = 12 + HEAD_H + ROW_H*monthly.length + TOTAL_H;
+    if(detailH < 190) ensureFits(detailH);
+    else ensureFits(12 + HEAD_H + ROW_H*4);
+    y+=3; fill(cBL);doc.rect(MG,y,3.5,8,'F'); fill(cLBL);doc.rect(MG+3.5,y,CW-3.5,8,'F');
+    sf('bold',9,cBD);txt('DETAIL MENSUEL',MG+8,y+5.6);
+    stroke(cBR,0.5);var tw4d=doc.getTextWidth('DETAIL MENSUEL');
+    doc.line(MG+11+tw4d,y+4,MG+CW,y+4); y+=12;
+    tableHeader(mCols);
     var totCA=0,totCH=0,totRS=0,totFX=0,totVR=0;
     monthly.forEach(function(m,idx){
       var n1key=(m.yr-1)+'-'+String(m.m+1).padStart(2,'0');
       var n1r=computeMonth(_allData[n1key]||null,n1key);
       var mg2=m.caHT>0?m.resultat/m.caHT*100:0;
       if(m.hasData){totCA+=m.caHT;totCH+=m.charges;totRS+=m.resultat;totFX+=m.fixe;totVR+=m.variable;}
-      var clrs=[BL,TX,TX,m.hasData?(m.resultat>=0?GR:RD):MT,m.hasData?(mg2>=0?GR:RD):MT,TX,TX,MT];
-      var vals=[
+      var clrs=[cBL,cTX,cTX,
+        m.hasData?(m.resultat>=0?cGR:cRD):cMT,
+        m.hasData?(mg2>=0?cGR:cRD):cMT,
+        cTX,cTX,[170,180,200]];
+      tableRow(mCols,[
         m.lbl,
         m.hasData?fmtP(m.caHT):'-',
         m.hasData?fmtP(m.charges):'-',
@@ -1616,229 +1689,263 @@ function exportPDF(){
         m.hasData?fmtP(m.fixe):'-',
         m.hasData?fmtP(m.variable):'-',
         n1r.hasData?fmtP(n1r.caHT):'-',
-      ];
-      tRow(mc,vals,idx,{colors:clrs,bold:false,accent:null});
+      ],idx,{colors:clrs,reHead:function(){tableHeader(mCols);}});
     });
     var mgTot=totCA>0?totRS/totCA*100:0;
-    tTotal(mc,[
-      'TOTAL',fmtP(totCA),fmtP(totCH),fmtP(totRS),fmtPctP(mgTot,true),
-      fmtP(totFX),fmtP(totVR),TN1.moisData>0?fmtP(TN1.caHT):'-'
-    ]);
-    y+=8;
+    tableTotal(mCols,['TOTAL',fmtP(totCA),fmtP(totCH),fmtP(totRS),
+      fmtPctP(mgTot,true),fmtP(totFX),fmtP(totVR),TN1.moisData>0?fmtP(TN1.caHT):'-']);
+    y+=10;
 
     // ── FAITS MARQUANTS ──────────────────────────────────────
-    if(monthly.length>0){
-      sectionTitle('FAITS MARQUANTS DE LA PERIODE');
-      var moisData2=monthly.filter(function(m){return m.hasData;});
-      var meillCA2=moisData2.reduce(function(a,b){return b.caHT>a.caHT?b:a;},moisData2[0]||{caHT:0});
-      var moinsCA2=moisData2.reduce(function(a,b){return b.caHT<a.caHT?b:a;},moisData2[0]||{caHT:0});
-      var meillRes2=moisData2.reduce(function(a,b){return b.resultat>a.resultat?b:a;},moisData2[0]||{resultat:0});
-      var piresRes2=moisData2.reduce(function(a,b){return b.resultat<a.resultat?b:a;},moisData2[0]||{resultat:0});
-      var moisDeficit=moisData2.filter(function(m){return m.resultat<0;});
-      var moisExcedent=moisData2.filter(function(m){return m.resultat>0;});
+    var moisData2=monthly.filter(function(m){return m.hasData;});
+    if(moisData2.length>0){
+      var meillCA2 =moisData2.reduce(function(a,b){return b.caHT>a.caHT?b:a;},moisData2[0]);
+      var moinsCA2 =moisData2.reduce(function(a,b){return b.caHT<a.caHT?b:a;},moisData2[0]);
+      var meillRes2=moisData2.reduce(function(a,b){return b.resultat>a.resultat?b:a;},moisData2[0]);
+      var piresRes2=moisData2.reduce(function(a,b){return b.resultat<a.resultat?b:a;},moisData2[0]);
+      var moisDef  =moisData2.filter(function(m){return m.resultat<0;});
+      var moisExc  =moisData2.filter(function(m){return m.resultat>0;});
+      var seuil    =txVar<100?T.fixe/(1-txVar/100)/moisData2.length:0;
 
-      // 4 cartes en grille 2x4
       var facts=[
-        {ic:'Meilleur CA',    val:meillCA2?fmtP(meillCA2.caHT):'-',   sub:meillCA2?meillCA2.lbl+' '+meillCA2.yr:'-',   cl:GR},
-        {ic:'CA le plus bas', val:moinsCA2?fmtP(moinsCA2.caHT):'-',   sub:moinsCA2?moinsCA2.lbl+' '+moinsCA2.yr:'-',   cl:OR},
-        {ic:'Meilleur res.',  val:meillRes2?fmtP(meillRes2.resultat):'-',sub:meillRes2?meillRes2.lbl+' '+meillRes2.yr:'-',cl:GR},
-        {ic:'Pire res.',      val:piresRes2?fmtP(piresRes2.resultat):'-',sub:piresRes2?piresRes2.lbl+' '+piresRes2.yr:'-',cl:piresRes2&&piresRes2.resultat<0?RD:OR},
-        {ic:'Mois beneficiaires',val:moisExcedent.length+' / '+moisData2.length,sub:moisDeficit.length+' mois deficitaire(s)',cl:moisExcedent.length>=moisData2.length*0.75?GR:OR},
-        {ic:'Deficits cumules',val:moisDeficit.length>0?fmtP(Math.abs(moisDeficit.reduce(function(s,m){return s+m.resultat;},0))):'Aucun',sub:moisDeficit.length>0?moisDeficit.length+' mois dans le rouge':'Tous les mois positifs',cl:moisDeficit.length>0?RD:GR},
-        {ic:'CA moy./mois',    val:fmtP(caMens),                         sub:moisData2.length+' mois analyses',              cl:BL},
-        {ic:'Point mort/mois', val:txVar<100?fmtP(T.fixe/(1-txVar/100)/moisData2.length||T.moisData):'-', sub:'Seuil de rentabilite', cl:[99,102,241]},
+        {ic:'Meilleur mois CA',     v:fmtP(meillCA2.caHT),   s:meillCA2.lbl+' — Res: '+fmtP(meillCA2.resultat),    cl:cGR},
+        {ic:'CA le plus bas',       v:fmtP(moinsCA2.caHT),   s:moinsCA2.lbl+' — Charges: '+fmtP(moinsCA2.charges), cl:cOR},
+        {ic:'Meilleur resultat',    v:fmtP(meillRes2.resultat),s:meillRes2.lbl+' — CA: '+fmtP(meillRes2.caHT),      cl:cGR},
+        {ic:'Pire resultat',        v:fmtP(piresRes2.resultat),s:piresRes2.lbl+' — CA: '+fmtP(piresRes2.caHT),     cl:piresRes2.resultat<0?cRD:cOR},
+        {ic:'Mois beneficiaires',   v:moisExc.length+' / '+moisData2.length,s:moisDef.length+' mois deficitaire(s)',cl:moisExc.length>=moisData2.length*0.75?cGR:cOR},
+        {ic:'Deficits cumules',     v:moisDef.length>0?fmtP(Math.abs(moisDef.reduce(function(s,m){return s+m.resultat;},0))):'Neant',s:moisDef.length>0?moisDef.length+' mois dans le rouge':'Tous les mois positifs',cl:moisDef.length>0?cRD:cGR},
+        {ic:'CA moyen mensuel',     v:fmtP(caMens),           s:moisData2.length+' mois enregistres',              cl:cBL},
+        {ic:'Seuil de rentabilite', v:seuil>0?fmtP(seuil):'-',s:'Point mort mensuel estime',                      cl:cPU},
       ];
-      var fw=(CW-6)/4,fh=18;
-      facts.forEach(function(f,i){
-        if(i%4===0&&i>0){y+=fh+3;chk(fh+3);}
-        var fx=MG+(i%4)*(fw+2);
-        if(i===0)chk(fh*2+6);
-        fill(GY);doc.roundedRect(fx,y,fw,fh,1.5,1.5,'F');
-        fill(f.cl);doc.rect(fx,y,fw,2,'F');
-        stroke(BR,0.2);doc.roundedRect(fx,y,fw,fh,1.5,1.5,'S');
-        sf('normal',5,MT);doc.text(f.ic,fx+2.5,y+6.5);
-        sf('bold',8,f.cl);doc.text(f.val,fx+2.5,y+13);
-        sf('normal',5,MT);doc.text(f.sub,fx+2.5,y+17);
-      });
-      y+=fh+8;
+
+      // 4 cartes par ligne, 2 lignes = 8 cartes
+      var fw=(CW-9)/4, fh=20;
+      sectionTitle('FAITS MARQUANTS DE LA PERIODE', fh*2+15);
+      for(var fi=0;fi<2;fi++){
+        // Vérifier que les 4 cartes de la ligne tiennent ensemble
+        ensureFits(fh+3);
+        for(var fj=0;fj<4;fj++){
+          var fk=facts[fi*4+fj];
+          var fx=MG+fj*(fw+3);
+          fill(cWH);doc.roundedRect(fx,y,fw,fh,2,2,'F');
+          fill(fk.cl);doc.rect(fx,y,fw,2.5,'F');
+          stroke(cBR,0.2);doc.roundedRect(fx,y,fw,fh,2,2,'S');
+          sf('normal',5.5,cMT);txt(fk.ic,fx+3,y+7.5);
+          sf('bold',9,fk.cl);txt(fk.v,fx+3,y+14.5);
+          sf('normal',5,cMT);txt(fk.s.slice(0,32),fx+3,y+19);
+        }
+        y+=fh+4;
+      }
+      y+=6;
     }
 
     // ── ANALYSE DE SITUATION ─────────────────────────────────
-    sectionTitle('ANALYSE DE LA SITUATION');
-    // Score
     var scoreG=50;
     if(evCA!==null&&Math.abs(evCA)<500){
       if(evCA>15)scoreG+=20;else if(evCA>5)scoreG+=12;else if(evCA<-10)scoreG-=15;else if(evCA<0)scoreG-=5;else scoreG+=6;
     }
     if(mgN>15)scoreG+=25;else if(mgN>8)scoreG+=15;else if(mgN>0)scoreG+=5;else if(mgN>-5)scoreG-=10;else scoreG-=25;
-    var txFixeP=T.caHT>0?T.fixe/T.caHT*100:0;
-    if(txFixeP>60)scoreG-=10;
+    if(txFixe>60)scoreG-=10;
     if(totD>0){if(ratioEndett>150)scoreG-=15;else if(ratioEndett>80)scoreG-=5;}
     scoreG=Math.max(0,Math.min(100,scoreG));
-    var scoreLabel=scoreG>=70?'Situation saine':scoreG>=50?'Situation correcte':scoreG>=35?'Situation fragile':'Situation preoccupante';
-    var scoreCl=scoreG>=70?GR:scoreG>=50?OR:scoreG>=35?[249,115,22]:RD;
+    var scoreLbl=scoreG>=70?'Situation saine':scoreG>=50?'Situation correcte':scoreG>=35?'Situation fragile':'Situation preoccupante';
+    var scoreCl=scoreG>=70?cGR:scoreG>=50?cOR:scoreG>=35?[249,115,22]:cRD;
+    var scoreBg=scoreG>=70?cLGR:scoreG>=50?cLOR:cLRD;
 
-    // Score circle
-    chk(20);
-    var sx0=MG,sy0=y;
-    fill(GY);doc.roundedRect(MG,y,CW,16,2,2,'F');
-    // Score bar
-    fill(scoreCl);doc.roundedRect(MG+3,y+6,(CW-6)*scoreG/100,5,1,1,'F');
-    fill(BR);doc.roundedRect(MG+3,y+6,CW-6,5,1,1,'S');
-    sf('bold',9,scoreCl);doc.text(scoreG+'/100',MG+4,y+5);
-    sf('bold',8,BD);doc.text(scoreLabel,MG+4+doc.getTextWidth(scoreG+'/100')+3,y+5);
-    sf('normal',6,MT);doc.text('Base: marge nette, evolution CA, structure charges, endettement',MG+4,y+14.5);
-    y+=20;
-
-    // Points d'analyse (texte)
-    var analyses2=[];
+    var analyses=[];
     if(evCA!==null&&Math.abs(evCA)<500){
-      if(evCA>10)analyses2.push({dot:GR,txt:'CA en progression de +'+evCA.toFixed(1)+'% vs N-1 ('+fmtP(TN1.caHT)+' -> '+fmtP(T.caHT)+'). Dynamique positive.'});
-      else if(evCA<-10)analyses2.push({dot:RD,txt:'CA en baisse de '+Math.abs(evCA).toFixed(1)+'% vs N-1. Analyser les causes : clientele, prix, saisonnalite.'});
-      else analyses2.push({dot:OR,txt:'Evolution CA moderee vs N-1 ('+fmtPctP(evCA)+').'});
+      if(evCA>10)analyses.push({cl:cGR,t:'CA en hausse de +'+evCA.toFixed(1)+'% vs N-1 ('+fmtP(TN1.caHT)+' → '+fmtP(T.caHT)+'). Dynamique positive.'});
+      else if(evCA<-10)analyses.push({cl:cRD,t:'CA en baisse de '+Math.abs(evCA).toFixed(1)+'% vs N-1. Analyser : clientele, prix, saisonnalite.'});
+      else analyses.push({cl:cOR,t:'Evolution CA moderee vs N-1 ('+fmtPctP(evCA)+'). Stabilite.'});
     }
-    if(mgN>15)analyses2.push({dot:GR,txt:'Excellente marge nette ('+fmtPctP(mgN,true)+'). Structure financiere saine.'});
-    else if(mgN>8)analyses2.push({dot:GR,txt:'Bonne marge nette ('+fmtPctP(mgN,true)+'). Activite rentable et bien geree.'});
-    else if(mgN>0)analyses2.push({dot:OR,txt:'Marge nette faible ('+fmtPctP(mgN,true)+'). Risque de deficit si baisse de CA. Optimiser les charges.'});
-    else analyses2.push({dot:RD,txt:'Deficit estimé ('+fmtPctP(mgN,true)+'). Charges de '+fmtP(Math.abs(T.resultat))+' en exces vs CA. Action requise.'});
-    if(txFixeP>60)analyses2.push({dot:OR,txt:'Charges fixes elevees ('+fmtPctP(txFixeP,true)+' du CA). Exposition aux baisses d\'activite.'});
+    if(mgN>15)analyses.push({cl:cGR,t:'Excellente marge nette ('+fmtPctP(mgN,true)+'). Structure financiere tres saine.'});
+    else if(mgN>8)analyses.push({cl:cGR,t:'Bonne marge nette ('+fmtPctP(mgN,true)+'). Activite rentable et bien geree.'});
+    else if(mgN>0)analyses.push({cl:cOR,t:'Marge nette faible ('+fmtPctP(mgN,true)+'). Optimiser les charges pour consolider la rentabilite.'});
+    else analyses.push({cl:cRD,t:'Deficit estime ('+fmtPctP(mgN,true)+'). Charges en exces de '+fmtP(Math.abs(T.resultat))+' vs CA. Action requise.'});
+    if(txFixe>60)analyses.push({cl:cOR,t:'Charges fixes elevees ('+fmtPctP(txFixe,true)+' du CA). Exposition forte aux baisses d\'activite.'});
     if(totD>0){
-      if(ratioEndett>150)analyses2.push({dot:RD,txt:'Endettement important: '+fmtP(totD)+' ('+ratioEndett.toFixed(0)+'% du CA). Mensualites: '+fmtP(totM)+'/mois.'});
-      else if(ratioEndett>80)analyses2.push({dot:OR,txt:'Endettement a surveiller: '+fmtP(totD)+' ('+ratioEndett.toFixed(0)+'% du CA).'});
-      else analyses2.push({dot:GR,txt:'Endettement maitrise: '+fmtP(totD)+' ('+ratioEndett.toFixed(0)+'% du CA). Mensualites absorbables.'});
+      if(ratioEndett>150)analyses.push({cl:cRD,t:'Endettement important : '+fmtP(totD)+' ('+ratioEndett.toFixed(0)+'% du CA). Mensualites : '+fmtP(totM)+'/mois.'});
+      else if(ratioEndett>80)analyses.push({cl:cOR,t:'Endettement a surveiller : '+fmtP(totD)+' ('+ratioEndett.toFixed(0)+'% du CA).'});
+      else analyses.push({cl:cGR,t:'Endettement maitrise : '+fmtP(totD)+' ('+ratioEndett.toFixed(0)+'% du CA).'});
     }
-    if(T.tvaDue>2000)analyses2.push({dot:OR,txt:'TVA a provisionner: '+fmtP(T.tvaDue)+'. Prevoir la tresorerie pour la declaration.'});
-    if(T.tvaDue<0)analyses2.push({dot:BL,txt:'Credit de TVA: '+fmtP(Math.abs(T.tvaDue))+'. Recuperable aupres des impots.'});
+    if(T.tvaDue>2000)analyses.push({cl:cOR,t:'TVA a provisionner : '+fmtP(T.tvaDue)+'. Preparer la tresorerie pour la declaration.'});
+    if(T.tvaDue<0)analyses.push({cl:cBL,t:'Credit de TVA : '+fmtP(Math.abs(T.tvaDue))+'. Recuperable aupres de l\'administration fiscale.'});
 
-    analyses2.forEach(function(a){
-      chk(9);
-      fill(GY);doc.rect(MG,y,CW,7,'F');
-      stroke(BR,0.15);doc.line(MG,y+7,MG+CW,y+7);
-      fill(a.dot);doc.circle(MG+5,y+3.5,1.5,'F');
-      sf('normal',6.5,TX);
-      var lines2=doc.splitTextToSize(a.txt,CW-14);
-      doc.text(lines2[0]||'',MG+10,y+4.5);
-      y+=7;
+    var analHeight = 24 + analyses.length * 9;
+    sectionTitle('ANALYSE DE LA SITUATION', analHeight);
+
+    // Bloc score
+    fill(scoreBg);doc.roundedRect(MG,y,CW,18,2,2,'F');
+    stroke(scoreCl,0.4);doc.roundedRect(MG,y,CW,18,2,2,'S');
+    // Barre de score
+    fill(cBR);doc.roundedRect(MG+60,y+5,(CW-64),6,1,1,'F');
+    fill(scoreCl);doc.roundedRect(MG+60,y+5,Math.max(1,(CW-64)*scoreG/100),6,1,1,'F');
+    sf('bold',11,scoreCl);txt(scoreG+'/100',MG+4,y+10);
+    sf('bold',8,cBD);txt(scoreLbl,MG+4,y+16);
+    sf('normal',6,cMT);txt('Base : marge nette, evolution CA, charges, endettement',MG+62,y+10);
+    y+=22;
+
+    // Points d'analyse
+    analyses.forEach(function(a){
+      if(!fits(9)) newPage();
+      fill(cGY);doc.rect(MG,y,CW,7.5,'F');
+      stroke(cBR,0.15);doc.line(MG,y+7.5,MG+CW,y+7.5);
+      fill(a.cl);doc.circle(MG+5,y+3.75,1.8,'F');
+      sf('normal',6.5,cTX);
+      var lines2=doc.splitTextToSize(a.t,CW-14);
+      txt(lines2[0]||'',MG+10,y+4.8);
+      y+=7.5;
       if(lines2[1]){
-        chk(6);fill(GY);doc.rect(MG,y,CW,6,'F');
-        stroke(BR,0.15);doc.line(MG,y+6,MG+CW,y+6);
-        sf('normal',6.5,TX);doc.text(lines2[1],MG+10,y+4.2);
-        y+=6;
+        if(!fits(7)) newPage();
+        fill(cGY);doc.rect(MG,y,CW,7,'F');
+        stroke(cBR,0.15);doc.line(MG,y+7,MG+CW,y+7);
+        txt(lines2[1],MG+10,y+4.5);
+        y+=7;
       }
     });
-    y+=6;
+    y+=10;
 
     // ── TOP CHARGES ──────────────────────────────────────────
     if(topCharges.length>0){
-      sectionTitle('TOP POSTES DE CHARGES');
-      // 6 colonnes: #|Fournisseur|Type|Total HT|% Ch.|% CA
-      // 8+56+50+34+20+18 = 186 ✓
-      var cc=[
-        {x:MG,    w:8, label:'#',       r:false},
-        {x:MG+8,  w:56,label:'Fournisseur',r:false},
-        {x:MG+64, w:50,label:'Type',    r:false},
-        {x:MG+114,w:34,label:'Total HT',r:true},
-        {x:MG+148,w:20,label:'% Ch.',   r:true},
-        {x:MG+168,w:18,label:'% CA',    r:true},
+      var nRows=Math.min(topCharges.length,12);
+      // 8+58+52+32+18+14 = 182 ✓
+      var cCols=[
+        {label:'#',          x:MG,     w:8,  r:false},
+        {label:'Fournisseur',x:MG+8,   w:58, r:false},
+        {label:'Type',       x:MG+66,  w:52, r:false},
+        {label:'Total HT',   x:MG+118, w:32, r:true},
+        {label:'% Ch.',      x:MG+150, w:18, r:true},
+        {label:'% CA',       x:MG+168, w:14, r:true},
       ];
-      tHead(cc);
-      topCharges.forEach(function(c,i){
-        tRow(cc,[(i+1)+'.', (c.fournisseur||'-').slice(0,20), (c.type||'-').slice(0,18),
+      // Protéger: si toute la section tient sur une page, forcer nouvelle page
+      // Si trop grande pour une page (>220mm), accepter la coupure avec reHead
+      var topTotalH = 12 + HEAD_H + ROW_H*nRows + TOTAL_H + 10;
+      if(topTotalH < 200) ensureFits(topTotalH);
+      else ensureFits(12 + HEAD_H + ROW_H*3); // au moins 3 lignes
+      y+=3; fill(cBL);doc.rect(MG,y,3.5,8,'F'); fill(cLBL);doc.rect(MG+3.5,y,CW-3.5,8,'F');
+      sf('bold',9,cBD);txt('TOP POSTES DE CHARGES',MG+8,y+5.6);
+      stroke(cBR,0.5);var tw2=doc.getTextWidth('TOP POSTES DE CHARGES');
+      doc.line(MG+11+tw2,y+4,MG+CW,y+4); y+=12;
+      tableHeader(cCols);
+      topCharges.slice(0,12).forEach(function(c,i){
+        tableRow(cCols,[(i+1)+'.', (c.fournisseur||'-').slice(0,22), (c.type||'-').slice(0,20),
           fmtP(c.total),
           T.charges>0?fmtPctP(c.total/T.charges*100,true):'-',
-          T.caHT>0?fmtPctP(c.total/T.caHT*100,true):'-'],i);
+          T.caHT>0?fmtPctP(c.total/T.caHT*100,true):'-'],i,
+          {reHead:function(){tableHeader(cCols);}});
       });
-      tTotal(cc,['','Total charges','',fmtP(T.charges),'100%',fmtPctP(txCh,true)]);
-      y+=8;
+      tableTotal(cCols,['','Total charges','',fmtP(T.charges),'100%',fmtPctP(txCh,true)]);
+      y+=10;
     }
 
     // ── DETTES ───────────────────────────────────────────────
     if(dA.length>0){
-      sectionTitle('DETTES ET EMPRUNTS');
-      // 7 colonnes: Libelle|Capital|Restant|Mensua.|Taux|Duree|Avancement
-      // 50+28+28+28+16+14+22 = 186 ✓
-      var dc=[
-        {x:MG,    w:50,label:'Credit / Emprunt',r:false},
-        {x:MG+50, w:28,label:'Capital',r:true},
-        {x:MG+78, w:28,label:'Restant',r:true},
-        {x:MG+106,w:28,label:'Mensual.',r:true},
-        {x:MG+134,w:16,label:'Taux',   r:true},
-        {x:MG+150,w:14,label:'Duree',  r:true},
-        {x:MG+164,w:22,label:'Avanc.', r:true},
+      // 52+28+28+28+14+12+20 = 182 ✓
+      var dCols=[
+        {label:'Credit / Emprunt',x:MG,     w:52, r:false},
+        {label:'Capital',         x:MG+52,  w:28, r:true},
+        {label:'Restant',         x:MG+80,  w:28, r:true},
+        {label:'Mensual.',        x:MG+108, w:28, r:true},
+        {label:'Taux',            x:MG+136, w:14, r:true},
+        {label:'Duree',           x:MG+150, w:12, r:true},
+        {label:'Avanc.',          x:MG+162, w:20, r:true},
       ];
-      tHead(dc);
+      var dettesTotalH = 12 + 13 + HEAD_H + ROW_H*dA.length + TOTAL_H + 10;
+      if(dettesTotalH < 200) ensureFits(dettesTotalH);
+      else ensureFits(12 + 13 + HEAD_H + ROW_H*2);
+      y+=3; fill(cBL);doc.rect(MG,y,3.5,8,'F'); fill(cLBL);doc.rect(MG+3.5,y,CW-3.5,8,'F');
+      sf('bold',9,cBD);txt('DETTES ET EMPRUNTS',MG+8,y+5.6);
+      stroke(cBR,0.5);var tw3d=doc.getTextWidth('DETTES ET EMPRUNTS');
+      doc.line(MG+11+tw3d,y+4,MG+CW,y+4); y+=12;
+      // Résumé dettes
+      fill(cLBL);doc.roundedRect(MG,y,CW,10,1.5,1.5,'F');
+      sf('normal',6.5,cBD);
+      txt('Encours total : '+fmtP(totD)+'   |   Mensualites : '+fmtP(totM)+'/mois   |   '+dA.length+' emprunt(s) actif(s)   |   Ratio encours/CA : '+fmtPctP(ratioEndett,true),MG+4,y+6.5);
+      y+=13;
+      tableHeader(dCols);
       dA.forEach(function(d,i){
-        var mt=parseFloat(d.montant)||0,rst=parseFloat(d.montantRestant||d.montant)||0;
+        var mt=parseFloat(d.montant)||0, rst=parseFloat(d.montantRestant||d.montant)||0;
         var mens=parseFloat(d.mensualite)||0;
         var prog=mt>0?Math.max(0,Math.min(100,(mt-rst)/mt*100)):0;
-        tRow(dc,[(d.libelle||d.nom||'Emprunt').slice(0,22),fmtP(mt),fmtP(rst),
-          mens>0?fmtP(mens)+'/m':'-',d.taux?d.taux+'%':'-',d.duree?d.duree+'m':'-',prog.toFixed(0)+'%'],i);
+        tableRow(dCols,[(d.libelle||d.nom||'Emprunt').slice(0,22),
+          fmtP(mt),fmtP(rst),mens>0?fmtP(mens)+'/m':'-',
+          d.taux?d.taux+'%':'-',d.duree?d.duree+'m':'-',prog.toFixed(0)+'%'],i,
+          {reHead:function(){tableHeader(dCols);}});
       });
-      tTotal(dc,['TOTAL','',fmtP(totD),fmtP(totM)+'/m','','','']);
-      y+=8;
+      tableTotal(dCols,['TOTAL','',fmtP(totD),fmtP(totM)+'/m','','','']);
+      y+=10;
     }
 
-    // ── PROJECTION ───────────────────────────────────────────
+    // ── PROJECTION (mode période seulement) ──────────────────
     if(!_customRange){
-      sectionTitle('PROJECTION FIN D\'ANNEE '+year);
-      var allProjMonths=[];
+      var allPM=[];
       for(var pm=0;pm<12;pm++){
         var pKey=year+'-'+String(pm+1).padStart(2,'0');
         var pr=computeMonth(_allData[pKey]||null,pKey);
-        allProjMonths.push({lbl:MONTHS_SHORT[pm],caHT:pr.hasData?pr.caHT:caMens,charges:pr.hasData?pr.charges:chargesMens,
+        allPM.push({lbl:MONTHS_SHORT[pm],caHT:pr.hasData?pr.caHT:caMens,
+          charges:pr.hasData?pr.charges:chargesMens,
           resultat:pr.hasData?pr.resultat:(caMens-chargesMens),isProj:!pr.hasData});
       }
-      var projCA=allProjMonths.reduce(function(s,m){return s+m.caHT;},0);
-      var projCh=allProjMonths.reduce(function(s,m){return s+m.charges;},0);
+      var projCA=allPM.reduce(function(s,m){return s+m.caHT;},0);
+      var projCh=allPM.reduce(function(s,m){return s+m.charges;},0);
       var projRes=projCA-projCh+T.rentrees;
       var projMg=projCA>0?projRes/projCA*100:0;
-      // 6 colonnes: 18+36+36+36+22+38 = 186 ✓
-      var pc=[
-        {x:MG,    w:18,label:'Mois',    r:false},
-        {x:MG+18, w:36,label:'CA HT',   r:true},
-        {x:MG+54, w:36,label:'Charges', r:true},
-        {x:MG+90, w:36,label:'Resultat',r:true},
-        {x:MG+126,w:22,label:'Marge',   r:true},
-        {x:MG+148,w:38,label:'Type',    r:false},
+      // 18+36+34+34+22+38 = 182 ✓
+      var pCols=[
+        {label:'Mois',    x:MG,     w:18, r:false},
+        {label:'CA HT',   x:MG+18,  w:36, r:true},
+        {label:'Charges', x:MG+54,  w:34, r:true},
+        {label:'Resultat',x:MG+88,  w:34, r:true},
+        {label:'Marge',   x:MG+122, w:22, r:true},
+        {label:'Type',    x:MG+144, w:38, r:false},
       ];
-      tHead(pc);
-      allProjMonths.forEach(function(m,idx){
+      sectionTitle('PROJECTION FIN D\'ANNEE '+year, HEAD_H+ROW_H*12+TOTAL_H+4);
+      tableHeader(pCols);
+      allPM.forEach(function(m,idx){
         var mg2=m.caHT>0?m.resultat/m.caHT*100:0;
-        var clrs=[BL,TX,TX,m.resultat>=0?GR:RD,mg2>=0?GR:RD,m.isProj?OR:GR];
-        tRow(pc,[m.lbl,fmtP(m.caHT),fmtP(m.charges),fmtP(m.resultat),fmtPctP(mg2,true),m.isProj?'Estimé':'Réel'],idx,
-          {colors:clrs,bg:m.isProj?LOR:null});
+        tableRow(pCols,[m.lbl,fmtP(m.caHT),fmtP(m.charges),fmtP(m.resultat),
+          fmtPctP(mg2,true),m.isProj?'Estime':'Reel'],idx,{
+          bg:m.isProj?cLOR:null,
+          colors:[cBL,cTX,cTX,m.resultat>=0?cGR:cRD,mg2>=0?cGR:cRD,m.isProj?cOR:cGR],
+          reHead:function(){tableHeader(pCols);}
+        });
       });
-      tTotal(pc,['TOTAL',fmtP(projCA),fmtP(projCh),fmtP(projRes),fmtPctP(projMg,true),'']);
-      y+=6;
+      tableTotal(pCols,['TOTAL',fmtP(projCA),fmtP(projCh),fmtP(projRes),fmtPctP(projMg,true),'']);
+      y+=8;
 
-      // Scenarios
-      chk(36);sectionTitle('SCENARIOS FIN D\'ANNEE');
+      // Scénarios
+      sectionTitle('SCENARIOS FIN D\'ANNEE',30);
       var scens=[['Pessimiste (-10%)',0.9],['Tendanciel',1.0],['Optimiste (+10%)',1.1],['Ambitieux (+20%)',1.2]];
-      var sw2=(CW-6)/4;
+      var sw2=(CW-9)/4;
+      ensureFits(28);
       scens.forEach(function(sc,i){
-        var sCA2=projCA*sc[1],sCh2=projCh,sRes2=sCA2-sCh2+T.rentrees;
+        var sCA2=projCA*sc[1],sRes2=sCA2-projCh+T.rentrees;
         var smg2=sCA2>0?sRes2/sCA2*100:0;
-        var sx2=MG+i*(sw2+2);
-        fill(GY);doc.roundedRect(sx2,y,sw2,22,1.5,1.5,'F');
-        var clr2=sc[1]>=1?GR:RD;
-        fill(clr2);doc.rect(sx2,y,sw2,2.5,'F');
-        stroke(BR,0.2);doc.roundedRect(sx2,y,sw2,22,1.5,1.5,'S');
-        sf('normal',5.5,MT);doc.text(sc[0],sx2+2.5,y+7);
-        sf('bold',9,clr2);doc.text(fmtP(sRes2),sx2+2.5,y+15);
-        sf('normal',5.5,MT);doc.text('Marge: '+fmtPctP(smg2,true)+'  |  CA: '+fmtP(sCA2),sx2+2.5,y+20);
+        var sx2=MG+i*(sw2+3);
+        var sclr=sc[1]>=1?cGR:cRD;
+        var sbg=sc[1]>=1?cLGR:cLRD;
+        fill(sbg);doc.roundedRect(sx2,y,sw2,24,2,2,'F');
+        fill(sclr);doc.rect(sx2,y,sw2,3,'F');
+        stroke(cBR,0.2);doc.roundedRect(sx2,y,sw2,24,2,2,'S');
+        sf('normal',5.5,cMT);txt(sc[0],sx2+3,y+8);
+        sf('bold',10,sclr);txt(fmtP(sRes2),sx2+3,y+17);
+        sf('normal',5.5,cMT);txt('Marge: '+fmtPctP(smg2,true)+'   CA: '+fmtP(sCA2),sx2+3,y+22.5);
       });
-      y+=26;
+      y+=28;
     }
 
     // ── DISCLAIMER ───────────────────────────────────────────
-    chk(16);
-    fill(LOR);doc.roundedRect(MG,y,CW,14,2,2,'F');
+    ensureFits(16);
+    fill(cLOR);doc.roundedRect(MG,y,CW,14,2,2,'F');
     stroke([253,230,138],0.4);doc.roundedRect(MG,y,CW,14,2,2,'S');
-    sf('bold',6.5,[146,64,14]);doc.text('Document indicatif — ne constitue pas un bilan officiel. Pour un bilan certifie, consultez votre expert-comptable.',MG+4,y+5.5);
-    sf('normal',6.5,[146,64,14]);doc.text('Donnees issues de votre saisie sur ALTEORE (alteore.com). Genere le '+new Date().toLocaleDateString('fr-FR')+'.',MG+4,y+11);
-    y+=16;
+    sf('bold',6.5,[146,64,14]);
+    txt('Document indicatif - ne constitue pas un bilan officiel. Pour un bilan certifie, consultez votre expert-comptable.',MG+4,y+5.5);
+    sf('normal',6.5,[146,64,14]);
+    txt('Donnees saisies sur ALTEORE (alteore.com). Genere le '+new Date().toLocaleDateString('fr-FR')+'.',MG+4,y+11);
 
-    footer();
+    // Footer sur dernière page
+    drawFooter();
+
     var fn='situation-alteore-'+nom.replace(/[^a-z0-9]/gi,'-').toLowerCase()+'-'+year+'.pdf';
     doc.save(fn);
   }catch(e){console.error('PDF error:',e);alert('Erreur PDF : '+e.message);}
