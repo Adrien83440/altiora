@@ -448,63 +448,69 @@ function handlePdfUpload(event) {
 }
 
 async function processPdf(file) {
-  // Afficher loader
-  document.getElementById('mainContent').innerHTML = `
-    <div class="analyze-loader">
-      <div class="analyze-spinner"></div>
-      <div class="analyze-text">Analyse du bilan en cours...</div>
-      <div class="analyze-step" id="analyzeStep">📄 Lecture du document PDF</div>
-    </div>
-  `;
+  document.getElementById('mainContent').innerHTML =
+    '<div class="analyze-loader">' +
+      '<div class="analyze-spinner"></div>' +
+      '<div class="analyze-text">Analyse du bilan en cours...</div>' +
+      '<div class="analyze-step" id="analyzeStep">📄 Lecture du document PDF</div>' +
+    '</div>';
 
   try {
-    // Convertir les pages PDF en images (Claude lit mieux les tableaux en mode vision)
-    updateStep('📄 Conversion des pages en images...');
-    const pages = await pdfToImages(file);
-    if(!pages || pages.length === 0) {
-      throw new Error('Impossible de lire le PDF.');
-    }
-    updateStep('🤖 Envoi à l\'intelligence artificielle (' + pages.length + ' pages)...');
+    // ETAPE 1 : Tenter extraction texte (mode economique, ~10x moins de tokens)
+    updateStep('📄 Extraction du texte PDF...');
+    var extracted = await extractPdfText(file);
+    var useTextMode = extracted.text && extracted.text.trim().length > 500;
 
-    // Préparer les données existantes pour comparaison
-    const existingYears = {};
-    for(var y in _bilans) {
+    // ETAPE 2 : Fallback images si PDF scanné (texte insuffisant)
+    var payload;
+    if (useTextMode) {
+      updateStep('✅ Texte extrait (' + extracted.pages + ' pages) — mode économique activé');
+      payload = { pdfText: extracted.text, mode: 'text', fileName: file.name };
+    } else {
+      updateStep('🖼️ PDF scanné détecté — conversion en images (toutes les pages)...');
+      var images = await pdfToImages(file);
+      if (!images || images.length === 0) throw new Error('Impossible de lire le PDF.');
+      updateStep('🖼️ ' + images.length + ' pages converties — envoi à l\'IA...');
+      payload = { pages: images, mode: 'image', fileName: file.name };
+    }
+
+    // ETAPE 3 : Données existantes pour comparaison
+    var existingYears = {};
+    for (var y in _bilans) {
+      var b = _bilans[y];
       existingYears[y] = {
-        ca: _bilans[y].compteResultat?.chiffreAffaires || 0,
-        resultatNet: _bilans[y].compteResultat?.resultatNet || 0,
-        totalActif: _bilans[y].actif?.totalActif || 0,
-        capitauxPropres: _bilans[y].passif?.totalCapitauxPropres || 0,
-        dettes: _bilans[y].passif?.totalDettes || 0,
-        tresorerie: _bilans[y].actif?.tresorerieActive || 0,
-        ebe: _bilans[y].compteResultat?.ebe || 0
+        ca: (b.compteResultat && b.compteResultat.chiffreAffaires) || 0,
+        resultatNet: (b.compteResultat && b.compteResultat.resultatNet) || 0,
+        totalActif: (b.actif && b.actif.totalActif) || 0,
+        capitauxPropres: (b.passif && b.passif.totalCapitauxPropres) || 0,
+        dettes: (b.passif && b.passif.totalDettes) || 0,
+        tresorerie: (b.actif && b.actif.tresorerieActive) || 0,
+        ebe: (b.compteResultat && b.compteResultat.ebe) || 0
       };
     }
+    payload.existingYears = existingYears;
 
-    // Appeler l'API avec les images des pages
-    updateStep('🧠 Analyse des données financières...');
-    const resp = await fetch('/api/analyze-bilan', {
+    // ETAPE 4 : Appel API
+    updateStep('🧠 Analyse par l\'intelligence artificielle...');
+    var resp = await fetch('/api/analyze-bilan', {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        pages: pages,
-        fileName: file.name,
-        existingYears: existingYears
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
     });
 
-    if(!resp.ok) {
-      const err = await resp.json().catch(function(){ return {error:'Erreur serveur ('+resp.status+')'}; });
-      throw new Error(err.error || 'Erreur serveur');
+    if (!resp.ok) {
+      var errData = await resp.json().catch(function() { return { error: 'Erreur serveur (' + resp.status + ')' }; });
+      throw new Error(errData.error || 'Erreur serveur');
     }
 
-    const result = await resp.json();
-    if(!result.success || !result.data) throw new Error('Réponse invalide de l\'IA');
+    var result = await resp.json();
+    if (!result.success || !result.data) throw new Error('Réponse invalide de l\'IA');
 
+    // ETAPE 5 : Sauvegarde Firestore
     updateStep('💾 Sauvegarde des données...');
-    const data = result.data;
-    const year = data.annee || new Date().getFullYear().toString();
+    var data = result.data;
+    var year = data.annee || new Date().getFullYear().toString();
 
-    // Sauvegarder dans Firestore
     await window._setDoc(
       window._doc(window._db, 'bilans', window._uid, 'years', year),
       data
@@ -516,95 +522,146 @@ async function processPdf(file) {
 
   } catch(err) {
     console.error('Erreur analyse:', err);
-    document.getElementById('mainContent').innerHTML = `
-      <div style="text-align:center;padding:60px 20px;">
-        <div style="font-size:48px;margin-bottom:16px;">⚠️</div>
-        <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px;">Erreur lors de l'analyse</div>
-        <div style="font-size:13px;color:var(--muted);margin-bottom:20px;">${err.message}</div>
-        <button class="btn btn-primary" onclick="renderMain()">← Retour</button>
-      </div>
-    `;
+    var isRateLimit = err.message && err.message.toLowerCase().includes('limite');
+    document.getElementById('mainContent').innerHTML =
+      '<div style="text-align:center;padding:60px 20px;">' +
+        '<div style="font-size:48px;margin-bottom:16px;">' + (isRateLimit ? '⏳' : '⚠️') + '</div>' +
+        '<div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px;">' +
+          (isRateLimit ? 'Trop de demandes simultanées' : 'Erreur lors de l\'analyse') +
+        '</div>' +
+        '<div style="font-size:13px;color:var(--muted);margin-bottom:20px;">' + err.message + '</div>' +
+        (isRateLimit ? '<div style="font-size:12px;color:var(--muted);margin-bottom:20px;">Patientez 1 minute puis réessayez.</div>' : '') +
+        '<button class="btn btn-primary" onclick="renderMain()">← Retour</button>' +
+      '</div>';
   }
 }
 
 function updateStep(text) {
   var el = document.getElementById('analyzeStep');
-  if(el) el.textContent = text;
+  if (el) el.textContent = text;
 }
 
-// Convertir un PDF en images JPEG via pdf.js + canvas
-// Compression automatique progressive pour TOUJOURS rester sous la limite Vercel (4.5 Mo)
-// Gère les bilans de toute taille (même 50+ pages)
-async function pdfToImages(file) {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
-
+// ── EXTRACTION TEXTE depuis PDF (mode économique) ─────────────────────────────
+// Utilise pdf.js pour lire le texte natif du PDF, page par page.
+// Reconstruit les colonnes grâce aux positions X/Y des tokens.
+// Retourne { text: string, pages: number }.
+// Si le PDF est un scan, text sera vide → fallback images automatique.
+async function extractPdfText(file) {
+  var arrayBuffer = await file.arrayBuffer();
+  var pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   var numPages = pdf.numPages;
-  var MAX_TOTAL = 3200000; // 3.2 Mo en base64 → laisse marge pour le JSON
+  var allText = '';
 
-  // Niveaux de compression : on essaie du plus beau au plus compressé
+  for (var i = 1; i <= numPages; i++) {
+    var page = await pdf.getPage(i);
+    var textContent = await page.getTextContent();
+    var items = textContent.items;
+    if (!items || items.length === 0) continue;
+
+    // Trier par Y décroissant (haut de page en premier) puis X croissant
+    items.sort(function(a, b) {
+      var dy = b.transform[5] - a.transform[5];
+      if (Math.abs(dy) > 3) return dy;
+      return a.transform[4] - b.transform[4];
+    });
+
+    // Grouper par ligne (tolérance 3px sur Y)
+    var lines = [];
+    var currentLine = [];
+    var lastY = null;
+    for (var j = 0; j < items.length; j++) {
+      var item = items[j];
+      var y = Math.round(item.transform[5]);
+      if (lastY === null || Math.abs(y - lastY) > 3) {
+        if (currentLine.length > 0) lines.push(currentLine);
+        currentLine = [item];
+        lastY = y;
+      } else {
+        currentLine.push(item);
+      }
+    }
+    if (currentLine.length > 0) lines.push(currentLine);
+
+    // Convertir chaque ligne en string avec espaces proportionnels aux X
+    var pageText = '=== Page ' + i + ' ===\n';
+    for (var l = 0; l < lines.length; l++) {
+      var lineItems = lines[l];
+      var lineStr = '';
+      var prevEndX = 0;
+      for (var k = 0; k < lineItems.length; k++) {
+        var it = lineItems[k];
+        var x = Math.round(it.transform[4]);
+        // Espaces proportionnels pour représenter les colonnes
+        var gap = k === 0 ? 0 : Math.max(1, Math.round((x - prevEndX) / 7));
+        if (gap > 3) lineStr += '   '; // séparateur de colonne visible
+        else if (gap > 0) lineStr += ' ';
+        lineStr += it.str;
+        prevEndX = x + Math.round(it.width || 0);
+      }
+      var trimmed = lineStr.trim();
+      if (trimmed) pageText += trimmed + '\n';
+    }
+    allText += pageText + '\n';
+  }
+
+  return { text: allText, pages: numPages };
+}
+
+// ── FALLBACK : Conversion PDF → images JPEG (PDFs scannés uniquement) ────────
+// Compression automatique progressive pour rester sous la limite Vercel (4.5 Mo).
+// Envoie TOUTES les pages, en abaissant la qualité si nécessaire.
+async function pdfToImages(file) {
+  var arrayBuffer = await file.arrayBuffer();
+  var pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  var numPages = pdf.numPages;
+
   var configs = [
-    {scale: 1.8, quality: 0.75},
-    {scale: 1.5, quality: 0.65},
-    {scale: 1.2, quality: 0.50},
-    {scale: 1.0, quality: 0.40},
-    {scale: 0.85, quality: 0.30},
-    {scale: 0.7,  quality: 0.25}
+    { scale: 1.5, quality: 0.65 },
+    { scale: 1.2, quality: 0.50 },
+    { scale: 1.0, quality: 0.40 },
+    { scale: 0.85, quality: 0.30 },
+    { scale: 0.7,  quality: 0.22 }
   ];
 
-  // Pour les gros PDF (>20 pages), on commence directement par une qualité plus basse
-  var startConfig = 0;
-  if(numPages > 30) startConfig = 3;
-  else if(numPages > 20) startConfig = 2;
-  else if(numPages > 12) startConfig = 1;
+  var MAX_TOTAL = 3500000; // 3.5 Mo
 
-  for(var c = startConfig; c < configs.length; c++) {
+  for (var c = 0; c < configs.length; c++) {
     var cfg = configs[c];
     var images = [];
     var totalSize = 0;
     var tooLarge = false;
 
-    for(var i = 1; i <= numPages; i++) {
+    for (var i = 1; i <= numPages; i++) {
       var page = await pdf.getPage(i);
-      var viewport = page.getViewport({scale: cfg.scale});
+      var viewport = page.getViewport({ scale: cfg.scale });
       var canvas = document.createElement('canvas');
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      var ctx = canvas.getContext('2d');
-      await page.render({canvasContext: ctx, viewport: viewport}).promise;
-
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
       var base64 = canvas.toDataURL('image/jpeg', cfg.quality).split(',')[1];
       totalSize += base64.length;
       images.push(base64);
-
-      // Arrêter tôt si déjà trop gros → passer au niveau suivant
-      if(totalSize > MAX_TOTAL) { tooLarge = true; break; }
+      if (totalSize > MAX_TOTAL) { tooLarge = true; break; }
     }
 
-    if(!tooLarge) return images; // ça passe → on envoie
+    if (!tooLarge) return images;
   }
 
-  // Dernier recours : prendre un maximum de pages avec la compression max
-  // en répartissant sur tout le document (début + milieu + fin si besoin)
+  // Dernier recours : autant de pages que possible avec la compression maximale
   var lastCfg = configs[configs.length - 1];
   var finalImages = [];
-  var totalSize = 0;
-
-  for(var k = 1; k <= numPages; k++) {
+  var total = 0;
+  for (var k = 1; k <= numPages; k++) {
     var pg = await pdf.getPage(k);
-    var vp = pg.getViewport({scale: lastCfg.scale});
+    var vp = pg.getViewport({ scale: lastCfg.scale });
     var cv = document.createElement('canvas');
-    cv.width = vp.width;
-    cv.height = vp.height;
-    var cx = cv.getContext('2d');
-    await pg.render({canvasContext: cx, viewport: vp}).promise;
+    cv.width = vp.width; cv.height = vp.height;
+    await pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
     var b64 = cv.toDataURL('image/jpeg', lastCfg.quality).split(',')[1];
-
-    if(totalSize + b64.length > MAX_TOTAL) break; // stop quand on atteint la limite
+    if (total + b64.length > MAX_TOTAL) break;
     finalImages.push(b64);
-    totalSize += b64.length;
+    total += b64.length;
   }
-
   return finalImages;
 }
 
