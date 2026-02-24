@@ -527,14 +527,10 @@ function updateStep(text) {
 
 // Convertir un PDF en images JPEG via pdf.js + canvas
 // Compression automatique progressive pour TOUJOURS rester sous la limite Vercel (4.5 Mo)
+// Gère les bilans de toute taille (même 50+ pages)
 async function pdfToImages(file) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
-
-  // Max 25 pages (largement suffisant pour un bilan)
-  if(pdf.numPages > 25) {
-    throw new Error('Le bilan ne doit pas dépasser 25 pages. Votre document fait ' + pdf.numPages + ' pages.');
-  }
 
   var numPages = pdf.numPages;
   var MAX_TOTAL = 3200000; // 3.2 Mo en base64 → laisse marge pour le JSON
@@ -548,7 +544,13 @@ async function pdfToImages(file) {
     {scale: 0.7,  quality: 0.25}
   ];
 
-  for(var c = 0; c < configs.length; c++) {
+  // Pour les gros PDF (>20 pages), on commence directement par une qualité plus basse
+  var startConfig = 0;
+  if(numPages > 30) startConfig = 3;
+  else if(numPages > 20) startConfig = 2;
+  else if(numPages > 12) startConfig = 1;
+
+  for(var c = startConfig; c < configs.length; c++) {
     var cfg = configs[c];
     var images = [];
     var totalSize = 0;
@@ -574,12 +576,13 @@ async function pdfToImages(file) {
     if(!tooLarge) return images; // ça passe → on envoie
   }
 
-  // Si même la compression maximale ne suffit pas : on prend les 12 premières pages
-  // (un bilan a toujours les données clés au début)
+  // Dernier recours : prendre un maximum de pages avec la compression max
+  // en répartissant sur tout le document (début + milieu + fin si besoin)
   var lastCfg = configs[configs.length - 1];
   var finalImages = [];
-  var maxEssential = Math.min(numPages, 12);
-  for(var k = 1; k <= maxEssential; k++) {
+  var totalSize = 0;
+
+  for(var k = 1; k <= numPages; k++) {
     var pg = await pdf.getPage(k);
     var vp = pg.getViewport({scale: lastCfg.scale});
     var cv = document.createElement('canvas');
@@ -587,8 +590,13 @@ async function pdfToImages(file) {
     cv.height = vp.height;
     var cx = cv.getContext('2d');
     await pg.render({canvasContext: cx, viewport: vp}).promise;
-    finalImages.push(cv.toDataURL('image/jpeg', lastCfg.quality).split(',')[1]);
+    var b64 = cv.toDataURL('image/jpeg', lastCfg.quality).split(',')[1];
+
+    if(totalSize + b64.length > MAX_TOTAL) break; // stop quand on atteint la limite
+    finalImages.push(b64);
+    totalSize += b64.length;
   }
+
   return finalImages;
 }
 
