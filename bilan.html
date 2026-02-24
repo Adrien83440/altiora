@@ -459,7 +459,22 @@ async function processPdf(file) {
     // ETAPE 1 : Tenter extraction texte (mode economique, ~10x moins de tokens)
     updateStep('📄 Extraction du texte PDF...');
     var extracted = await extractPdfText(file);
-    var useTextMode = extracted.text && extracted.text.trim().length > 500;
+    // Évaluer la QUALITÉ du texte extrait, pas seulement sa longueur.
+    // Un PDF scanné avec OCR embarqué peut avoir du texte mais illisible (caractères corrompus).
+    var useTextMode = false;
+    if (extracted.text && extracted.text.trim().length > 500) {
+      var t = extracted.text;
+      // Score de qualité : ratio de caractères "normaux" (lettres, chiffres, ponctuation courante)
+      var normalChars = (t.match(/[a-zA-ZÀ-ÿ0-9€.,;:\-\s\(\)\/]/g) || []).length;
+      var qualityRatio = normalChars / t.length;
+      // Un texte de bonne qualité a > 80% de caractères normaux
+      // + doit contenir des chiffres (sinon c'est probablement vide de données financières)
+      var hasNumbers = /\d{3,}/.test(t); // au moins un nombre à 3+ chiffres
+      useTextMode = qualityRatio > 0.80 && hasNumbers;
+      if (!useTextMode) {
+        console.log('Texte extrait mais qualité insuffisante (ratio: ' + qualityRatio.toFixed(2) + ', chiffres: ' + hasNumbers + ') → fallback images');
+      }
+    }
 
     // ETAPE 2 : Fallback images si PDF scanné (texte insuffisant)
     var payload;
