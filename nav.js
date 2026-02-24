@@ -10,6 +10,7 @@
   const CAN_IMPORT       = ['pro', 'max', 'master', 'dev'];
   const CAN_CORE         = ['trial', 'pro', 'max', 'master', 'dev'];
   const CAN_BILAN        = ['master', 'trial', 'dev'];
+  const CAN_RAPPORT      = ['pro', 'max', 'master', 'dev'];
 
   const mainEl = document.querySelector('main');
   // Masquer brièvement pour éviter le flash uniquement si Firebase est déjà prêt
@@ -64,6 +65,12 @@
         title: 'Analyse de Bilan — Plan Master requis',
         desc: 'L\'analyse de bilan comptable par intelligence artificielle est disponible avec le plan <strong>Master (169€/mois)</strong>. Importez vos bilans et obtenez des conseils IA personnalisés.',
         cta: '⭐ Passer au plan Master'
+      },
+      rapport: {
+        icon: '📄',
+        title: 'Rapport annuel PDF — Plan Pro requis',
+        desc: 'La génération de rapports annuels PDF (situation financière, compte de résultat, dettes) est disponible dès le plan <strong>Pro (69€/mois)</strong>.',
+        cta: '⭐ Passer au plan Pro'
       },
       import: {
         icon: '📥',
@@ -160,6 +167,15 @@
     return null;
   }
 
+  function getRapportNavEl() {
+    const all = document.querySelectorAll('.nav-item, .ni');
+    for (let i = 0; i < all.length; i++) {
+      const oc = all[i].getAttribute('onclick') || '';
+      if (oc.includes('rapport-annuel.html')) return all[i];
+    }
+    return null;
+  }
+
   function applyNavPlan(plan) {
     window._userPlan = plan;
     const upl = document.getElementById('uplan');
@@ -173,6 +189,9 @@
     }
     if (!CAN_BILAN.includes(plan)) {
       lockNavItem(getBilanNavEl(), 'Master', 'bilan');
+    }
+    if (!CAN_RAPPORT.includes(plan)) {
+      lockNavItem(getRapportNavEl(), 'Pro+', 'rapport');
     }
     if (mainEl) mainEl.style.visibility = 'visible';
   }
@@ -192,6 +211,11 @@
     if (page === 'bilan.html' && !CAN_BILAN.includes(plan)) {
       if (mainEl) mainEl.style.visibility = 'visible';
       showUpgradeModal('bilan');
+      return false;
+    }
+    if (page === 'rapport-annuel.html' && !CAN_RAPPORT.includes(plan)) {
+      if (mainEl) mainEl.style.visibility = 'visible';
+      showUpgradeModal('rapport');
       return false;
     }
     const corePages = ['pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','dashboard.html'];
