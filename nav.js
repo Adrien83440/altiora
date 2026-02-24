@@ -9,6 +9,7 @@
   const CAN_FIDELISATION = ['trial', 'max', 'master', 'dev'];
   const CAN_IMPORT       = ['pro', 'max', 'master', 'dev'];
   const CAN_CORE         = ['trial', 'pro', 'max', 'master', 'dev'];
+  const CAN_BILAN        = ['master', 'trial', 'dev'];
 
   const mainEl = document.querySelector('main');
   // Masquer brièvement pour éviter le flash uniquement si Firebase est déjà prêt
@@ -57,6 +58,12 @@
         title: 'Fidélisation — Plan Max requis',
         desc: 'La gestion des clients, cartes de fidélité, coupons et campagnes SMS est disponible dès le plan <strong>Max (99€/mois)</strong> ou <strong>Master (169€/mois)</strong>.',
         cta: '⭐ Passer au plan Max'
+      },
+      bilan: {
+        icon: '🤖',
+        title: 'Analyse de Bilan — Plan Master requis',
+        desc: 'L\'analyse de bilan comptable par intelligence artificielle est disponible avec le plan <strong>Master (169€/mois)</strong>. Importez vos bilans et obtenez des conseils IA personnalisés.',
+        cta: '⭐ Passer au plan Master'
       },
       import: {
         icon: '📥',
@@ -144,6 +151,15 @@
     return null;
   }
 
+  function getBilanNavEl() {
+    const all = document.querySelectorAll('.nav-item, .ni');
+    for (let i = 0; i < all.length; i++) {
+      const oc = all[i].getAttribute('onclick') || '';
+      if (oc.includes('bilan.html')) return all[i];
+    }
+    return null;
+  }
+
   function applyNavPlan(plan) {
     window._userPlan = plan;
     const upl = document.getElementById('uplan');
@@ -154,6 +170,9 @@
     }
     if (!CAN_IMPORT.includes(plan)) {
       lockNavItem(getImportNavEl(), 'Pro+', 'import');
+    }
+    if (!CAN_BILAN.includes(plan)) {
+      lockNavItem(getBilanNavEl(), 'Master', 'bilan');
     }
     if (mainEl) mainEl.style.visibility = 'visible';
   }
@@ -168,6 +187,11 @@
     if (page === 'import.html' && !CAN_IMPORT.includes(plan)) {
       if (mainEl) mainEl.style.visibility = 'visible';
       showUpgradeModal('import');
+      return false;
+    }
+    if (page === 'bilan.html' && !CAN_BILAN.includes(plan)) {
+      if (mainEl) mainEl.style.visibility = 'visible';
+      showUpgradeModal('bilan');
       return false;
     }
     const corePages = ['pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','dashboard.html'];
