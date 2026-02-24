@@ -35,27 +35,49 @@ module.exports = async function handler(req, res) {
 
 MISSION CRITIQUE : extraire les chiffres EXACTS du bilan. La précision des montants est FONDAMENTALE.
 
-ATTENTION AUX COLONNES — Dans les bilans français :
-- Il y a souvent 2 colonnes de chiffres : l'exercice N (le plus récent, souvent à gauche) et l'exercice N-1 (à droite)
-- Il y a parfois 3 colonnes : BRUT | AMORTISSEMENTS | NET — prends TOUJOURS la colonne NET
-- La date de clôture est indiquée en haut du tableau (ex: "31/12/2022" et "31/12/2021")
-- Tu dois extraire UNIQUEMENT les chiffres de l'exercice le plus récent (celui de la date de clôture principale)
-- NE MÉLANGE JAMAIS les chiffres des deux exercices
+═══════════════════════════════════════════════════
+RÈGLE N°1 — IDENTIFICATION DE LA BONNE COLONNE (CRITIQUE)
+═══════════════════════════════════════════════════
 
-VÉRIFICATIONS OBLIGATOIRES avant de répondre :
-1. TOTAL ACTIF doit être ÉGAL à TOTAL PASSIF (c'est une règle comptable absolue — si ce n'est pas le cas, tu as fait une erreur)
-2. totalActif = totalActifImmobilise + totalActifCirculant
-3. totalPassif = totalCapitauxPropres + totalDettes
-4. Les totaux intermédiaires doivent correspondre à la somme de leurs composants
-5. Si un montant est négatif dans le bilan (entre parenthèses ou avec un signe -), reporte-le comme négatif
+ÉTAPE 1 : Identifier la date de clôture principale du bilan
+→ Elle est sur la page de garde (ex: "Période du 01/01/2022 au 31/12/2022")
+→ La date de FIN (31/12/2022) = c'est l'exercice à extraire
 
-SI TU AS UN DOUTE SUR UN CHIFFRE : relis la page correspondante. Mieux vaut mettre 0 que d'inventer un montant.
+ÉTAPE 2 : Pour CHAQUE tableau (actif, passif, compte de résultat), LIS L'EN-TÊTE DES COLONNES
+→ Les en-têtes indiquent les dates : ex "31/12/2022" et "31/12/2021"  
+→ La position varie selon les cabinets : parfois N est à gauche, parfois à droite
+→ NE SUPPOSE JAMAIS la position. LIS la date en en-tête de chaque colonne.
+
+ÉTAPE 3 : Extraire UNIQUEMENT les chiffres de la colonne dont la date correspond à la clôture principale
+→ Si clôture = 31/12/2022, prends TOUS les chiffres sous l'en-tête "31/12/2022" 
+→ IGNORE TOTALEMENT l'autre colonne (N-1)
+
+CAS SPÉCIAL — Bilan actif avec colonnes BRUT | AMORTISSEMENTS | NET :
+→ Prends la colonne NET de l'exercice N (pas le brut, pas les amortissements)
+→ La colonne NET est celle qui donne le montant final après amortissements
+
+PIÈGE FRÉQUENT : ne pas confondre la colonne "Exercice N" et "Exercice N-1". 
+Si tes chiffres Total Actif ≠ Total Passif, tu as probablement mélangé les colonnes → recommence.
+
+═══════════════════════════════════════════════════
+RÈGLE N°2 — VÉRIFICATIONS DE COHÉRENCE OBLIGATOIRES
+═══════════════════════════════════════════════════
+
+AVANT de répondre, vérifie ces 3 égalités :
+1. totalActif DOIT ÊTRE EXACTEMENT ÉGAL à totalPassif (sinon tu as mélangé les colonnes !)
+2. totalActif = totalActifImmobilise + totalActifCirculant (±1€ d'arrondi max)
+3. totalPassif = totalCapitauxPropres + totalDettes (±1€ d'arrondi max)
+
+Si une de ces vérifications échoue : RELIS les tableaux, vérifie quelle colonne tu lis.
+Le TOTAL GÉNÉRAL du bilan (dernière ligne "TOTAL GENERAL" ou "TOTAL ACTIF"/"TOTAL PASSIF") est toujours le chiffre le plus fiable → pars de là et remonte.
+
+═══════════════════════════════════════════════════
 
 Retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le JSON brut).
 
 {
-  "annee": "2024",
-  "dateCloture": "31/12/2024",
+  "annee": "2022",
+  "dateCloture": "31/12/2022",
   "entreprise": "Nom de l'entreprise",
   "formeJuridique": "SARL/SAS/etc",
   
@@ -122,26 +144,21 @@ Retourne UNIQUEMENT un JSON valide (pas de markdown, pas de backticks, juste le 
       "bfrJours": {"moyenne": 0, "position": "au-dessus|en-dessous|dans la moyenne"},
       "ratioLiquiditeGenerale": {"moyenne": 0, "position": "au-dessus|en-dessous|dans la moyenne"}
     },
-    "commentaire": "Phrase résumant la position de l'entreprise par rapport à son secteur"
+    "commentaire": "Phrase résumant la position par rapport au secteur"
   },
   
   "conseils": [
-    {
-      "type": "force|faiblesse|opportunite|vigilance",
-      "titre": "Titre court",
-      "detail": "Explication détaillée et actionnable pour un commerçant"
-    }
+    {"type": "force|faiblesse|opportunite|vigilance", "titre": "Titre court", "detail": "Explication actionnable"}
   ],
   
-  "resumeIA": "Résumé global en français, accessible, avec recommandations concrètes."
+  "resumeIA": "Résumé global en français accessible pour un commerçant."
 }
 
-Règles STRICTES :
-- Tous les montants en euros (nombre entier, PAS de string, PAS de séparateurs de milliers)
-- Ratios en pourcentage (ex: 15.5 pour 15.5%), BFR en jours de CA
+Règles :
+- Montants en euros (nombre entier, PAS de string, PAS de séparateurs)
+- Ratios en % (ex: 15.5), BFR en jours de CA
 - 4 à 8 conseils
-- VÉRIFIE QUE totalActif == totalPassif (règle comptable fondamentale)
-- SECTEUR : identifie le code NAF/APE ou déduis-le. Compare avec les moyennes sectorielles françaises.${contextYears}`
+- SECTEUR : identifie le code NAF/APE ou déduis-le. Compare avec moyennes sectorielles françaises.${contextYears}`
     });
 
     const response = await client.messages.create({
