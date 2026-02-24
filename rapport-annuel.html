@@ -302,6 +302,10 @@ var MONTHS_SHORT=['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct',
 var _allData={}, _dettesData=[], _nomCommerce='', _selectedYear=new Date().getFullYear();
 var _periodeType='civile', _exerciceMois=0;
 var _activeTab='resume';
+// Plage personnalisée
+var _customRange=false;
+var _rangeStart=null; // {year,month} 0-indexed month
+var _rangeEnd=null;
 
 // Nav helpers
 function toggleMenu(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('open');}
@@ -349,29 +353,55 @@ window.initRapport=async function(){
 
 function buildControls(){
   var cur=new Date().getFullYear();
-  var years=[cur-2,cur-1,cur].filter(function(y){return y>=2023;});
+  var years=[cur-3,cur-2,cur-1,cur].filter(function(y){return y>=2022;});
   var yOpts=years.map(function(y){return '<option value="'+y+'"'+(y===_selectedYear?' selected':'')+'>'+y+'</option>';}).join('');
   var mOpts=MONTHS_FR.map(function(m,i){return '<option value="'+i+'"'+(i===_exerciceMois?' selected':'')+'>'+m+'</option>';}).join('');
+  // Valeurs par défaut plage
+  var d=new Date();
+  var defEnd=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  var defStartM=d.getMonth()-5; var defStartY=d.getFullYear();
+  if(defStartM<0){defStartM+=12;defStartY--;}
+  var defStart=defStartY+'-'+String(defStartM+1).padStart(2,'0');
+  var rsVal=(_rangeStart?_rangeStart.year+'-'+String(_rangeStart.month+1).padStart(2,'0'):defStart);
+  var reVal=(_rangeEnd?_rangeEnd.year+'-'+String(_rangeEnd.month+1).padStart(2,'0'):defEnd);
+
   document.getElementById('mainContent').innerHTML=
     '<div class="config-bar">'+
-      '<div class="config-group"><div class="config-label">Année de référence</div>'+
-        '<select class="config-select" id="yearSel" onchange="changeYear(parseInt(this.value))">'+yOpts+'</select></div>'+
-      '<div class="config-divider"></div>'+
-      '<div class="config-group"><div class="config-label">Type de période</div>'+
+      '<div class="config-group"><div class="config-label">Mode</div>'+
         '<div class="seg">'+
-          '<button class="seg-btn'+(_periodeType==='civile'?' active':'')+'" onclick="setPeriode(\'civile\',this)">📅 Civile</button>'+
-          '<button class="seg-btn'+(_periodeType==='fiscale'?' active':'')+'" onclick="setPeriode(\'fiscale\',this)">📋 Exercice fiscal</button>'+
+          '<button class="seg-btn'+(!_customRange?' active':'')+'" onclick="setCustomRange(false)">📅 Période</button>'+
+          '<button class="seg-btn'+(_customRange?' active':'')+'" onclick="setCustomRange(true)">📆 Plage libre</button>'+
         '</div></div>'+
-      '<div id="exo-cfg" class="config-group" style="'+(_periodeType==='fiscale'?'':'display:none')+'">'+
-        '<div class="config-label">Début exercice</div>'+
-        '<select class="config-select" id="exoMois" onchange="setExoMois(parseInt(this.value))">'+mOpts+'</select>'+
+      '<div class="config-divider"></div>'+
+      '<div id="classic-cfg" style="'+(_customRange?'display:none':'display:flex')+';align-items:center;gap:12px;flex-wrap:wrap">'+
+        '<div class="config-group"><div class="config-label">Année</div>'+
+          '<select class="config-select" id="yearSel" onchange="changeYear(parseInt(this.value))">'+yOpts+'</select></div>'+
+        '<div class="config-group"><div class="config-label">Type</div>'+
+          '<div class="seg">'+
+            '<button class="seg-btn'+(_periodeType==='civile'?' active':'')+'" onclick="setPeriode(\'civile\',this)">Civile</button>'+
+            '<button class="seg-btn'+(_periodeType==='fiscale'?' active':'')+'" onclick="setPeriode(\'fiscale\',this)">Fiscal</button>'+
+          '</div></div>'+
+        '<div id="exo-cfg" class="config-group" style="'+(_periodeType==='fiscale'?'':'display:none')+'">'+
+          '<div class="config-label">Début exercice</div>'+
+          '<select class="config-select" id="exoMois" onchange="setExoMois(parseInt(this.value))">'+mOpts+'</select>'+
+        '</div>'+
+      '</div>'+
+      '<div id="range-cfg" style="'+(_customRange?'display:flex':'display:none')+';align-items:flex-end;gap:10px;flex-wrap:wrap">'+
+        '<div class="config-group"><div class="config-label">De</div>'+
+          '<input type="month" id="rangeStart" class="config-select" value="'+rsVal+'" style="cursor:pointer;font-family:inherit">'+
+        '</div>'+
+        '<div style="font-size:20px;color:var(--muted);padding-bottom:7px">→</div>'+
+        '<div class="config-group"><div class="config-label">À</div>'+
+          '<input type="month" id="rangeEnd" class="config-select" value="'+reVal+'" style="cursor:pointer;font-family:inherit">'+
+        '</div>'+
+        '<button class="btn btn-primary" style="margin-bottom:2px" onclick="applyRange()">Analyser →</button>'+
       '</div>'+
       '<div class="config-divider"></div>'+
-      '<div class="config-group"><div class="config-label">Nom du commerce</div>'+
-        '<input id="nomCommerce" type="text" class="config-select" style="width:190px" placeholder="Mon commerce" value="'+_nomCommerce+'" oninput="_nomCommerce=this.value"></div>'+
+      '<div class="config-group"><div class="config-label">Commerce</div>'+
+        '<input id="nomCommerce" type="text" class="config-select" style="width:160px" placeholder="Mon commerce" value="'+_nomCommerce+'" oninput="_nomCommerce=this.value"></div>'+
       '<div class="config-actions">'+
-        '<button class="btn btn-outline" onclick="window.print()">🖨️ Imprimer</button>'+
-        '<button class="btn btn-primary" onclick="exportPDF()">⬇️ PDF complet</button>'+
+        '<button class="btn btn-outline" onclick="window.print()" title="Imprimer">🖨️</button>'+
+        '<button class="btn btn-primary" onclick="exportPDF()">⬇️ PDF</button>'+
       '</div>'+
     '</div>'+
     '<div id="rapportBody"><div class="loader-wrap"><div class="spinner"></div><span>Chargement des données...</span></div></div>';
@@ -386,6 +416,39 @@ function setPeriode(type,btn){
 }
 function setExoMois(m){_exerciceMois=m;renderRapport();}
 function changeYear(y){_selectedYear=y;loadData(y);}
+function setCustomRange(v){
+  _customRange=v;
+  var bloc=document.getElementById('range-cfg');
+  var classic=document.getElementById('classic-cfg');
+  if(bloc)bloc.style.display=v?'':'none';
+  if(classic)classic.style.display=v?'none':'';
+  renderRapport();
+}
+function applyRange(){
+  var s=document.getElementById('rangeStart');
+  var e=document.getElementById('rangeEnd');
+  if(!s||!e||!s.value||!e.value)return;
+  var sp=s.value.split('-');var ep=e.value.split('-');
+  _rangeStart={year:parseInt(sp[0]),month:parseInt(sp[1])-1};
+  _rangeEnd={year:parseInt(ep[0]),month:parseInt(ep[1])-1};
+  // Load all needed years
+  var yearsNeeded={};
+  var cy=_rangeStart.year,cm=_rangeStart.month;
+  while(cy<_rangeEnd.year||(cy===_rangeEnd.year&&cm<=_rangeEnd.month)){
+    yearsNeeded[cy]=true;cm++;if(cm>11){cm=0;cy++;}
+  }
+  _selectedYear=_rangeStart.year;
+  var yKeys=Object.keys(yearsNeeded);
+  var proms=[];
+  yKeys.forEach(function(y){
+    for(var m=1;m<=12;m++){
+      var key=y+'-'+String(m).padStart(2,'0');
+      proms.push(window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key))
+        .then((function(k){return function(s){if(s.exists())_allData[k]=s.data();};})(key)).catch(function(){}));
+    }
+  });
+  Promise.all(proms).then(function(){renderRapport();});
+}
 function switchTab(t){
   _activeTab=t;
   document.querySelectorAll('.tab-btn').forEach(function(b){b.classList.toggle('active',b.dataset.tab===t);});
@@ -394,19 +457,34 @@ function switchTab(t){
 
 // Période keys
 function getPeriodKeys(year){
+  if(_customRange&&_rangeStart&&_rangeEnd){
+    var keys=[];
+    var sy=_rangeStart.year,sm=_rangeStart.month;
+    var ey=_rangeEnd.year,em=_rangeEnd.month;
+    var cy=sy,cm=sm;
+    while(cy<ey||(cy===ey&&cm<=em)){
+      keys.push(cy+'-'+String(cm+1).padStart(2,'0'));
+      cm++;if(cm>11){cm=0;cy++;}
+      if(keys.length>36)break; // sécurité
+    }
+    return keys;
+  }
   var keys=[];
   if(_periodeType==='civile'){
     for(var m=1;m<=12;m++)keys.push(year+'-'+String(m).padStart(2,'0'));
   } else {
     for(var i=0;i<12;i++){
-      var cm=(_exerciceMois+i)%12;
-      var cy=year+Math.floor((_exerciceMois+i)/12);
-      keys.push(cy+'-'+String(cm+1).padStart(2,'0'));
+      var cm2=(_exerciceMois+i)%12;
+      var cy2=year+Math.floor((_exerciceMois+i)/12);
+      keys.push(cy2+'-'+String(cm2+1).padStart(2,'0'));
     }
   }
   return keys;
 }
 function getPeriodLabel(year){
+  if(_customRange&&_rangeStart&&_rangeEnd){
+    return MONTHS_SHORT[_rangeStart.month]+' '+_rangeStart.year+' → '+MONTHS_SHORT[_rangeEnd.month]+' '+_rangeEnd.year;
+  }
   if(_periodeType==='civile')return '01/01/'+year+' — 31/12/'+year;
   var endMIdx=(_exerciceMois+11)%12;
   var endY=year+(_exerciceMois>0?1:0);
@@ -548,7 +626,20 @@ function renderRapport(){
   var el=document.getElementById('rapportBody');if(!el)return;
   var year=_selectedYear;
   var keys=getPeriodKeys(year);
-  var keysN1=getPeriodKeys(year-1);
+  // N-1 : décaler la plage d'un an en arrière
+  var keysN1=[];
+  if(_customRange&&_rangeStart&&_rangeEnd){
+    var rs1={year:_rangeStart.year-1,month:_rangeStart.month};
+    var re1={year:_rangeEnd.year-1,month:_rangeEnd.month};
+    var cy=rs1.year,cm=rs1.month;
+    while(cy<re1.year||(cy===re1.year&&cm<=re1.month)){
+      keysN1.push(cy+'-'+String(cm+1).padStart(2,'0'));
+      cm++;if(cm>11){cm=0;cy++;}
+      if(keysN1.length>36)break;
+    }
+  } else {
+    keysN1=getPeriodKeys(year-1);
+  }
   var agg=aggregateKeys(keys);
   var aggN1=aggregateKeys(keysN1);
   var T=agg.T, TN1=aggN1.T, monthly=agg.monthly, topCharges=agg.topChargesList;
@@ -707,17 +798,195 @@ function renderRapport(){
   tabResume+='</div></div>';
   tabResume+='</div>';
 
-  // Faits marquants
-  if(moisData.length>1){
+  // ── FAITS MARQUANTS (enrichis)
+  if(moisData.length>0){
+    // Calculs complémentaires
+    var caMaxMois=meillCA?meillCA.caHT:0;
+    var caMinMois=moinsCA?moinsCA.caHT:0;
+    var ecartCAMois=caMaxMois>0&&caMinMois>=0?((caMaxMois-caMinMois)/caMaxMois*100):0;
+    var caAccelere=monthly.length>=6&&moisData.length>=4?(function(){
+      var firstHalf=moisData.filter(function(m){return m.m<6;});
+      var secondHalf=moisData.filter(function(m){return m.m>=6;});
+      if(!firstHalf.length||!secondHalf.length)return null;
+      var avgFirst=firstHalf.reduce(function(s,m){return s+m.caHT;},0)/firstHalf.length;
+      var avgSecond=secondHalf.reduce(function(s,m){return s+m.caHT;},0)/secondHalf.length;
+      return {first:avgFirst,second:avgSecond,delta:avgSecond-avgFirst,pct:avgFirst>0?(avgSecond-avgFirst)/avgFirst*100:0};
+    })():null;
+    var moisDeficit=moisData.filter(function(m){return m.resultat<0;});
+    var moisExcedent=moisData.filter(function(m){return m.resultat>0;});
+    var totalDeficit=moisDeficit.reduce(function(s,m){return s+m.resultat;},0);
+    var totalExcedent=moisExcedent.reduce(function(s,m){return s+m.resultat;},0);
+    var chargesParCA=T.caHT>0?(T.fixe/T.caHT*100):0; // poids fixes seules
+    var pointMort=chargesParCA<100&&T.variable<T.caHT?T.fixe/(1-T.variable/T.caHT)/1000:0; // en milliers
+
     tabResume+='<div class="bilan-block full" style="margin-bottom:24px">'+
-      '<div class="block-header"><div class="block-title">🏆 Faits marquants</div></div>'+
-      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0">';
-    tabResume+=factCard('🥇','Meilleur CA',meillCA?meillCA.lbl+' '+meillCA.yr:'—',meillCA?fmt(meillCA.caHT):'—','green');
-    tabResume+=factCard('📉','CA le plus bas',moinsCA?moinsCA.lbl+' '+moinsCA.yr:'—',moinsCA?fmt(moinsCA.caHT):'—','orange');
-    tabResume+=factCard('✅','Meilleur résultat',meillRes?meillRes.lbl+' '+meillRes.yr:'—',meillRes?fmt(meillRes.resultat):'—','green');
-    tabResume+=factCard('❌','Pire résultat',piresRes?piresRes.lbl+' '+piresRes.yr:'—',piresRes?fmt(piresRes.resultat):'—',piresRes&&piresRes.resultat<0?'red':'orange');
+      '<div class="block-header">'+
+        '<div class="block-title">🏆 Faits marquants de la période</div>'+
+        '<span class="block-badge badge-gray">'+T.moisData+' mois analysés</span>'+
+      '</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid var(--border)">';
+
+    tabResume+=factCard('🥇','Meilleur mois CA',
+      meillCA?meillCA.lbl+' '+meillCA.yr:'—',
+      meillCA?fmt(meillCA.caHT):'—',
+      'green',
+      meillCA&&T.moisData>1?'Résultat : '+fmt(meillCA.resultat):'');
+
+    tabResume+=factCard('📉','Mois CA le plus faible',
+      moinsCA?moinsCA.lbl+' '+moinsCA.yr:'—',
+      moinsCA?fmt(moinsCA.caHT):'—',
+      'orange',
+      caMaxMois>0?'Écart max/min : '+ecartCAMois.toFixed(0)+'%':'');
+
+    tabResume+=factCard('✅','Meilleur résultat',
+      meillRes?meillRes.lbl+' '+meillRes.yr:'—',
+      meillRes?fmt(meillRes.resultat):'—',
+      'green',
+      meillRes?'CA ce mois : '+fmt(meillRes.caHT):'');
+
+    tabResume+=factCard('❌','Pire résultat',
+      piresRes?piresRes.lbl+' '+piresRes.yr:'—',
+      piresRes?fmt(piresRes.resultat):'—',
+      piresRes&&piresRes.resultat<0?'red':'orange',
+      piresRes?'CA ce mois : '+fmt(piresRes.caHT):'');
+
+    tabResume+='</div>';
+    // Ligne 2 de faits
+    tabResume+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0">';
+
+    tabResume+=factCard('📊','Mois bénéficiaires',
+      moisExcedent.length+' / '+T.moisData,
+      moisExcedent.length===T.moisData?'Tous positifs !':moisDeficit.length+' déficitaire'+(moisDeficit.length>1?'s':''),
+      moisExcedent.length>=T.moisData*0.75?'green':'orange',
+      moisExcedent.length>0?'Excédents : '+fmt(totalExcedent):'');
+
+    tabResume+=factCard('💸','Total déficits cumulés',
+      moisDeficit.length>0?fmt(Math.abs(totalDeficit)):'Aucun déficit',
+      moisDeficit.length>0?moisDeficit.length+' mois dans le rouge':'✅ Tous les mois couvrent leurs charges',
+      moisDeficit.length>0?'red':'green',
+      moisDeficit.length>0&&moisExcedent.length>0?'Excédents compensateurs : '+fmt(totalExcedent):'');
+
+    tabResume+=factCard(caAccelere&&caAccelere.pct>0?'🚀':'📉',
+      'Dynamique S1 → S2',
+      caAccelere?fmt(caAccelere.second)+'/mois':'—',
+      caAccelere?''+( caAccelere.pct>=0?'+':'')+caAccelere.pct.toFixed(1)+'% vs S1':'Données insuffisantes',
+      caAccelere?( caAccelere.pct>5?'green': caAccelere.pct<-5?'red':'orange'):'gray',
+      caAccelere?'S1 moy. : '+fmt(caAccelere.first)+'/mois':'Moins de 4 mois enregistrés');
+
+    tabResume+=factCard('⚡','Seuil de rentabilité',
+      T.moisData>0&&txVar<100?fmt(T.fixe/(1-txVar/100)/T.moisData)+'/mois':'—',
+      caMens>0&&T.fixe/(1-txVar/100)/T.moisData>0?(caMens>T.fixe/(1-txVar/100)/T.moisData?'✅ CA moy. au-dessus du seuil':'⚠️ CA moy. sous le seuil'):'',
+      caMens>0&&T.moisData>0&&T.fixe/(1-txVar/100)/T.moisData>0?(caMens>T.fixe/(1-txVar/100)/T.moisData?'green':'red'):'gray',
+      'Point mort mensuel estimé');
+
     tabResume+='</div></div>';
   }
+
+  // ── MINI ANALYSE DE SITUATION
+  (function(){
+    var analyse=[];
+    var scoreGlobal=0; // 0-100
+
+    // CA & croissance
+    if(evCA!==null){
+      if(evCA>15){scoreGlobal+=20;analyse.push({type:'good',titre:'Croissance CA solide',texte:'Le chiffre d\'affaires progresse de <strong>+'+evCA.toFixed(1)+'%</strong> par rapport à la même période N-1 ('+fmt(TN1.caHT)+' → '+fmt(T.caHT)+'). Cette dynamique est encourageante et témoigne d\'une activité en développement.'});}
+      else if(evCA>5){scoreGlobal+=12;analyse.push({type:'good',titre:'CA en légère hausse',texte:'Le CA est en progression de <strong>+'+evCA.toFixed(1)+'%</strong> vs N-1. La croissance est modérée mais positive — à maintenir.'});}
+      else if(evCA<-10){scoreGlobal-=15;analyse.push({type:'bad',titre:'Baisse significative du CA',texte:'Le CA recule de <strong>'+evCA.toFixed(1)+'%</strong> par rapport à N-1 ('+fmt(TN1.caHT)+' → '+fmt(T.caHT)+'). Une analyse des causes s\'impose : perte de clientèle, baisse des prix, saisonnalité ?'});}
+      else if(evCA<0){scoreGlobal-=5;analyse.push({type:'warn',titre:'CA en légère baisse',texte:'Légère contraction du CA de '+evCA.toFixed(1)+'% vs N-1. À surveiller mais pas encore alarmant.'});}
+      else{scoreGlobal+=6;analyse.push({type:'info',titre:'CA stable vs N-1',texte:'Le CA est quasiment stable par rapport à l\'an dernier ('+fmtPct(evCA)+').'});}
+    } else {
+      // Pas de N-1 — analyser la tendance interne
+      if(caMens>0) analyse.push({type:'info',titre:'Activité en cours',texte:'CA moyen mensuel de <strong>'+fmt(caMens)+'</strong> sur '+T.moisData+' mois enregistrés.'});
+    }
+
+    // Rentabilité
+    if(margeN>15){scoreGlobal+=25;analyse.push({type:'good',titre:'Excellente rentabilité',texte:'Avec une marge nette de <strong>'+margeN.toFixed(1)+'%</strong>, la structure financière est saine. Pour chaque euro encaissé, '+margeN.toFixed(0)+' centimes restent en bénéfice après toutes les charges.'});}
+    else if(margeN>8){scoreGlobal+=15;analyse.push({type:'good',titre:'Bonne rentabilité',texte:'La marge nette de <strong>'+margeN.toFixed(1)+'%</strong> est satisfaisante. L\'activité génère un résultat positif qui permet de couvrir toutes les charges et de dégager des bénéfices.'});}
+    else if(margeN>0){scoreGlobal+=5;analyse.push({type:'warn',titre:'Rentabilité fragile',texte:'La marge nette est positive mais faible (<strong>'+margeN.toFixed(1)+'%</strong>). Le moindre imprévu (baisse de CA, hausse de charges) peut faire basculer le résultat dans le négatif. Il est conseillé de renforcer les marges.'});}
+    else if(margeN>-5){scoreGlobal-=10;analyse.push({type:'bad',titre:'Léger déficit',texte:'Le résultat est légèrement négatif (<strong>'+margeN.toFixed(1)+'%</strong>). Les charges dépassent le CA de '+fmt(Math.abs(T.resultat))+'. Une action rapide sur les charges ou le CA est nécessaire pour redresser la situation.'});}
+    else{scoreGlobal-=25;analyse.push({type:'bad',titre:'Déficit important',texte:'La situation est déficitaire avec une perte de <strong>'+fmt(Math.abs(T.resultat))+'</strong> ('+Math.abs(margeN).toFixed(1)+'% du CA). Les charges structurelles sont trop élevées par rapport au CA généré. Une restructuration est à envisager.'});}
+
+    // Structure des charges
+    if(txFixe>60){scoreGlobal-=10;analyse.push({type:'warn',titre:'Charges fixes dominantes',texte:'Les charges fixes représentent <strong>'+txFixe.toFixed(1)+'% du CA</strong> ('+fmt(T.fixe)+'), ce qui est élevé. Cette rigidité expose l\'activité aux fluctuations de CA : même en cas de baisse d\'activité, ces charges restent dues.'});}
+    else if(txFixe>40){analyse.push({type:'info',titre:'Équilibre charges fixes/variables',texte:'Les charges fixes représentent '+txFixe.toFixed(1)+'% du CA. La structure est équilibrée mais le seuil de rentabilité reste à surveiller.'});}
+
+    // Endettement
+    if(totDettes>0){
+      if(ratioEndett>150){scoreGlobal-=15;analyse.push({type:'bad',titre:'Endettement préoccupant',texte:'L\'encours de dettes (<strong>'+fmt(totDettes)+'</strong>) représente '+ratioEndett.toFixed(0)+'% du CA annuel. Ce niveau d\'endettement laisse peu de marge de manœuvre et pèse lourd sur la trésorerie ('+fmt(totMensDettes)+'/mois de mensualités).'});}
+      else if(ratioEndett>80){scoreGlobal-=5;analyse.push({type:'warn',titre:'Endettement à surveiller',texte:'L\'encours de dettes de <strong>'+fmt(totDettes)+'</strong> représente '+ratioEndett.toFixed(0)+'% du CA. Les mensualités de '+fmt(totMensDettes)+'/mois sont à intégrer dans le pilotage de trésorerie.'});}
+      else{analyse.push({type:'good',titre:'Endettement maîtrisé',texte:'L\'encours de dettes (<strong>'+fmt(totDettes)+'</strong> — '+ratioEndett.toFixed(0)+'% du CA) reste à un niveau gérable. Les mensualités de '+fmt(totMensDettes)+'/mois sont absorbables par l\'activité.'});}
+    }
+
+    // TVA
+    if(T.tvaDue<0){analyse.push({type:'info',titre:'Crédit de TVA',texte:'La TVA déductible dépasse la TVA collectée, générant un <strong>crédit de '+fmt(Math.abs(T.tvaDue))+'</strong>. Ce montant est récupérable auprès des impôts ou reportable sur la prochaine déclaration.'});}
+    else if(T.tvaDue>2000){analyse.push({type:'warn',titre:'TVA à provisionner',texte:'La TVA due estimée s\'élève à <strong>'+fmt(T.tvaDue)+'</strong>. Pensez à provisionner ce montant pour éviter une tension de trésorerie lors de la déclaration.'});}
+
+    // Dynamique S1/S2
+    if(caAccelere&&Math.abs(caAccelere.pct)>10){
+      if(caAccelere.pct>10){scoreGlobal+=10;analyse.push({type:'good',titre:'Accélération en 2ème partie d\'année',texte:'Le CA du 2ème semestre (moy. '+fmt(caAccelere.second)+'/mois) est en hausse de <strong>+'+caAccelere.pct.toFixed(1)+'%</strong> par rapport au 1er semestre ('+fmt(caAccelere.first)+'/mois). L\'activité s\'accélère, signe positif.'});}
+      else if(caAccelere.pct<-10){scoreGlobal-=10;analyse.push({type:'warn',titre:'Ralentissement en 2ème partie d\'année',texte:'Le CA du 2ème semestre (moy. '+fmt(caAccelere.second)+'/mois) marque un recul de <strong>'+caAccelere.pct.toFixed(1)+'%</strong> vs le 1er semestre. À analyser : saisonnalité, concurrence, événements ?'});}
+    }
+
+    // Score global
+    scoreGlobal=Math.max(0,Math.min(100,50+scoreGlobal));
+    var scoreLabel=scoreGlobal>=70?'Situation saine':scoreGlobal>=50?'Situation correcte':scoreGlobal>=35?'Situation fragile':'Situation préoccupante';
+    var scoreColor=scoreGlobal>=70?'var(--green)':scoreGlobal>=50?'var(--orange)':scoreGlobal>=35?'#f97316':'var(--red)';
+
+    tabResume+='<div class="bilan-block full" style="margin-bottom:24px">'+
+      '<div class="block-header">'+
+        '<div class="block-title">🔍 Analyse de la situation financière</div>'+
+        '<span class="block-badge badge-blue">Généré automatiquement</span>'+
+      '</div>'+
+      // Score général
+      '<div style="padding:20px 24px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:24px;flex-wrap:wrap">'+
+        '<div style="flex-shrink:0;text-align:center">'+
+          '<div style="width:72px;height:72px;border-radius:50%;border:4px solid '+scoreColor+';display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0 auto 6px">'+
+            '<div style="font-size:20px;font-weight:800;color:'+scoreColor+'">'+scoreGlobal+'</div>'+
+            '<div style="font-size:8px;color:var(--muted);font-weight:600">/100</div>'+
+          '</div>'+
+          '<div style="font-size:11px;font-weight:700;color:'+scoreColor+'">'+scoreLabel+'</div>'+
+        '</div>'+
+        '<div style="flex:1;min-width:200px">'+
+          '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px">Score de santé financière</div>'+
+          '<div style="height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-bottom:8px">'+
+            '<div style="width:'+scoreGlobal+'%;height:100%;background:'+scoreColor+';border-radius:4px;transition:width 1s ease"></div>'+
+          '</div>'+
+          '<div style="font-size:12px;color:var(--muted)">Basé sur la marge nette, l\'évolution du CA, la structure des charges et le niveau d\'endettement.</div>'+
+        '</div>'+
+        // Résumé 3 chiffres clés
+        '<div style="display:flex;gap:16px;flex-wrap:wrap">'+
+          '<div style="text-align:center;padding:0 16px;border-left:1px solid var(--border)">'+
+            '<div style="font-size:18px;font-weight:800;color:'+(margeN>=0?'var(--green)':'var(--red)')+'">'+fmtPct(margeN,true)+'</div>'+
+            '<div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase">Marge nette</div>'+
+          '</div>'+
+          '<div style="text-align:center;padding:0 16px;border-left:1px solid var(--border)">'+
+            '<div style="font-size:18px;font-weight:800;color:var(--text)">'+fmtPct(txCharges,true)+'</div>'+
+            '<div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase">Taux charges</div>'+
+          '</div>'+
+          (evCA!==null?'<div style="text-align:center;padding:0 16px;border-left:1px solid var(--border)">'+
+            '<div style="font-size:18px;font-weight:800;color:'+(evCA>=0?'var(--green)':'var(--red)')+'">'+fmtPct(evCA)+'</div>'+
+            '<div style="font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase">Évolution CA</div>'+
+          '</div>':'')+''+
+        '</div>'+
+      '</div>'+
+      // Points d'analyse
+      '<div style="padding:16px 24px;display:flex;flex-direction:column;gap:12px">';
+
+    analyse.forEach(function(a){
+      var bg={good:'#f0fdf4',warn:'#fffbeb',bad:'#fff1f2',info:'#eff6ff'};
+      var border={good:'#bbf7d0',warn:'#fde68a',bad:'#fca5a5',info:'#bfdbfe'};
+      var dot={good:'#10b981',warn:'#f59e0b',bad:'#ef4444',info:'#3b82f6'};
+      tabResume+='<div style="background:'+bg[a.type]+';border:1px solid '+border[a.type]+';border-radius:10px;padding:12px 16px;display:flex;gap:12px;align-items:flex-start">'+
+        '<div style="width:8px;height:8px;border-radius:50%;background:'+dot[a.type]+';margin-top:5px;flex-shrink:0"></div>'+
+        '<div>'+
+          '<div style="font-size:13px;font-weight:700;margin-bottom:3px">'+a.titre+'</div>'+
+          '<div style="font-size:12px;line-height:1.6;color:#374151">'+a.texte+'</div>'+
+        '</div>'+
+      '</div>';
+    });
+
+    tabResume+='</div></div>';
+  })();
 
   // Top charges
   if(topCharges.length>0){
@@ -1041,14 +1310,16 @@ function pbar(label,val,total,color){
     '<div class="progress-bar"><div class="progress-fill" style="width:'+p.toFixed(1)+'%;background:'+color+'"></div></div>'+
   '</div>';
 }
-function factCard(icon,label,sub,value,color){
-  var bg={green:'#f0fdf4',orange:'#fffbeb',red:'#fff1f2'};
-  var tc={green:'#15803d',orange:'#92400e',red:'#dc2626'};
-  return '<div style="padding:16px 20px;border-right:1px solid var(--border)">'+
-    '<div style="font-size:20px;margin-bottom:6px">'+icon+'</div>'+
+function factCard(icon,label,sub,value,color,extra){
+  var bg={green:'#f0fdf4',orange:'#fffbeb',red:'#fff1f2',gray:'var(--bg)'};
+  var tc={green:'#15803d',orange:'#92400e',red:'#dc2626',gray:'var(--muted)'};
+  return '<div style="padding:18px 20px;border-right:1px solid var(--border);background:'+(bg[color]||'white')+';position:relative;overflow:hidden">'+
+    '<div style="position:absolute;top:0;left:0;right:0;height:3px;background:'+(tc[color]||'var(--border)')+'"></div>'+
+    '<div style="font-size:22px;margin-bottom:8px">'+icon+'</div>'+
     '<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">'+label+'</div>'+
-    '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:5px">'+sub+'</div>'+
-    '<div style="font-size:17px;font-weight:800;color:'+(tc[color]||'var(--text)')+'">'+value+'</div>'+
+    '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px">'+sub+'</div>'+
+    '<div style="font-size:18px;font-weight:800;color:'+(tc[color]||'var(--text)')+'">'+value+'</div>'+
+    (extra?'<div style="font-size:11px;color:var(--muted);margin-top:5px;font-weight:500">'+extra+'</div>':'')+
   '</div>';
 }
 
@@ -1058,10 +1329,22 @@ function exportPDF(){
     var jsPDF=window.jspdf?window.jspdf.jsPDF:null;
     if(!jsPDF){alert('Librairie PDF non chargée.');return;}
     var doc=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
-    var W=210,H=297,mg=15,cW=180,y=mg;
+    var W=210,H=297,mg=10,cW=190,y=mg;
     var year=_selectedYear;
     var keys=getPeriodKeys(year);
-    var keysN1=getPeriodKeys(year-1);
+    var keysN1=[];
+    if(_customRange&&_rangeStart&&_rangeEnd){
+      var rs1={year:_rangeStart.year-1,month:_rangeStart.month};
+      var re1={year:_rangeEnd.year-1,month:_rangeEnd.month};
+      var cy2=rs1.year,cm2=rs1.month;
+      while(cy2<re1.year||(cy2===re1.year&&cm2<=re1.month)){
+        keysN1.push(cy2+'-'+String(cm2+1).padStart(2,'0'));
+        cm2++;if(cm2>11){cm2=0;cy2++;}
+        if(keysN1.length>36)break;
+      }
+    } else {
+      keysN1=getPeriodKeys(year-1);
+    }
     var agg=aggregateKeys(keys);
     var aggN1=aggregateKeys(keysN1);
     var T=agg.T,TN1=aggN1.T,monthly=agg.monthly,topCharges=agg.topChargesList;
@@ -1204,7 +1487,7 @@ function exportPDF(){
 
     //  COMPTE DE RESULTAT
     sectionTitle('COMPTE DE RESULTAT SIMPLIFIE');
-    var c1=mg,c2=mg+80,c3=mg+115,c4=mg+155;
+    var c1=mg,c2=mg+88,c3=mg+128,c4=mg+162;
     doc.setFillColor(BD[0],BD[1],BD[2]);doc.rect(mg,y,cW,7.5,'F');
     doc.setFillColor(BL[0],BL[1],BL[2]);doc.rect(mg+cW*0.5,y,cW*0.5,7.5,'F');
     sf('bold',7,WH);
@@ -1270,7 +1553,7 @@ function exportPDF(){
 
     // TVA par taux
     chk(30);
-    var tvaCols=[{x:mg,w:60,label:'Taux',r:false},{x:mg+60,w:40,label:'Base HT',r:true},{x:mg+100,w:40,label:'TVA',r:true},{x:mg+140,w:40,label:'% base',r:true}];
+    var tvaCols=[{x:mg,w:80,label:'Taux',r:false},{x:mg+80,w:40,label:'Base HT',r:true},{x:mg+120,w:40,label:'TVA',r:true},{x:mg+160,w:30,label:'% base',r:true}];
     tableHead(tvaCols);
     var tvraRows=[];
     if(T.caHT055>0)tvraRows.push(['5,5%',fmtP(T.caHT055),fmtP(T.caHT055*0.055),fmtPctP(T.caHT>0?T.caHT055/T.caHT*100:0,true)]);
@@ -1282,7 +1565,7 @@ function exportPDF(){
 
     //  DÉTAIL MENSUEL
     sectionTitle('DETAIL MENSUEL COMPLET');
-    var mc=[{x:mg,w:14,label:'Mois',r:false},{x:mg+14,w:25,label:'CA HT',r:true},{x:mg+39,w:22,label:'Charges',r:true},{x:mg+61,w:22,label:'Résultat',r:true},{x:mg+83,w:16,label:'Marge',r:true},{x:mg+99,w:22,label:'Fixes',r:true},{x:mg+121,w:22,label:'Var.',r:true},{x:mg+143,w:22,label:'Crédits',r:true},{x:mg+165,w:15,label:'N-1',r:true}];
+    var mc=[{x:mg,w:16,label:'Mois',r:false},{x:mg+16,w:26,label:'CA HT',r:true},{x:mg+42,w:26,label:'Charges',r:true},{x:mg+68,w:25,label:'Résultat',r:true},{x:mg+93,w:18,label:'Marge',r:true},{x:mg+111,w:24,label:'Fixes',r:true},{x:mg+135,w:22,label:'Var.',r:true},{x:mg+157,w:18,label:'N-1',r:true}];
     tableHead(mc);
     monthly.forEach(function(m,idx){
       chk(7);
@@ -1322,7 +1605,7 @@ function exportPDF(){
     //  TOP CHARGES
     if(topCharges.length>0){
       sectionTitle('TOP POSTES DE CHARGES (cumule periode)');
-      var cc=[{x:mg,w:8,label:'#',r:false},{x:mg+8,w:55,label:'Fournisseur',r:false},{x:mg+63,w:45,label:'Type',r:false},{x:mg+108,w:35,label:'Total HT',r:true},{x:mg+143,w:20,label:'% Ch.',r:true},{x:mg+163,w:17,label:'% CA',r:true}];
+      var cc=[{x:mg,w:8,label:'#',r:false},{x:mg+8,w:60,label:'Fournisseur',r:false},{x:mg+68,w:50,label:'Type',r:false},{x:mg+118,w:36,label:'Total HT',r:true},{x:mg+154,w:20,label:'% Ch.',r:true},{x:mg+174,w:16,label:'% CA',r:true}];
       tableHead(cc);
       topCharges.forEach(function(c,i){
         tableRow(cc,[(i+1)+'.',c.fournisseur||'—',c.type||'—',fmtP(c.total),T.charges>0?fmtPctP(c.total/T.charges*100,true):'—',T.caHT>0?fmtPctP(c.total/T.caHT*100,true):'—'],i);
@@ -1334,7 +1617,7 @@ function exportPDF(){
     //  DETTES
     if(dA.length>0){
       sectionTitle('SITUATION DES DETTES ET EMPRUNTS');
-      var dc=[{x:mg,w:50,label:'Crédit / Emprunt',r:false},{x:mg+50,w:28,label:'Capital',r:true},{x:mg+78,w:30,label:'Restant dû',r:true},{x:mg+108,w:28,label:'Mensualité',r:true},{x:mg+136,w:16,label:'Taux',r:true},{x:mg+152,w:14,label:'Durée',r:true},{x:mg+166,w:14,label:'%',r:true}];
+      var dc=[{x:mg,w:52,label:'Credit / Emprunt',r:false},{x:mg+52,w:30,label:'Capital',r:true},{x:mg+82,w:32,label:'Restant du',r:true},{x:mg+114,w:30,label:'Mensualite',r:true},{x:mg+144,w:16,label:'Taux',r:true},{x:mg+160,w:16,label:'Duree',r:true},{x:mg+176,w:14,label:'%',r:true}];
       tableHead(dc);
       dA.forEach(function(d,idx){
         var mt=parseFloat(d.montant)||0,rst=parseFloat(d.montantRestant||d.montant)||0,mens=parseFloat(d.mensualite)||0;
@@ -1359,7 +1642,7 @@ function exportPDF(){
     var projCh=allProjMonths.reduce(function(s,m){return s+m.charges;},0);
     var projRes=projCA-projCh+T.rentrees;
     var projMg=projCA>0?projRes/projCA*100:0;
-    var pc=[{x:mg,w:16,label:'Mois',r:false},{x:mg+16,w:28,label:'CA HT',r:true},{x:mg+44,w:28,label:'Charges',r:true},{x:mg+72,w:28,label:'Résultat',r:true},{x:mg+100,w:18,label:'Marge',r:true},{x:mg+118,w:20,label:'Type',r:false}];
+    var pc=[{x:mg,w:18,label:'Mois',r:false},{x:mg+18,w:36,label:'CA HT',r:true},{x:mg+54,w:36,label:'Charges',r:true},{x:mg+90,w:36,label:'Resultat',r:true},{x:mg+126,w:20,label:'Marge',r:true},{x:mg+146,w:22,label:'Type',r:false}];
     tableHead(pc);
     allProjMonths.forEach(function(m,idx){
       var mg2=m.caHT>0?m.resultat/m.caHT*100:0;
