@@ -413,16 +413,17 @@ async function loadYear(year) {
   // Labels X adaptés au mode
   var labels = monthKeys.map(function(mk) { return MS[mk.m]; });
 
+  var nowKeyCF = (new Date()).getFullYear() + '-' + String((new Date()).getMonth()+1).padStart(2,'0');
   const computed = months.map(function(mo) {
-    var r = calcMonth(mo.m, mo.raw);
+    var r = calcMonth(mo.m, mo.raw, mo.key > nowKeyCF);
     r.key = mo.key;
     return r;
   });
   renderPage(computed, dettes, year, labels, labelPeriode);
 }
 
-function calcMonth(m, raw) {
-  if (!raw) return { m, hasData:false, caHT:0, caTotal:0, rentreeSupp:0, prevCA:0, chargesHT:0, fixesHT:0, varHT:0, leasingHT:0, creditsPrincipal:0, creditsInteret:0, cashflow:0, tvaCollectee:0, tvaDed:0, tvaDue:0 };
+function calcMonth(m, raw, isFuture) {
+  if (!raw) return { m, hasData:false, caHT:0, caTotal:0, rentreeSupp:0, prevCA:0, chargesHT:0, fixesHT:0, varHT:0, leasingHT:0, creditsPrincipal:0, creditsInteret:0, cashflow:0, tvaCollectee:0, tvaDed:0, tvaDue:0, prevCharges:0, isFuture:!!isFuture };
 
   // CA journalier
   let caHT = 0, tvaC = 0;
@@ -486,9 +487,23 @@ function calcMonth(m, raw) {
   const chargesHT = fixesHT + varHT + leasingHT + creditsPrincipal + creditsInteret;
   const tvaDed = tvaDedF + tvaDedV + tvaDedL + tvaDedCr;
   const tvaDue = tvaC - tvaDed;
-  const cashflow = caHT - chargesHT;
 
-  return { m, hasData:true, caHT: caHT-rentreeSupp, caTotal:caHT, rentreeSupp, prevCA, chargesHT, fixesHT, varHT, leasingHT, creditsPrincipal, creditsInteret, cashflow, tvaCollectee:tvaC, tvaDed, tvaDue };
+  // Mois futur → tout en prévisionnel
+  const prevCharges  = isFuture ? chargesHT : 0;
+  const prevCAFutur  = isFuture ? caHT : 0;
+  const prevCAFinal  = isFuture ? (prevCA || prevCAFutur) : prevCA;
+  const caHTReel     = isFuture ? 0 : (caHT - rentreeSupp);
+  const caTotalReel  = isFuture ? 0 : caHT;
+  const cashflow     = isFuture ? 0 : (caHT - chargesHT);
+
+  return { m, hasData:true,
+    caHT: caHTReel, caTotal: caTotalReel, rentreeSupp: isFuture?0:rentreeSupp,
+    prevCA: prevCAFinal, prevCharges, isFuture: !!isFuture,
+    chargesHT: isFuture?0:chargesHT,
+    fixesHT: isFuture?0:fixesHT, varHT: isFuture?0:varHT,
+    leasingHT: isFuture?0:leasingHT,
+    creditsPrincipal: isFuture?0:creditsPrincipal, creditsInteret: isFuture?0:creditsInteret,
+    cashflow, tvaCollectee: isFuture?0:tvaC, tvaDed: isFuture?0:tvaDed, tvaDue: isFuture?0:tvaDue };
 }
 
 /* ── RENDER ── */
@@ -503,11 +518,17 @@ function renderPage(data, dettes, year, labels, labelPeriode) {
     return parseInt(parts[0])===_curY && parseInt(parts[1])-1===_curM;
   });
   const filled = data.filter(d => d.hasData);
+  // filled = mois ayant des données (passés uniquement pour les réels)
+  const allFilled   = data.filter(d => d.hasData);
   const totCA       = filled.reduce((s,d) => s+d.caTotal, 0);
   const totCharges  = filled.reduce((s,d) => s+d.chargesHT, 0);
   const totCF       = filled.reduce((s,d) => s+d.cashflow, 0);
   const totTVA      = filled.reduce((s,d) => s+d.tvaDue, 0);
   const totPrev     = filled.reduce((s,d) => s+d.prevCA, 0);
+  // Prévisionnel (mois futurs avec charges saisies)
+  const totPrevCharges = data.reduce((s,d) => s+d.prevCharges, 0);
+  const totPrevCA      = data.reduce((s,d) => s+(d.isFuture?(d.prevCA||0):0), 0);
+  const totPrevResultat= totPrevCA - totPrevCharges;
   const delta       = totCA - totPrev;
   const totalFixe   = filled.reduce((s,d) => s+d.fixesHT, 0);
   const totalVar    = filled.reduce((s,d) => s+d.varHT, 0);
@@ -542,10 +563,10 @@ function renderPage(data, dettes, year, labels, labelPeriode) {
   const html = `
     <div class="kpi-row">
       <div class="kpi blue"><div class="kpi-icon">💰</div><div class="kpi-label">CA Total HT</div><div class="kpi-val blue">${fmtK(totCA)}</div><div class="kpi-sub">${filled.length} mois enregistrés</div></div>
-      <div class="kpi ${totCharges>totCA?'red':'orange'}"><div class="kpi-icon">📦</div><div class="kpi-label">Charges HT</div><div class="kpi-val ${totCharges>totCA?'red':'orange'}">${fmtK(totCharges)}</div><div class="kpi-sub">${totCA>0?Math.round((totCharges/totCA)*100)+'% du CA':'—'}</div></div>
+      <div class="kpi ${totCharges>totCA?'red':'orange'}"><div class="kpi-icon">📦</div><div class="kpi-label">Charges réelles HT</div><div class="kpi-val ${totCharges>totCA?'red':'orange'}">${fmtK(totCharges)}</div><div class="kpi-sub">${totPrevCharges>0?`<span style="color:#b45309">+ ${fmtK(totPrevCharges)} prévi</span>`:(totCA>0?Math.round((totCharges/totCA)*100)+'% du CA':'—')}</div></div>
       <div class="kpi ${totCF>=0?'green':'red'}"><div class="kpi-icon">💧</div><div class="kpi-label">Cashflow Net</div><div class="kpi-val ${totCF>=0?'green':'red'}">${fmtK(totCF)}</div><div class="kpi-sub">${totCF>=0?'Excédent':'Déficit'} annuel</div></div>
       <div class="kpi teal"><div class="kpi-icon">🧾</div><div class="kpi-label">TVA ${totTVA>=0?'à payer':'Crédit'}</div><div class="kpi-val teal">${fmtK(Math.abs(totTVA))}</div><div class="kpi-sub">${totTVA>=0?'à reverser à l\'État':'crédit TVA'}</div></div>
-      <div class="kpi ${delta>=0?'green':'red'}"><div class="kpi-icon">${delta>=0?'🎯':'📉'}</div><div class="kpi-label">Delta Prévi/Réel</div><div class="kpi-val ${delta>=0?'green':'red'}">${totPrev>0?fmtK(delta):'—'}</div><div class="kpi-sub">${totPrev>0?'Prévi : '+fmtK(totPrev):'Pas de prévision'}</div></div>
+      <div class="kpi ${totPrevCharges>0?(totPrevResultat>=0?'teal':'orange'):(delta>=0?'green':'red')}"><div class="kpi-icon">${totPrevCharges>0?'🔮':(delta>=0?'🎯':'📉')}</div><div class="kpi-label">${totPrevCharges>0?'Résultat prévisionnel':'Delta Prévi/Réel'}</div><div class="kpi-val ${totPrevCharges>0?(totPrevResultat>=0?'teal':'orange'):(delta>=0?'green':'red')}">${totPrevCharges>0?fmtK(totPrevResultat):(totPrev>0?fmtK(delta):'—')}</div><div class="kpi-sub">${totPrevCharges>0?`Charges futures : ${fmtK(totPrevCharges)}`:(totPrev>0?'Prévi : '+fmtK(totPrev):'Pas de prévision')}</div></div>
     </div>
 
     <div class="grid-3">

@@ -536,10 +536,10 @@ async function loadData(year){
 }
 
 // Calcul mois complet
-function computeMonth(d,key){
+function computeMonth(d,key,isFuture){
   if(!d)return{caHT:0,caJ:0,caFP:0,rentrees:0,fixe:0,variable:0,credit:0,leasing:0,charges:0,resultat:0,
     tvaCollectee:0,tvaDed:0,tvaDue:0,caHT055:0,caHT10:0,caHT20:0,
-    topCharges:[],hasData:false};
+    prevCharges:0,prevCA:0,topCharges:[],hasData:false,isFuture:false};
   // CA journalier multi-TVA
   var h055=0,h10=0,h20=0;
   (d.ca||[]).forEach(function(r){
@@ -592,7 +592,11 @@ function computeMonth(d,key){
   var tvaDed=tvaDedFix+tvaDedVar+tvaDedCred+tvaDedLeas;
   var tvaDue=tvaCollectee-tvaDed;
   var charges=fixe+variable+credit+leasing;
-  var resultat=caHT+rentrees-charges;
+  // Mois futur : charges et CA passent en prévisionnel, résultat réel = 0
+  var prevCharges = isFuture ? charges : 0;
+  var prevCA      = isFuture ? caHT    : 0;
+  if(isFuture){ charges=0; caHT=0; caJ=0; caFP=0; caHT055=0; caHT10=0; caHT20=0; tvaCollectee=0; tvaDed=0; tvaDue=0; }
+  var resultat = caHT+rentrees-charges;
   // Top charges for details
   var topCharges=[];
   (d.chargesFixe||[]).concat(d.chargesVar||[]).concat(d.leasing||[]).forEach(function(r){
@@ -600,35 +604,41 @@ function computeMonth(d,key){
   });
   topCharges.sort(function(a,b){return b.montant-a.montant;});
   return{caHT,caJ,caFP,caHT055,caHT10,caHT20,rentrees,fixe,variable,credit,leasing,charges,resultat,
-    tvaCollectee,tvaDed,tvaDue,topCharges,hasData:true};
+    tvaCollectee,tvaDed,tvaDue,prevCharges,prevCA,isFuture:!!isFuture,topCharges,hasData:true};
 }
 
 // Agrégation
 function aggregateKeys(keys){
-  var T={caHT:0,caJ:0,caFP:0,caHT055:0,caHT10:0,caHT20:0,rentrees:0,fixe:0,variable:0,credit:0,leasing:0,charges:0,resultat:0,tvaCollectee:0,tvaDed:0,tvaDue:0,moisData:0};
+  // Clé du mois courant (ex: "2026-02") — les clés > nowKey sont futures
+  var _now=new Date();
+  var nowKey=_now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0');
+
+  var T={caHT:0,caJ:0,caFP:0,caHT055:0,caHT10:0,caHT20:0,rentrees:0,fixe:0,variable:0,credit:0,leasing:0,charges:0,resultat:0,tvaCollectee:0,tvaDed:0,tvaDue:0,moisData:0,prevCharges:0,prevCA:0};
   var monthly=[];
-  // Top charges agrégées
   var chargesMap={};
   keys.forEach(function(k){
     var d=_allData[k]||null;
-    var r=computeMonth(d,k);
+    var isFuture = k > nowKey;
+    var r=computeMonth(d,k,isFuture);
     monthly.push({key:k,lbl:MONTHS_SHORT[parseInt(k.slice(5,7))-1],yr:k.slice(0,4),m:parseInt(k.slice(5,7))-1,...r});
     if(d){
       T.moisData++;
-      // Agrège top charges par fournisseur
-      (d.chargesFixe||[]).concat(d.chargesVar||[]).concat(d.leasing||[]).forEach(function(c){
-        var h=pf(c.montantHT);
-        if(h<=0)return;
-        var k2=(c.fournisseur||'Inconnu')+'__'+(c.type||'');
-        if(!chargesMap[k2])chargesMap[k2]={fournisseur:c.fournisseur||'Inconnu',type:c.type||'',total:0};
-        chargesMap[k2].total+=h;
-      });
+      // Top charges : seulement les mois réels (passé + mois courant)
+      if(!isFuture){
+        (d.chargesFixe||[]).concat(d.chargesVar||[]).concat(d.leasing||[]).forEach(function(c){
+          var h=pf(c.montantHT);if(h<=0)return;
+          var k2=(c.fournisseur||'Inconnu')+'__'+(c.type||'');
+          if(!chargesMap[k2])chargesMap[k2]={fournisseur:c.fournisseur||'Inconnu',type:c.type||'',total:0};
+          chargesMap[k2].total+=h;
+        });
+      }
     }
     T.caHT+=r.caHT;T.caJ+=r.caJ;T.caFP+=r.caFP;
     T.caHT055+=r.caHT055;T.caHT10+=r.caHT10;T.caHT20+=r.caHT20;
     T.rentrees+=r.rentrees;T.fixe+=r.fixe;T.variable+=r.variable;
     T.credit+=r.credit;T.leasing+=r.leasing;T.charges+=r.charges;T.resultat+=r.resultat;
     T.tvaCollectee+=r.tvaCollectee;T.tvaDed+=r.tvaDed;T.tvaDue+=r.tvaDue;
+    T.prevCharges+=r.prevCharges; T.prevCA+=r.prevCA;
   });
   var topChargesList=Object.values(chargesMap).sort(function(a,b){return b.total-a.total;}).slice(0,12);
   return{T,monthly,topChargesList};
@@ -733,7 +743,8 @@ function renderRapport(){
   html+='<div class="kpi-row">';
   html+=kpi('blue','💰','CA Total HT',fmt(T.caHT),'Moy. '+fmt(caMens)+'/mois',null,evCA);
   html+=kpi('orange','💸','Total Charges',fmt(T.charges),fmtPct(txCharges,true)+' du CA',null,evCharges);
-  html+=kpi(T.resultat>=0?'green':'red',T.resultat>=0?'📈':'📉','Résultat Net',fmt(T.resultat),fmtPct(margeN,true)+' de marge',T.resultat>=0?'positive':'negative',evRes!==null?evRes:null,true);
+  html+=kpi(T.resultat>=0?'green':'red',T.resultat>=0?'📈':'📉','Résultat réel',fmt(T.resultat),fmtPct(margeN,true)+' de marge',T.resultat>=0?'positive':'negative',evRes!==null?evRes:null,true);
+  if(T.prevCharges>0){var prevRes=T.prevCA-T.prevCharges;html+=kpi(prevRes>=0?'teal':'orange','🔮','Prévisionnel (mois futurs)',fmt(prevRes),fmt(T.prevCharges)+' de charges prévi',prevRes>=0?'positive':'negative',null,false);}
   html+=kpi('purple','🏦','Encours dettes',fmt(totDettes),totMensDettes>0?fmt(totMensDettes)+'/mois':'Aucune échéance');
   html+=kpi('teal','🧾','TVA due (estimée)',fmt(Math.max(0,T.tvaDue)),T.tvaDue<0?'🟢 Crédit TVA '+fmt(Math.abs(T.tvaDue)):'Collectée : '+fmt(T.tvaCollectee));
   html+='</div>';
@@ -778,7 +789,19 @@ function renderRapport(){
   if(T.leasing>0)tabResume+='<tr><td>Leasing / LOA / LLD</td><td>'+fmt(T.leasing)+'</td><td>'+(T.caHT>0?fmtPct(T.leasing/T.caHT*100,true):'—')+'</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.leasing)+'</td>':'')+'</tr>';
   tabResume+='<tr class="row-total"><td>Total Charges HT</td><td>'+fmt(T.charges)+'</td><td>'+fmtPct(txCharges,true)+'</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.charges)+'</td>':'')+'</tr>';
   var rcls=(T.resultat>=0?'row-result':'row-result neg');
-  tabResume+='<tr class="'+rcls+'"><td>'+(T.resultat>=0?'✅ Bénéfice estimé':'❌ Perte estimée')+'</td><td>'+fmt(T.resultat)+'</td><td>'+fmtPct(Math.abs(margeN),true)+'</td>'+(TN1.moisData>0?'<td class="'+(T.resultat>TN1.resultat?'positive':'negative')+'">'+fmt(TN1.resultat)+'</td>':'')+'</tr>';
+  tabResume+='<tr class="'+rcls+'"><td>'+(T.resultat>=0?'✅ Résultat réel (mois passés)':'❌ Résultat réel (mois passés)')+'</td><td>'+fmt(T.resultat)+'</td><td>'+fmtPct(Math.abs(margeN),true)+'</td>'+(TN1.moisData>0?'<td class="'+(T.resultat>TN1.resultat?'positive':'negative')+'">'+fmt(TN1.resultat)+'</td>':'')+'</tr>';
+  if(T.prevCharges>0||T.prevCA>0){
+    var prevRes=T.prevCA-T.prevCharges;
+    var prevResTotal=T.resultat+prevRes;
+    tabResume+='<tr class="row-section" style="background:#fef3c7"><td colspan="'+(TN1.moisData>0?'4':'3')+'" style="color:#92400e;font-weight:700;font-size:12px">▸ PRÉVISIONNEL — mois futurs ('+moisRestants+' mois)</td></tr>';
+    if(T.prevCA>0)tabResume+='<tr style="color:#92400e"><td>🔮 CA prévisionnel saisi</td><td style="font-weight:700">'+fmt(T.prevCA)+'</td><td>—</td>'+(TN1.moisData>0?'<td>—</td>':'')+'</tr>';
+    else tabResume+='<tr style="color:#b45309"><td>⚠️ CA prévisionnel</td><td colspan="'+(TN1.moisData>0?'3':'2')+'" style="font-style:italic;color:#b45309">Aucun CA prévisionnel saisi — ajoutez-le dans Pilotage</td></tr>';
+    tabResume+='<tr style="color:#92400e"><td>📦 Charges prévisionnelles</td><td style="font-weight:700">'+fmt(T.prevCharges)+'</td><td>—</td>'+(TN1.moisData>0?'<td>—</td>':'')+'</tr>';
+    var prevClr=prevRes>=0?'#059669':'#b45309';
+    tabResume+='<tr style="background:#fef9c3"><td style="font-weight:700;color:'+prevClr+'">'+( prevRes>=0?'📈':'📉')+' Résultat prévisionnel</td><td style="font-weight:700;color:'+prevClr+'">'+fmt(prevRes)+'</td><td style="color:'+prevClr+'">'+(T.prevCA>0?fmtPct(prevRes/T.prevCA*100,true):'—')+'</td>'+(TN1.moisData>0?'<td>—</td>':'')+'</tr>';
+    var totalClr=prevResTotal>=0?'#059669':'#dc2626';
+    tabResume+='<tr style="border-top:2px solid #d97706;background:#fff7ed"><td style="font-weight:800;color:'+totalClr+'">🔭 Total projeté (réel + prévi)</td><td style="font-weight:800;color:'+totalClr+'">'+fmt(prevResTotal)+'</td><td style="color:'+totalClr+'">'+(T.caHT+T.prevCA>0?fmtPct(prevResTotal/(T.caHT+T.prevCA)*100,true):'—')+'</td>'+(TN1.moisData>0?'<td>—</td>':'')+'</tr>';
+  }
   tabResume+='</tbody></table></div>';
 
   // Ratios
@@ -1046,9 +1069,30 @@ function renderRapport(){
     var deltaCA=n1r.hasData&&m.hasData?(m.caHT-n1r.caHT):null;
     html+='';
     tabDetail+='<tr>';
-    tabDetail+='<td style="white-space:nowrap"><span style="font-size:11px;font-weight:700;padding:3px 8px;background:var(--blue-ghost);color:var(--blue-main);border-radius:20px">'+m.lbl+'</span> <span style="font-size:10px;color:var(--muted)">'+m.yr+'</span></td>';
-    if(empty){
+    var futurStyle=m.isFuture?'background:#fffbeb;':'';
+    var lbl_badge=m.isFuture
+      ?'<span style="font-size:11px;font-weight:700;padding:3px 8px;background:#fef3c7;color:#92400e;border-radius:20px">'+m.lbl+'</span> <span style="font-size:10px;color:#b45309">🔮 Prévi</span>'
+      :'<span style="font-size:11px;font-weight:700;padding:3px 8px;background:var(--blue-ghost);color:var(--blue-main);border-radius:20px">'+m.lbl+'</span> <span style="font-size:10px;color:var(--muted)">'+m.yr+'</span>';
+    tabDetail+='<td style="white-space:nowrap;'+futurStyle+'">'+lbl_badge+'</td>';
+    if(empty&&!m.isFuture){
       for(var ci=0;ci<(TN1.moisData>0?11:9);ci++)tabDetail+='<td style="color:#d1d5db">—</td>';
+    } else if(m.isFuture){
+      // Mois futur : afficher les charges prévi, CA prévi si saisi
+      var caPreviStr=m.prevCA>0?'<span style="color:#92400e;font-weight:700">'+fmt(m.prevCA)+'</span>':'<span style="color:#d1d5db;font-style:italic">—</span>';
+      var chargesStr=m.prevCharges>0?fmt(m.prevCharges):'<span style="color:#d1d5db">—</span>';
+      var prevResM=m.prevCA-m.prevCharges;
+      var prevResMStr=m.prevCharges>0?'<span style="color:'+(prevResM>=0?'#059669':'#b45309')+';font-weight:700">'+fmt(prevResM)+'</span>':'<span style="color:#d1d5db">—</span>';
+      tabDetail+='<td style="'+futurStyle+'">'+caPreviStr+'</td>';
+      tabDetail+='<td style="'+futurStyle+'">—</td>';
+      tabDetail+='<td style="'+futurStyle+'">'+caPreviStr+'</td>';
+      tabDetail+='<td style="color:#92400e;'+futurStyle+'">'+chargesStr+'</td>';
+      tabDetail+='<td style="'+futurStyle+'">—</td>';
+      tabDetail+='<td style="'+futurStyle+'">—</td>';
+      tabDetail+='<td style="'+futurStyle+'">—</td>';
+      tabDetail+='<td style="color:#92400e;font-weight:700;'+futurStyle+'">'+chargesStr+'</td>';
+      tabDetail+='<td style="'+futurStyle+'">'+prevResMStr+'</td>';
+      tabDetail+='<td style="'+futurStyle+'">—</td>';
+      if(TN1.moisData>0)tabDetail+='<td style="'+futurStyle+'">—</td><td style="'+futurStyle+'">—</td>';
     } else {
       tabDetail+='<td>'+fmt(m.caJ)+'</td>';
       tabDetail+='<td>'+(m.caFP>0?'<span style="color:var(--purple)">'+fmt(m.caFP)+'</span>':'—')+'</td>';

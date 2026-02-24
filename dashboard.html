@@ -554,8 +554,8 @@ document.getElementById('pageDate').textContent=new Date().toLocaleDateString('f
 function toggleMenu(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('open');}
 async function handleLogout(){await window._signOut(window._auth);window.location.href='index.html';}
 
-function extractMonthData(d){
-  if(!d)return{caHT:0,caTTC:0,tvaCollectee:0,rentrees:0,prevCA:0,fixesHT:0,varHT:0,creditsHT:0,leasingHT:0,chargesHT:0,resultat:0,cashflow:0};
+function extractMonthData(d,isFuture){
+  if(!d)return{caHT:0,caTTC:0,tvaCollectee:0,rentrees:0,prevCA:0,fixesHT:0,varHT:0,creditsHT:0,leasingHT:0,chargesHT:0,resultat:0,cashflow:0,prevCharges:0,isFuture:false};
   // CA journalier
   const caHT_j=d.ca?d.ca.reduce((s,r)=>{
     const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;
@@ -590,9 +590,21 @@ function extractMonthData(d){
     else{let mt=parseFloat(r.montant)||0;if(r.tvaAuto&&parseFloat(r.tauxInteret)>0){const p=d.credits.slice(0,i).reverse().find(c=>c.fournisseur===r.fournisseur&&c.ligneType==='principal');if(p)mt=(parseFloat(p.montant)||0)*parseFloat(r.tauxInteret)/100/12;}creditsHT+=mt;}
   });
   const chargesHT=fixesHT+varHT+creditsHT+leasingHT;
-  const resultat=caHT+rentrees-chargesHT;
-  const cashflow=caTTC+rentrees-(fixesHT*(1+0.2)+varHT*(1+0.2)+creditsHT+leasingHT*(1+0.2));
-  return{caHT,caTTC,tvaCollectee,rentrees,prevCA,fixesHT,varHT,creditsHT,leasingHT,chargesHT,resultat,cashflow};
+  // Mois futur → charges et CA en prévisionnel, pas dans les réels
+  const prevCharges = isFuture ? chargesHT : 0;
+  const prevCAFutur = isFuture ? (caHT||0) : 0;
+  const caHTReel    = isFuture ? 0 : caHT;
+  const chargesReel = isFuture ? 0 : chargesHT;
+  const resultat    = isFuture ? 0 : (caHT+rentrees-chargesHT);
+  const cashflow    = isFuture ? 0 : (caTTC+rentrees-(fixesHT*(1+0.2)+varHT*(1+0.2)+creditsHT+leasingHT*(1+0.2)));
+  // prevCA : on garde la valeur de prévisionCA du mois (objectif saisi manuellement)
+  // + pour les mois futurs on met le CA saisi comme prevCA si pas de previsionCA
+  const prevCAFinal = isFuture ? (prevCA||prevCAFutur) : prevCA;
+  return{caHT:caHTReel,caTTC:isFuture?0:caTTC,tvaCollectee:isFuture?0:tvaCollectee,
+    rentrees:isFuture?0:rentrees,prevCA:prevCAFinal,
+    fixesHT:isFuture?0:fixesHT,varHT:isFuture?0:varHT,creditsHT:isFuture?0:creditsHT,
+    leasingHT:isFuture?0:leasingHT,chargesHT:chargesReel,resultat,cashflow,
+    prevCharges,isFuture:!!isFuture};
 }
 
 async function loadData(_tries){
@@ -626,15 +638,25 @@ async function loadData(_tries){
     }catch(e){console.error('Firestore erreur',key,e.code,e.message);allMonths.push(null);}
   }
 
-  const monthsData=allMonths.map(d=>extractMonthData(d));
+  const nowKey2=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  const monthsData=allMonths.map((d,i)=>{
+    const ym=fiscalMonths[i];
+    const key=`${ym.year}-${String(ym.month+1).padStart(2,'0')}`;
+    return extractMonthData(d, key>nowKey2);
+  });
   const current=monthsData[currentM];
   const prevMonthData=currentM>0?monthsData[currentM-1]:{caHT:0,chargesHT:0,resultat:0};
 
-  // Annual totals
+  // Annual totals — réel uniquement (mois passés + courant)
   const annualCA=monthsData.reduce((s,d)=>s+d.caHT,0);
   const annualCharges=monthsData.reduce((s,d)=>s+d.chargesHT,0);
   const annualResultat=monthsData.reduce((s,d)=>s+d.resultat,0);
   const annualCashflow=monthsData.reduce((s,d)=>s+d.cashflow,0);
+  // Prévisionnel (mois futurs)
+  const annualPrevCharges=monthsData.reduce((s,d)=>s+d.prevCharges,0);
+  const annualPrevCA=monthsData.reduce((s,d)=>s+d.prevCA,0);
+  const annualPrevResultat=annualPrevCA-annualPrevCharges;
+  const annualTotalResultat=annualResultat+annualPrevResultat;
 
   // Destroy old charts
   _charts.forEach(c=>{try{c.destroy();}catch(e){}});
@@ -716,9 +738,9 @@ async function loadData(_tries){
       </div>
       <div class="kpi-card ${!hasAnnualData?'green':annualResultat>=0?'green':'red'}">
         <div class="kpi-icon">🎯</div>
-        <div class="kpi-label">Résultat annuel HT</div>
+        <div class="kpi-label">Résultat réel HT</div>
         <div class="kpi-value ${!hasAnnualData?'empty':annualResultat>=0?'positive':'negative'}">${hasAnnualData?fmtE(annualResultat):'— €'}</div>
-        <div class="kpi-sub"><span class="neutral">CA − Total Charges</span></div>
+        <div class="kpi-sub"><span class="neutral">${annualPrevCharges>0?`<span style="color:#b45309">+ ${fmtE(annualPrevResultat)} prévi → total ${fmtE(annualTotalResultat)}</span>`:'CA − Charges (mois passés)'}</span></div>
       </div>
       <div class="kpi-card teal">
         <div class="kpi-icon">💸</div>
