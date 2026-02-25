@@ -2318,12 +2318,42 @@ function renderCatModalList() {
     el.innerHTML = '<p style="font-size:13px;color:var(--muted);text-align:center;padding:20px">Aucune valeur enregistrée.</p>';
     return;
   }
+  var isSuppliers = (_currentCatTab === 'suppliers');
   el.innerHTML = list.slice().sort(function(a,b){ return a.localeCompare(b,'fr'); }).map(function(s) {
+    var safeName = s.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    var fiche = isSuppliers && _fichesMap ? _fichesMap[s.toLowerCase()] : null;
+    var ficheBtn = '';
+    if (isSuppliers) {
+      if (fiche) {
+        var safeId = (fiche.id||'').replace(/'/g,"\\'");
+        var recColor = fiche.recurrence==='Récurrent' ? '#16a34a' : '#ea580c';
+        var recBg    = fiche.recurrence==='Récurrent' ? 'rgba(34,197,94,.1)' : 'rgba(249,115,22,.1)';
+        ficheBtn = '<button onclick="openFicheDetail(\'' + safeId + '\');closeSuppliersModal()" ' +
+          'style="background:' + recBg + ';color:' + recColor + ';border:none;border-radius:8px;font-size:11px;font-weight:700;padding:3px 9px;cursor:pointer;white-space:nowrap" ' +
+          'title="Voir la fiche fournisseur">🏢 ' + (fiche.recurrence||'Fiche') + '</button>';
+      } else {
+        ficheBtn = '<button onclick="convertirEnFiche(\'' + safeName + '\')" ' +
+          'style="background:rgba(79,126,248,.08);color:var(--blue-main);border:1px solid rgba(79,126,248,.25);border-radius:8px;font-size:11px;font-weight:700;padding:3px 9px;cursor:pointer;white-space:nowrap" ' +
+          'title="Créer une fiche pour ce fournisseur">+ Créer fiche</button>';
+      }
+    }
     return '<div class="sup-list-item">' +
-      '<span>' + s.replace(/</g,'&lt;') + '</span>' +
-      '<button onclick="removeCatItem(\'' + _currentCatTab + '\',\'' + s.replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')" title="Supprimer">✕</button>' +
+      '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">' + s.replace(/</g,'&lt;') + '</span>' +
+      (ficheBtn ? '<span style="flex-shrink:0">' + ficheBtn + '</span>' : '') +
+      '<button onclick="removeCatItem(\'' + _currentCatTab + '\',\'' + safeName + '\')" title="Supprimer" style="flex-shrink:0">✕</button>' +
     '</div>';
   }).join('');
+}
+
+
+// Convertir un nom du catalogue en fiche fournisseur complète
+function convertirEnFiche(nom) {
+  closeSuppliersModal();
+  openFicheForm();
+  setTimeout(function() {
+    var inp = document.getElementById('ff-nom');
+    if (inp) inp.value = nom;
+  }, 60);
 }
 
 function addCatalogueFromModal() {
@@ -2408,6 +2438,11 @@ async function loadFiches() {
     if (cfT && _data) cfT.innerHTML = renderCharges(_data.chargesFixe, 'chargesFixe');
     var cvT = document.getElementById('cv-tbody');
     if (cvT && _data) cvT.innerHTML = renderCharges(_data.chargesVar, 'chargesVar');
+    // Refresh la liste catalogue si la modale est ouverte sur l'onglet suppliers
+    var suppModal = document.getElementById('suppliersModal');
+    if (suppModal && suppModal.style.display !== 'none' && _currentCatTab === 'suppliers') {
+      renderCatModalList();
+    }
   } catch(e) { console.warn('loadFiches error:', e); }
 }
 
