@@ -669,8 +669,8 @@ html, body { overflow-x: hidden; max-width: 100vw; }
             <div>
               <label class="field-lbl">Mode d'affichage par défaut</label>
               <div style="display:flex;gap:8px;margin-top:6px">
-                <button id="btn-mode-civil" onclick="setProfMode('civil')" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:.15s">📅 Année civile</button>
-                <button id="btn-mode-exercice" onclick="setProfMode('exercice')" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:.15s">📊 Exercice comptable</button>
+                <button id="btn-mode-civil" onclick="setProfMode('civil',true)" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:.15s">📅 Année civile</button>
+                <button id="btn-mode-exercice" onclick="setProfMode('exercice',true)" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:.15s">📊 Exercice comptable</button>
               </div>
               <p style="font-size:11px;color:var(--muted);margin-top:6px">Détermine comment les données annuelles sont calculées et affichées.</p>
             </div>
@@ -1088,7 +1088,6 @@ function saveProfile() {
   const data = {};
   fields.forEach(f => { const el = document.getElementById('p-'+f); if (el) data[f] = el.value; });
   document.getElementById('lastSaved').textContent = '✅ Enregistré le ' + new Date().toLocaleString('fr-FR');
-  showToastMsg('✅ Profil enregistré !', 'ok');
   updateHero();
   if (window._uid && window._setDoc) {
     // Profil entreprise
@@ -1100,15 +1099,37 @@ function saveProfile() {
   }
 }
 
+// ── AUTOSAVE (debounce 1,5s) ──
+var _autosaveTimer = null;
+function scheduleAutosave() {
+  clearTimeout(_autosaveTimer);
+  const lbl = document.getElementById('lastSaved');
+  if (lbl) lbl.textContent = '✏️ Modifications en cours…';
+  _autosaveTimer = setTimeout(function() {
+    saveProfile();
+    showToastMsg('✅ Profil enregistré automatiquement', 'ok');
+  }, 1500);
+}
+
+function initAutosave() {
+  ['nom','commercial','secteur','forme','siret','tva','desc','adresse','cp','ville','tel','email','web','banque','titulaire','iban','bic'].forEach(function(f) {
+    var el = document.getElementById('p-'+f);
+    if (el) el.addEventListener('input', scheduleAutosave);
+  });
+  var fsel = document.getElementById('p-fiscalStart');
+  if (fsel) fsel.addEventListener('change', scheduleAutosave);
+}
+
 var _profMode = 'civil';
 
-function setProfMode(mode) {
+function setProfMode(mode, fromUser) {
   _profMode = mode;
   const btnC = document.getElementById('btn-mode-civil');
   const btnE = document.getElementById('btn-mode-exercice');
   if (btnC) { btnC.style.background = mode === 'civil' ? 'var(--blue)' : '#fff'; btnC.style.color = mode === 'civil' ? '#fff' : 'var(--text)'; btnC.style.borderColor = mode === 'civil' ? 'var(--blue)' : 'var(--border)'; }
   if (btnE) { btnE.style.background = mode === 'exercice' ? 'var(--blue)' : '#fff'; btnE.style.color = mode === 'exercice' ? '#fff' : 'var(--text)'; btnE.style.borderColor = mode === 'exercice' ? 'var(--blue)' : 'var(--border)'; }
   updateExercicePreview();
+  if (fromUser) scheduleAutosave();
 }
 
 function updateExercicePreview() {
@@ -1367,6 +1388,9 @@ onAuthStateChanged(auth, async function(user) {
       if (typeof window.updateHero === 'function') window.updateHero();
     }
   } catch(e) {}
+
+  // ── AUTOSAVE — brancher après chargement ──
+  if (typeof initAutosave === 'function') initAutosave();
 });
 </script>
 <script src="nav.js"></script>
