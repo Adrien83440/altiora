@@ -1001,10 +1001,10 @@ function renderPage(data, month) {
           '<tfoot><tr><td>TOTAL NET</td><td><span id="tot-rsupp">' + fmtN(t.rentreesSupp) + '</span> €</td><td></td></tr></tfoot></table>' +
         '</div>' +
         '<div class="section-card">' +
-          '<div class="section-head"><div class="section-title">🎯 Prévision CA du mois</div></div>' +
-          '<table class="data-table"><thead><tr><th>Type</th><th>Montant prévu</th></tr></thead>' +
-          '<tbody id="prev-tbody">' + renderPrevCA(data.previsionCA) + '</tbody>' +
-          '<tfoot><tr><td>Total HT</td><td><span id="tot-prev">' + fmtN(t.prevCA) + '</span> €</td></tr></tfoot></table>' +
+          '<div class="section-head"><div class="section-title">🎯 Prévision CA du mois</div><button class="btn btn-outline btn-sm" onclick="addPrevLine()">+ Ligne</button></div>' +
+          '<table class="data-table"><thead><tr><th>Type / Source</th><th>Montant prévu</th><th>CA réel</th><th>Écart</th></tr></thead>' +
+          '<tbody id="prev-tbody">' + renderPrevCA(data.previsionCA, t.caHT) + '</tbody>' +
+          '<tfoot><tr><td>Total</td><td><span id="tot-prev">' + fmtN(t.prevCA) + '</span> €</td><td style="font-weight:700;color:var(--blue-main)" id="tot-prev-reel">' + fmtN(t.caHT) + ' €</td><td id="tot-prev-ecart" style="font-weight:700"></td></tr></tfoot></table>' +
         '</div>' +
       '</div>' +
     '</div>' +
@@ -1150,11 +1150,30 @@ function renderRentrees(rows) {
   }).join('');
 }
 
-function renderPrevCA(rows) {
+function renderPrevCA(rows, caReelTotal) {
+  // caReelTotal = CA réel du mois (toutes lignes confondues)
+  // On le répartit au prorata sur la première ligne, les autres affichent —
+  // Mais surtout on affiche le total réel sur la ligne "total"
+  var totalPrevu = rows.reduce(function(s,r){ return s+(parseFloat(r.montant)||0); }, 0);
   return rows.map(function(r, i) {
+    var prevu = parseFloat(r.montant)||0;
+    // Répartir le CA réel au prorata de la prévision de chaque ligne
+    var reel = (totalPrevu > 0 && caReelTotal > 0 && prevu > 0)
+      ? caReelTotal * (prevu / totalPrevu)
+      : (i === 0 && caReelTotal > 0 ? caReelTotal : 0); // si pas de prévision, tout sur ligne 0
+    var ecart = reel - prevu;
+    var reelDisp = caReelTotal > 0
+      ? '<span style="font-weight:600;color:var(--blue-main)">' + fmtN(reel) + ' €</span>'
+      : '<span style="color:var(--muted);font-size:11px">En attente</span>';
+    var ecartColor = ecart >= 0 ? '#10b981' : '#ef4444';
+    var ecartDisp = caReelTotal > 0
+      ? '<span style="font-weight:700;color:' + ecartColor + '">' + (ecart>=0?'+':'') + fmtN(ecart) + ' €</span>'
+      : '<span style="color:var(--muted)">—</span>';
     return '<tr>' +
-      '<td><input class="cell-input" style="width:140px" value="' + r.type + '" oninput="_data.previsionCA[' + i + '].type=this.value"/></td>' +
-      '<td><input class="cell-input" style="width:90px" type="number" placeholder="0.00" value="' + r.montant + '" oninput="_data.previsionCA[' + i + '].montant=this.value;refreshTotals()"/></td>' +
+      '<td><input class="cell-input" style="width:130px" value="' + esc(r.type) + '" oninput="_data.previsionCA[' + i + '].type=this.value"/></td>' +
+      '<td><input class="cell-input" style="width:90px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="_data.previsionCA[' + i + '].montant=this.value;refreshTotals()"/></td>' +
+      '<td style="text-align:right;padding:4px 8px">' + reelDisp + '</td>' +
+      '<td style="text-align:right;padding:4px 8px">' + ecartDisp + '</td>' +
     '</tr>';
   }).join('');
 }
@@ -1487,6 +1506,15 @@ function delFacturePro(i) {
   refreshTotals();
 }
 
+function addPrevLine() {
+  if (!_data.previsionCA) _data.previsionCA = [];
+  _data.previsionCA.push({type:'', montant:''});
+  var t = calcTotals(_data);
+  var tbody = document.getElementById('prev-tbody');
+  if (tbody) tbody.innerHTML = renderPrevCA(_data.previsionCA, t.caHT);
+  refreshTotals();
+}
+
 function addRentree() {
   _data.rentreesSupp.push({type:'', montant:''});
   document.getElementById('rsupp-tbody').innerHTML = renderRentrees(_data.rentreesSupp);
@@ -1641,6 +1669,20 @@ function refreshTotals() {
   s('tot-fpTTC',fp055*1.055+fp10*1.10+fp20*1.20);
   s('tot-fpTVA',fp055*0.055+fp10*0.10+fp20*0.20);
   s('tot-rsupp',t.rentreesSupp);s('tot-prev',t.prevCA);
+  // Mettre à jour le CA réel et l'écart dans la section prévision
+  var totPrevReelEl = document.getElementById('tot-prev-reel');
+  var totPrevEcartEl = document.getElementById('tot-prev-ecart');
+  if (totPrevReelEl) totPrevReelEl.textContent = fmtN(t.caHT) + ' €';
+  if (totPrevEcartEl) {
+    var ecartTotal = t.caHT - t.prevCA;
+    totPrevEcartEl.style.color = ecartTotal >= 0 ? '#10b981' : '#ef4444';
+    totPrevEcartEl.textContent = (ecartTotal >= 0 ? '+' : '') + fmtN(ecartTotal) + ' €';
+  }
+  // Re-render les lignes prévision pour mettre à jour les valeurs réel/écart par ligne
+  var prevTbody = document.getElementById('prev-tbody');
+  if (prevTbody && _data && _data.previsionCA) {
+    prevTbody.innerHTML = renderPrevCA(_data.previsionCA, t.caHT);
+  }
   s('tot-fixHT',t.fixesHT);s('tot-fixTTC',t.fixesTTC);s('tot-fixTVA',t.fixesTVA);
   s('tot-varHT',t.varHT);s('tot-varTTC',t.varTTC);s('tot-varTVA',t.varTVA);
   s('tot-leasHT',t.leasingHT);s('tot-leasTTC',t.leasingTTC);
