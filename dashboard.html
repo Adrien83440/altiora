@@ -490,7 +490,25 @@ async function fetchWeatherFromCoords(lat, lon, cityHint){
   }catch(e){return null;}
 }
 async function fetchWeather(){
-  // Priorité 1 : /api/geo (serveur Vercel → pas de restriction HTTPS)
+  // Priorité 1 : code postal du profil utilisateur (Firestore)
+  try{
+    if(window._uid && window._getDoc && window._doc && window._db){
+      const snap=await window._getDoc(window._doc(window._db,'profil',window._uid,'data','profil'));
+      if(snap.exists()){
+        const cp=(snap.data().cp||'').trim();
+        if(cp && /^\d{4,5}$/.test(cp)){
+          const geo=await fetch(`https://nominatim.openstreetmap.org/search?postalcode=${cp}&country=fr&format=json&limit=1`,{signal:AbortSignal.timeout(5000),headers:{'Accept-Language':'fr'}});
+          const gj=await geo.json();
+          if(gj&&gj[0]){
+            const city=gj[0].display_name.split(',')[0];
+            const w=await fetchWeatherFromCoords(parseFloat(gj[0].lat).toFixed(4),parseFloat(gj[0].lon).toFixed(4),city);
+            if(w)return w;
+          }
+        }
+      }
+    }
+  }catch(e){}
+  // Priorité 2 : /api/geo (IP serveur Vercel)
   try{
     const r=await fetch('/api/geo',{signal:AbortSignal.timeout(5000)});
     const ip=await r.json();
@@ -499,7 +517,7 @@ async function fetchWeather(){
       if(w)return w;
     }
   }catch(e){}
-  // Priorité 2 : GPS navigateur (fallback)
+  // Priorité 3 : GPS navigateur
   try{
     const pos=await new Promise((res,rej)=>navigator.geolocation
       ?navigator.geolocation.getCurrentPosition(res,rej,{timeout:4000})
@@ -507,7 +525,8 @@ async function fetchWeather(){
     const w=await fetchWeatherFromCoords(pos.coords.latitude.toFixed(4),pos.coords.longitude.toFixed(4),'Ma position');
     if(w)return w;
   }catch(e){}
-  return null;
+  // Fallback : France centre (Paris)
+  return await fetchWeatherFromCoords('46.2276','2.2137','France');
 }
 function getWeatherIcon(code){
   if(code===0)return'☀️';
