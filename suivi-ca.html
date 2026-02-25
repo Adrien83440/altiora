@@ -812,7 +812,7 @@ async function loadYear(_tries){
     </div>
 
     <!-- GRAPHIQUE CUMUL -->
-    <div class="charts-grid-2" style="margin-bottom:0">
+    <div class="charts-grid-2" style="margin-bottom:22px">
       <div class="chart-card full">
         <div class="chart-head"><div><div class="chart-title">📉 Variation Résultat Annuel cumulé</div><div class="chart-sub">Cumul CA HT − Cumul Charges HT au fil des mois</div></div></div>
         <div class="chart-wrap h280"><canvas id="chartCumul"></canvas></div>
@@ -822,22 +822,20 @@ async function loadYear(_tries){
     <!-- CARTE FOURNISSEURS -->
     <div class="fourn-card" id="fournCard" style="margin-bottom:0">
       <div class="fourn-head">
-        <div class="fourn-title">🏢 Fournisseurs — Volume d'achats vs CA <span class="badge badge-blue" id="fournYear">${year}</span></div>
-        <div style="font-size:11px;color:var(--muted)">Total charges fixes + variables</div>
+        <div class="fourn-title">🏢 Fournisseurs — Volume d'achats vs CA <span class="badge badge-blue">${_viewMode==='exercice'?getFiscalLabel(year):year}</span></div>
+        <div style="font-size:11px;color:var(--muted)">Total charges fixes + variables, période affichée</div>
       </div>
-      <div id="fournCardBody"><div class="fourn-empty"><div class="spin"></div> Chargement…</div></div>
+      <div id="fournCardBody"><div style="display:flex;align-items:center;justify-content:center;padding:60px;color:var(--muted);gap:12px"><div class="spin"></div> Chargement…</div></div>
     </div>
   `;
 
   // Build charts
-  buildCharts(data,cumuls,year);
-
-  // Build supplier card (async, ne bloque pas le rendu)
+  buildCharts(data,cumuls,year,monthLabelsShort,monthLabels);
   buildFournCard(months, totCA, year, fiscalMonths2);
 }
 
-function buildCharts(data,cumuls,year){
-  const labels=typeof monthLabelsShort!=="undefined"?monthLabelsShort:MONTHS_SHORT;
+function buildCharts(data,cumuls,year,monthLabelsShort,monthLabels){
+  const labels=monthLabelsShort||MONTHS_SHORT;
   const caHT=data.map(d=>d.caHT);
   const caTTC=data.map(d=>d.caTTC);
   const fixesHT=data.map(d=>d.fixesHT);
@@ -936,7 +934,6 @@ function buildCharts(data,cumuls,year){
 }
 
 function buildFournCard(months, totCA, year, fiscalMonths2) {
-  // Agréger les achats par fournisseur depuis chargesFixe + chargesVar + leasing
   var map = {};
   months.forEach(function(d) {
     if (!d) return;
@@ -964,17 +961,13 @@ function buildFournCard(months, totCA, year, fiscalMonths2) {
     return;
   }
 
-  // Couleurs
   var COLORS = ['#1a3dce','#4f7ef8','#10b981','#f59e0b','#6366f1','#ef4444','#06b6d4','#ec4899','#84cc16','#f97316','#8b5cf6','#14b8a6'];
-
-  // Limiter à 12 pour le graphique, grouper le reste en "Autres"
   var chartEntries = entries.slice(0, 12);
   if (entries.length > 12) {
     var autresTotal = entries.slice(12).reduce(function(s,e){ return s+e.total; }, 0);
     chartEntries.push({nom:'Autres', total: autresTotal});
   }
 
-  // Charger les fiches pour les badges (depuis Firestore)
   var fichesMap = {};
   var fichesPromise = (window._uid && window._getDoc && window._db)
     ? window._getDoc(window._doc(window._db, 'fournisseurs', window._uid)).then(function(snap){
@@ -985,9 +978,6 @@ function buildFournCard(months, totCA, year, fiscalMonths2) {
     : Promise.resolve();
 
   fichesPromise.then(function() {
-    var maxVal = chartEntries[0].total;
-
-    // HTML légende
     var legendHtml = chartEntries.map(function(e, i) {
       var color = COLORS[i % COLORS.length];
       var pct = totCA > 0 ? (e.total / totCA * 100).toFixed(1) : '0.0';
@@ -1012,22 +1002,17 @@ function buildFournCard(months, totCA, year, fiscalMonths2) {
         '<div class="fourn-legend">' + legendHtml + '</div>' +
       '</div>';
 
-    // Graphique horizontal barres
     var ctx = document.getElementById('chartFourn');
     if (!ctx) return;
-    var labels = chartEntries.map(function(e){ return e.nom.length > 22 ? e.nom.slice(0,20)+'…' : e.nom; });
-    var values = chartEntries.map(function(e){ return e.total; });
-    var colors = chartEntries.map(function(e,i){ return COLORS[i % COLORS.length]; });
-
     var chartFourn = new Chart(ctx, {
       type: 'bar',
       data: {
-        labels: labels,
+        labels: chartEntries.map(function(e){ return e.nom.length > 22 ? e.nom.slice(0,20)+'…' : e.nom; }),
         datasets: [{
           label: 'Volume achats HT',
-          data: values,
-          backgroundColor: colors.map(function(c){ return c + 'cc'; }),
-          borderColor: colors,
+          data: chartEntries.map(function(e){ return e.total; }),
+          backgroundColor: COLORS.slice(0, chartEntries.length).map(function(c){ return c + 'cc'; }),
+          borderColor: COLORS.slice(0, chartEntries.length),
           borderWidth: 1.5,
           borderRadius: 5,
         }]
@@ -1049,21 +1034,8 @@ function buildFournCard(months, totCA, year, fiscalMonths2) {
           }
         },
         scales: {
-          x: {
-            grid: { color: '#f1f5f9' },
-            ticks: {
-              font: {size:11, family:'Plus Jakarta Sans'},
-              color: '#9ca3af',
-              callback: function(v){ return fmtK(v); }
-            }
-          },
-          y: {
-            grid: { display: false },
-            ticks: {
-              font: {size:11, family:'Plus Jakarta Sans'},
-              color: '#374151'
-            }
-          }
+          x: { grid:{color:'#f1f5f9'}, ticks:{font:{size:11,family:'Plus Jakarta Sans'},color:'#9ca3af',callback:function(v){return fmtK(v);}} },
+          y: { grid:{display:false}, ticks:{font:{size:11,family:'Plus Jakarta Sans'},color:'#374151'} }
         }
       }
     });
