@@ -1172,8 +1172,8 @@ function renderPrevCA(rows, caReelTotal) {
     return '<tr>' +
       '<td><input class="cell-input" style="width:130px" value="' + esc(r.type) + '" oninput="_data.previsionCA[' + i + '].type=this.value"/></td>' +
       '<td><input class="cell-input" style="width:90px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="_data.previsionCA[' + i + '].montant=this.value;refreshTotals()"/></td>' +
-      '<td style="text-align:right;padding:4px 8px">' + reelDisp + '</td>' +
-      '<td style="text-align:right;padding:4px 8px">' + ecartDisp + '</td>' +
+      '<td style="text-align:right;padding:4px 8px" id="prev-reel-' + i + '">' + reelDisp + '</td>' +
+      '<td style="text-align:right;padding:4px 8px" id="prev-ecart-' + i + '">' + ecartDisp + '</td>' +
     '</tr>';
   }).join('');
 }
@@ -1678,10 +1678,26 @@ function refreshTotals() {
     totPrevEcartEl.style.color = ecartTotal >= 0 ? '#10b981' : '#ef4444';
     totPrevEcartEl.textContent = (ecartTotal >= 0 ? '+' : '') + fmtN(ecartTotal) + ' €';
   }
-  // Re-render les lignes prévision pour mettre à jour les valeurs réel/écart par ligne
-  var prevTbody = document.getElementById('prev-tbody');
-  if (prevTbody && _data && _data.previsionCA) {
-    prevTbody.innerHTML = renderPrevCA(_data.previsionCA, t.caHT);
+  // Mettre à jour uniquement les cellules réel/écart sans re-render (pour ne pas perdre le focus)
+  if (_data && _data.previsionCA) {
+    var totalPrevu = _data.previsionCA.reduce(function(s,r){ return s+(parseFloat(r.montant)||0); }, 0);
+    _data.previsionCA.forEach(function(r, i) {
+      var reelEl = document.getElementById('prev-reel-' + i);
+      var ecartEl = document.getElementById('prev-ecart-' + i);
+      if (!reelEl || !ecartEl) return;
+      var prevu = parseFloat(r.montant)||0;
+      var reel = (totalPrevu > 0 && t.caHT > 0 && prevu > 0)
+        ? t.caHT * (prevu / totalPrevu)
+        : (i === 0 && t.caHT > 0 ? t.caHT : 0);
+      var ecart = reel - prevu;
+      if (t.caHT > 0) {
+        reelEl.innerHTML = '<span style="font-weight:600;color:var(--blue-main)">' + fmtN(reel) + ' €</span>';
+        ecartEl.innerHTML = '<span style="font-weight:700;color:' + (ecart>=0?'#10b981':'#ef4444') + '">' + (ecart>=0?'+':'') + fmtN(ecart) + ' €</span>';
+      } else {
+        reelEl.innerHTML = '<span style="color:var(--muted);font-size:11px">En attente</span>';
+        ecartEl.innerHTML = '<span style="color:var(--muted)">—</span>';
+      }
+    });
   }
   s('tot-fixHT',t.fixesHT);s('tot-fixTTC',t.fixesTTC);s('tot-fixTVA',t.fixesTVA);
   s('tot-varHT',t.varHT);s('tot-varTTC',t.varTTC);s('tot-varTVA',t.varTVA);
