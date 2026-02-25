@@ -158,26 +158,33 @@ module.exports = async (req, res) => {
       const plan = session.metadata?.plan || 'pro';
 
       if (uid && customerId) {
-        // Récupérer les détails de la subscription pour la date de fin de trial
+        // Récupérer les détails de la subscription
         let trialEnd = null;
+        let subStatus = 'trialing';
         if (subscriptionId && stripeKey) {
           const subRes = await fetch(`https://api.stripe.com/v1/subscriptions/${subscriptionId}`, {
             headers: { Authorization: 'Bearer ' + stripeKey }
           });
           const sub = await subRes.json();
           if (sub.trial_end) trialEnd = new Date(sub.trial_end * 1000).toISOString().split('T')[0];
+          subStatus = sub.status || 'trialing';
         }
 
+        // Si pas de trial (abonnement direct) → plan actif immédiatement
+        const isTrial = subStatus === 'trialing';
+        const activePlan = isTrial ? 'trial' : plan;
+
         await updateFirestore(uid, {
-          plan:                 'trial',
+          plan:                 activePlan,
           stripeCustomerId:     customerId,
           stripeSubscriptionId: subscriptionId || '',
-          trialStart:           new Date().toISOString().split('T')[0],
-          ...(trialEnd ? { trialEnd } : {}),
-          pendingPlan:          plan,  // plan qui s'activera après le trial
+          ...(isTrial ? { trialStart: new Date().toISOString().split('T')[0] } : {}),
+          ...(isTrial && trialEnd ? { trialEnd } : {}),
+          ...(isTrial ? { pendingPlan: plan } : { pendingPlan: '' }),
+          subscriptionStatus:   subStatus,
         });
 
-        console.log(`[Webhook] Trial démarré pour uid=${uid} plan=${plan}`);
+        console.log(`[Webhook] checkout.session.completed uid=${uid} plan=${activePlan} status=${subStatus}`);
       }
     }
 

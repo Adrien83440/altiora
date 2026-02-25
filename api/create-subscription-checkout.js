@@ -7,7 +7,7 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { priceId, plan, billing, uid, email } = req.body || {};
+  const { priceId, plan, billing, uid, email, skipTrial } = req.body || {};
   if (!priceId) return res.status(400).json({ error: 'priceId manquant' });
 
   const stripeKey = process.env.STRIPE_SECRET_KEY;
@@ -24,7 +24,7 @@ module.exports = async (req, res) => {
         mode: 'subscription',
         'line_items[0][price]': priceId,
         'line_items[0][quantity]': '1',
-        'subscription_data[trial_period_days]': '15',
+        ...(!skipTrial ? { 'subscription_data[trial_period_days]': '15' } : {}),
         'payment_method_collection': 'if_required',
         'allow_promotion_codes': 'true',
         success_url: baseUrl + '/dashboard.html?subscription=success&plan=' + plan,
