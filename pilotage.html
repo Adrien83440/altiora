@@ -1051,10 +1051,13 @@ function renderPage(data, month) {
         '<div class="section-title">📦 Charges Variables <span class="section-title-badge badge-green">Au fil de l\'eau</span></div>' +
         '<button class="btn btn-outline btn-sm" onclick="addCharge(\'chargesVar\',\'cv-tbody\')">+ Ligne</button>' +
       '</div>' +
-      '<table class="data-table"><thead><tr><th>Pointé</th><th>Fournisseur</th><th>Type</th><th>Montant HT</th><th>TVA %</th><th>Total TTC</th><th>Déductible</th><th></th></tr></thead>' +
+      '<table class="data-table"><thead><tr><th>Pointé</th><th>Fournisseur</th><th>Type</th><th>Montant HT</th><th>TVA %</th><th>Total TTC</th><th>Déductible</th><th title="Exceptionnel : exclut la ligne du total normal">Excep.</th><th></th></tr></thead>' +
       '<tbody id="cv-tbody">' + renderCharges(data.chargesVar, 'chargesVar') + '</tbody>' +
-      '<tfoot><tr><td colspan="3">TOTAL CHARGES VARIABLES HT</td><td><span id="tot-varHT">' + fmtN(t.varHT) + '</span> €</td><td>—</td><td><span id="tot-varTTC">' + fmtN(t.varTTC) + '</span> €</td><td colspan="2">TVA déd. : <span id="tot-varTVA">' + fmtN(t.varTVA) + '</span> €</td></tr>' +
-      '<tr><td colspan="8" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCharge(\'chargesVar\',\'cv-tbody\')">+ Ligne</button></td></tr></tfoot>' +
+      '<tfoot>' +
+        '<tr><td colspan="3">TOTAL CHARGES VARIABLES HT</td><td><span id="tot-varHT">' + fmtN(t.varHT) + '</span> €</td><td>—</td><td><span id="tot-varTTC">' + fmtN(t.varTTC) + '</span> €</td><td colspan="3">TVA déd. : <span id="tot-varTVA">' + fmtN(t.varTVA) + '</span> €</td></tr>' +
+        (t.varHT_excep > 0 ? '<tr id="var-excep-row"><td colspan="3" style="color:#f97316;font-size:11px;padding:5px 9px">⚡ Dont exceptionnel (exclu du total)</td><td style="color:#f97316;font-weight:700">' + fmtN(t.varHT_excep) + ' €</td><td>—</td><td style="color:#f97316;font-weight:700">' + fmtN(t.varTTC_excep) + ' €</td><td colspan="3"></td></tr>' : '<tr id="var-excep-row" style="display:none"></tr>') +
+        '<tr><td colspan="9" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCharge(\'chargesVar\',\'cv-tbody\')">+ Ligne</button></td></tr>' +
+      '</tfoot>' +
       '</table>' +
     '</div>' +
 
@@ -1190,7 +1193,8 @@ function renderCharges(rows, key) {
     var ficheExists = nom && _fichesMap && _fichesMap[nom.toLowerCase()];
     var safeNom = nom.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     var ficheBtn = nom ? ' <button class="btn-fiche' + (ficheExists?' has-fiche':'') + '" title="' + (ficheExists?'Voir fiche':'Créer fiche') + '" onclick="event.stopPropagation();openFicheByName(\'' + safeNom + '\')">' + (ficheExists?'🏢':'📋') + '</button>' : '';
-    return '<tr>' +
+    var isExcep = key==='chargesVar' && r.exceptionnel;
+    return '<tr style="' + (isExcep ? 'background:rgba(249,115,22,0.06);' : '') + '">' +
       '<td><select class="cell-input" style="width:55px" onchange="_data[\'' + key + '\'][' + i + '].pointe=this.value"><option' + (r.pointe==='Oui'?' selected':'') + '>Oui</option><option' + (r.pointe==='Non'?' selected':'') + '>Non</option></select></td>' +
       '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + supplierInputHtml(key, i, r.fournisseur||'') + ficheBtn + '</div></td>' +
       '<td>' + catalogInputHtml('types', key+'-typ-'+i, r.type||'', 'width:95px', 'Type', '_data[\''+key+'\']['+i+'].type=this.value') + '</td>' +
@@ -1201,6 +1205,11 @@ function renderCharges(rows, key) {
       (key==='leasing' ? '<td style="white-space:nowrap;min-width:130px">' +
         mpHtml('mpL-'+i+'-deb','leasing',i,'dateDebut',r.dateDebut||'') +
         '<div style="margin-top:4px">' + mpHtml('mpL-'+i+'-fin','leasing',i,'dateFin',r.dateFin||'') + '</div>' +
+      '</td>' : '') +
+      (key==='chargesVar' ? '<td style="text-align:center;padding:4px 6px">' +
+        '<label title="Exceptionnel : exclut cette charge du total normal" style="display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer">' +
+        '<input type="checkbox"' + (r.exceptionnel ? ' checked' : '') + ' onchange="_data[\'' + key + '\'][' + i + '].exceptionnel=this.checked;refreshTotals()" style="width:15px;height:15px;cursor:pointer;accent-color:#f97316">' +
+        '</label>' +
       '</td>' : '') +
       '<td style="white-space:nowrap;display:flex;gap:4px;align-items:center;padding:5px 7px;">' +
         (isFixe ? '<button class="btn btn-orange btn-sm" style="font-size:10px;padding:3px 8px;" onclick="duplicateFixeLine(' + i + ')">⚡ Année</button>' : '') +
@@ -1618,8 +1627,17 @@ function calcTotals(data) {
   var prevCA = data.previsionCA.reduce(function(s,r){return s+(parseFloat(r.montant)||0);},0);
   var fixesHT=0,fixesTTC=0,fixesTVA=0;
   data.chargesFixe.forEach(function(r){var h=pf(r.montantHT);fixesHT+=h;fixesTTC+=h*(1+(r.tvaRate||0)/100);if(r.deductible==='Oui')fixesTVA+=h*(r.tvaRate||0)/100;});
-  var varHT=0,varTTC=0,varTVA=0;
-  data.chargesVar.forEach(function(r){var h=pf(r.montantHT);varHT+=h;varTTC+=h*(1+(r.tvaRate||0)/100);if(r.deductible==='Oui')varTVA+=h*(r.tvaRate||0)/100;});
+  var varHT=0,varTTC=0,varTVA=0,varHT_excep=0,varTTC_excep=0;
+  data.chargesVar.forEach(function(r){
+    var h=pf(r.montantHT);
+    var ttc=h*(1+(r.tvaRate||0)/100);
+    if(r.exceptionnel){
+      varHT_excep+=h; varTTC_excep+=ttc;
+    } else {
+      varHT+=h; varTTC+=ttc;
+      if(r.deductible==='Oui') varTVA+=h*(r.tvaRate||0)/100;
+    }
+  });
   var leasingHT=0,leasingTTC=0,leasingTVA=0;
   data.leasing.forEach(function(r){
     if (r.dateDebut && r.dateFin && curMonthKey) {
@@ -1649,7 +1667,7 @@ function calcTotals(data) {
   var resultat = caHT+rentreesSupp-chargesHT;
   var cashflow = caHT+rentreesSupp-(fixesTTC+varTTC+creditsPrincipal+creditsInteret+leasingTTC);
   var delta = resultat-(prevCA-chargesHT);
-  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caTTC,tvaCollectee,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta,caFP055,caFP10,caFP20};
+  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caTTC,tvaCollectee,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,varHT_excep,varTTC_excep,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta,caFP055,caFP10,caFP20};
 }
 
 function refreshTotals() {
@@ -1701,6 +1719,20 @@ function refreshTotals() {
   }
   s('tot-fixHT',t.fixesHT);s('tot-fixTTC',t.fixesTTC);s('tot-fixTVA',t.fixesTVA);
   s('tot-varHT',t.varHT);s('tot-varTTC',t.varTTC);s('tot-varTVA',t.varTVA);
+  // Ligne exceptionnel
+  var excepRow = document.getElementById('var-excep-row');
+  if (excepRow) {
+    if (t.varHT_excep > 0) {
+      excepRow.style.display = '';
+      excepRow.innerHTML = '<td colspan="3" style="color:#f97316;font-size:11px;padding:5px 9px">⚡ Dont exceptionnel (exclu du total)</td>' +
+        '<td style="color:#f97316;font-weight:700">' + fmtN(t.varHT_excep) + ' €</td>' +
+        '<td>—</td>' +
+        '<td style="color:#f97316;font-weight:700">' + fmtN(t.varTTC_excep) + ' €</td>' +
+        '<td colspan="3"></td>';
+    } else {
+      excepRow.style.display = 'none';
+    }
+  }
   s('tot-leasHT',t.leasingHT);s('tot-leasTTC',t.leasingTTC);
   s('tot-credP',t.creditsPrincipal);s('tot-credMens',t.creditsPrincipal+t.creditsInteret);s('tot-credInt',t.creditsInteret);s('tot-credTVA',t.creditsTVA);
   s('tva-c',fmtN(t.tvaCollectee)+' €');s('tva-d',fmtN(t.tvaDed)+' €');s('tva-due',fmtN(Math.abs(t.tvaDue))+' €');
