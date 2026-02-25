@@ -393,6 +393,8 @@
           document.getElementById('uplan').textContent='Plan '+d.plan.charAt(0).toUpperCase()+d.plan.slice(1);
           window._userPlanDirect=d.plan;
         }
+        // Bannière trial
+        if(d.plan==='trial' && d.trialEnd) showTrialBanner(d.trialEnd, d.pendingPlan||'pro');
       }
     }catch(e){}
     window.loadData();
@@ -402,6 +404,62 @@
       if(sel)sel.value=_fiscalStart;
     },100);
   });
+
+  // ── Bannière trial expiration ──
+  window.showTrialBanner = function(trialEndStr, pendingPlan) {
+    const trialEnd = new Date(trialEndStr);
+    const now = new Date();
+    const diffMs = trialEnd - now;
+    const diffH = diffMs / (1000 * 60 * 60);
+    const diffJ = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+    // Afficher seulement si < 24h ou déjà expiré
+    if (diffH > 24) return;
+
+    const isExpired = diffMs <= 0;
+    const planNames = { pro: 'Pro (69€/mois)', max: 'Max (99€/mois)', master: 'Master (169€/mois)' };
+    const planLabel = planNames[pendingPlan] || 'Pro';
+
+    // Injecter le CSS si pas déjà là
+    if (!document.getElementById('trial-banner-style')) {
+      const s = document.createElement('style');
+      s.id = 'trial-banner-style';
+      s.textContent = `
+        #trial-banner{position:fixed;top:0;left:0;right:0;z-index:99998;padding:12px 20px;display:flex;align-items:center;justify-content:center;gap:16px;font-family:inherit;font-size:13px;font-weight:600;box-shadow:0 2px 12px rgba(0,0,0,.15);animation:trialSlide .4s ease}
+        #trial-banner.warning{background:linear-gradient(135deg,#f59e0b,#fbbf24);color:#1a1f36}
+        #trial-banner.expired{background:linear-gradient(135deg,#ef4444,#f87171);color:#fff}
+        #trial-banner a{color:inherit;text-decoration:underline;cursor:pointer;font-weight:800}
+        #trial-banner .trial-close{background:rgba(0,0,0,.15);border:none;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:12px;color:inherit;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-left:8px}
+        @keyframes trialSlide{from{transform:translateY(-100%)}to{transform:translateY(0)}}
+        body.has-trial-banner main, body.has-trial-banner .sidebar{padding-top:48px !important}
+      `;
+      document.head.appendChild(s);
+    }
+
+    // Créer la bannière
+    const banner = document.createElement('div');
+    banner.id = 'trial-banner';
+    banner.className = isExpired ? 'expired' : 'warning';
+
+    if (isExpired) {
+      banner.innerHTML = `
+        <span>⚠️ Votre essai gratuit est terminé — Ajoutez un moyen de paiement pour continuer avec le plan <strong>${planLabel}</strong></span>
+        <a onclick="location.href='profil.html?tab=abonnement'">Ajouter ma CB →</a>
+        <button class="trial-close" onclick="document.getElementById('trial-banner').remove();document.body.classList.remove('has-trial-banner')">✕</button>
+      `;
+    } else {
+      const heures = Math.round(diffH);
+      banner.innerHTML = `
+        <span>⏳ Votre essai gratuit se termine dans <strong>${heures < 2 ? 'moins de 2h' : 'moins de 24h'}</strong> — Ajoutez un moyen de paiement pour ne pas perdre l'accès</span>
+        <a onclick="location.href='profil.html?tab=abonnement'">Ajouter ma CB →</a>
+        <button class="trial-close" onclick="document.getElementById('trial-banner').remove();document.body.classList.remove('has-trial-banner')">✕</button>
+      `;
+    }
+
+    document.body.prepend(banner);
+    document.body.classList.add('has-trial-banner');
+  };
+
 </script>
 
 <script>
