@@ -26,6 +26,7 @@ module.exports = async (req, res) => {
         'line_items[0][quantity]': '1',
         'subscription_data[trial_period_days]': '15',
         'payment_method_collection': 'always',
+        'allow_promotion_codes': 'true',
         success_url: baseUrl + '/dashboard.html?subscription=success&plan=' + plan,
         cancel_url: baseUrl + '/pricing.html?cancelled=1',
         'metadata[plan]': plan,
