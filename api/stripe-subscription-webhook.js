@@ -195,18 +195,18 @@ module.exports = async (req, res) => {
       if (!plan) { console.warn('[Webhook] plan non reconnu pour sub:', sub.id); return res.status(200).end(); }
 
       let newPlan = plan;
-      // Si le trial vient de se terminer → activer le vrai plan
-      if (sub.status === 'active' && !sub.trial_end) newPlan = plan;
-      else if (sub.status === 'trialing')             newPlan = 'trial';
-      else if (sub.status === 'past_due')             newPlan = 'past_due';
-      else if (sub.status === 'canceled')             newPlan = 'free';
-      else if (sub.status === 'active')               newPlan = plan;
+      if (sub.status === 'trialing')             newPlan = 'trial';
+      else if (sub.status === 'active')          newPlan = plan;
+      else if (sub.status === 'past_due')        newPlan = 'past_due';
+      else if (sub.status === 'canceled')        newPlan = 'free';
+      else if (sub.status === 'incomplete')      newPlan = 'trial'; // CB pas encore fournie
+      else if (sub.status === 'incomplete_expired') newPlan = 'free'; // jamais fourni la CB
 
       await updateFirestore(uid, {
         plan:                 newPlan,
         stripeSubscriptionId: sub.id,
         subscriptionStatus:   sub.status,
-        ...(plan !== 'trial' ? { pendingPlan: '' } : {}),
+        ...(newPlan !== 'trial' ? { pendingPlan: '' } : {}),
       });
 
       console.log(`[Webhook] Subscription updated uid=${uid} plan=${newPlan} status=${sub.status}`);
@@ -233,11 +233,19 @@ module.exports = async (req, res) => {
     // ════════════════════════════════════════════
     // 4. invoice.payment_succeeded
     //    → Paiement OK → activer le plan
+    //    Note : amount_paid peut être 0 avec un coupon (2 mois offerts) — on active quand même
     // ════════════════════════════════════════════
     else if (event.type === 'invoice.payment_succeeded') {
       const invoice = event.data.object;
-      // Ignorer les invoices de trial (montant = 0)
-      if (invoice.amount_paid === 0) return res.status(200).end();
+
+      // Ignorer uniquement les invoices de trial pur (sans subscription, montant 0 et billing_reason = subscription_create)
+      const isFreeTrialInvoice = invoice.amount_paid === 0
+        && invoice.billing_reason === 'subscription_create'
+        && !invoice.discount;
+      if (isFreeTrialInvoice) {
+        console.log('[Webhook] Invoice trial ignorée (pas de coupon, montant 0)');
+        return res.status(200).end();
+      }
 
       const uid = await getUidFromCustomer(invoice.customer);
       if (!uid) return res.status(200).end();
@@ -259,7 +267,7 @@ module.exports = async (req, res) => {
           lastPayment:        new Date().toISOString().split('T')[0],
           pendingPlan:        '',
         });
-        console.log(`[Webhook] Paiement OK uid=${uid} plan=${plan}`);
+        console.log(`[Webhook] Paiement OK uid=${uid} plan=${plan} montant=${invoice.amount_paid}`);
       }
     }
 
