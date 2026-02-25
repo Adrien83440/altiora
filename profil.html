@@ -658,6 +658,49 @@ html, body { overflow-x: hidden; max-width: 100vw; }
         </div>
       </div>
 
+      <!-- Paramètres de gestion -->
+      <div class="card" style="margin-bottom:0">
+        <div class="card-head">
+          <div class="card-title">⚙️ Paramètres de gestion</div>
+          <span style="font-size:11px;color:var(--muted)">Appliqués sur Dashboard, Suivi CA et Cashflow</span>
+        </div>
+        <div style="padding:20px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+            <div>
+              <label class="field-lbl">Mode d'affichage par défaut</label>
+              <div style="display:flex;gap:8px;margin-top:6px">
+                <button id="btn-mode-civil" onclick="setProfMode('civil')" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:.15s">📅 Année civile</button>
+                <button id="btn-mode-exercice" onclick="setProfMode('exercice')" style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:.15s">📊 Exercice comptable</button>
+              </div>
+              <p style="font-size:11px;color:var(--muted);margin-top:6px">Détermine comment les données annuelles sont calculées et affichées.</p>
+            </div>
+            <div>
+              <label class="field-lbl">Mois de début d'exercice</label>
+              <div class="field-wrap" style="margin-top:6px">
+                <select class="field-sel" id="p-fiscalStart" onchange="updateExercicePreview()">
+                  <option value="0">Janvier (année civile)</option>
+                  <option value="1">Février</option>
+                  <option value="2">Mars</option>
+                  <option value="3">Avril</option>
+                  <option value="4">Mai</option>
+                  <option value="5">Juin</option>
+                  <option value="6">Juillet</option>
+                  <option value="7">Août</option>
+                  <option value="8">Septembre</option>
+                  <option value="9">Octobre</option>
+                  <option value="10">Novembre</option>
+                  <option value="11">Décembre</option>
+                </select>
+              </div>
+              <p style="font-size:11px;color:var(--muted);margin-top:6px">Ex : si votre exercice va de mai à avril, choisissez <b>Mai</b>.</p>
+            </div>
+          </div>
+          <div id="exercice-preview" style="margin-top:14px;padding:10px 14px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--muted);display:none">
+            📆 Votre exercice en cours : <span id="exercice-preview-txt" style="font-weight:700;color:var(--text)"></span>
+          </div>
+        </div>
+      </div>
+
       <!-- Save -->
       <div class="save-bar">
         <span class="save-hint" id="lastSaved">Modifications non enregistrées</span>
@@ -1029,9 +1072,47 @@ function saveProfile() {
   document.getElementById('lastSaved').textContent = '✅ Enregistré le ' + new Date().toLocaleString('fr-FR');
   showToastMsg('✅ Profil enregistré !', 'ok');
   updateHero();
-  // Firebase uniquement
   if (window._uid && window._setDoc) {
+    // Profil entreprise
     window._setDoc(window._doc(window._db,'profil',window._uid,'data','profil'), data, {merge:true}).catch(() => {});
+    // Préférences de gestion → users/{uid} (partagées avec dashboard/suivi-ca/cashflow)
+    const fiscalStart = parseInt(document.getElementById('p-fiscalStart')?.value || '0');
+    const viewMode = _profMode || 'civil';
+    window._setDoc(window._doc(window._db,'users',window._uid), {fiscalStart, viewMode}, {merge:true}).catch(() => {});
+  }
+}
+
+var _profMode = 'civil';
+
+function setProfMode(mode) {
+  _profMode = mode;
+  const btnC = document.getElementById('btn-mode-civil');
+  const btnE = document.getElementById('btn-mode-exercice');
+  if (btnC) { btnC.style.background = mode === 'civil' ? 'var(--blue)' : '#fff'; btnC.style.color = mode === 'civil' ? '#fff' : 'var(--text)'; btnC.style.borderColor = mode === 'civil' ? 'var(--blue)' : 'var(--border)'; }
+  if (btnE) { btnE.style.background = mode === 'exercice' ? 'var(--blue)' : '#fff'; btnE.style.color = mode === 'exercice' ? '#fff' : 'var(--text)'; btnE.style.borderColor = mode === 'exercice' ? 'var(--blue)' : 'var(--border)'; }
+  updateExercicePreview();
+}
+
+function updateExercicePreview() {
+  const sel = document.getElementById('p-fiscalStart');
+  const preview = document.getElementById('exercice-preview');
+  const txt = document.getElementById('exercice-preview-txt');
+  if (!sel || !preview || !txt) return;
+  const fs = parseInt(sel.value);
+  if (_profMode === 'exercice' && fs !== 0) {
+    const MONTHS_FR = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+    const now = new Date();
+    const curM = now.getMonth();
+    const curY = now.getFullYear();
+    // Trouver l'année de début de l'exercice en cours
+    let startYear = curY;
+    if (curM < fs) startYear = curY - 1;
+    const endM = (fs + 11) % 12;
+    const endY = startYear + (fs + 11 >= 12 ? 1 : 0);
+    txt.textContent = MONTHS_FR[fs] + ' ' + startYear + ' → ' + MONTHS_FR[endM] + ' ' + endY;
+    preview.style.display = 'block';
+  } else {
+    preview.style.display = 'none';
   }
 }
 
@@ -1181,6 +1262,22 @@ async function tryFirebase() {
         const el = document.getElementById('p-'+f); if (el) el.value = data[f]||'';
       });
       updateHero();
+    }
+    // Charger les préférences de gestion depuis users/{uid}
+    const userSnap = await window._getDoc(window._doc(window._db,'users',window._uid));
+    if (userSnap.exists()) {
+      const ud = userSnap.data();
+      if (ud.fiscalStart !== undefined) {
+        const sel = document.getElementById('p-fiscalStart');
+        if (sel) sel.value = String(ud.fiscalStart);
+      }
+      if (ud.viewMode) {
+        setProfMode(ud.viewMode);
+      } else {
+        setProfMode('civil');
+      }
+    } else {
+      setProfMode('civil');
     }
     // Plan géré directement dans le module Firebase
   } catch (e) { console.warn('tryFirebase error:', e); }
