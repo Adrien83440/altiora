@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gérer mon abonnement — Alteore</title>
+  <link rel="icon" href="favicon.ico" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #12121a;
+      --surface2: #1a1a26;
+      --border: #2a2a3d;
+      --border-bright: #3d3d5c;
+      --text: #e8e8f0;
+      --text-muted: #7a7a9a;
+      --text-dim: #4a4a6a;
+      --accent: #6c63ff;
+      --accent-soft: rgba(108,99,255,0.12);
+      --accent-glow: rgba(108,99,255,0.3);
+      --danger: #ff4757;
+      --danger-soft: rgba(255,71,87,0.1);
+      --success: #2ed573;
+      --success-soft: rgba(46,213,115,0.1);
+      --warning: #ffa502;
+      --warning-soft: rgba(255,165,2,0.1);
+      --gold: #f7b731;
+      --gold-soft: rgba(247,183,49,0.12);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Sora', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 0 16px 80px;
+      overflow-x: hidden;
+    }
+
+    /* ── Noise overlay ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Ambient glow ── */
+    .ambient {
+      position: fixed;
+      width: 600px; height: 600px;
+      border-radius: 50%;
+      filter: blur(120px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .ambient-1 { background: rgba(108,99,255,0.06); top: -200px; left: 50%; transform: translateX(-50%); }
+    .ambient-2 { background: rgba(255,71,87,0.04); bottom: 0; right: -200px; }
+
+    /* ── Header ── */
+    .header {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 680px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 28px 0 0;
+    }
+
+    .logo {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: var(--text);
+    }
+    .logo span { color: var(--accent); }
+
+    .back-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+    .back-btn:hover { color: var(--text); }
+    .back-btn svg { width: 16px; height: 16px; }
+
+    /* ── Progress bar ── */
+    .progress-wrap {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 680px;
+      margin-top: 40px;
+    }
+
+    .progress-steps {
+      display: flex;
+      align-items: center;
+      gap: 0;
+    }
+
+    .step-item {
+      display: flex;
+      align-items: center;
+      flex: 1;
+    }
+
+    .step-dot {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-dim);
+      background: var(--surface);
+      transition: all 0.4s ease;
+      flex-shrink: 0;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .step-dot.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      box-shadow: 0 0 16px var(--accent-glow);
+    }
+
+    .step-dot.done {
+      border-color: var(--success);
+      background: var(--success);
+      color: #000;
+    }
+
+    .step-dot.done::after { content: '✓'; }
+
+    .step-line {
+      flex: 1;
+      height: 2px;
+      background: var(--border);
+      transition: background 0.4s ease;
+    }
+
+    .step-line.done { background: var(--success); }
+
+    .step-labels {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 10px;
+    }
+
+    .step-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-align: center;
+      flex: 1;
+      transition: color 0.3s;
+    }
+
+    .step-label.active { color: var(--accent); }
+    .step-label.done { color: var(--success); }
+
+    /* ── Main card ── */
+    .card {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 680px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 40px;
+      margin-top: 32px;
+      animation: cardIn 0.5s ease both;
+    }
+
+    @keyframes cardIn {
+      from { opacity: 0; transform: translateY(16px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Step panels ── */
+    .step-panel { display: none; }
+    .step-panel.active { display: block; }
+
+    /* ── Step 1 : Raison ── */
+    .step-title {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+    }
+
+    .step-subtitle {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 32px;
+      line-height: 1.6;
+    }
+
+    .reason-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .reason-btn {
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: left;
+      color: var(--text);
+      font-family: 'Sora', sans-serif;
+    }
+
+    .reason-btn:hover {
+      border-color: var(--border-bright);
+      background: #1e1e2e;
+    }
+
+    .reason-btn.selected {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .reason-icon { font-size: 22px; margin-bottom: 8px; display: block; }
+    .reason-label { font-size: 13px; font-weight: 500; }
+
+    .textarea-wrap { margin-bottom: 28px; }
+    .textarea-wrap label { font-size: 13px; color: var(--text-muted); display: block; margin-bottom: 8px; }
+
+    textarea {
+      width: 100%;
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      color: var(--text);
+      font-family: 'Sora', sans-serif;
+      font-size: 14px;
+      padding: 14px 16px;
+      resize: vertical;
+      min-height: 100px;
+      transition: border-color 0.2s;
+      outline: none;
+    }
+
+    textarea:focus { border-color: var(--accent); }
+    textarea::placeholder { color: var(--text-dim); }
+
+    /* ── Step 2 : Offre rétention ── */
+    .offer-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--gold-soft);
+      border: 1px solid rgba(247,183,49,0.3);
+      color: var(--gold);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 100px;
+      margin-bottom: 20px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .offer-card {
+      background: linear-gradient(135deg, rgba(108,99,255,0.08) 0%, rgba(247,183,49,0.06) 100%);
+      border: 1.5px solid rgba(108,99,255,0.25);
+      border-radius: 16px;
+      padding: 28px;
+      margin: 24px 0;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .offer-card::before {
+      content: '';
+      position: absolute;
+      top: -40px; right: -40px;
+      width: 120px; height: 120px;
+      background: radial-gradient(circle, rgba(247,183,49,0.15) 0%, transparent 70%);
+      border-radius: 50%;
+    }
+
+    .offer-pct {
+      font-size: 56px;
+      font-weight: 700;
+      letter-spacing: -3px;
+      line-height: 1;
+      background: linear-gradient(135deg, var(--accent), var(--gold));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .offer-detail {
+      font-size: 16px;
+      color: var(--text-muted);
+      margin-top: 8px;
+      font-weight: 400;
+    }
+
+    .offer-detail strong { color: var(--text); }
+
+    .savings-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--success-soft);
+      border: 1px solid rgba(46,213,115,0.2);
+      color: var(--success);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: 100px;
+      margin-top: 16px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .plan-display {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+
+    .plan-name { font-size: 14px; font-weight: 600; }
+    .plan-price { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text-muted); }
+
+    .retention-bullets {
+      list-style: none;
+      margin: 20px 0;
+    }
+
+    .retention-bullets li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+
+    .retention-bullets li::before {
+      content: '→';
+      color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    /* ── Step 3 : Export + confirmation ── */
+    .export-section { margin-bottom: 32px; }
+
+    .export-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+
+    .export-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+
+    .export-btns {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .export-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface2);
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 18px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: 'Sora', sans-serif;
+    }
+
+    .export-btn:hover { border-color: var(--border-bright); }
+    .export-btn.loading { opacity: 0.6; pointer-events: none; }
+    .export-btn.done { border-color: var(--success); color: var(--success); }
+
+    .export-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+    .danger-zone {
+      background: var(--danger-soft);
+      border: 1.5px solid rgba(255,71,87,0.2);
+      border-radius: 16px;
+      padding: 24px;
+    }
+
+    .danger-zone-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--danger);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .danger-zone-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 20px;
+      line-height: 1.6;
+    }
+
+    .grace-info {
+      background: rgba(255,165,2,0.08);
+      border: 1px solid rgba(255,165,2,0.2);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 12px;
+      color: var(--warning);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      line-height: 1.5;
+    }
+
+    .confirm-input-wrap {
+      margin-bottom: 16px;
+    }
+
+    .confirm-input-wrap label {
+      font-size: 12px;
+      color: var(--text-muted);
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .confirm-input-wrap label code {
+      background: var(--surface2);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--danger);
+      font-size: 12px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      padding: 12px 16px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type="text"]:focus { border-color: var(--danger); }
+    input[type="text"].valid { border-color: var(--success); }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 14px 28px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: 'Sora', sans-serif;
+      cursor: pointer;
+      border: none;
+      transition: all 0.25s;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 4px 20px var(--accent-glow);
+    }
+
+    .btn-primary:hover { background: #7c74ff; transform: translateY(-1px); box-shadow: 0 6px 28px var(--accent-glow); }
+    .btn-primary:active { transform: translateY(0); }
+
+    .btn-success {
+      background: var(--success);
+      color: #000;
+      box-shadow: 0 4px 20px rgba(46,213,115,0.25);
+    }
+
+    .btn-success:hover { background: #42e87e; transform: translateY(-1px); }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1.5px solid var(--border);
+    }
+
+    .btn-ghost:hover { border-color: var(--border-bright); color: var(--text); }
+
+    .btn-danger {
+      background: var(--danger-soft);
+      color: var(--danger);
+      border: 1.5px solid rgba(255,71,87,0.3);
+    }
+
+    .btn-danger:hover { background: rgba(255,71,87,0.18); }
+    .btn-danger:disabled { opacity: 0.4; pointer-events: none; }
+
+    .btn-full { width: 100%; }
+    .btn-lg { padding: 16px 32px; font-size: 15px; }
+
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      margin-top: 24px;
+    }
+
+    .btn-row .spacer { flex: 1; }
+
+    /* ── Success screen ── */
+    .success-screen {
+      display: none;
+      text-align: center;
+      padding: 20px 0;
+    }
+
+    .success-screen.active { display: block; }
+
+    .success-icon {
+      width: 72px; height: 72px;
+      background: var(--success-soft);
+      border: 2px solid rgba(46,213,115,0.3);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      margin: 0 auto 24px;
+    }
+
+    .retention-success {
+      display: none;
+    }
+
+    .retention-success.active { display: block; text-align: center; padding: 20px 0; }
+
+    .retention-icon {
+      width: 72px; height: 72px;
+      background: var(--gold-soft);
+      border: 2px solid rgba(247,183,49,0.3);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      margin: 0 auto 24px;
+    }
+
+    /* ── Loading overlay ── */
+    .loading-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(10,10,15,0.8);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .loading-overlay.active { display: flex; }
+
+    .spinner {
+      width: 40px; height: 40px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .loading-text { font-size: 14px; color: var(--text-muted); }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed;
+      bottom: 24px; left: 50%;
+      transform: translateX(-50%) translateY(100px);
+      background: var(--surface2);
+      border: 1px solid var(--border-bright);
+      color: var(--text);
+      padding: 12px 20px;
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: 200;
+      transition: transform 0.3s ease;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .toast.show { transform: translateX(-50%) translateY(0); }
+    .toast.success { border-color: rgba(46,213,115,0.4); }
+    .toast.error { border-color: rgba(255,71,87,0.4); }
+
+    /* ── Responsive ── */
+    @media (max-width: 600px) {
+      .card { padding: 24px 20px; }
+      .reason-grid { grid-template-columns: 1fr; }
+      .btn-row { flex-direction: column; }
+      .btn-row .spacer { display: none; }
+      .btn-row .btn { width: 100%; }
+      .offer-pct { font-size: 42px; }
+    }
+
+    /* ── Séparateur ── */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 28px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="ambient ambient-1"></div>
+  <div class="ambient ambient-2"></div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">ALTE<span>ORE</span></div>
+    <a href="parametres.html" class="back-btn">
+      <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+      Retour
+    </a>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-steps">
+      <div class="step-item">
+        <div class="step-dot active" id="dot1">01</div>
+        <div class="step-line" id="line1"></div>
+      </div>
+      <div class="step-item">
+        <div class="step-dot" id="dot2">02</div>
+        <div class="step-line" id="line2"></div>
+      </div>
+      <div class="step-item">
+        <div class="step-dot" id="dot3">03</div>
+      </div>
+    </div>
+    <div class="step-labels">
+      <span class="step-label active" id="lbl1">Raison</span>
+      <span class="step-label" id="lbl2">Offre exclusive</span>
+      <span class="step-label" id="lbl3">Suppression</span>
+    </div>
+  </div>
+
+  <!-- Main card -->
+  <div class="card" id="mainCard">
+
+    <!-- ───────── STEP 1 : Raison ───────── -->
+    <div class="step-panel active" id="panel1">
+      <div class="step-title">Pourquoi souhaitez-vous partir ?</div>
+      <div class="step-subtitle">Votre retour nous aide à améliorer Alteore. Cette information reste confidentielle.</div>
+
+      <div class="reason-grid">
+        <button class="reason-btn" data-reason="price" onclick="selectReason(this)">
+          <span class="reason-icon">💸</span>
+          <span class="reason-label">Trop cher</span>
+        </button>
+        <button class="reason-btn" data-reason="features" onclick="selectReason(this)">
+          <span class="reason-icon">🔧</span>
+          <span class="reason-label">Fonctionnalités manquantes</span>
+        </button>
+        <button class="reason-btn" data-reason="complex" onclick="selectReason(this)">
+          <span class="reason-icon">🌀</span>
+          <span class="reason-label">Trop complexe à utiliser</span>
+        </button>
+        <button class="reason-btn" data-reason="notime" onclick="selectReason(this)">
+          <span class="reason-icon">⏱️</span>
+          <span class="reason-label">Manque de temps</span>
+        </button>
+        <button class="reason-btn" data-reason="competitor" onclick="selectReason(this)">
+          <span class="reason-icon">🔄</span>
+          <span class="reason-label">Passage à un concurrent</span>
+        </button>
+        <button class="reason-btn" data-reason="other" onclick="selectReason(this)">
+          <span class="reason-icon">💬</span>
+          <span class="reason-label">Autre raison</span>
+        </button>
+      </div>
+
+      <div class="textarea-wrap">
+        <label>Dites-nous en plus (facultatif)</label>
+        <textarea id="reasonDetail" placeholder="Votre commentaire nous aidera à nous améliorer…"></textarea>
+      </div>
+
+      <div class="btn-row">
+        <a href="parametres.html" class="btn btn-ghost">Annuler</a>
+        <div class="spacer"></div>
+        <button class="btn btn-primary" onclick="goToStep2()" id="btnStep1">
+          Continuer
+          <svg fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24" width="16"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- ───────── STEP 2 : Offre rétention ───────── -->
+    <div class="step-panel" id="panel2">
+      <div class="offer-badge">⚡ Offre exclusive</div>
+      <div class="step-title">Avant de partir, on a quelque chose pour vous</div>
+      <div class="step-subtitle">
+        En tant que client Alteore, vous bénéficiez d'une offre de fidélité exceptionnelle pendant <strong>3 mois</strong>.
+      </div>
+
+      <div class="plan-display">
+        <span class="plan-name" id="planDisplayName">Plan Pro</span>
+        <span class="plan-price" id="planDisplayPrice">69€/mois</span>
+      </div>
+
+      <div class="offer-card">
+        <div class="offer-pct">-50%</div>
+        <div class="offer-detail">pendant <strong>3 mois consécutifs</strong>, puis retour au tarif normal</div>
+        <div class="savings-pill" id="savingsPill">≈ 103€ économisés</div>
+      </div>
+
+      <ul class="retention-bullets">
+        <li>Toutes vos données conservées et accessibles sans interruption</li>
+        <li>Aucun engagement supplémentaire — résiliez à tout moment</li>
+        <li>Coupon appliqué automatiquement dès la prochaine facture</li>
+      </ul>
+
+      <button class="btn btn-success btn-full btn-lg" onclick="applyRetentionOffer()">
+        🎉 Oui, profiter de l'offre -50%
+      </button>
+
+      <div class="btn-row" style="margin-top: 14px;">
+        <button class="btn btn-ghost" onclick="goToStep1()" style="font-size:13px; padding: 10px 18px;">
+          ← Retour
+        </button>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" onclick="goToStep3()" style="font-size:13px; color: var(--text-dim); padding: 10px 18px; border-color: transparent;">
+          Non merci, continuer la suppression →
+        </button>
+      </div>
+    </div>
+
+    <!-- ───────── STEP 3 : Export + Suppression ───────── -->
+    <div class="step-panel" id="panel3">
+      <div class="step-title">Export de vos données</div>
+      <div class="step-subtitle">Téléchargez une copie de vos données avant de supprimer votre compte.</div>
+
+      <!-- Export -->
+      <div class="export-section">
+        <div class="export-title">📦 Vos données</div>
+        <div class="export-desc">
+          Toutes vos données Alteore — chiffre d'affaires, charges, dettes, marges — seront incluses dans l'export.
+        </div>
+        <div class="export-btns">
+          <button class="export-btn" id="btnExportJSON" onclick="exportData('json')">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+            JSON
+          </button>
+          <button class="export-btn" id="btnExportCSV" onclick="exportData('csv')">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            CSV
+          </button>
+          <button class="export-btn" id="btnExportPDF" onclick="exportData('pdf')">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8M8 17h4"/></svg>
+            PDF
+          </button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Danger zone -->
+      <div class="danger-zone">
+        <div class="danger-zone-title">
+          <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" width="16"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Supprimer définitivement mon compte
+        </div>
+        <div class="danger-zone-desc">
+          Votre abonnement sera résilié immédiatement. Vos données seront conservées pendant <strong>14 jours</strong> puis supprimées définitivement.
+        </div>
+
+        <div class="grace-info">
+          <span>⏳</span>
+          <span>Vous pouvez réactiver votre compte pendant la période de grâce de 14 jours en vous reconnectant et en choisissant un plan.</span>
+        </div>
+
+        <div class="confirm-input-wrap">
+          <label>Tapez <code>SUPPRIMER MON COMPTE</code> pour confirmer</label>
+          <input type="text" id="confirmInput" placeholder="SUPPRIMER MON COMPTE" oninput="checkConfirmInput()" autocomplete="off" />
+        </div>
+
+        <button class="btn btn-danger btn-full" id="btnConfirmDelete" onclick="confirmCancellation()" disabled>
+          Supprimer définitivement mon compte
+        </button>
+      </div>
+
+      <div class="btn-row" style="margin-top: 20px;">
+        <button class="btn btn-ghost" onclick="goToStep2()" style="font-size:13px; padding: 10px 18px;">← Retour</button>
+      </div>
+    </div>
+
+    <!-- ───────── Écran succès rétention ───────── -->
+    <div class="retention-success" id="retentionSuccess">
+      <div class="retention-icon">🎉</div>
+      <div class="step-title">Votre remise est activée !</div>
+      <div class="step-subtitle" style="margin-bottom: 28px;">
+        La remise de <strong>-50%</strong> a été appliquée sur votre prochain prélèvement et les 2 suivants. Merci de rester avec Alteore !
+      </div>
+      <div class="plan-display" style="margin-bottom: 24px;">
+        <span class="plan-name">Remise active</span>
+        <span class="plan-price" style="color: var(--success);" id="discountedPrice">34,50€/mois × 3 mois</span>
+      </div>
+      <a href="dashboard.html" class="btn btn-success btn-full btn-lg">Retour au tableau de bord</a>
+    </div>
+
+    <!-- ───────── Écran succès suppression ───────── -->
+    <div class="success-screen" id="successScreen">
+      <div class="success-icon">✓</div>
+      <div class="step-title">Votre compte a été résilié</div>
+      <div class="step-subtitle" style="margin-bottom: 28px;">
+        Votre abonnement est annulé. Vos données sont conservées jusqu'au <strong id="deleteDate"></strong> puis supprimées automatiquement.
+        <br/><br/>
+        Pour réactiver votre compte, reconnectez-vous avant cette date.
+      </div>
+      <a href="index.html" class="btn btn-ghost btn-full">Se déconnecter</a>
+    </div>
+
+  </div>
+
+  <!-- Loading overlay -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loadingText">Traitement en cours…</div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- Script 1 : Firebase Module                -->
+  <!-- ══════════════════════════════════════════ -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import {
+      getFirestore, doc, getDoc, getDocs, collection, query
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+    const app = initializeApp({
+      apiKey: "AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+      authDomain: "altiora-70599.firebaseapp.com",
+      projectId: "altiora-70599",
+      storageBucket: "altiora-70599.firebasestorage.app",
+      messagingSenderId: "120905555746",
+      appId: "1:120905555746:web:618460c65cdc9e57cc8f7b"
+    });
+
+    const auth = getAuth(app);
+    const db   = getFirestore(app);
+
+    window._db       = db;
+    window._auth     = auth;
+    window._doc      = doc;
+    window._getDoc   = getDoc;
+    window._getDocs  = getDocs;
+    window._collection = collection;
+    window._query    = query;
+    window._signOut  = signOut;
+
+    onAuthStateChanged(auth, function(user) {
+      if (!user) { window.location.href = 'index.html'; return; }
+      window._uid = user.uid;
+      window._firebaseReady = true;
+      window.initUnsubscribePage();
+    });
+  </script>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- Script 2 : Logic applicative              -->
+  <!-- ══════════════════════════════════════════ -->
+  <script>
+    // ── State ──────────────────────────────────
+    let _currentStep   = 1;
+    let _selectedReason = null;
+    let _userData      = {};
+    let _allData       = {};
+
+    // Plan info
+    const PLAN_INFO = {
+      pro:    { name: 'Plan Pro',    price: 69,  label: '69€/mois'  },
+      max:    { name: 'Plan Max',    price: 99,  label: '99€/mois'  },
+      master: { name: 'Plan Master', price: 169, label: '169€/mois' },
+      trial:  { name: 'Essai gratuit', price: 0, label: 'Gratuit'   }
+    };
+
+    // ── Init ───────────────────────────────────
+    window.initUnsubscribePage = async function() {
+      if (!window._uid) return;
+      try {
+        const uSnap = await window._getDoc(window._doc(window._db, 'users', window._uid));
+        if (uSnap.exists()) {
+          _userData = uSnap.data();
+          updatePlanDisplay();
+        }
+        // Pre-load all data for export
+        await loadAllData();
+      } catch(e) {
+        console.error('Init error:', e);
+      }
+    };
+
+    function updatePlanDisplay() {
+      const plan = _userData.plan || 'pro';
+      const info = PLAN_INFO[plan] || PLAN_INFO.pro;
+      document.getElementById('planDisplayName').textContent  = info.name;
+      document.getElementById('planDisplayPrice').textContent = info.label;
+
+      // Savings = 50% * 3 months
+      const savings = (info.price * 0.5 * 3).toFixed(0);
+      document.getElementById('savingsPill').textContent = `≈ ${savings}€ économisés`;
+
+      const half = (info.price * 0.5).toFixed(2).replace('.', ',');
+      document.getElementById('discountedPrice').textContent = `${half}€/mois × 3 mois`;
+    }
+
+    // ── Load all Firestore data ─────────────────
+    async function loadAllData() {
+      const uid = window._uid;
+      _allData = { uid, exportDate: new Date().toISOString(), pilotage: {}, dettes: [], marges: {} };
+      try {
+        // Pilotage months
+        const pilSnap = await window._getDocs(window._collection(window._db, 'pilotage', uid, 'months'));
+        pilSnap.forEach(d => { _allData.pilotage[d.id] = d.data(); });
+        // Dettes
+        const detSnap = await window._getDoc(window._doc(window._db, 'dettes', uid, 'data', 'all'));
+        if (detSnap.exists()) _allData.dettes = detSnap.data().list || [];
+        // User info (sans données sensibles)
+        _allData.plan = _userData.plan;
+        _allData.email = window._auth.currentUser?.email;
+      } catch(e) { console.warn('loadAllData partial error:', e); }
+    }
+
+    // ── Reason selection ───────────────────────
+    window.selectReason = function(btn) {
+      document.querySelectorAll('.reason-btn').forEach(b => b.classList.remove('selected'));
+      btn.classList.add('selected');
+      _selectedReason = btn.dataset.reason;
+    };
+
+    // ── Step navigation ────────────────────────
+    window.goToStep1 = function() { activateStep(1); };
+    window.goToStep2 = function() { activateStep(2); };
+    window.goToStep3 = function() { activateStep(3); };
+
+    function activateStep(n) {
+      _currentStep = n;
+      document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById(`panel${n}`).classList.add('active');
+
+      // Update progress dots
+      for (let i = 1; i <= 3; i++) {
+        const dot = document.getElementById(`dot${i}`);
+        const lbl = document.getElementById(`lbl${i}`);
+        dot.className = 'step-dot';
+        lbl.className = 'step-label';
+        if (i < n)      { dot.classList.add('done'); dot.textContent = ''; lbl.classList.add('done'); }
+        else if (i === n) { dot.classList.add('active'); dot.textContent = `0${i}`; lbl.classList.add('active'); }
+        else              { dot.textContent = `0${i}`; }
+      }
+      for (let i = 1; i <= 2; i++) {
+        const line = document.getElementById(`line${i}`);
+        line.className = 'step-line' + (i < n ? ' done' : '');
+      }
+    }
+
+    // ── Retention offer ────────────────────────
+    window.applyRetentionOffer = async function() {
+      showLoading('Application de votre remise…');
+      try {
+        const res = await fetch('/api/apply-retention-coupon', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: window._uid, reason: _selectedReason })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur serveur');
+
+        hideLoading();
+        // Hide step panels + progress, show success
+        document.getElementById('progressWrap').style.display = 'none';
+        document.querySelectorAll('.step-panel').forEach(p => p.style.display = 'none');
+        document.getElementById('retentionSuccess').classList.add('active');
+        showToast('✅ Remise de -50% activée !', 'success');
+
+      } catch(e) {
+        hideLoading();
+        showToast('❌ ' + e.message, 'error');
+      }
+    };
+
+    // ── Confirm input ──────────────────────────
+    window.checkConfirmInput = function() {
+      const val = document.getElementById('confirmInput').value.trim();
+      const ok  = val === 'SUPPRIMER MON COMPTE';
+      document.getElementById('btnConfirmDelete').disabled = !ok;
+      document.getElementById('confirmInput').classList.toggle('valid', ok);
+    };
+
+    // ── Final cancellation ─────────────────────
+    window.confirmCancellation = async function() {
+      showLoading('Résiliation en cours…');
+      try {
+        const res = await fetch('/api/cancel-subscription', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uid: window._uid,
+            reason: _selectedReason,
+            detail: document.getElementById('reasonDetail')?.value || ''
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Erreur lors de la résiliation');
+
+        hideLoading();
+        // Show success screen
+        document.getElementById('progressWrap').style.display = 'none';
+        document.querySelectorAll('.step-panel').forEach(p => p.style.display = 'none');
+        const deleteDate = new Date(Date.now() + 14 * 86400000);
+        document.getElementById('deleteDate').textContent = deleteDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+        document.getElementById('successScreen').classList.add('active');
+
+      } catch(e) {
+        hideLoading();
+        showToast('❌ ' + e.message, 'error');
+      }
+    };
+
+    // ── Export ─────────────────────────────────
+    window.exportData = async function(format) {
+      if (!Object.keys(_allData.pilotage || {}).length) {
+        await loadAllData();
+      }
+      const btn = document.getElementById(`btnExport${format.toUpperCase()}`);
+      btn.classList.add('loading');
+
+      try {
+        if (format === 'json') exportJSON();
+        else if (format === 'csv') exportCSV();
+        else if (format === 'pdf') exportPDF();
+
+        setTimeout(() => {
+          btn.classList.remove('loading');
+          btn.classList.add('done');
+          btn.querySelector('svg').outerHTML = '✓';
+        }, 800);
+        showToast(`✅ Export ${format.toUpperCase()} téléchargé`, 'success');
+      } catch(e) {
+        btn.classList.remove('loading');
+        showToast('❌ Erreur lors de l\'export', 'error');
+      }
+    };
+
+    function exportJSON() {
+      const blob = new Blob([JSON.stringify(_allData, null, 2)], { type: 'application/json' });
+      downloadBlob(blob, `alteore-export-${today()}.json`);
+    }
+
+    function exportCSV() {
+      let csv = 'Mois,CA HT 5.5%,CA HT 10%,CA HT 20%,CA HT Total,Charges fixes,Charges variables\n';
+      const months = Object.entries(_allData.pilotage || {}).sort(([a],[b]) => a.localeCompare(b));
+      for (const [month, data] of months) {
+        const rows = data.ca || [];
+        let h055=0, h10=0, h20=0, total=0, cf=0, cv=0;
+        for (const r of rows) {
+          const m055 = parseFloat(r.ht055)||0;
+          const m10  = parseFloat(r.ht10)||0;
+          const m20  = parseFloat(r.ht20)||0;
+          const multi = m055+m10+m20;
+          const caHT = multi > 0 ? multi : (parseFloat(r.montantHT)||0);
+          h055 += m055; h10 += m10; h20 += m20; total += caHT;
+        }
+        for (const c of (data.chargesFixe||[])) cf += parseFloat(c.montant)||0;
+        for (const c of (data.chargesVar||[])) cv += parseFloat(c.montant)||0;
+        csv += `${month},${h055.toFixed(2)},${h10.toFixed(2)},${h20.toFixed(2)},${total.toFixed(2)},${cf.toFixed(2)},${cv.toFixed(2)}\n`;
+      }
+      // Dettes
+      if (_allData.dettes.length) {
+        csv += '\nDETTES\nNom,Capital,Taux,Échéance,Mensualité\n';
+        for (const d of _allData.dettes) {
+          csv += `${d.nom||''},${d.capital||0},${d.taux||0},${d.echeance||''},${d.mensualite||0}\n`;
+        }
+      }
+      const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8' });
+      downloadBlob(blob, `alteore-export-${today()}.csv`);
+    }
+
+    function exportPDF() {
+      // PDF via print window (simple, no external lib needed)
+      const plan = _userData.plan || 'pro';
+      const info = PLAN_INFO[plan] || PLAN_INFO.pro;
+      const months = Object.entries(_allData.pilotage || {}).sort(([a],[b]) => a.localeCompare(b));
+
+      let rows = '';
+      let grandTotal = 0;
+      for (const [month, data] of months) {
+        const caArr = data.ca || [];
+        let total = 0;
+        for (const r of caArr) {
+          const m055 = parseFloat(r.ht055)||0;
+          const m10  = parseFloat(r.ht10)||0;
+          const m20  = parseFloat(r.ht20)||0;
+          const multi = m055+m10+m20;
+          total += multi > 0 ? multi : (parseFloat(r.montantHT)||0);
+        }
+        let cf = 0, cv = 0;
+        for (const c of (data.chargesFixe||[])) cf += parseFloat(c.montant)||0;
+        for (const c of (data.chargesVar||[])) cv += parseFloat(c.montant)||0;
+        grandTotal += total;
+        rows += `<tr><td>${month}</td><td>${fmtEur(total)}</td><td>${fmtEur(cf)}</td><td>${fmtEur(cv)}</td><td>${fmtEur(total-cf-cv)}</td></tr>`;
+      }
+
+      const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"/>
+<title>Export Alteore</title>
+<style>
+  body{font-family:Arial,sans-serif;color:#111;padding:40px;font-size:13px}
+  h1{font-size:24px;margin-bottom:4px}
+  .sub{color:#666;margin-bottom:30px;font-size:13px}
+  table{width:100%;border-collapse:collapse;margin-bottom:30px}
+  th{background:#111;color:#fff;padding:10px 14px;text-align:left;font-size:12px}
+  td{padding:9px 14px;border-bottom:1px solid #eee}
+  tr:nth-child(even) td{background:#f8f8f8}
+  .total{font-weight:bold;font-size:15px;margin-top:10px}
+  .footer{color:#aaa;font-size:11px;margin-top:40px;border-top:1px solid #eee;padding-top:16px}
+</style></head><body>
+<h1>ALTEORE — Export de données</h1>
+<div class="sub">Compte : ${_allData.email || ''} &nbsp;|&nbsp; Plan : ${info.name} &nbsp;|&nbsp; Export le : ${new Date().toLocaleDateString('fr-FR')}</div>
+
+<h2>Chiffre d'affaires mensuel</h2>
+<table><thead><tr><th>Mois</th><th>CA HT</th><th>Charges fixes</th><th>Charges var.</th><th>Résultat</th></tr></thead>
+<tbody>${rows}</tbody></table>
+<div class="total">CA total : ${fmtEur(grandTotal)}</div>
+
+${_allData.dettes.length ? `<h2 style="margin-top:30px">Dettes & emprunts</h2>
+<table><thead><tr><th>Nom</th><th>Capital</th><th>Taux</th><th>Mensualité</th></tr></thead><tbody>
+${_allData.dettes.map(d=>`<tr><td>${d.nom||''}</td><td>${fmtEur(d.capital||0)}</td><td>${d.taux||0}%</td><td>${fmtEur(d.mensualite||0)}</td></tr>`).join('')}
+</tbody></table>` : ''}
+
+<div class="footer">Export généré automatiquement par Alteore — ${new Date().toISOString()}</div>
+</body></html>`;
+
+      const w = window.open('', '_blank');
+      w.document.write(html);
+      w.document.close();
+      setTimeout(() => w.print(), 500);
+    }
+
+    function fmtEur(n) { return Number(n).toLocaleString('fr-FR', { minimumFractionDigits:2, maximumFractionDigits:2 }) + ' €'; }
+    function today() { return new Date().toISOString().split('T')[0]; }
+    function downloadBlob(blob, name) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    // ── UI helpers ─────────────────────────────
+    function showLoading(txt) {
+      document.getElementById('loadingText').textContent = txt || 'Traitement…';
+      document.getElementById('loadingOverlay').classList.add('active');
+    }
+    function hideLoading() {
+      document.getElementById('loadingOverlay').classList.remove('active');
+    }
+
+    let _toastTimer;
+    function showToast(msg, type) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'toast' + (type ? ' '+type : '');
+      t.classList.add('show');
+      clearTimeout(_toastTimer);
+      _toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+    }
+  </script>
+</body>
+</html>
