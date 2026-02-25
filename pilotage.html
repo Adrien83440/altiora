@@ -235,6 +235,15 @@
   border-radius:0 0 8px 8px;
 }
 .sugg-item-save:hover { background:rgba(79,126,248,.08); }
+/* Suggestion fournisseur enrichie */
+.sugg-item-supplier { display:flex; align-items:center; justify-content:space-between; padding:7px 10px; gap:6px; }
+.sugg-item-name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sugg-fiche-btn {
+  flex-shrink:0; font-size:13px; padding:2px 5px; border-radius:6px;
+  cursor:pointer; opacity:.6; transition:.15s; line-height:1;
+  background:none;
+}
+.sugg-fiche-btn:hover { opacity:1; background:var(--blue-ghost); }
 #suppliersModal .modal { max-width:480px; width:90%; }
 .sup-list-item {
   display:flex; align-items:center; justify-content:space-between;
@@ -2202,7 +2211,6 @@ function showCatSugg(inp, uid, cat) {
   var q = (inp.value || '').trim().toLowerCase();
   var minLen = (_catLabels[cat] && _catLabels[cat].minLen) || 0;
 
-  // Pas de suggestion si moins de minLen caractères
   if (q.length < minLen) { list.classList.remove('show'); return; }
 
   var pool = _catalogues[cat] || [];
@@ -2210,8 +2218,17 @@ function showCatSugg(inp, uid, cat) {
     return !q || s.toLowerCase().startsWith(q) || s.toLowerCase().includes(q);
   }).slice(0, 8);
 
+  var isSupplier = (cat === 'suppliers');
+
   var html = matches.map(function(s) {
-    return '<div class="sugg-item" onmousedown="pickCatItem(\'' + uid + '\',\'' + s.replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')">' + s + '</div>';
+    var safeName = s.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    var fiche = isSupplier && _fichesMap ? _fichesMap[s.toLowerCase()] : null;
+    var badge = fiche ? '<span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:4px;background:' + (fiche.recurrence==='Récurrent'?'rgba(34,197,94,.12);color:#16a34a':'rgba(249,115,22,.12);color:#ea580c') + '">' + (fiche.recurrence||'') + '</span>' : '';
+    var ficheBtn = fiche ? '<span class="sugg-fiche-btn" title="Voir fiche" onmousedown="event.stopPropagation();event.preventDefault();openFicheDetail(\'' + (fiche.id||'').replace(/'/g,"\\'") + '\')">🏢</span>' : '';
+    return '<div class="sugg-item sugg-item-supplier" onmousedown="pickCatItem(\'' + uid + '\',\'' + safeName + '\')">' +
+      '<span class="sugg-item-name">' + s.replace(/</g,'&lt;') + badge + '</span>' +
+      ficheBtn +
+    '</div>';
   }).join('');
 
   // Option "Enregistrer" si valeur non vide et pas déjà dans le catalogue
@@ -2346,6 +2363,13 @@ var _origRenderPage = renderPage;
 renderPage = function(data, month) {
   _origRenderPage(data, month);
   _enrichCataloguesFromData(data);
+  // Si les fiches sont déjà chargées, re-render les boutons 🏢/📋
+  if (_fichesMap && Object.keys(_fichesMap).length > 0) {
+    var cfT = document.getElementById('cf-tbody');
+    if (cfT) cfT.innerHTML = renderCharges(data.chargesFixe, 'chargesFixe');
+    var cvT = document.getElementById('cv-tbody');
+    if (cvT) cvT.innerHTML = renderCharges(data.chargesVar, 'chargesVar');
+  }
 };
 </script>
 <script>
@@ -2543,10 +2567,14 @@ async function computeFicheStats(nom) {
   var nomLow = nom.toLowerCase();
   var byMonth = {};
   var currentYear = new Date().getFullYear();
+  // Le mois courant est lu depuis _data en mémoire (plus à jour que Firestore)
+  var curKey = (typeof getMonthKey === 'function') ? getMonthKey() : '';
+
   var fetchPromises = [];
   for (var y = currentYear - 2; y <= currentYear + 1; y++) {
     for (var m = 1; m <= 12; m++) {
       var key = y + '-' + String(m).padStart(2,'0');
+      if (key === curKey) continue; // mois courant : on utilisera _data
       (function(k) {
         fetchPromises.push(
           window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', k))
@@ -2556,14 +2584,15 @@ async function computeFicheStats(nom) {
               ['chargesFixe','chargesVar','leasing'].forEach(function(cat) {
                 (d[cat]||[]).forEach(function(r) { if ((r.fournisseur||'').toLowerCase()===nomLow) total+=pf(r.montantHT); });
               });
-              if (total > 0) byMonth[k] = (byMonth[k]||0) + total;
+              if (total > 0) byMonth[k] = total;
             }).catch(function(){})
         );
       })(key);
     }
   }
-  if (typeof _data !== 'undefined' && _data) {
-    var curKey = getMonthKey(); var curTotal = 0;
+  // Mois courant depuis _data (vérité terrain, même non sauvegardé)
+  if (curKey && typeof _data !== 'undefined' && _data) {
+    var curTotal = 0;
     ['chargesFixe','chargesVar','leasing'].forEach(function(cat) {
       (_data[cat]||[]).forEach(function(r) { if ((r.fournisseur||'').toLowerCase()===nomLow) curTotal+=pf(r.montantHT); });
     });
