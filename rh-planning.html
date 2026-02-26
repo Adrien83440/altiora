@@ -87,6 +87,8 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 .g-cell.off:hover{background:#f9fafb;}
 .add-hint{position:absolute;bottom:4px;right:4px;width:18px;height:18px;border-radius:4px;background:var(--rh-ghost);border:1px dashed var(--rh-border);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--rh-main);opacity:0;transition:opacity .15s;}
 .g-cell:hover .add-hint{opacity:1;}
+.add-hint-sm{font-size:11px;font-weight:800;color:var(--rh-main);opacity:0;width:18px;height:18px;border-radius:4px;border:1px dashed var(--rh-border);background:var(--rh-ghost);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:opacity .15s;}
+.g-cell:hover .add-hint-sm{opacity:1;}
 
 /* CRÉNEAU PILL */
 .cr-pill{border-radius:6px;padding:4px 7px;margin-bottom:3px;cursor:pointer;position:relative;transition:all .12s;}
@@ -251,6 +253,20 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
     <div class="sitem"><div class="sdot" style="background:#3b82f6"></div><span class="sval" id="s-act">—</span><span class="slbl"> actifs</span></div>
     <div class="sitem"><div class="sdot" style="background:#f59e0b"></div><span class="sval" id="s-cg">—</span><span class="slbl"> congés</span></div>
     <div class="sitem"><div class="sdot" style="background:#ef4444"></div><span class="sval" id="s-ab">—</span><span class="slbl"> absences</span></div>
+    <div class="sitem" id="s-infr-wrap" style="display:none;cursor:pointer;margin-left:auto" onclick="toggleInfrPanel()">
+      <div class="sdot" style="background:#dc2626"></div>
+      <span class="sval" id="s-infr" style="color:#dc2626">—</span>
+      <span class="slbl" style="color:#dc2626"> infraction(s) ⚠️</span>
+    </div>
+  </div>
+
+  <!-- BANDEAU RÉCAP INFRACTIONS -->
+  <div id="infr-panel" style="display:none;background:#fef2f2;border-bottom:2px solid #fecaca;padding:10px 24px">
+    <div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
+      <span>⚠️ Infractions légales détectées cette semaine</span>
+      <button onclick="toggleInfrPanel()" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px">✕</button>
+    </div>
+    <div id="infr-list" style="display:flex;flex-direction:column;gap:4px"></div>
   </div>
 
   <!-- CONTENU -->
@@ -363,11 +379,22 @@ const TYPE_LBL={travail:'Travail',conge:'Congé',maladie:'Maladie',formation:'Fo
 // ══ INIT ══
 async function initPlanning(){
   if(!window._uid){setTimeout(initPlanning,400);return;}
+  await loadRHParams();
   await loadEmps();
   await loadCr();
   render();
 }
 window.initPlanning=initPlanning;
+
+async function loadRHParams(){
+  try{
+    const snap=await window._getDoc(window._doc(window._db,'rh_params',window._uid));
+    if(snap.exists()){
+      const d=snap.data();
+      if(d.ccnDefault) _ccnDefault=d.ccnDefault;
+    }
+  }catch(e){console.warn('Params RH',e);}
+}
 
 async function loadEmps(){
   _emps=[];
@@ -432,13 +459,421 @@ function setDisplay(d){
 window.setDisplay=setDisplay;
 
 // ══ RENDER ══
-function render(){updLabel();updStats();if(_view==='semaine')renderSemaine();else if(_view==='jour')renderJour();else renderMois();}
+function render(){updLabel();updStats();checkLegal();if(_view==='semaine')renderSemaine();else if(_view==='jour')renderJour();else renderMois();}
 
 function updLabel(){
   const el=document.getElementById('week-label');
   if(_view==='semaine'){const d=weekDays(_cur);el.textContent=d[0].toLocaleDateString('fr-FR',{day:'numeric',month:'short'})+' – '+d[6].toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'});}
   else if(_view==='jour')el.textContent=_cur.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
   else el.textContent=_cur.toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+}
+
+
+// ══════════════════════════════════════════════════════
+// MOTEUR DE CONTRÔLE LÉGAL
+// ══════════════════════════════════════════════════════
+
+// Règles par convention collective (duréeMax = max journalière en h)
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVENTIONS COLLECTIVES — Sources : IDCC légaux, Légifrance, fiches pratiques
+// Champs : jourMax (h), hebdoMax (h), hebdoMoyMax (h/12sem), reposMin (h),
+//          pauseApres (h → déclenchement pause), pauseMin (min), note (info clé)
+// ─────────────────────────────────────────────────────────────────────────────
+const CCN_RULES = {
+
+  // ── CODE DU TRAVAIL (référence de base) ──────────────────────────────────
+  'droit_commun': {
+    label:'Code du travail', idcc:null,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'Art. L3121-18 : 10h/j max · Art. L3121-20 : 48h/sem · Art. L3121-33 : pause 20 min après 6h'
+  },
+
+  // ── HÉBERGEMENT / RESTAURATION ───────────────────────────────────────────
+  'chr': {
+    label:'Hôtels-Cafés-Restaurants (CHR)', idcc:1979,
+    jourMax:11.5, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    reposHebdo:35, // repos hebdo consécutif minimum
+    note:'IDCC 1979 · Amplitude 13h max · Repos hebdo 2j consécutifs possible · HS majorées 10% dès 36h'
+  },
+  'restauration_rapide': {
+    label:'Restauration rapide', idcc:1501,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1501 · Modulation annuelle possible · Temps partiel fréquent (plannings variables)'
+  },
+
+  // ── COMMERCE / DISTRIBUTION ──────────────────────────────────────────────
+  'commerce': {
+    label:'Commerce de détail non alimentaire', idcc:1517,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1517 · Modulation · Dimanche exceptionnel possible'
+  },
+  'commerce_alimentaire': {
+    label:'Commerce alimentaire (supermarchés)', idcc:2216,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 2216 · Travail dominical fréquent · Pause payée 20 min après 6h'
+  },
+  'grande_distribution': {
+    label:'Grande distribution', idcc:2216,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 2216 · Amplitude max 12h · Repos hebdo dimanche si possible'
+  },
+
+  // ── BOULANGERIE / ALIMENTATION ───────────────────────────────────────────
+  'boulangerie': {
+    label:'Boulangerie-Pâtisserie artisanale', idcc:843,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 843 · Travail de nuit courant (panification) · Majoration nuit +25% · Repos hebdo lundi fréquent'
+  },
+  'patisserie': {
+    label:'Pâtisserie (entreprises artisanales)', idcc:1267,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1267 · Nuit possible · Dimanche travaillé majoré'
+  },
+  'boucherie': {
+    label:'Boucherie-Charcuterie artisanale', idcc:953,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 953 · Horaires tôt le matin · Dimanche matin courant'
+  },
+
+  // ── BTP / ARTISANAT ──────────────────────────────────────────────────────
+  'btp': {
+    label:'Bâtiment (BTP ouvriers)', idcc:1597,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1597 · Modulation annuelle · Intempéries · Grand déplacement'
+  },
+  'btp_etam': {
+    label:'BTP — ETAM (techniciens/agents de maîtrise)', idcc:2609,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 2609 · Forfait jours possible pour cadres · RTT'
+  },
+
+  // ── COIFFURE / ESTHÉTIQUE ────────────────────────────────────────────────
+  'coiffure': {
+    label:'Coiffure', idcc:2596,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 2596 · Repos dimanche + 1 autre jour · Samedi travaillé courant'
+  },
+  'esthetique': {
+    label:'Esthétique-Cosmétique-Parfumerie', idcc:3032,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 3032 · Temps partiel fréquent · Salons ouverts samedi/dimanche'
+  },
+
+  // ── SANTÉ / MÉDICO-SOCIAL ────────────────────────────────────────────────
+  'sante': {
+    label:'Santé (FEHAP / EHPAD)', idcc:29,
+    jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 29 · Gardes 12h autorisées · Cycles de travail · Repos compensateur obligatoire'
+  },
+  'cabinet_medical': {
+    label:'Cabinet médical / Para-médical', idcc:1748,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1748 · Fermeture le mercredi après-midi souvent · Pas de travail de nuit en général'
+  },
+  'pharmacie': {
+    label:"Pharmacie d'officine", idcc:1996,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1996 · Gardes dimanche/nuit obligatoires par roulement · Pause 20 min payée'
+  },
+
+  // ── NETTOYAGE / PROPRETÉ ─────────────────────────────────────────────────
+  'nettoyage': {
+    label:'Nettoyage et services associés', idcc:3043,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 3043 · Horaires décalés (tôt matin / tard soir) · Multi-sites fréquent · Temps partiel très courant'
+  },
+
+  // ── TRANSPORT ────────────────────────────────────────────────────────────
+  'transport_routier': {
+    label:'Transport routier (conducteurs)', idcc:16,
+    jourMax:10, hebdoMax:56, hebdoMoyMax:48, reposMin:11, pauseApres:4.5, pauseMin:45,
+    note:'IDCC 16 · Règlement CE 561/2006 : 4h30 max sans pause 45 min · 56h/sem max · 90h/2 semaines'
+  },
+  'transport_voyageurs': {
+    label:'Transport en commun (conducteurs)', idcc:1424,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1424 · Amplitude journalière max 13h · Coupures comptabilisées'
+  },
+
+  // ── AUTOMOBILE ───────────────────────────────────────────────────────────
+  'automobile': {
+    label:"Services de l'automobile (réparation/vente)", idcc:1090,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1090 · Modulation · Samedi travaillé courant · Congé principal été"
+  },
+
+  // ── IMMOBILIER ───────────────────────────────────────────────────────────
+  'immobilier': {
+    label:'Immobilier / Agences', idcc:1527,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1527 · Forfait jours pour négociateurs non-salariés · Samedi travaillé'
+  },
+
+  // ── SÉCURITÉ ─────────────────────────────────────────────────────────────
+  'securite': {
+    label:'Prévention-Sécurité privée', idcc:1351,
+    jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1351 · Vacation max 12h · Repos entre vacations 12h minimum · Cycles modulation'
+  },
+
+  // ── AGRICULTURE ──────────────────────────────────────────────────────────
+  'agriculture': {
+    label:'Agriculture / Exploitations agricoles', idcc:7024,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 7024 · Modulation saisonnière · Périodes hautes jusqu'à 60h/sem possibles en accord"
+  },
+  'viticulture': {
+    label:'Viticulture', idcc:9111,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 9111 · Vendanges : modulation spécifique · Saisonniers fréquents"
+  },
+
+  // ── SERVICES À LA PERSONNE ───────────────────────────────────────────────
+  'sap': {
+    label:'Services à la personne (SAP)', idcc:3127,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 3127 · Interventions courtes multiples · Temps de déplacement comptabilisé · Temps partiel dominant'
+  },
+  'aide_domicile': {
+    label:'Aide à domicile (associations)', idcc:2941,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 2941 · Astreintes · Déplacements indemnisés · Amplitude 13h possible'
+  },
+
+};
+
+// Groupes pour affichage dans les selects
+const CCN_GROUPS = [
+  { label: '📄 Droit commun', keys: ['droit_commun'] },
+  { label: '🍽️ Hôtellerie / Restauration', keys: ['chr','restauration_rapide'] },
+  { label: '🛒 Commerce / Distribution', keys: ['commerce','commerce_alimentaire','grande_distribution'] },
+  { label: '🥖 Alimentation artisanale', keys: ['boulangerie','patisserie','boucherie'] },
+  { label: '🏗️ BTP / Artisanat', keys: ['btp','btp_etam'] },
+  { label: '💇 Coiffure / Esthétique', keys: ['coiffure','esthetique'] },
+  { label: '🏥 Santé / Médico-social', keys: ['sante','cabinet_medical','pharmacie'] },
+  { label: '🧹 Nettoyage / Propreté', keys: ['nettoyage'] },
+  { label: '🚛 Transport', keys: ['transport_routier','transport_voyageurs'] },
+  { label: '🚗 Automobile', keys: ['automobile'] },
+  { label: '🏠 Immobilier', keys: ['immobilier'] },
+  { label: '🔒 Sécurité', keys: ['securite'] },
+  { label: '🌾 Agriculture', keys: ['agriculture','viticulture'] },
+  { label: '🤝 Services à la personne', keys: ['sap','aide_domicile'] },
+];
+
+// Convention par défaut de l'entreprise (chargée depuis Firestore profil RH)
+let _ccnDefault = 'droit_commun';
+
+// Map infraction : clé = "YYYY-MM-DD_empId", valeur = [{code, msg, severity}]
+let _infractions = {};
+
+function getCCN(emp) {
+  // Priorité : ccn de l'employé > ccn entreprise > droit commun
+  const key = emp.ccn || _ccnDefault || 'droit_commun';
+  return CCN_RULES[key] || CCN_RULES['droit_commun'];
+}
+
+function itemTotalH(it) {
+  if(it.plages && it.plages.length > 0) return it.plages.reduce((s,p) => s + diffH(p.deb, p.fin), 0);
+  return diffH(it.deb, it.fin);
+}
+
+function itemFirstDeb(it) {
+  if(it.plages && it.plages.length > 0) return it.plages[0].deb;
+  return it.deb;
+}
+
+function itemLastFin(it) {
+  if(it.plages && it.plages.length > 0) return it.plages[it.plages.length-1].fin;
+  return it.fin;
+}
+
+// Convertit "HH:MM" en minutes depuis minuit
+function toMin(t) {
+  if(!t) return 0;
+  const [h,m] = t.split(':').map(Number);
+  return h*60 + m;
+}
+
+function checkLegal() {
+  _infractions = {};
+  const days = weekDays(_cur);
+
+  _emps.forEach(emp => {
+    if(_hidden.has(emp.id)) return;
+    const ccn = getCCN(emp);
+    let totalHebdo = 0;
+    let prevDayLastFin = null; // fin du dernier créneau de la veille (pour repos entre shifts)
+    let prevDayDate = null;
+
+    days.forEach((d, di) => {
+      const k = `${fmt(d)}_${emp.id}`;
+      const items = (_cr[k]?.items || []).filter(it => it.type === 'travail');
+
+      if(items.length === 0) {
+        prevDayLastFin = null;
+        prevDayDate = d;
+        return;
+      }
+
+      const errs = [];
+
+      // ── 1. DURÉE JOURNALIÈRE MAX ──
+      const jourH = items.reduce((s,it) => s + itemTotalH(it), 0);
+      if(jourH > ccn.jourMax) {
+        errs.push({
+          code: 'JOUR_MAX',
+          msg: `Durée journalière dépassée : ${jourH.toFixed(1)}h (max ${ccn.jourMax}h — ${ccn.label})${ccn.note?` · ${ccn.note.split('·')[0].trim()}`:''}`,  
+          severity: 'error'
+        });
+      }
+
+      // ── 2. PAUSE OBLIGATOIRE (20 min si > 6h continues) ──
+      // Vérifier chaque item : si une plage unique > pauseApres h sans coupure interne >= pauseMin min
+      items.forEach(it => {
+        if(it.plages && it.plages.length >= 2) {
+          // Chercher si au moins une coupure >= pauseMin min
+          let hasValidPause = false;
+          for(let i=0; i<it.plages.length-1; i++) {
+            const coupure = toMin(it.plages[i+1].deb) - toMin(it.plages[i].fin);
+            if(coupure >= ccn.pauseMin) { hasValidPause = true; break; }
+          }
+          const amplitude = toMin(itemLastFin(it)) - toMin(itemFirstDeb(it));
+          const worked = itemTotalH(it) * 60; // en minutes
+          if(worked > ccn.pauseApres * 60 && !hasValidPause) {
+            errs.push({
+              code: 'PAUSE',
+              msg: `Pause insuffisante : ${(worked/60).toFixed(1)}h travaillées sans pause de ${ccn.pauseMin} min`,
+              severity: 'warning'
+            });
+          }
+        } else {
+          // Plage unique — si > pauseApres h, pause manquante
+          const h = itemTotalH(it);
+          if(h > ccn.pauseApres) {
+            errs.push({
+              code: 'PAUSE',
+              msg: `Pause obligatoire manquante : ${h.toFixed(1)}h continues (pause ${ccn.pauseMin} min requise après ${ccn.pauseApres}h)`,
+              severity: 'warning'
+            });
+          }
+        }
+      });
+
+      // ── 3. REPOS ENTRE DEUX SHIFTS (11h min entre fin J-1 et début J) ──
+      if(prevDayLastFin !== null && prevDayDate !== null) {
+        // Calculer l'écart en heures entre fin J-1 et début J
+        const firstDebToday = items.reduce((mn,it) => {
+          const t = toMin(itemFirstDeb(it));
+          return t < mn ? t : mn;
+        }, 24*60);
+        // Nombre de minutes de minuit à J à J-1 minuit + firstDebToday
+        const gapMin = (24*60 - prevDayLastFin) + firstDebToday;
+        const gapH = gapMin / 60;
+        if(gapH < ccn.reposMin) {
+          errs.push({
+            code: 'REPOS',
+            msg: `Repos inter-shift insuffisant : ${gapH.toFixed(1)}h (minimum ${ccn.reposMin}h requis)`,
+            severity: 'error'
+          });
+        }
+      }
+
+      // ── 4. AMPLITUDE JOURNALIÈRE (début premier shift → fin dernier shift) ──
+      const allDebs = items.map(it => toMin(itemFirstDeb(it)));
+      const allFins = items.map(it => toMin(itemLastFin(it)));
+      const ampMin = Math.max(...allFins) - Math.min(...allDebs);
+      const ampH = ampMin / 60;
+      // Amplitude max = jourMax + 1h (marge conventionnelle)
+      if(ampH > ccn.jourMax + 1 && ampH > 13) {
+        errs.push({
+          code: 'AMPLITUDE',
+          msg: `Amplitude journalière excessive : ${ampH.toFixed(1)}h (de ${items.map(it=>itemFirstDeb(it)).sort()[0]} à ${items.map(it=>itemLastFin(it)).sort().reverse()[0]})`,
+          severity: 'warning'
+        });
+      }
+
+      // Mémoriser fin du dernier créneau
+      prevDayLastFin = Math.max(...allFins);
+      prevDayDate = d;
+      totalHebdo += jourH;
+
+      if(errs.length) _infractions[k] = errs;
+    });
+
+    // ── 5. DURÉE HEBDOMADAIRE MAX ──
+    if(totalHebdo > ccn.hebdoMax) {
+      // Attacher au dernier jour travaillé
+      days.slice().reverse().forEach(d => {
+        const k = `${fmt(d)}_${emp.id}`;
+        const items = (_cr[k]?.items||[]).filter(it=>it.type==='travail');
+        if(items.length) {
+          if(!_infractions[k]) _infractions[k] = [];
+          _infractions[k].push({
+            code: 'HEBDO_MAX',
+            msg: `Durée hebdomadaire dépassée : ${totalHebdo.toFixed(1)}h (max ${ccn.hebdoMax}h)`,
+            severity: 'error'
+          });
+          return;
+        }
+      });
+    }
+  });
+
+  // Mettre à jour le compteur dans la stats bar
+  const total = Object.values(_infractions).reduce((s,arr) => s+arr.length, 0);
+  const wrap = document.getElementById('s-infr-wrap');
+  const count = document.getElementById('s-infr');
+  if(wrap && count) {
+    if(total > 0) {
+      wrap.style.display = '';
+      count.textContent = total;
+    } else {
+      wrap.style.display = 'none';
+    }
+  }
+  // Mettre à jour le panel récap
+  const list = document.getElementById('infr-list');
+  if(list) {
+    if(total === 0) {
+      list.innerHTML = '';
+      const panel = document.getElementById('infr-panel');
+      if(panel) panel.style.display = 'none';
+    } else {
+      list.innerHTML = Object.entries(_infractions).map(([k, errs]) => {
+        const [date, eid] = k.split('_');
+        const emp = _emps.find(e => e.id === eid);
+        const name = emp ? `${emp.prenom||''} ${emp.nom||''}` : eid;
+        const d = new Date(date+'T12:00:00');
+        const dayLabel = d.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+        return errs.map(e => `
+          <div style="display:flex;align-items:flex-start;gap:8px;padding:5px 8px;border-radius:6px;background:${e.severity==='error'?'#fee2e2':'#fef3c7'}">
+            <span style="font-size:13px;flex-shrink:0">${e.severity==='error'?'🔴':'🟡'}</span>
+            <div>
+              <span style="font-size:11px;font-weight:700;color:${e.severity==='error'?'#dc2626':'#92400e'}">${name} — ${dayLabel}</span>
+              <div style="font-size:11px;color:#374151;margin-top:1px">${e.msg}</div>
+            </div>
+          </div>`).join('');
+      }).join('');
+    }
+  }
+}
+
+function toggleInfrPanel() {
+  const p = document.getElementById('infr-panel');
+  if(p) p.style.display = p.style.display === 'none' ? '' : 'none';
+}
+window.toggleInfrPanel = toggleInfrPanel;
+
+// Génère le HTML d'alerte pour une cellule
+function infrAlert(k) {
+  const errs = _infractions[k];
+  if(!errs || !errs.length) return '';
+  const hasError = errs.some(e => e.severity === 'error');
+  const col = hasError ? '#dc2626' : '#d97706';
+  const bg  = hasError ? '#fee2e2' : '#fef3c7';
+  const icon = hasError ? '🔴' : '🟡';
+  const msgs = errs.map(e => e.msg).join(' · ');
+  return `<div style="font-size:9px;font-weight:700;color:${col};background:${bg};border-radius:4px;padding:2px 5px;margin-top:3px;line-height:1.3" title="${msgs}">${icon} ${errs.length > 1 ? errs.length+' infraction(s)' : msgs.slice(0,60)+(msgs.length>60?'…':'')}</div>`;
 }
 
 function updStats(){
@@ -484,9 +919,12 @@ function renderSemaine(){
         ${days.map(d=>{
           const k=`${fmt(d)}_${e.id}`;const items=(_cr[k]?.items||[]);
           const off=d.getDay()===0&&!items.length;
+          const tH=items.reduce((s,it)=>it.plages?.length>0?s+it.plages.reduce((a,p)=>a+diffH(p.deb,p.fin),0):s+diffH(it.deb,it.fin),0);
           return `<div class="g-cell ${isToday(d)?'tc':''} ${off?'off':''}" onclick="openCreneauModal('${e.id}','${fmt(d)}')">
-            ${items.map(it=>pill(it,k)).join('')}
-            ${!items.length?`<div class="add-hint">+</div>`:''}
+            <div style="display:flex;flex-wrap:wrap;gap:3px">${items.map(it=>pill(it,k)).join('')}</div>
+            ${items.length?`<div style="display:flex;align-items:center;justify-content:space-between;margin-top:3px"><span style="font-size:9px;font-weight:700;color:var(--rh-main)">${tH>0?tH.toFixed(1)+'h':''}</span><span class="add-hint-sm" onclick="event.stopPropagation();openCreneauModal('${e.id}','${fmt(d)}')">+</span></div>`:
+            `<div class="add-hint">+</div>`}
+            ${infrAlert(k)}
           </div>`;
         }).join('')}
       </div>`;
@@ -511,9 +949,12 @@ function renderSemaine(){
           <div style="font-size:16px;font-weight:800;color:${isToday(d)?'var(--rh-main)':'var(--text)'}">${d.getDate()}</div>
         </div>
         ${vis.map(e=>{const k=`${fmt(d)}_${e.id}`;const items=(_cr[k]?.items||[]);
+          const tH=items.reduce((s,it)=>it.plages?.length>0?s+it.plages.reduce((a,p)=>a+diffH(p.deb,p.fin),0):s+diffH(it.deb,it.fin),0);
           return `<div class="g-cell ${isToday(d)?'tc':''}" onclick="openCreneauModal('${e.id}','${fmt(d)}')">
-            ${items.map(it=>pill(it,k)).join('')}
-            ${!items.length?`<span style="color:var(--muted);font-size:11px">+</span>`:''}
+            <div style="display:flex;flex-wrap:wrap;gap:3px">${items.map(it=>pill(it,k)).join('')}</div>
+            ${items.length?`<div style="display:flex;align-items:center;justify-content:space-between;margin-top:3px"><span style="font-size:9px;font-weight:700;color:var(--rh-main)">${tH>0?tH.toFixed(1)+'h':''}</span><span class="add-hint-sm" onclick="event.stopPropagation();openCreneauModal('${e.id}','${fmt(d)}')">+</span></div>`:
+            `<span style="color:var(--muted);font-size:11px">+</span>`}
+            ${infrAlert(k)}
           </div>`;
         }).join('')}
       </div>`;
@@ -540,6 +981,7 @@ function renderJour(){
       <div class="day-card-body">
         ${items.length?items.map(it=>pill(it,k)).join(''):
         `<div style="text-align:center;padding:8px 0;color:var(--muted);font-size:11px;cursor:pointer" onclick="openCreneauModal('${e.id}','${fmt(d)}')">+ Ajouter</div>`}
+        ${infrAlert(k)}
         <div style="margin-top:4px;text-align:center"><span style="font-size:10px;color:var(--rh-main);cursor:pointer;font-weight:600" onclick="openCreneauModal('${e.id}','${fmt(d)}')">+ Créneau</span></div>
       </div>
     </div>`;
@@ -623,7 +1065,24 @@ function renderLegend(){
 function toggleEmp(id){_hidden.has(id)?_hidden.delete(id):_hidden.add(id);renderLegend();render();}
 window.toggleEmp=toggleEmp;
 
-function fillEmpSel(){document.getElementById('cr-emp').innerHTML=_emps.map(e=>`<option value="${e.id}">${e.prenom||''} ${e.nom||''}</option>`).join('');}
+function fillEmpSel(){
+  document.getElementById('cr-emp').innerHTML=_emps.map(e=>{
+    const ccnLabel = e.ccn && CCN_RULES[e.ccn] ? ` (${CCN_RULES[e.ccn].label})` : '';
+    return `<option value="${e.id}">${e.prenom||''} ${e.nom||''}${ccnLabel}</option>`;
+  }).join('');
+}
+
+// Génère un <select> groupé pour choisir une CCN
+function buildCCNSelect(selId, currentVal) {
+  const el = document.getElementById(selId);
+  if(!el) return;
+  el.innerHTML = CCN_GROUPS.map(g =>
+    `<optgroup label="${g.label}">${g.keys.map(k =>
+      `<option value="${k}" ${k===currentVal?'selected':''}>${CCN_RULES[k]?.label||k}</option>`
+    ).join('')}</optgroup>`
+  ).join('');
+}
+window.buildCCNSelect = buildCCNSelect;
 
 // ══ MODAL CRÉNEAU ══
 // ── PLAGES (multi-plages / coupures) ──
