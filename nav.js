@@ -42,7 +42,23 @@
 
     return `
 <nav id="alteore-nav">
-  <div class="logo"><div class="logo-i">📊</div><div class="logo-t">ALTEORE</div></div>
+  <div class="logo">
+    <svg width="32" height="28" viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="nav-lg-ae" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#00e5ff"/>
+          <stop offset="100%" stop-color="#1a3dce"/>
+        </linearGradient>
+      </defs>
+      <!-- A -->
+      <polygon points="38,80 55,20 72,80 65,80 55,45 45,80" fill="url(#nav-lg-ae)"/>
+      <!-- E barres -->
+      <polygon points="68,24 105,24 102,32 68,32" fill="url(#nav-lg-ae)"/>
+      <polygon points="68,44 100,44 97,52 68,52" fill="url(#nav-lg-ae)"/>
+      <polygon points="68,64 95,64 92,72 68,72" fill="url(#nav-lg-ae)"/>
+    </svg>
+    <div class="logo-t">ALTEORE</div>
+  </div>
 
   <div class="ns">Principal</div>
 
