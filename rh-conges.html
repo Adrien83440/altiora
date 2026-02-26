@@ -385,10 +385,27 @@
         <b>Durées légales des événements familiaux (Code du travail) :</b><br>
         Mariage/PACS : 4j · Mariage enfant : 1j · Naissance/adoption : 3j · Décès conjoint/enfant : 5j · Décès parent/frère/sœur : 3j · Décès beau-parent : 1j · Annonce handicap enfant : 2j
       </div>
+      <!-- JUSTIFICATIF : visible si maladie ou formation -->
+      <div id="d-justif-wrap" style="display:none">
+        <div class="mfield">
+          <label class="mlabel">📎 Justificatif <span style="font-weight:400;color:var(--muted)">(arrêt, ordonnance, convocation…)</span></label>
+          <div id="d-justif-drop" onclick="document.getElementById('d-justif-input').click()" style="border:2px dashed var(--border);border-radius:10px;padding:16px;text-align:center;cursor:pointer;background:#fafafa;transition:all .15s" onmouseover="this.style.borderColor='#059669';this.style.background='#f0fdf4'" onmouseout="this.style.borderColor='var(--border)';this.style.background='#fafafa'">
+            <div style="font-size:24px;margin-bottom:4px">📄</div>
+            <div style="font-size:12px;font-weight:600;color:var(--muted)">Cliquez pour sélectionner un fichier</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px">PDF, JPG, PNG · Max 5 Mo</div>
+          </div>
+          <input type="file" id="d-justif-input" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="onJustifChange(this)"/>
+          <div id="d-justif-preview" style="display:none;margin-top:8px;padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;display:none;align-items:center;gap:8px;font-size:12px">
+            <span id="d-justif-name" style="flex:1;font-weight:600;color:#065f46;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+            <span id="d-justif-size" style="color:var(--muted);flex-shrink:0"></span>
+            <button onclick="clearJustif()" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:14px;padding:0 2px;flex-shrink:0">✕</button>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="modal-foot">
       <button class="btn btn-outline" onclick="closeModal('modal-demande')">Annuler</button>
-      <button class="btn btn-rh" onclick="saveDemande()">💾 Enregistrer</button>
+      <button class="btn btn-rh" id="btn-save-dem" onclick="saveDemande()">💾 Enregistrer</button>
     </div>
   </div>
 </div>
@@ -756,6 +773,7 @@ function renderDemandes(search=''){
         <div class="dem-dates">📅 ${debFmt}${d.dateFin&&d.dateFin!==d.dateDebut?' → '+finFmt:''}</div>
         ${d.motif?`<div class="dem-motif">"${d.motif}"</div>`:''}
         ${d.motifRefus?`<div class="dem-motif" style="color:var(--red)">Motif refus : ${d.motifRefus}</div>`:''}
+        ${d.justificatif?`<div style="margin-top:4px"><a href="${d.justificatif.data}" download="${d.justificatif.name}" style="font-size:11px;color:#059669;font-weight:600;text-decoration:none;background:#f0fdf4;border:1px solid #bbf7d0;padding:2px 8px;border-radius:6px;display:inline-flex;align-items:center;gap:4px">📎 ${d.justificatif.name} <span style="color:var(--muted);font-weight:400">(${(d.justificatif.size/1024).toFixed(0)}Ko)</span></a></div>`:''}
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
         <span class="badge badge-${d.statut||'pending'}">${{pending:'⏳ Attente',approved:'✅ Approuvé',refused:'❌ Refusé',cancelled:'🚫 Annulé'}[d.statut]||d.statut}</span>
@@ -887,6 +905,8 @@ function openNewDemandeModal(empId=''){
   document.getElementById('d-jours-info').style.display='none';
   document.getElementById('d-solde-warn').style.display='none';
   document.getElementById('d-evenement-info').style.display='none';
+  document.getElementById('d-justif-wrap').style.display='none';
+  clearJustif();
   calcJours();
   document.getElementById('modal-demande').classList.add('show');
 }
@@ -903,6 +923,10 @@ function calcJours(){
 
   // Afficher info événements familiaux
   if(evEl) evEl.style.display = type==='evenement'?'':'none';
+
+  // Afficher zone justificatif si maladie ou formation
+  const justifWrap=document.getElementById('d-justif-wrap');
+  if(justifWrap) justifWrap.style.display = (type==='maladie'||type==='formation')?'':'none';
 
   if(!deb){infoEl.style.display='none';return;}
   const finDate = fin||deb;
@@ -934,6 +958,44 @@ function calcJours(){
 }
 window.calcJours=calcJours; window.onEmpChange=onEmpChange;
 
+// Gestion fichier justificatif
+let _justifBase64 = null;
+let _justifMeta   = null;
+
+function onJustifChange(input){
+  const file = input.files[0];
+  if(!file) return;
+  if(file.size > 5*1024*1024){ showToast('Fichier trop lourd (max 5 Mo)','err'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    _justifBase64 = e.target.result; // data:type;base64,...
+    _justifMeta   = { name: file.name, size: file.size, type: file.type };
+    // Afficher preview
+    const prev = document.getElementById('d-justif-preview');
+    const nm   = document.getElementById('d-justif-name');
+    const sz   = document.getElementById('d-justif-size');
+    if(nm) nm.textContent = file.name;
+    if(sz) sz.textContent = (file.size/1024).toFixed(0)+'Ko';
+    if(prev){ prev.style.display='flex'; }
+    // Cacher la zone drop
+    const drop = document.getElementById('d-justif-drop');
+    if(drop) drop.style.display='none';
+  };
+  reader.readAsDataURL(file);
+}
+window.onJustifChange=onJustifChange;
+
+function clearJustif(){
+  _justifBase64=null; _justifMeta=null;
+  const inp=document.getElementById('d-justif-input');
+  if(inp) inp.value='';
+  const prev=document.getElementById('d-justif-preview');
+  if(prev) prev.style.display='none';
+  const drop=document.getElementById('d-justif-drop');
+  if(drop) drop.style.display='';
+}
+window.clearJustif=clearJustif;
+
 async function saveDemande(){
   const empId=document.getElementById('d-emp')?.value;
   const type=document.getElementById('d-type')?.value;
@@ -951,17 +1013,26 @@ async function saveDemande(){
     traitePar:document.getElementById('uname')?.textContent||'Manager'
   };
 
+  // Ajouter le justificatif si présent (base64 stocké en Firestore)
+  if(_justifBase64 && _justifMeta){
+    data.justificatif = { data: _justifBase64, name: _justifMeta.name, size: _justifMeta.size, type: _justifMeta.type };
+  }
+
+  const btn=document.getElementById('btn-save-dem');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Enregistrement...';}
   try{
     if(_editDemandeId){
       await window._updateDoc(window._doc(window._db,'rh_conges',window._uid,'demandes',_editDemandeId),data);
     } else {
       await window._addDoc(window._col(window._db,'rh_conges',window._uid,'demandes'),data);
     }
+    clearJustif();
     closeModal('modal-demande');
     await loadDemandes();
     renderAll();
     showToast('✅ Demande enregistrée','ok');
   }catch(e){ showToast('Erreur : '+e.message,'err'); }
+  finally{ if(btn){btn.disabled=false;btn.textContent='💾 Enregistrer';} }
 }
 window.saveDemande=saveDemande;
 
@@ -1079,7 +1150,7 @@ function exportCSV(){
   const rows=[['Employé','Type','Date début','Date fin','Jours','Statut','Demandé le','Motif']];
   _demandes.forEach(d=>{
     const emp=_emps[d.empId]||{};
-    rows.push([`${emp.prenom||''} ${emp.nom||''}`,TYPE_LBL[d.type]||d.type,d.dateDebut||'',d.dateFin||'',d.nbJours||0,d.statut||'',d.createdAt?d.createdAt.slice(0,10):'',d.motif||'']);
+    rows.push([`${emp.prenom||''} ${emp.nom||''}`,TYPE_LBL[d.type]||d.type,d.dateDebut||'',d.dateFin||'',d.nbJours||0,d.statut||'',d.createdAt?d.createdAt.slice(0,10):'',d.motif||'',d.justificatif?d.justificatif.name:'']);
   });
   const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const a=document.createElement('a');

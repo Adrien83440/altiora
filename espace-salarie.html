@@ -265,6 +265,28 @@
             <label>Motif (facultatif)</label>
             <input class="finput" type="text" id="f-motif" placeholder="Ex : vacances, formation, événement…"/>
           </div>
+          <!-- JUSTIFICATIF visible si maladie ou formation -->
+          <div id="justif-wrap" style="display:none;margin-bottom:11px">
+            <div class="field" style="margin-bottom:0">
+              <label>📎 Justificatif <span style="font-weight:400;text-transform:none;letter-spacing:0">(arrêt maladie, ordonnance…)</span></label>
+              <div id="justif-drop"
+                onclick="document.getElementById('justif-input').click()"
+                style="border:2px dashed var(--border);border-radius:10px;padding:18px 12px;text-align:center;cursor:pointer;background:white;transition:all .15s;"
+                onmouseover="this.style.borderColor='var(--g3)';this.style.background='var(--green-ghost)'"
+                onmouseout="this.style.borderColor='var(--border)';this.style.background='white'">
+                <div style="font-size:26px;margin-bottom:4px">📄</div>
+                <div style="font-size:12px;font-weight:600;color:var(--muted)">Appuyez pour joindre un fichier</div>
+                <div style="font-size:10px;color:var(--muted);margin-top:2px">PDF, JPG, PNG · Max 5 Mo · Facultatif</div>
+              </div>
+              <input type="file" id="justif-input" accept=".pdf,.jpg,.jpeg,.png" style="display:none" onchange="onJustifChange(this)"/>
+              <div id="justif-preview" style="display:none;margin-top:7px;padding:8px 12px;background:var(--green-ghost);border:1px solid #6ee7b7;border-radius:8px;align-items:center;gap:8px;">
+                <span style="font-size:16px">📎</span>
+                <span id="justif-name" style="flex:1;font-size:12px;font-weight:600;color:#065f46;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+                <span id="justif-size" style="font-size:11px;color:var(--muted);flex-shrink:0"></span>
+                <button onclick="clearJustif(event)" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:15px;padding:0 2px;flex-shrink:0;line-height:1">✕</button>
+              </div>
+            </div>
+          </div>
           <div class="btn-row">
             <button class="btn btn-ghost" onclick="goStep(1)">← Retour</button>
             <button class="btn btn-green" id="next2" onclick="goStep(3)" disabled>Vérifier →</button>
@@ -612,11 +634,46 @@ window.changeYear = changeYear;
 /* ── FORMULAIRE ── */
 var _curStep = 1;
 
+var _justifB64 = null;
+var _justifMeta = null;
+
+function onJustifChange(input) {
+  var file = input.files[0];
+  if (!file) return;
+  if (file.size > 5*1024*1024) { showToast('Fichier trop lourd (max 5 Mo)','err'); return; }
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    _justifB64 = e.target.result;
+    _justifMeta = { name: file.name, size: file.size, type: file.type };
+    document.getElementById('justif-name').textContent = file.name;
+    document.getElementById('justif-size').textContent = (file.size/1024).toFixed(0)+'Ko';
+    var prev = document.getElementById('justif-preview');
+    prev.style.display = 'flex';
+    document.getElementById('justif-drop').style.display = 'none';
+  };
+  reader.readAsDataURL(file);
+}
+window.onJustifChange = onJustifChange;
+
+function clearJustif(e) {
+  if (e) e.stopPropagation();
+  _justifB64 = null; _justifMeta = null;
+  var inp = document.getElementById('justif-input');
+  if (inp) inp.value = '';
+  document.getElementById('justif-preview').style.display = 'none';
+  document.getElementById('justif-drop').style.display = '';
+}
+window.clearJustif = clearJustif;
+
 function selType(k) {
   _selType = k;
   renderTypeGrid();
   document.getElementById('next1').disabled = false;
   document.getElementById('evenement-loi').className = 'alert alert-blue'+(k==='evenement'?' show':'');
+  // Afficher la zone justificatif si maladie ou formation
+  var jw = document.getElementById('justif-wrap');
+  if (jw) jw.style.display = (k==='maladie' || k==='formation') ? '' : 'none';
+  clearJustif();
 }
 window.selType = selType;
 
@@ -691,7 +748,8 @@ function buildRecap() {
     +'<div class="resume-row"><span>Au</span><span>'+finFmt+'</span></div>'
     +(motif?'<div class="resume-row"><span>Motif</span><span>'+motif+'</span></div>':'')
     +'<div class="resume-row"><span>Total</span><span style="color:var(--g3)">'+jours+' jour'+(jours>1?'s':'')+' ouvré'+(jours>1?'s':'')+'</span></div>'
-    +(apres!==null?'<div class="resume-row"><span>Solde restant après</span><span style="color:'+(apres>5?'var(--g3)':'var(--orange)')+'">'+apres.toFixed(1)+'j</span></div>':'');
+    +(apres!==null?'<div class="resume-row"><span>Solde restant après</span><span style="color:'+(apres>5?'var(--g3)':'var(--orange)')+'">'+apres.toFixed(1)+'j</span></div>':'')
+    +(_justifB64?'<div class="resume-row"><span>Justificatif</span><span style="color:var(--g3)">📎 '+(_justifMeta?_justifMeta.name:'Fichier joint')+'</span></div>':'');
 }
 
 async function submitDemande() {
@@ -701,12 +759,16 @@ async function submitDemande() {
   var jours = joursOuvres(deb, fin);
   var btn = document.getElementById('btn-submit');
   btn.disabled = true; btn.textContent = 'Envoi…';
+  var demandeData = {
+    empId:_empId, uid:_uid, type:_selType, dateDebut:deb, dateFin:fin, nbJours:jours,
+    statut:'pending', motif:motif||null,
+    createdAt:new Date().toISOString(), source:'salarie',
+  };
+  if (_justifB64 && _justifMeta) {
+    demandeData.justificatif = { data:_justifB64, name:_justifMeta.name, size:_justifMeta.size, type:_justifMeta.type };
+  }
   try {
-    await window._addDoc(['rh_conges', _uid, 'demandes'], {
-      empId:_empId, uid:_uid, type:_selType, dateDebut:deb, dateFin:fin, nbJours:jours,
-      statut:'pending', motif:motif||null,
-      createdAt:new Date().toISOString(), source:'salarie',
-    });
+    await window._addDoc(['rh_conges', _uid, 'demandes'], demandeData);
     _demandes.unshift({id:'tmp_'+Date.now(),empId:_empId,type:_selType,dateDebut:deb,dateFin:fin,nbJours:jours,statut:'pending',motif:motif||null,createdAt:new Date().toISOString()});
     calcSoldes(); renderSoldes(); renderDemandes(); renderCal();
     document.getElementById('st3').classList.remove('active');
@@ -731,6 +793,9 @@ function resetForm() {
   document.getElementById('solde-alert').className = 'alert alert-orange';
   document.getElementById('next1').disabled = true;
   document.getElementById('next2').disabled = true;
+  clearJustif();
+  var jw = document.getElementById('justif-wrap');
+  if (jw) jw.style.display = 'none';
   goStep(1); renderTypeGrid();
 }
 window.resetForm = resetForm;
