@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+  <title>ALTEORE — Employés</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --rh-dark:#052e16;--rh-main:#059669;--rh-mid:#10b981;--rh-bright:#34d399;
+      --rh-ghost:#f0fdf4;--rh-border:#d1fae5;
+      --text:#1a1f36;--muted:#6b7280;--border:#e2e8f0;--bg:#f0fdf7;--radius:12px;
+      --red:#ef4444;--red-light:#fee2e2;--orange:#f59e0b;--orange-light:#fef3c7;
+      --blue:#1a3dce;--purple:#6366f1;--sidebar-w:250px;
+    }
+    body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;font-size:13px;}
+    .main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;min-width:0;}
+
+    /* TOPBAR */
+    .topbar{background:white;border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
+    .topbar-left h1{font-size:17px;font-weight:700;}
+    .topbar-left p{font-size:12px;color:var(--muted);margin-top:2px;}
+    .topbar-right{display:flex;align-items:center;gap:8px;}
+    .btn{padding:7px 14px;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:all .18s;display:inline-flex;align-items:center;gap:6px;}
+    .btn-rh{background:linear-gradient(135deg,var(--rh-main),var(--rh-mid));color:white;box-shadow:0 3px 10px rgba(5,150,105,.25);}
+    .btn-rh:hover{opacity:.9;transform:translateY(-1px);}
+    .btn-outline{background:white;color:var(--rh-main);border:1.5px solid var(--rh-border);}
+    .btn-outline:hover{background:var(--rh-ghost);}
+    .btn-danger{background:#fee2e2;color:#991b1b;border:1px solid #fecaca;}
+    .btn-danger:hover{background:#fecaca;}
+    .btn-sm{padding:5px 11px;font-size:12px;}
+    .btn-xs{padding:3px 8px;font-size:11px;}
+
+    /* LAYOUT 2 PANNEAUX */
+    .workspace{display:flex;flex:1;overflow:hidden;height:calc(100vh - 57px);}
+
+    /* PANEL GAUCHE */
+    .left-panel{width:300px;flex-shrink:0;border-right:1px solid var(--border);background:white;display:flex;flex-direction:column;overflow:hidden;}
+    .lp-head{padding:12px 14px;border-bottom:1px solid var(--border);}
+    .search-wrap{display:flex;gap:7px;margin-bottom:8px;}
+    .search-input{flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;outline:none;color:var(--text);}
+    .search-input:focus{border-color:var(--rh-main);}
+    .filter-row{display:flex;gap:6px;}
+    .filter-sel{flex:1;padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;color:var(--text);outline:none;background:white;cursor:pointer;}
+    .filter-sel:focus{border-color:var(--rh-main);}
+    .emp-list{flex:1;overflow-y:auto;}
+    .emp-item{display:flex;align-items:center;gap:9px;padding:10px 14px;cursor:pointer;border-left:3px solid transparent;transition:all .15s;}
+    .emp-item:hover{background:#fafffe;}
+    .emp-item.active{background:var(--rh-ghost);border-left-color:var(--rh-main);}
+    .emp-av{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:white;flex-shrink:0;position:relative;}
+    .emp-av img{width:34px;height:34px;border-radius:10px;object-fit:cover;}
+    .emp-av-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:10px;font-size:13px;font-weight:700;color:white;}
+    .emp-info{flex:1;min-width:0;}
+    .emp-name{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .emp-sub{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .emp-badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:20px;white-space:nowrap;flex-shrink:0;}
+    .b-cdi{background:#d1fae5;color:#065f46;}
+    .b-cdd{background:#fef3c7;color:#92400e;}
+    .b-stage{background:#e0f2fe;color:#075985;}
+    .b-alternance{background:#eef2ff;color:#3730a3;}
+    .b-freelance{background:#fce7f3;color:#9d174d;}
+    .b-expire{background:#fee2e2;color:#991b1b;}
+    .lp-footer{padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;}
+
+    /* PANEL DROIT */
+    .right-panel{flex:1;overflow-y:auto;background:var(--bg);}
+    .empty-fiche{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);text-align:center;padding:40px;}
+    .empty-fiche .icon{font-size:52px;margin-bottom:16px;}
+
+    /* FICHE */
+    .fiche{padding:22px 26px;display:flex;flex-direction:column;gap:18px;}
+
+    /* HERO FICHE */
+    .fiche-hero{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:22px 24px;}
+    .fiche-hero-top{display:flex;align-items:flex-start;gap:18px;margin-bottom:16px;}
+    .fiche-big-av{width:72px;height:72px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;color:white;flex-shrink:0;position:relative;cursor:pointer;overflow:hidden;}
+    .fiche-big-av:hover .av-overlay{opacity:1;}
+    .av-overlay{position:absolute;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;opacity:0;transition:.2s;border-radius:16px;font-size:18px;color:white;}
+    .fiche-big-av img{width:72px;height:72px;object-fit:cover;border-radius:16px;}
+    .fiche-hero-info{flex:1;}
+    .fiche-hero-name{font-size:22px;font-weight:800;line-height:1.1;margin-bottom:4px;}
+    .fiche-hero-poste{font-size:14px;color:var(--muted);margin-bottom:10px;}
+    .fiche-hero-badges{display:flex;flex-wrap:wrap;gap:6px;}
+    .hbadge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;}
+    .fiche-hero-actions{display:flex;gap:8px;align-items:flex-start;flex-shrink:0;}
+    .fiche-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+    .fkpi{padding:11px 14px;border-radius:9px;background:var(--rh-ghost);border:1px solid var(--rh-border);}
+    .fkpi.orange{background:#fef9c3;border-color:#fde68a;}
+    .fkpi.red{background:#fee2e2;border-color:#fecaca;}
+    .fkpi-label{font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;}
+    .fkpi-val{font-size:15px;font-weight:800;color:var(--text);}
+    .fkpi-sub{font-size:10px;color:var(--muted);margin-top:2px;}
+
+    /* TABS */
+    .tabs{display:flex;gap:2px;background:#f1f5f9;border-radius:10px;padding:3px;}
+    .tab{padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);transition:.15s;border:none;background:transparent;font-family:'Plus Jakarta Sans',sans-serif;}
+    .tab.active{background:white;color:var(--rh-main);box-shadow:0 1px 4px rgba(0,0,0,.08);}
+
+    /* SECTIONS FICHE */
+    .fiche-section{background:white;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+    .sec-head{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;background:#fafffe;border-bottom:1px solid var(--border);}
+    .sec-title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:7px;}
+    .sec-body{padding:16px 18px;}
+    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    .info-field{display:flex;flex-direction:column;gap:3px;}
+    .info-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+    .info-val{font-size:13px;font-weight:600;color:var(--text);}
+    .info-val.muted{color:var(--muted);font-weight:400;}
+
+    /* DOCUMENTS */
+    .doc-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;margin-bottom:8px;transition:.15s;}
+    .doc-item:last-child{margin-bottom:0;}
+    .doc-item:hover{background:#fafffe;border-color:var(--rh-border);}
+    .doc-ico{width:34px;height:34px;border-radius:8px;background:var(--rh-ghost);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;}
+    .doc-name{font-size:12px;font-weight:600;flex:1;}
+    .doc-date{font-size:11px;color:var(--muted);}
+    .doc-actions{display:flex;gap:5px;}
+
+    /* ÉVALUATIONS */
+    .eval-item{padding:12px 14px;border:1px solid var(--border);border-radius:9px;margin-bottom:8px;}
+    .eval-item:last-child{margin-bottom:0;}
+    .eval-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+    .eval-date{font-size:11px;color:var(--muted);}
+    .eval-note{display:flex;align-items:center;gap:4px;}
+    .eval-note-val{font-size:14px;font-weight:800;color:var(--rh-main);}
+    .eval-comment{font-size:12px;color:var(--text);line-height:1.5;}
+    .eval-by{font-size:10px;color:var(--muted);margin-top:4px;}
+    .stars{display:flex;gap:1px;}
+    .star-on{color:#f59e0b;font-size:13px;}
+    .star-off{color:#e2e8f0;font-size:13px;}
+
+    /* UPLOAD ZONE */
+    .upload-zone{border:2px dashed var(--rh-border);border-radius:10px;padding:16px;text-align:center;cursor:pointer;transition:.15s;color:var(--muted);font-size:12px;}
+    .upload-zone:hover{border-color:var(--rh-main);background:var(--rh-ghost);}
+    .upload-zone input{display:none;}
+
+    /* MODAL */
+    .modal-overlay{position:fixed;inset:0;background:rgba(5,46,22,.4);backdrop-filter:blur(4px);z-index:300;display:none;align-items:center;justify-content:center;padding:16px;}
+    .modal-overlay.show{display:flex;}
+    .modal{background:white;border-radius:16px;width:100%;max-width:600px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(5,46,22,.2);}
+    .modal-head{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:linear-gradient(135deg,#f0fdf4,#dcfce7);flex-shrink:0;}
+    .modal-head h3{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;}
+    .modal-close{background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted);padding:2px;}
+    .modal-body{padding:20px 22px;overflow-y:auto;flex:1;}
+    .modal-foot{padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;}
+    .mfield{margin-bottom:14px;}
+    .mfield label{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px;}
+    .minput{width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;color:var(--text);outline:none;transition:.15s;}
+    .minput:focus{border-color:var(--rh-main);box-shadow:0 0 0 3px rgba(5,150,105,.08);}
+    .mrow{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    .mrow-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+    .msep{font-size:12px;font-weight:700;color:var(--text);padding:8px 0 4px;border-top:1px solid var(--border);margin-top:4px;}
+
+    /* TOAST */
+    .toast{position:fixed;bottom:24px;right:24px;background:#052e16;color:white;padding:11px 18px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;transform:translateY(80px);opacity:0;transition:all .3s;}
+    .toast.show{transform:translateY(0);opacity:1;}
+    .toast.ok{background:#065f46;}
+    .toast.err{background:#991b1b;}
+
+    .loader{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--muted);gap:8px;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .spin{width:16px;height:16px;border:2px solid var(--rh-border);border-top-color:var(--rh-main);border-radius:50%;animation:spin .7s linear infinite;}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+    .fiche{animation:fadeIn .2s ease both;}
+
+    /* ARCHIVÉ */
+    .emp-item.archived{opacity:.5;}
+    .emp-item.archived .emp-name{text-decoration:line-through;}
+
+    /* HAMBURGER MOBILE */
+    .hamburger{display:none;}
+    @media(max-width:768px){
+      .main{margin-left:0!important;}
+      .hamburger{display:flex!important;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#052e16;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;}
+      .hamburger span{display:block;width:20px;height:2.5px;background:#fff;border-radius:2px;}
+      .workspace{flex-direction:column;height:auto;}
+      .left-panel{width:100%;height:auto;border-right:none;border-bottom:1px solid var(--border);}
+      .emp-list{max-height:280px;}
+      .topbar{padding:10px 10px 10px 62px!important;flex-wrap:wrap;gap:6px;}
+      .topbar-right{width:100%;flex-wrap:wrap;}
+      .topbar-right .btn{flex:1;font-size:11px;padding:6px 8px;}
+      .fiche-kpis{grid-template-columns:1fr 1fr!important;}
+      .mrow,.mrow-3{grid-template-columns:1fr!important;}
+      .info-grid{grid-template-columns:1fr!important;}
+      .fiche-hero-top{flex-direction:column;align-items:flex-start;}
+      .fiche-hero-actions{width:100%;justify-content:flex-start;}
+      .modal{max-width:100%;margin:0;border-radius:18px 18px 0 0;max-height:92vh;}
+      .modal-overlay{align-items:flex-end;padding:0;}
+    }
+    @media(max-width:420px){
+      .fiche-kpis{grid-template-columns:1fr!important;}
+    }
+  </style>
+</head>
+<body>
+
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>👤 Employés</h1>
+      <p id="emp-count-top">Gestion des fiches employés</p>
+    </div>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="location.href='rh-dashboard.html'">← Dashboard RH</button>
+      <button class="btn btn-outline btn-sm" id="btn-show-archived" onclick="toggleArchived()">👁 Archivés</button>
+      <button class="btn btn-rh btn-sm" onclick="openModalNouvelEmploye()">+ Nouvel employé</button>
+    </div>
+  </div>
+
+  <div class="workspace">
+    <!-- LISTE -->
+    <div class="left-panel">
+      <div class="lp-head">
+        <div class="search-wrap">
+          <input class="search-input" id="search-emp" placeholder="🔍 Rechercher..." oninput="filterEmployes()"/>
+        </div>
+        <div class="filter-row">
+          <select class="filter-sel" id="filter-contrat" onchange="filterEmployes()">
+            <option value="">Tous contrats</option>
+            <option value="CDI">CDI</option>
+            <option value="CDD">CDD</option>
+            <option value="Stage">Stage</option>
+            <option value="Alternance">Alternance</option>
+            <option value="Freelance">Freelance</option>
+          </select>
+          <select class="filter-sel" id="filter-dept" onchange="filterEmployes()">
+            <option value="">Tous départements</option>
+          </select>
+          <select class="filter-sel" id="filter-statut" onchange="filterEmployes()">
+            <option value="actif">Actifs</option>
+            <option value="all">Tous</option>
+            <option value="archive">Archivés</option>
+          </select>
+        </div>
+      </div>
+      <div class="emp-list" id="emp-list">
+        <div class="loader"><div class="spin"></div></div>
+      </div>
+      <div class="lp-footer">
+        <span id="emp-list-count">0 employé(s)</span>
+        <button class="btn btn-rh btn-xs" onclick="openModalNouvelEmploye()">+ Nouveau</button>
+      </div>
+    </div>
+
+    <!-- FICHE DROITE -->
+    <div class="right-panel" id="right-panel">
+      <div class="empty-fiche">
+        <div class="icon">👤</div>
+        <h3 style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px">Sélectionnez un employé</h3>
+        <p style="font-size:13px;line-height:1.7;max-width:300px;color:var(--muted)">Cliquez sur un employé dans la liste pour afficher sa fiche complète.</p>
+        <button class="btn btn-rh" style="margin-top:16px" onclick="openModalNouvelEmploye()">+ Créer un employé</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     MODAL NOUVEL EMPLOYÉ / ÉDITION
+═══════════════════════════════════════════ -->
+<div class="modal-overlay" id="modalEmploye">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-emp-title">👤 Nouvel employé</h3>
+      <button class="modal-close" onclick="closeModal('modalEmploye')">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Identité -->
+      <div class="msep">👤 Identité</div>
+      <div class="mrow">
+        <div class="mfield"><label>Prénom *</label><input class="minput" id="f-prenom" placeholder="Marie"/></div>
+        <div class="mfield"><label>Nom *</label><input class="minput" id="f-nom" placeholder="DUPONT"/></div>
+      </div>
+      <div class="mrow">
+        <div class="mfield"><label>Date de naissance</label><input class="minput" id="f-naissance" type="date"/></div>
+        <div class="mfield"><label>Nationalité</label><input class="minput" id="f-nationalite" placeholder="Française"/></div>
+      </div>
+      <div class="mfield"><label>Adresse</label><input class="minput" id="f-adresse" placeholder="12 rue des Fleurs, 75001 Paris"/></div>
+      <div class="mrow">
+        <div class="mfield"><label>Téléphone</label><input class="minput" id="f-tel" placeholder="06 12 34 56 78"/></div>
+        <div class="mfield"><label>Email</label><input class="minput" id="f-email" type="email" placeholder="marie@email.com"/></div>
+      </div>
+      <div class="mfield"><label>N° Sécurité sociale</label><input class="minput" id="f-nss" placeholder="1 85 05 75 001 001 01"/></div>
+
+      <!-- Contrat -->
+      <div class="msep">📋 Contrat</div>
+      <div class="mrow">
+        <div class="mfield"><label>Type de contrat *</label>
+          <select class="minput" id="f-contrat">
+            <option value="CDI">CDI</option><option value="CDD">CDD</option>
+            <option value="Stage">Stage</option><option value="Alternance">Alternance</option>
+            <option value="Freelance">Freelance</option>
+          </select>
+        </div>
+        <div class="mfield"><label>Statut</label>
+          <select class="minput" id="f-statut">
+            <option value="actif">Actif</option><option value="essai">Période d'essai</option>
+            <option value="archive">Archivé</option>
+          </select>
+        </div>
+      </div>
+      <div class="mrow">
+        <div class="mfield"><label>Poste / Intitulé *</label><input class="minput" id="f-poste" placeholder="Développeur, Vendeur..."/></div>
+        <div class="mfield"><label>Département</label><input class="minput" id="f-dept" placeholder="Vente, Production..."/></div>
+      </div>
+      <div class="mrow">
+        <div class="mfield"><label>Date d'entrée *</label><input class="minput" id="f-entree" type="date"/></div>
+        <div class="mfield"><label>Date de fin (CDD)</label><input class="minput" id="f-fin" type="date"/></div>
+      </div>
+
+      <!-- Salaire -->
+      <div class="msep">💶 Rémunération</div>
+      <div class="mrow-3">
+        <div class="mfield"><label>Salaire brut (€)</label><input class="minput" id="f-brut" type="text" inputmode="decimal" placeholder="2500"/></div>
+        <div class="mfield"><label>Salaire net (€)</label><input class="minput" id="f-net" type="text" inputmode="decimal" placeholder="1980"/></div>
+        <div class="mfield"><label>Fréquence</label>
+          <select class="minput" id="f-freq">
+            <option value="mensuel">Mensuel</option><option value="annuel">Annuel</option>
+            <option value="horaire">Horaire</option>
+          </select>
+        </div>
+      </div>
+      <div class="mrow">
+        <div class="mfield"><label>Heures / semaine</label><input class="minput" id="f-heures" type="text" inputmode="decimal" placeholder="35"/></div>
+        <div class="mfield"><label>IBAN</label><input class="minput" id="f-iban" placeholder="FR76 ..."/></div>
+      </div>
+
+      <!-- Divers -->
+      <div class="msep">📝 Divers</div>
+      <div class="mrow">
+        <div class="mfield"><label>Note de bienvenue</label><input class="minput" id="f-note" type="text" inputmode="decimal" placeholder="Note /5"/></div>
+        <div class="mfield"><label>Emoji / couleur</label>
+          <select class="minput" id="f-couleur">
+            <option value="#059669">🟢 Vert</option><option value="#0891b2">🔵 Bleu</option>
+            <option value="#7c3aed">🟣 Violet</option><option value="#db2777">🩷 Rose</option>
+            <option value="#ea580c">🟠 Orange</option><option value="#ca8a04">🟡 Jaune</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeModal('modalEmploye')">Annuler</button>
+      <button class="btn btn-rh" onclick="saveEmploye()">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     MODAL NOUVELLE ÉVALUATION
+═══════════════════════════════════════════ -->
+<div class="modal-overlay" id="modalEval">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-head">
+      <h3>⭐ Nouvelle évaluation</h3>
+      <button class="modal-close" onclick="closeModal('modalEval')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="mfield">
+        <label>Note (1 à 5)</label>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <input class="minput" id="eval-note" type="text" inputmode="decimal" placeholder="4.5" style="width:80px"/>
+          <div id="eval-stars-preview" style="display:flex;gap:2px;font-size:18px;color:#f59e0b">☆☆☆☆☆</div>
+        </div>
+      </div>
+      <div class="mfield"><label>Date</label><input class="minput" id="eval-date" type="date"/></div>
+      <div class="mfield"><label>Commentaire</label><textarea class="minput" id="eval-comment" rows="3" placeholder="Points forts, axes d'amélioration..."></textarea></div>
+      <div class="mfield"><label>Évaluateur</label><input class="minput" id="eval-by" placeholder="Nom du responsable"/></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeModal('modalEval')">Annuler</button>
+      <button class="btn btn-rh" onclick="saveEval()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL UPLOAD DOC -->
+<div class="modal-overlay" id="modalDoc">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-head">
+      <h3>📎 Ajouter un document</h3>
+      <button class="modal-close" onclick="closeModal('modalDoc')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="mfield"><label>Nom du document *</label><input class="minput" id="doc-nom" placeholder="Contrat de travail, CNI..."/></div>
+      <div class="mfield"><label>Type</label>
+        <select class="minput" id="doc-type">
+          <option value="contrat">📋 Contrat de travail</option>
+          <option value="cni">🪪 Pièce d'identité</option>
+          <option value="rib">🏦 RIB</option>
+          <option value="diplome">🎓 Diplôme</option>
+          <option value="medical">🏥 Certificat médical</option>
+          <option value="autre">📄 Autre</option>
+        </select>
+      </div>
+      <div class="mfield"><label>Date du document</label><input class="minput" id="doc-date" type="date"/></div>
+      <div class="mfield">
+        <label>Fichier (référence)</label>
+        <input class="minput" id="doc-ref" placeholder="Nom du fichier ou lien Drive"/>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">💡 Renseignez le nom ou le lien vers le document stocké dans votre espace.</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeModal('modalDoc')">Annuler</button>
+      <button class="btn btn-rh" onclick="saveDoc()">Ajouter</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL PHOTO -->
+<div class="modal-overlay" id="modalPhoto">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-head">
+      <h3>📸 Photo de profil</h3>
+      <button class="modal-close" onclick="closeModal('modalPhoto')">✕</button>
+    </div>
+    <div class="modal-body" style="text-align:center">
+      <div id="photo-preview" style="width:100px;height:100px;border-radius:20px;margin:0 auto 16px;overflow:hidden;background:var(--rh-ghost);display:flex;align-items:center;justify-content:center;font-size:32px"></div>
+      <label class="upload-zone">
+        <input type="file" id="photo-input" accept="image/*" onchange="previewPhoto(this)"/>
+        <div style="font-size:22px;margin-bottom:6px">📷</div>
+        <div style="font-weight:600">Cliquez pour choisir une photo</div>
+        <div style="font-size:11px;margin-top:3px">JPG, PNG – max 2Mo</div>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeModal('modalPhoto')">Annuler</button>
+      <button class="btn btn-danger btn-sm" onclick="removePhoto()">Supprimer</button>
+      <button class="btn btn-rh" onclick="savePhoto()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ARCHIVAGE -->
+<div class="modal-overlay" id="modalArchive">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-head">
+      <h3 id="modal-arch-title">📦 Archiver l'employé</h3>
+      <button class="modal-close" onclick="closeModal('modalArchive')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;line-height:1.7;color:var(--muted)">L'employé sera marqué comme archivé et masqué par défaut. Les données sont conservées.</p>
+      <div class="mfield" style="margin-top:14px"><label>Motif de départ</label>
+        <select class="minput" id="arch-motif">
+          <option value="fin_cdd">Fin de CDD</option>
+          <option value="demission">Démission</option>
+          <option value="licenciement">Licenciement</option>
+          <option value="retraite">Retraite</option>
+          <option value="rupture">Rupture conventionnelle</option>
+          <option value="autre">Autre</option>
+        </select>
+      </div>
+      <div class="mfield"><label>Date de sortie</label><input class="minput" id="arch-date" type="date"/></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeModal('modalArchive')">Annuler</button>
+      <button class="btn btn-danger" onclick="confirmArchive()">📦 Archiver</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ═══════════════════════════════════════ FIREBASE ═══ -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const app = initializeApp({
+    apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain:"altiora-70599.firebaseapp.com",
+    projectId:"altiora-70599",
+    storageBucket:"altiora-70599.firebasestorage.app",
+    messagingSenderId:"120905555746",
+    appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+  });
+  const auth = getAuth(app);
+  const db   = getFirestore(app);
+  window._auth=auth; window._db=db;
+  window._doc=doc; window._setDoc=setDoc; window._getDoc=getDoc;
+  window._collection=collection; window._getDocs=getDocs;
+  window._deleteDoc=deleteDoc; window._updateDoc=updateDoc;
+
+  onAuthStateChanged(auth, user => {
+    if (!user) { window.location.href='index.html'; return; }
+    window._uid = user.uid;
+    window._firebaseReady = true;
+    window.initEmployes();
+  });
+</script>
+
+<!-- ═══════════════════════════════════════ APP JS ═══ -->
+<script>
+// ══════════════════════════
+// ÉTAT
+// ══════════════════════════
+let _employes    = {};   // { id: {...data} }
+let _currentId   = null;
+let _editId      = null; // null = nouveau, sinon ID
+let _showArchived = false;
+let _photoDataURL = null;
+let _photoFile    = null;
+
+const COLORS = ['#059669','#0891b2','#7c3aed','#db2777','#ea580c','#ca8a04'];
+
+// ══════════════════════════
+// INIT
+// ══════════════════════════
+window.initEmployes = async function() {
+  await loadEmployes();
+};
+
+async function loadEmployes() {
+  try {
+    const snap = await window._getDocs(window._collection(window._db,'rh',window._uid,'employes'));
+    _employes = {};
+    snap.forEach(d => { _employes[d.id] = { id:d.id, ...d.data() }; });
+    buildDeptFilter();
+    renderList();
+  } catch(e) {
+    console.error(e);
+    showToast('Erreur chargement','err');
+  }
+}
+
+// ══════════════════════════
+// LISTE
+// ══════════════════════════
+function buildDeptFilter() {
+  const depts = [...new Set(Object.values(_employes).map(e=>e.departement).filter(Boolean))];
+  const sel = document.getElementById('filter-dept');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Tous départements</option>' +
+    depts.map(d=>`<option value="${d}" ${d===cur?'selected':''}>${d}</option>`).join('');
+}
+
+function filterEmployes() { renderList(); }
+
+function renderList() {
+  const search  = (document.getElementById('search-emp')?.value||'').toLowerCase();
+  const contrat = document.getElementById('filter-contrat')?.value||'';
+  const dept    = document.getElementById('filter-dept')?.value||'';
+  const statut  = document.getElementById('filter-statut')?.value||'actif';
+
+  let items = Object.values(_employes).filter(e => {
+    const nom = `${e.prenom||''} ${e.nom||''}`.toLowerCase();
+    const matchSearch = !search || nom.includes(search) || (e.poste||'').toLowerCase().includes(search);
+    const matchContrat = !contrat || e.typeContrat === contrat;
+    const matchDept = !dept || e.departement === dept;
+    const matchStatut = statut==='all' ? true : statut==='archive' ? e.statut==='archive' : e.statut!=='archive';
+    return matchSearch && matchContrat && matchDept && matchStatut;
+  });
+
+  // Trier : actifs d'abord, puis alphabétique
+  items.sort((a,b)=>{
+    if (a.statut==='archive' && b.statut!=='archive') return 1;
+    if (a.statut!=='archive' && b.statut==='archive') return -1;
+    return `${a.prenom} ${a.nom}`.localeCompare(`${b.prenom} ${b.nom}`);
+  });
+
+  const list = document.getElementById('emp-list');
+  const count = document.getElementById('emp-list-count');
+  const topCount = document.getElementById('emp-count-top');
+  const total = Object.values(_employes).filter(e=>e.statut!=='archive').length;
+  count.textContent = `${items.length} employé(s)`;
+  topCount.textContent = `${total} employé${total>1?'s':''} actif${total>1?'s':''}`;
+
+  if (items.length === 0) {
+    list.innerHTML = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:12px">
+      <div style="font-size:28px;margin-bottom:8px">👤</div>Aucun employé trouvé.<br>
+      <button class="btn btn-rh btn-sm" style="margin-top:12px" onclick="openModalNouvelEmploye()">+ Ajouter</button></div>`;
+    return;
+  }
+
+  list.innerHTML = items.map(e => {
+    const nom = `${e.prenom||''} ${e.nom||''}`.trim()||'Employé';
+    const init = nom.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    const color = e.couleur || COLORS[0];
+    const badgeCls = getBadgeCls(e.typeContrat);
+    const archived = e.statut==='archive';
+
+    // CDD expirant ?
+    let expireSoon = false;
+    if (e.typeContrat==='CDD' && e.dateFinContrat) {
+      const j = Math.ceil((new Date(e.dateFinContrat)-Date.now())/86400000);
+      if (j>=0 && j<=30) expireSoon = true;
+    }
+
+    return `<div class="emp-item ${_currentId===e.id?'active':''} ${archived?'archived':''}" onclick="openFiche('${e.id}')">
+      <div class="emp-av" style="background:${color}">
+        ${e.photoURL ? `<img src="${e.photoURL}" alt="${nom}" onerror="this.style.display='none'"/>` : ''}
+        <div class="emp-av-fallback" style="background:${color}">${init}</div>
+      </div>
+      <div class="emp-info">
+        <div class="emp-name">${nom}</div>
+        <div class="emp-sub">${e.poste||'—'}${e.departement?' · '+e.departement:''}</div>
+      </div>
+      <span class="emp-badge ${expireSoon?'b-expire':badgeCls}">${expireSoon?'⚠️ CDD':e.typeContrat||'CDI'}</span>
+    </div>`;
+  }).join('');
+}
+
+function getBadgeCls(type) {
+  return {CDI:'b-cdi',CDD:'b-cdd',Stage:'b-stage',Alternance:'b-alternance',Freelance:'b-freelance'}[type]||'b-cdi';
+}
+
+function toggleArchived() {
+  _showArchived = !_showArchived;
+  const sel = document.getElementById('filter-statut');
+  sel.value = _showArchived ? 'all' : 'actif';
+  document.getElementById('btn-show-archived').style.background = _showArchived ? 'var(--rh-ghost)' : '';
+  renderList();
+}
+
+// ══════════════════════════
+// FICHE
+// ══════════════════════════
+function openFiche(id) {
+  _currentId = id;
+  renderList(); // update active state
+  const e = _employes[id];
+  if (!e) return;
+  renderFiche(e);
+}
+
+function renderFiche(e) {
+  const nom = `${e.prenom||''} ${e.nom||''}`.trim()||'Employé';
+  const init = nom.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+  const color = e.couleur || COLORS[0];
+  const badgeCls = getBadgeCls(e.typeContrat);
+
+  // Ancienneté
+  const anc = e.dateEntree ? calcAnciennete(e.dateEntree) : '—';
+
+  // Jours avant fin CDD
+  let cddWarning = '';
+  if (e.typeContrat==='CDD' && e.dateFinContrat) {
+    const j = Math.ceil((new Date(e.dateFinContrat)-Date.now())/86400000);
+    if (j>=0 && j<=30) cddWarning = `<span style="background:#fee2e2;color:#991b1b;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px">⚠️ Expire dans ${j}j</span>`;
+  }
+
+  // Note moyenne
+  const evals = e.evaluations||[];
+  const noteMoy = evals.length>0 ? (evals.reduce((s,ev)=>s+(parseFloat(ev.note)||0),0)/evals.length).toFixed(1) : null;
+
+  const rp = document.getElementById('right-panel');
+  rp.innerHTML = `
+  <div class="fiche" id="fiche-content">
+
+    <!-- HERO -->
+    <div class="fiche-hero">
+      <div class="fiche-hero-top">
+        <div class="fiche-big-av" style="background:${color}" onclick="openModalPhoto('${e.id}')">
+          ${e.photoURL ? `<img src="${e.photoURL}" alt="${nom}" onerror="this.style.display='none'"/>` : ''}
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;color:white;${e.photoURL?'opacity:0':''};" id="av-initiales">${init}</div>
+          <div class="av-overlay">📷</div>
+        </div>
+        <div class="fiche-hero-info">
+          <div class="fiche-hero-name">${nom}</div>
+          <div class="fiche-hero-poste">${e.poste||'Poste non renseigné'}${e.departement?' · '+e.departement:''}</div>
+          <div class="fiche-hero-badges">
+            <span class="hbadge ${badgeCls}">${e.typeContrat||'CDI'}</span>
+            ${e.statut==='essai'?'<span class="hbadge" style="background:#e0f2fe;color:#075985">Période d\'essai</span>':''}
+            ${e.statut==='archive'?'<span class="hbadge" style="background:#f1f5f9;color:#64748b">Archivé</span>':''}
+            ${cddWarning}
+            ${noteMoy?`<span class="hbadge" style="background:#fef9c3;color:#92400e">⭐ ${noteMoy}/5</span>`:''}
+          </div>
+        </div>
+        <div class="fiche-hero-actions">
+          <button class="btn btn-outline btn-sm" onclick="openModalEdit('${e.id}')">✏️ Modifier</button>
+          <button class="btn btn-outline btn-sm" onclick="exportPDF('${e.id}')">📄 PDF</button>
+          <button class="btn btn-danger btn-sm" onclick="${e.statut==='archive'?`restoreEmploye('${e.id}')`:`openModalArchive('${e.id}')`}">${e.statut==='archive'?'♻️ Restaurer':'📦 Archiver'}</button>
+        </div>
+      </div>
+
+      <!-- KPIs RAPIDES -->
+      <div class="fiche-kpis">
+        <div class="fkpi">
+          <div class="fkpi-label">Salaire net</div>
+          <div class="fkpi-val">${e.salaireNet?fmtE(e.salaireNet):'—'}</div>
+          <div class="fkpi-sub">${e.frequence||'mensuel'}</div>
+        </div>
+        <div class="fkpi">
+          <div class="fkpi-label">Ancienneté</div>
+          <div class="fkpi-val">${anc}</div>
+          <div class="fkpi-sub">Depuis ${e.dateEntree||'—'}</div>
+        </div>
+        <div class="fkpi ${e.typeContrat==='CDD'&&e.dateFinContrat?'orange':''}">
+          <div class="fkpi-label">Fin de contrat</div>
+          <div class="fkpi-val">${e.dateFinContrat||'CDI'}</div>
+          <div class="fkpi-sub">${e.typeContrat||'—'}</div>
+        </div>
+        <div class="fkpi">
+          <div class="fkpi-label">Heures / sem.</div>
+          <div class="fkpi-val">${e.heuresHebdo||35}h</div>
+          <div class="fkpi-sub">Contrat</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <div class="tabs" id="fiche-tabs">
+      <button class="tab active" onclick="showTab('infos',this)">👤 Infos</button>
+      <button class="tab" onclick="showTab('contrat',this)">📋 Contrat</button>
+      <button class="tab" onclick="showTab('docs',this)">📎 Documents</button>
+      <button class="tab" onclick="showTab('evals',this)">⭐ Évaluations</button>
+    </div>
+
+    <!-- TAB INFOS -->
+    <div class="fiche-section" id="tab-infos">
+      <div class="sec-head"><div class="sec-title">👤 Informations personnelles</div><button class="btn btn-outline btn-xs" onclick="openModalEdit('${e.id}')">✏️</button></div>
+      <div class="sec-body">
+        <div class="info-grid">
+          ${infoField('Prénom',e.prenom)}
+          ${infoField('Nom',e.nom)}
+          ${infoField('Date de naissance',fmtDate(e.dateNaissance))}
+          ${infoField('Nationalité',e.nationalite)}
+          ${infoField('Téléphone',e.telephone)}
+          ${infoField('Email',e.email)}
+          ${infoField('Adresse',e.adresse,true)}
+          ${infoField('N° Sécurité sociale',e.nss ? maskNSS(e.nss) : null)}
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB CONTRAT -->
+    <div class="fiche-section" id="tab-contrat" style="display:none">
+      <div class="sec-head"><div class="sec-title">📋 Informations contractuelles</div><button class="btn btn-outline btn-xs" onclick="openModalEdit('${e.id}')">✏️</button></div>
+      <div class="sec-body">
+        <div class="info-grid">
+          ${infoField('Type de contrat',e.typeContrat)}
+          ${infoField('Statut',e.statut)}
+          ${infoField('Poste',e.poste)}
+          ${infoField('Département',e.departement)}
+          ${infoField('Date d\'entrée',fmtDate(e.dateEntree))}
+          ${infoField('Date de fin',fmtDate(e.dateFinContrat))}
+        </div>
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+          <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">💶 Rémunération</div>
+          <div class="info-grid">
+            ${infoField('Salaire brut',e.salaireBrut?fmtE(e.salaireBrut):null)}
+            ${infoField('Salaire net',e.salaireNet?fmtE(e.salaireNet):null)}
+            ${infoField('Fréquence',e.frequence||'mensuel')}
+            ${infoField('Heures hebdo',(e.heuresHebdo||35)+'h')}
+            ${infoField('IBAN',e.iban ? maskIBAN(e.iban) : null)}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB DOCUMENTS -->
+    <div class="fiche-section" id="tab-docs" style="display:none">
+      <div class="sec-head">
+        <div class="sec-title">📎 Documents RH</div>
+        <button class="btn btn-rh btn-xs" onclick="openModalDoc('${e.id}')">+ Ajouter</button>
+      </div>
+      <div class="sec-body" id="docs-body-${e.id}">
+        ${renderDocs(e)}
+      </div>
+    </div>
+
+    <!-- TAB ÉVALUATIONS -->
+    <div class="fiche-section" id="tab-evals" style="display:none">
+      <div class="sec-head">
+        <div class="sec-title">⭐ Évaluations <span style="font-size:10px;font-weight:400;color:var(--muted)">${evals.length} entrée${evals.length>1?'s':''}</span></div>
+        <button class="btn btn-rh btn-xs" onclick="openModalEval('${e.id}')">+ Évaluer</button>
+      </div>
+      <div class="sec-body" id="evals-body-${e.id}">
+        ${renderEvals(e)}
+      </div>
+    </div>
+
+  </div>`;
+}
+
+function showTab(tab, btn) {
+  ['infos','contrat','docs','evals'].forEach(t => {
+    const el = document.getElementById('tab-'+t);
+    if (el) el.style.display = t===tab ? '' : 'none';
+  });
+  document.querySelectorAll('#fiche-tabs .tab').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+
+function infoField(label, val, full=false) {
+  return `<div class="info-field${full?' style="grid-column:1/-1"':''}">
+    <div class="info-label">${label}</div>
+    <div class="info-val ${!val?'muted':''}">${val||'Non renseigné'}</div>
+  </div>`;
+}
+
+function renderDocs(e) {
+  const docs = e.documents||[];
+  if (docs.length===0) return `<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">
+    <div style="font-size:24px;margin-bottom:6px">📎</div>Aucun document.<br>
+    <button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="openModalDoc('${e.id}')">+ Ajouter un document</button></div>`;
+
+  const docIcons = {contrat:'📋',cni:'🪪',rib:'🏦',diplome:'🎓',medical:'🏥',autre:'📄'};
+  return docs.map((d,i)=>`
+    <div class="doc-item">
+      <div class="doc-ico">${docIcons[d.type]||'📄'}</div>
+      <div style="flex:1;min-width:0">
+        <div class="doc-name">${d.nom||'Document'}</div>
+        <div class="doc-date">${d.date?fmtDate(d.date):''} ${d.ref?'· '+d.ref:''}</div>
+      </div>
+      <div class="doc-actions">
+        <button class="btn btn-danger btn-xs" onclick="deleteDoc('${e.id}',${i})">🗑</button>
+      </div>
+    </div>`).join('');
+}
+
+function renderEvals(e) {
+  const evals = (e.evaluations||[]).slice().reverse();
+  if (evals.length===0) return `<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">
+    <div style="font-size:24px;margin-bottom:6px">⭐</div>Aucune évaluation.<br>
+    <button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="openModalEval('${e.id}')">+ Évaluer</button></div>`;
+
+  return evals.map((ev,i)=>`
+    <div class="eval-item">
+      <div class="eval-header">
+        <span class="eval-date">${ev.date?fmtDate(ev.date):'—'}</span>
+        <div class="eval-note">
+          ${renderStars(parseFloat(ev.note)||0)}
+          <span class="eval-note-val">${parseFloat(ev.note)||0}/5</span>
+        </div>
+      </div>
+      ${ev.commentaire?`<div class="eval-comment">"${ev.commentaire}"</div>`:''}
+      <div class="eval-by">Par ${ev.evaluateur||'—'}</div>
+    </div>`).join('');
+}
+
+function renderStars(note) {
+  let html = '<div class="stars">';
+  for (let i=1;i<=5;i++) {
+    html += `<span class="${i<=note?'star-on':'star-off'}">★</span>`;
+  }
+  return html+'</div>';
+}
+
+// ══════════════════════════
+// MODAL EMPLOYÉ
+// ══════════════════════════
+window.openModalNouvelEmploye = function() {
+  _editId = null;
+  _photoDataURL = null;
+  document.getElementById('modal-emp-title').textContent = '👤 Nouvel employé';
+  ['prenom','nom','naissance','nationalite','adresse','tel','email','nss',
+   'poste','dept','entree','fin','brut','net','heures','iban','note'].forEach(k => {
+    const el = document.getElementById('f-'+k);
+    if (el) el.value = '';
+  });
+  document.getElementById('f-contrat').value = 'CDI';
+  document.getElementById('f-statut').value = 'actif';
+  document.getElementById('f-freq').value = 'mensuel';
+  document.getElementById('f-couleur').value = COLORS[0];
+  document.getElementById('f-entree').value = new Date().toISOString().slice(0,10);
+  openModal('modalEmploye');
+};
+
+window.openModalEdit = function(id) {
+  const e = _employes[id];
+  if (!e) return;
+  _editId = id;
+  _photoDataURL = null;
+  document.getElementById('modal-emp-title').textContent = `✏️ Modifier — ${e.prenom||''} ${e.nom||''}`;
+  const set = (fid, val) => { const el=document.getElementById('f-'+fid); if(el) el.value=val||''; };
+  set('prenom',e.prenom); set('nom',e.nom); set('naissance',e.dateNaissance);
+  set('nationalite',e.nationalite); set('adresse',e.adresse); set('tel',e.telephone);
+  set('email',e.email); set('nss',e.nss); set('poste',e.poste); set('dept',e.departement);
+  set('entree',e.dateEntree); set('fin',e.dateFinContrat);
+  set('brut',e.salaireBrut); set('net',e.salaireNet); set('heures',e.heuresHebdo||35);
+  set('iban',e.iban); set('note',e.noteMoyenne||'');
+  document.getElementById('f-contrat').value = e.typeContrat||'CDI';
+  document.getElementById('f-statut').value = e.statut||'actif';
+  document.getElementById('f-freq').value = e.frequence||'mensuel';
+  document.getElementById('f-couleur').value = e.couleur||COLORS[0];
+  openModal('modalEmploye');
+};
+
+window.saveEmploye = async function() {
+  const prenom = document.getElementById('f-prenom').value.trim();
+  const nom    = document.getElementById('f-nom').value.trim();
+  if (!prenom||!nom) { showToast('Prénom et nom obligatoires','err'); return; }
+
+  const data = {
+    prenom, nom,
+    dateNaissance:   document.getElementById('f-naissance').value||null,
+    nationalite:     document.getElementById('f-nationalite').value.trim()||null,
+    adresse:         document.getElementById('f-adresse').value.trim()||null,
+    telephone:       document.getElementById('f-tel').value.trim()||null,
+    email:           document.getElementById('f-email').value.trim()||null,
+    nss:             document.getElementById('f-nss').value.trim()||null,
+    typeContrat:     document.getElementById('f-contrat').value,
+    statut:          document.getElementById('f-statut').value,
+    poste:           document.getElementById('f-poste').value.trim()||null,
+    departement:     document.getElementById('f-dept').value.trim()||null,
+    dateEntree:      document.getElementById('f-entree').value||null,
+    dateFinContrat:  document.getElementById('f-fin').value||null,
+    salaireBrut:     parseFloat(document.getElementById('f-brut').value.replace(',','.'))||null,
+    salaireNet:      parseFloat(document.getElementById('f-net').value.replace(',','.'))||null,
+    frequence:       document.getElementById('f-freq').value,
+    heuresHebdo:     parseFloat(document.getElementById('f-heures').value)||35,
+    iban:            document.getElementById('f-iban').value.trim()||null,
+    couleur:         document.getElementById('f-couleur').value,
+    updatedAt:       Date.now()
+  };
+
+  const id = _editId || ('emp_'+Date.now());
+  if (!_editId) data.createdAt = Date.now();
+
+  // Conserver les données existantes (docs, evals, photo)
+  if (_editId && _employes[_editId]) {
+    data.documents  = _employes[_editId].documents  || [];
+    data.evaluations= _employes[_editId].evaluations|| [];
+    data.photoURL   = _employes[_editId].photoURL   || null;
+    data.noteMoyenne= _employes[_editId].noteMoyenne|| null;
+  }
+
+  try {
+    await window._setDoc(window._doc(window._db,'rh',window._uid,'employes',id), data);
+    _employes[id] = { id, ...data };
+    closeModal('modalEmploye');
+    buildDeptFilter();
+    renderList();
+    openFiche(id);
+    showToast(_editId?'✅ Employé modifié':'✅ Employé créé','ok');
+  } catch(e) {
+    showToast('Erreur : '+e.message,'err');
+  }
+};
+
+// ══════════════════════════
+// PHOTO
+// ══════════════════════════
+window.openModalPhoto = function(id) {
+  _editId = id;
+  const e = _employes[id];
+  const preview = document.getElementById('photo-preview');
+  if (e?.photoURL) {
+    preview.innerHTML = `<img src="${e.photoURL}" style="width:100%;height:100%;object-fit:cover;border-radius:20px"/>`;
+  } else {
+    const nom = `${e?.prenom||''} ${e?.nom||''}`.trim();
+    const init = nom.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    preview.innerHTML = `<div style="font-size:32px;color:${e?.couleur||COLORS[0]}">${init}</div>`;
+  }
+  openModal('modalPhoto');
+};
+
+window.previewPhoto = function(input) {
+  if (!input.files[0]) return;
+  _photoFile = input.files[0];
+  const reader = new FileReader();
+  reader.onload = e => {
+    _photoDataURL = e.target.result;
+    document.getElementById('photo-preview').innerHTML =
+      `<img src="${_photoDataURL}" style="width:100%;height:100%;object-fit:cover;border-radius:20px"/>`;
+  };
+  reader.readAsDataURL(input.files[0]);
+};
+
+window.savePhoto = async function() {
+  if (!_editId || !_photoDataURL) { closeModal('modalPhoto'); return; }
+  try {
+    // Stocker en base64 directement (attention taille) — pour production : Firebase Storage
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',_editId), { photoURL: _photoDataURL });
+    _employes[_editId].photoURL = _photoDataURL;
+    closeModal('modalPhoto');
+    renderList();
+    openFiche(_editId);
+    showToast('✅ Photo enregistrée','ok');
+  } catch(e) { showToast('Erreur photo','err'); }
+};
+
+window.removePhoto = async function() {
+  if (!_editId) return;
+  try {
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',_editId), { photoURL: null });
+    _employes[_editId].photoURL = null;
+    closeModal('modalPhoto');
+    renderList();
+    openFiche(_editId);
+    showToast('Photo supprimée','ok');
+  } catch(e) { showToast('Erreur','err'); }
+};
+
+// ══════════════════════════
+// DOCUMENTS
+// ══════════════════════════
+let _docEmpId = null;
+window.openModalDoc = function(id) { _docEmpId=id; openModal('modalDoc'); };
+
+window.saveDoc = async function() {
+  const nom = document.getElementById('doc-nom').value.trim();
+  if (!nom||!_docEmpId) return;
+  const e = _employes[_docEmpId];
+  if (!e) return;
+  const doc = {
+    nom, type: document.getElementById('doc-type').value,
+    date: document.getElementById('doc-date').value||null,
+    ref:  document.getElementById('doc-ref').value.trim()||null,
+    addedAt: Date.now()
+  };
+  const docs = [...(e.documents||[]), doc];
+  try {
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',_docEmpId),{documents:docs});
+    _employes[_docEmpId].documents = docs;
+    closeModal('modalDoc');
+    document.getElementById('doc-nom').value='';
+    document.getElementById('doc-ref').value='';
+    // Rafraîchir docs tab si visible
+    const body = document.getElementById(`docs-body-${_docEmpId}`);
+    if (body) body.innerHTML = renderDocs(_employes[_docEmpId]);
+    showToast('✅ Document ajouté','ok');
+  } catch(err) { showToast('Erreur','err'); }
+};
+
+window.deleteDoc = async function(empId, idx) {
+  if (!confirm('Supprimer ce document ?')) return;
+  const docs = [...(_employes[empId].documents||[])];
+  docs.splice(idx,1);
+  try {
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',empId),{documents:docs});
+    _employes[empId].documents = docs;
+    const body = document.getElementById(`docs-body-${empId}`);
+    if (body) body.innerHTML = renderDocs(_employes[empId]);
+    showToast('Document supprimé','ok');
+  } catch(e) { showToast('Erreur','err'); }
+};
+
+// ══════════════════════════
+// ÉVALUATIONS
+// ══════════════════════════
+let _evalEmpId = null;
+window.openModalEval = function(id) {
+  _evalEmpId = id;
+  document.getElementById('eval-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('eval-note').value = '';
+  document.getElementById('eval-comment').value = '';
+  document.getElementById('eval-by').value = '';
+  document.getElementById('eval-stars-preview').innerHTML = '☆☆☆☆☆';
+  openModal('modalEval');
+};
+
+// Live preview étoiles
+document.addEventListener('input', e => {
+  if (e.target.id==='eval-note') {
+    const n = Math.min(5,Math.max(0,parseFloat(e.target.value)||0));
+    const preview = document.getElementById('eval-stars-preview');
+    if (preview) {
+      let stars='';
+      for (let i=1;i<=5;i++) stars+=`<span style="color:${i<=n?'#f59e0b':'#e2e8f0'}">★</span>`;
+      preview.innerHTML=stars;
+    }
+  }
+});
+
+window.saveEval = async function() {
+  if (!_evalEmpId) return;
+  const note = parseFloat(document.getElementById('eval-note').value)||0;
+  if (!note) { showToast('Note obligatoire','err'); return; }
+  const ev = {
+    note, date: document.getElementById('eval-date').value,
+    commentaire: document.getElementById('eval-comment').value.trim()||null,
+    evaluateur:  document.getElementById('eval-by').value.trim()||null,
+    createdAt: Date.now()
+  };
+  const e = _employes[_evalEmpId];
+  const evals = [...(e.evaluations||[]), ev];
+  const noteMoy = (evals.reduce((s,x)=>s+(parseFloat(x.note)||0),0)/evals.length).toFixed(1);
+  try {
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',_evalEmpId),{evaluations:evals,noteMoyenne:parseFloat(noteMoy)});
+    _employes[_evalEmpId].evaluations = evals;
+    _employes[_evalEmpId].noteMoyenne = parseFloat(noteMoy);
+    closeModal('modalEval');
+    const body = document.getElementById(`evals-body-${_evalEmpId}`);
+    if (body) body.innerHTML = renderEvals(_employes[_evalEmpId]);
+    openFiche(_evalEmpId);
+    showToast(`✅ Évaluation enregistrée · Moy. ${noteMoy}/5`,'ok');
+  } catch(err) { showToast('Erreur','err'); }
+};
+
+// ══════════════════════════
+// ARCHIVAGE
+// ══════════════════════════
+let _archiveId = null;
+window.openModalArchive = function(id) {
+  _archiveId = id;
+  document.getElementById('arch-date').value = new Date().toISOString().slice(0,10);
+  openModal('modalArchive');
+};
+
+window.confirmArchive = async function() {
+  if (!_archiveId) return;
+  const motif = document.getElementById('arch-motif').value;
+  const date  = document.getElementById('arch-date').value;
+  try {
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',_archiveId),
+      { statut:'archive', motifDepart:motif, dateSortie:date, archivedAt:Date.now() });
+    _employes[_archiveId].statut = 'archive';
+    _employes[_archiveId].motifDepart = motif;
+    closeModal('modalArchive');
+    _currentId = null;
+    renderList();
+    document.getElementById('right-panel').innerHTML = `<div class="empty-fiche"><div class="icon">📦</div><h3 style="font-size:15px;font-weight:700">Employé archivé</h3></div>`;
+    showToast('Employé archivé','ok');
+  } catch(e) { showToast('Erreur','err'); }
+};
+
+window.restoreEmploye = async function(id) {
+  if (!confirm('Restaurer cet employé ?')) return;
+  try {
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',id),{statut:'actif',archivedAt:null});
+    _employes[id].statut = 'actif';
+    renderList();
+    openFiche(id);
+    showToast('✅ Employé restauré','ok');
+  } catch(e) { showToast('Erreur','err'); }
+};
+
+// ══════════════════════════
+// EXPORT PDF
+// ══════════════════════════
+window.exportPDF = function(id) {
+  const e = _employes[id];
+  if (!e) return;
+  const nom = `${e.prenom||''} ${e.nom||''}`.trim();
+  showToast('📄 Génération PDF…');
+
+  // Génération HTML → window.print()
+  const evals = e.evaluations||[];
+  const noteMoy = evals.length>0 ? (evals.reduce((s,ev)=>s+(parseFloat(ev.note)||0),0)/evals.length).toFixed(1) : null;
+  const docs = e.documents||[];
+  const color = e.couleur||COLORS[0];
+  const init  = nom.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+  const anc   = e.dateEntree ? calcAnciennete(e.dateEntree) : '—';
+
+  const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/>
+  <title>Fiche RH — ${nom}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,sans-serif;font-size:12px;color:#1a1f36;background:white;padding:32px;}
+    h1{font-size:22px;font-weight:700;margin-bottom:4px;}
+    h2{font-size:13px;font-weight:700;margin:18px 0 8px;padding-bottom:4px;border-bottom:2px solid #d1fae5;color:#059669;}
+    .hero{display:flex;align-items:center;gap:18px;margin-bottom:22px;padding-bottom:18px;border-bottom:3px solid #d1fae5;}
+    .av{width:64px;height:64px;border-radius:14px;background:${color};display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:white;flex-shrink:0;}
+    .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;}
+    .kpi{padding:10px 12px;background:#f0fdf4;border:1px solid #d1fae5;border-radius:8px;}
+    .kpi-lbl{font-size:9px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;}
+    .kpi-v{font-size:14px;font-weight:800;}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px 24px;}
+    .field{margin-bottom:8px;}
+    .field-lbl{font-size:9px;font-weight:700;color:#6b7280;text-transform:uppercase;}
+    .field-v{font-size:12px;font-weight:600;}
+    .eval{padding:10px;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:6px;}
+    .doc-row{display:flex;gap:8px;align-items:center;padding:7px;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:5px;}
+    .badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:#d1fae5;color:#065f46;}
+    .footer{margin-top:24px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:10px;color:#6b7280;text-align:center;}
+    @media print{body{padding:16px;}}
+  </style></head><body>
+  <div class="hero">
+    <div class="av">${e.photoURL?`<img src="${e.photoURL}" style="width:64px;height:64px;border-radius:14px;object-fit:cover"/>`:init}</div>
+    <div>
+      <h1>${nom}</h1>
+      <div style="font-size:13px;color:#6b7280;margin-bottom:6px">${e.poste||'—'}${e.departement?' · '+e.departement:''}</div>
+      <span class="badge">${e.typeContrat||'CDI'}</span>
+      ${noteMoy?`<span class="badge" style="background:#fef3c7;color:#92400e;margin-left:6px">⭐ ${noteMoy}/5</span>`:''}
+    </div>
+  </div>
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi-lbl">Salaire net</div><div class="kpi-v">${e.salaireNet?fmtE(e.salaireNet):'—'}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Ancienneté</div><div class="kpi-v">${anc}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Date entrée</div><div class="kpi-v">${fmtDate(e.dateEntree)||'—'}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Heures/sem.</div><div class="kpi-v">${e.heuresHebdo||35}h</div></div>
+  </div>
+  <h2>👤 Informations personnelles</h2>
+  <div class="grid2">
+    ${pdfField('Date de naissance',fmtDate(e.dateNaissance))}
+    ${pdfField('Nationalité',e.nationalite)}
+    ${pdfField('Téléphone',e.telephone)}
+    ${pdfField('Email',e.email)}
+    ${pdfField('Adresse',e.adresse)}
+    ${pdfField('N° SS',e.nss?maskNSS(e.nss):null)}
+  </div>
+  <h2>📋 Contrat & Rémunération</h2>
+  <div class="grid2">
+    ${pdfField('Type',e.typeContrat)} ${pdfField('Statut',e.statut)}
+    ${pdfField('Date entrée',fmtDate(e.dateEntree))} ${pdfField('Fin contrat',fmtDate(e.dateFinContrat)||'—')}
+    ${pdfField('Salaire brut',e.salaireBrut?fmtE(e.salaireBrut):null)}
+    ${pdfField('Salaire net',e.salaireNet?fmtE(e.salaireNet):null)}
+    ${pdfField('Fréquence',e.frequence||'mensuel')} ${pdfField('Heures/sem.',(e.heuresHebdo||35)+'h')}
+  </div>
+  ${docs.length>0?`<h2>📎 Documents RH (${docs.length})</h2>${docs.map(d=>`<div class="doc-row"><b>${d.nom}</b><span style="color:#6b7280;font-size:11px">${d.date?fmtDate(d.date):''}</span></div>`).join('')}`:''}
+  ${evals.length>0?`<h2>⭐ Évaluations (${evals.length})</h2>${evals.map(ev=>`<div class="eval"><b>${parseFloat(ev.note)||0}/5</b> · ${ev.date?fmtDate(ev.date):''} · Par ${ev.evaluateur||'—'}<br>${ev.commentaire?`<i>${ev.commentaire}</i>`:''}</div>`).join('')}`:''}
+  <div class="footer">Document généré le ${new Date().toLocaleDateString('fr-FR')} · ALTEORE — Confidentiel RH</div>
+  </body></html>`;
+
+  const w = window.open('','_blank','width=800,height=900');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(()=>{w.print();},600);
+};
+
+function pdfField(label, val) {
+  return `<div class="field"><div class="field-lbl">${label}</div><div class="field-v">${val||'—'}</div></div>`;
+}
+
+// ══════════════════════════
+// UTILITAIRES
+// ══════════════════════════
+function calcAnciennete(dateEntree) {
+  const diff = Date.now() - new Date(dateEntree).getTime();
+  const ans  = Math.floor(diff / (365.25*86400000));
+  const mois = Math.floor((diff % (365.25*86400000)) / (30.44*86400000));
+  if (ans>0) return `${ans} an${ans>1?'s':''} ${mois>0?mois+'m':''}`.trim();
+  if (mois>0) return `${mois} mois`;
+  return 'Récent';
+}
+function fmtDate(d) {
+  if (!d) return null;
+  try { return new Date(d).toLocaleDateString('fr-FR'); } catch(e) { return d; }
+}
+function fmtE(n) {
+  return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:0,maximumFractionDigits:0})+' €';
+}
+function maskNSS(nss) {
+  if (!nss||nss.length<8) return nss;
+  return nss.slice(0,5)+'•••••'+nss.slice(-2);
+}
+function maskIBAN(iban) {
+  if (!iban||iban.length<8) return iban;
+  return iban.slice(0,4)+' •••• •••• •••• '+iban.slice(-4);
+}
+function showToast(msg, type='') {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className='toast show '+(type||'');
+  setTimeout(()=>t.className='toast',3200);
+}
+function openModal(id) { document.getElementById(id).classList.add('show'); }
+window.closeModal = function(id) { document.getElementById(id).classList.remove('show'); };
+
+// Fermer modals au clic overlay
+document.querySelectorAll('.modal-overlay').forEach(o=>{
+  o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('show'); });
+});
+
+window.openFiche = openFiche;
+window.showTab = showTab;
+window.toggleArchived = toggleArchived;
+window.openModalPhoto = openModalPhoto;
+</script>
+
+<script src="nav.js"></script>
+</body>
+</html>
