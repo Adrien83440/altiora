@@ -157,7 +157,7 @@
     /* CAL */
     .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;}
     .cal-hdr{font-size:9.5px;font-weight:700;color:var(--muted);padding:2px 0;}
-    .cal-day{aspect-ratio:1;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;} .cal-day.work{font-weight:600;} .cal-day.off{opacity:0.4;}
+    .cal-day{aspect-ratio:1;border-radius:5px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:11px;font-weight:500;line-height:1.2;} .cal-day.work{font-weight:700;} .cal-day.off{opacity:0.4;} .cal-day.work-generic{font-weight:500;}
     .cal-day.today{outline:2px solid var(--g3);font-weight:800;}
     .cal-day.abs{color:white;font-weight:700;}
     .cal-day.abs-pending{opacity:.6;}
@@ -393,6 +393,7 @@ var _selType='';
 var _demFilter='all';
 var _calMonth=new Date();
 var _year=new Date().getFullYear();
+var _planningCache={}; // {YYYY-MM-DD: [{type,deb,fin,plages,note}]}
 
 /* ── DÉMARRAGE ── */
 window.startApp = function() {
@@ -415,6 +416,7 @@ async function loadEmploye(pid) {
       _params = ps.exists() ? ps.data() : {};
     } catch(e) { _params = {}; }
     await loadDemandes();
+    await loadPlanningMonth(_calMonth.getFullYear(), _calMonth.getMonth());
     calcSoldes();
     renderPage();
     var lw = document.getElementById('loading-wrap');
@@ -570,28 +572,64 @@ function renderDemandes() {
   }).join('');
 }
 
+/* ── CHARGEMENT PLANNING RÉEL depuis rh/{uid}/plan_{wk}/{date}_{empId} ── */
+async function loadPlanningMonth(y, m) {
+  _planningCache = {};
+  if (!_uid || !_empId) return;
+
+  // Collecter toutes les clés de semaine du mois
+  var weekKeys = {};
+  var nb = new Date(y, m+1, 0).getDate();
+  for (var d = 1; d <= nb; d++) {
+    var dt = new Date(y, m, d);
+    var mon = new Date(dt);
+    var day = mon.getDay(), diff = (day === 0) ? -6 : 1 - day;
+    mon.setDate(mon.getDate() + diff);
+    mon.setHours(0,0,0,0);
+    var wk = mon.toISOString().slice(0,10).replace(/-/g,'');
+    weekKeys[wk] = true;
+  }
+
+  // Charger chaque semaine
+  for (var wk in weekKeys) {
+    try {
+      var snap = await window._getDocs('rh', _uid, 'plan_'+wk);
+      snap.forEach(function(doc) {
+        // clé doc = YYYY-MM-DD_empId
+        if (doc.id.endsWith('_'+_empId)) {
+          var dateStr = doc.id.replace('_'+_empId, '');
+          var data = doc.data();
+          _planningCache[dateStr] = (data.items || []).filter(function(it) {
+            return it.type === 'travail' || it.type === 'formation' || it.type === 'astreinte';
+          });
+        }
+      });
+    } catch(e) { /* semaine sans données */ }
+  }
+}
+
 function renderCal() {
   var y = _calMonth.getFullYear(), m = _calMonth.getMonth();
   var nb = new Date(y,m+1,0).getDate();
   var firstDow = (new Date(y,m,1).getDay()+6)%7;
   document.getElementById('cal-title').textContent = new Date(y,m,1).toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
 
-  // Planning de travail depuis _params.horaires
+  // Fallback sur les horaires généraux si pas de planning saisi
   var DOW_KEY = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
   var horaires = (_params && _params.horaires) || {
-    lundi:{actif:true}, mardi:{actif:true}, mercredi:{actif:true},
-    jeudi:{actif:true}, vendredi:{actif:true}, samedi:{actif:false}, dimanche:{actif:false}
+    lundi:{actif:true},mardi:{actif:true},mercredi:{actif:true},
+    jeudi:{actif:true},vendredi:{actif:true},samedi:{actif:false},dimanche:{actif:false}
   };
 
-  // Map des absences
-  var map = {};
+  // Map des absences approuvées/en attente
+  var absMap = {};
   _demandes.filter(function(d) { return d.statut==='approved'||d.statut==='pending'; }).forEach(function(d) {
     if (!d.dateDebut) return;
     var cur = new Date(d.dateDebut+'T12:00:00');
     var fin = new Date((d.dateFin||d.dateDebut)+'T12:00:00');
     while (cur <= fin) {
       if (cur.getFullYear()===y && cur.getMonth()===m)
-        map[cur.getDate()] = {type:d.type, pending:d.statut==='pending'};
+        absMap[cur.getDate()] = {type:d.type, pending:d.statut==='pending'};
       cur.setDate(cur.getDate()+1);
     }
   });
@@ -602,48 +640,105 @@ function renderCal() {
   hdrs.forEach(function(h) { calHtml += '<div class="cal-hdr">'+h+'</div>'; });
   for (var i=0; i<firstDow; i++) calHtml += '<div></div>';
 
+  var usedTypes = {};
+
   for (var d=1; d<=nb; d++) {
-    var dow = (firstDow+d-1)%7;
-    var jourKey = DOW_KEY[dow];
-    var travaille = horaires[jourKey] && horaires[jourKey].actif;
-    var abs = map[d];
-    var isToday = d===today.getDate() && m===today.getMonth() && y===today.getFullYear();
-    var bg, col, ttl='', cls='cal-day';
+    var dow    = (firstDow+d-1)%7;
+    var jourKey= DOW_KEY[dow];
+    var dateStr= y+'-'+String(m+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+    var items  = _planningCache[dateStr] || null; // créneaux réels
+    var hasPlan= items && items.length > 0;
+    var abs    = absMap[d];
+    var isToday= d===today.getDate() && m===today.getMonth() && y===today.getFullYear();
+
+    var bg='', col='', ttl='', cls='cal-day', extra='';
     if (isToday) cls += ' today';
+
     if (abs) {
-      bg  = abs.pending ? (COLORS[abs.type]+'bb') : COLORS[abs.type];
+      // Absence prioritaire
+      bg  = abs.pending ? (COLORS[abs.type]+'cc') : COLORS[abs.type];
       col = 'white';
       ttl = LABELS[abs.type]+(abs.pending?' (en attente)':'');
       cls += ' abs'+(abs.pending?' abs-pending':'');
-    } else if (travaille) {
-      bg  = 'rgba(5,150,105,0.10)';
-      col = '#059669';
-      var h = horaires[jourKey];
-      ttl = 'Jour travaillé'+(h.deb&&h.fin?' · '+h.deb+' – '+h.fin:'');
+      usedTypes[abs.type] = true;
+
+      // Afficher quand même l'horaire en petit si créneau existait
+      if (hasPlan) {
+        var plagesStr = getPlagesStr(items[0]);
+        extra = '<div style="font-size:7px;opacity:0.7;line-height:1;margin-top:2px">'+plagesStr+'</div>';
+      }
+    } else if (hasPlan) {
+      // Vrai créneau planifié
+      var totalH = items.reduce(function(s,it) { return s + itemH(it); }, 0);
+      var plagesStr = getPlagesStr(items[0]);
+      bg  = 'rgba(5,150,105,0.12)';
+      col = '#047857';
       cls += ' work';
+      ttl = plagesStr + ' (' + totalH.toFixed(1) + 'h)';
+      if (items.length > 1) ttl += ' + '+( items.length-1)+' autre(s)';
+      // Afficher horaires dans la cellule
+      extra = '<div style="font-size:7.5px;font-weight:700;line-height:1.2;margin-top:2px;opacity:0.85">'+plagesStr+'</div>';
+      usedTypes['__travail'] = true;
+    } else if (horaires[jourKey] && horaires[jourKey].actif) {
+      // Fallback : horaire général (pas de créneau saisi cette semaine)
+      bg  = 'rgba(5,150,105,0.06)';
+      col = '#6ee7b7';
+      cls += ' work work-generic';
+      var h = horaires[jourKey];
+      ttl = 'Horaire habituel'+(h.deb&&h.fin?' · '+h.deb+' – '+h.fin:'');
     } else {
       bg  = 'transparent';
       col = '#d1d5db';
       cls += ' off';
     }
+
     var style = 'background:'+bg+';color:'+col+';';
     if (isToday) style += 'outline:2px solid #059669;outline-offset:-2px;';
-    calHtml += '<div class="'+cls+'" style="'+style+'" title="'+ttl+'">'+d+'</div>';
+    calHtml += '<div class="'+cls+'" style="'+style+'" title="'+ttl+'">'+d+extra+'</div>';
   }
   document.getElementById('cal-grid').innerHTML = calHtml;
 
-  var usedTypes = {};
-  _demandes.filter(function(d) {
-    return d.dateDebut && new Date(d.dateDebut+'T12:00:00').getMonth()===m && new Date(d.dateDebut+'T12:00:00').getFullYear()===y;
-  }).forEach(function(d) { usedTypes[d.type]=true; });
-  var legHtml = '<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)"><div style="width:9px;height:9px;border-radius:2px;background:rgba(5,150,105,0.3)"></div>Travaillé</div>';
-  legHtml += Object.keys(usedTypes).map(function(t) {
+  // Légende
+  var legHtml = '';
+  if (Object.keys(_planningCache).length > 0) {
+    legHtml += '<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)"><div style="width:9px;height:9px;border-radius:2px;background:rgba(5,150,105,0.4)"></div>Planifié</div>';
+  } else {
+    legHtml += '<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)"><div style="width:9px;height:9px;border-radius:2px;background:rgba(5,150,105,0.15)"></div>Horaire habituel</div>';
+  }
+  legHtml += Object.keys(usedTypes).filter(function(t){ return t!=='__travail'; }).map(function(t) {
     return '<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)"><div style="width:9px;height:9px;border-radius:2px;background:'+(COLORS[t]||'#6b7280')+'"></div>'+(LABELS[t]||t)+'</div>';
   }).join('');
   document.getElementById('cal-legend').innerHTML = legHtml;
 }
-function prevM() { _calMonth.setMonth(_calMonth.getMonth()-1); renderCal(); }
-function nextM() { _calMonth.setMonth(_calMonth.getMonth()+1); renderCal(); }
+
+function getPlagesStr(it) {
+  if (!it) return '';
+  if (it.plages && it.plages.length > 0) {
+    return it.plages.map(function(p){ return p.deb+'–'+p.fin; }).join(' | ');
+  }
+  return (it.deb||'') + (it.fin ? '–'+it.fin : '');
+}
+
+function itemH(it) {
+  if (it.plages && it.plages.length > 0) {
+    return it.plages.reduce(function(s,p) {
+      if (!p.deb||!p.fin) return s;
+      var a=p.deb.split(':').map(Number), b=p.fin.split(':').map(Number);
+      return s + Math.max(0, ((b[0]*60+b[1])-(a[0]*60+a[1]))/60);
+    }, 0);
+  }
+  if (!it.deb||!it.fin) return 0;
+  var a=it.deb.split(':').map(Number), b=it.fin.split(':').map(Number);
+  return Math.max(0, ((b[0]*60+b[1])-(a[0]*60+a[1]))/60);
+}
+function prevM() {
+  _calMonth.setMonth(_calMonth.getMonth()-1);
+  loadPlanningMonth(_calMonth.getFullYear(), _calMonth.getMonth()).then(renderCal);
+}
+function nextM() {
+  _calMonth.setMonth(_calMonth.getMonth()+1);
+  loadPlanningMonth(_calMonth.getFullYear(), _calMonth.getMonth()).then(renderCal);
+}
 window.prevM=prevM; window.nextM=nextM;
 
 function changeYear() {
