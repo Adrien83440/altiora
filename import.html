@@ -324,9 +324,10 @@ input[type=file]{display:none}
             <div style="margin-bottom:6px">
               <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">📊 Pilotage mensuel</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-                <button class="btn btn-xs" id="dest-pilotage_ca" onclick="setDest('pilotage_ca',this)" style="border:2px solid var(--blue);background:#eff6ff;color:var(--blue);font-weight:700">📈 Pilotage — CA journalier</button>
-                <button class="btn btn-xs" id="dest-pilotage_chargesFixe" onclick="setDest('pilotage_chargesFixe',this)" style="border:2px solid var(--border)">📋 Pilotage — Charges fixes</button>
-                <button class="btn btn-xs" id="dest-pilotage_chargesVar" onclick="setDest('pilotage_chargesVar',this)" style="border:2px solid var(--border)">📋 Pilotage — Charges variables</button>
+                <button class="btn btn-xs" id="dest-pilotage_complet" onclick="setDest('pilotage_complet',this)" style="border:2px solid #7c3aed;background:#f5f3ff;color:#7c3aed;font-weight:700">🗂️ Tableau Pilotage complet</button>
+                <button class="btn btn-xs" id="dest-pilotage_ca" onclick="setDest('pilotage_ca',this)" style="border:2px solid var(--border)">📈 CA journalier</button>
+                <button class="btn btn-xs" id="dest-pilotage_chargesFixe" onclick="setDest('pilotage_chargesFixe',this)" style="border:2px solid var(--border)">📋 Charges fixes</button>
+                <button class="btn btn-xs" id="dest-pilotage_chargesVar" onclick="setDest('pilotage_chargesVar',this)" style="border:2px solid var(--border)">📋 Charges variables</button>
               </div>
               <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Autres modules</div>
             </div>
@@ -380,6 +381,7 @@ input[type=file]{display:none}
         </div>
       </div>
     </div>
+    <div class="panel" id="pilotage-complet-panel"></div>
     <div class="panel" id="step4">
       <div class="card" style="text-align:center;padding:40px 20px">
         <div style="font-size:56px;margin-bottom:16px">&#127881;</div>
@@ -482,7 +484,7 @@ const DEST_FIELDS = {
 };
 
 // ── ÉTAT GLOBAL ──
-let _wb=null, _headers=[], _rows=[], _mapping={}, _ignored=new Set(), _dest='ca', _fmt='xlsx', _currentStep=1, _gsRawData=null, _gsLastUrl=null, _gsLastGid=null, _gsLastName=null;
+let _wb=null, _headers=[], _rows=[], _mapping={}, _ignored=new Set(), _dest='ca', _fmt='xlsx', _currentStep=1, _gsRawData=null, _gsLastUrl=null, _gsLastGid=null, _gsLastName=null, _allRawRows=null;
 
 // ── NAVIGATION SIDEBAR ──
 function toggleNav(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('on')}
@@ -498,6 +500,12 @@ function uid(){return Date.now()+'_'+Math.random().toString(36).slice(2,8)}
 // ── ÉTAPES ──
 function goStep(n){
   if(n===2&&!_rows.length){showToast("Chargez d'abord un fichier",'err');return}
+  // Tableau Pilotage complet : import automatique sans mapping
+  if(n===2 && _dest==='pilotage_complet'){
+    if(!_wb){showToast('Format XLSX requis pour ce mode','err');return;}
+    showPilotageCompletPreview();
+    return;
+  }
   if(n===3){buildVerify();if(!validateMapping())return}
   _currentStep=n;
   for(let i=1;i<=4;i++){
@@ -576,9 +584,11 @@ async function applyHeaderRow(){
   if(btn){btn.textContent='⏳';btn.disabled=true;}
   try{
     if(_wb){
+      // Fichier XLSX local
       const idx = parseInt(document.getElementById('sheetSelect')?.value)||0;
       parseSheet(idx, '');
     } else if(_gsLastUrl) {
+      // Google Sheets : re-fetch avec headerRow
       const headerRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
       const r = await fetch('/api/fetch-sheet', {
         method:'POST',
@@ -587,11 +597,25 @@ async function applyHeaderRow(){
       });
       const data = await r.json();
       if(!r.ok||!data.success) throw new Error(data.error||'Erreur');
-      // Appliquer le filtre de colonnes
       const filtered = applyColFilter(data.headers, data.rows);
       _headers = filtered.headers;
       _rows = filtered.rows;
       showPreview('Google Sheets — ' + (_gsLastName||''));
+    } else if(_allRawRows && _allRawRows.length) {
+      // Fallback : utiliser les lignes brutes déjà en mémoire
+      const headerRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
+      const headerIdx = headerRow - 1;
+      const rawH = _allRawRows[headerIdx] || _allRawRows[0];
+      const allHeaders = rawH.map(h=>String(h||'').trim());
+      const allRows = _allRawRows.slice(headerIdx+1)
+        .filter(r=>r.some(c=>c!==''&&c!==null&&c!==undefined))
+        .map(r=>{const obj={};allHeaders.forEach((h,i)=>obj[h]=r[i]===undefined?'':r[i]);return obj;});
+      const filtered = applyColFilter(allHeaders, allRows);
+      _headers = filtered.headers;
+      _rows = filtered.rows;
+      showPreview('Google Sheets');
+    } else {
+      showToast('Rechargez le fichier pour appliquer les options','warning');
     }
   }catch(e){ showToast('Erreur : '+e.message,'err'); }
   finally{
@@ -799,6 +823,8 @@ async function loadSelectedTab() {
         _headers = data.headers;
         _rows = data.rows;
       }
+      // Mémoriser pour re-fetch via applyHeaderRow
+      _gsLastUrl = url; _gsLastGid = gid; _gsLastName = name;
       showPreview('Google Sheets — ' + name);
       if (data.aiAnalysis) applyAiAnalysis(data.aiAnalysis);
     } catch (e) {
@@ -1193,6 +1219,9 @@ function showPreview(filename){
     <tbody>${Array.from({length:maxRows},(_,i)=>`<tr>${_headers.map(h=>`<td>${_rows[i][h]??''}</td>`).join('')}</tr>`).join('')}</tbody>`;
   document.getElementById('previewCard').classList.remove('hidden');
   document.getElementById('parseControls').classList.remove('hidden');
+  // S'assurer que le bouton Appliquer est actif
+  const applyBtn = document.getElementById('applyHeaderBtn');
+  if(applyBtn){applyBtn.disabled=false;applyBtn.textContent='↺ Appliquer';}
   document.getElementById('uploadCard').classList.add('hidden');
   showToast(`✅ ${_rows.length} lignes chargées !`,'ok');
 }
@@ -1207,7 +1236,7 @@ function resetFile(){
 // ── DESTINATION ──
 function setDest(d,btn){
   _dest=d;
-  const allDests=['pilotage_ca','pilotage_chargesFixe','pilotage_chargesVar','ca','charges','dettes','stock','mouvements','fidelite','marges'];
+  const allDests=['pilotage_complet','pilotage_ca','pilotage_chargesFixe','pilotage_chargesVar','ca','charges','dettes','stock','mouvements','fidelite','marges'];
   allDests.forEach(k=>{
     const b=document.getElementById('dest-'+k);
     if(b){b.style.borderColor=k===d?'var(--blue)':'var(--border)';b.style.background=k===d?'#eff6ff':'';b.style.color=k===d?'var(--blue)':''}
@@ -1322,6 +1351,357 @@ function parseDateFull(v){
   if(m2)return m2[1].replace(/\//g,'-');
   try{const d=new Date(v);if(!isNaN(d))return d.toISOString().slice(0,10)}catch(e){}
   return new Date().toISOString().slice(0,10);
+}
+
+
+// ══════════════════════════════════════════════════════════════
+// IMPORT TABLEAU PILOTAGE COMPLET (format multi-sections)
+// Structure : Charges fixes (A-G) | Variables (H-N) | Crédits (O-R) | CA (W-X)
+// ══════════════════════════════════════════════════════════════
+
+let _pilotagePreviewData = null;
+
+function parsePilotageSheet(sheetName) {
+  if(!_wb) return null;
+  const ws = _wb.Sheets[sheetName];
+  if(!ws) return null;
+
+  // Détecter le mois/année depuis le nom de l'onglet
+  const monthMap = {
+    'janv':1,'jan':1,'janvier':1,
+    'fevr':2,'fev':2,'fév':2,'fevrier':2,'février':2,
+    'mars':3,'mar':3,
+    'avri':4,'avr':4,'avril':4,
+    'mai':5,
+    'juin':6,
+    'juil':7,'juill':7,'juillet':7,
+    'aout':8,'août':8,
+    'sept':9,'sep':9,
+    'octo':10,'oct':10,'octobre':10,
+    'nove':11,'nov':11,'novembre':11,
+    'dece':12,'déc':12,'dec':12,'décembre':12
+  };
+  let month = 0, year = 0;
+  const nameL = sheetName.toLowerCase();
+  for(const [k,v] of Object.entries(monthMap)) {
+    if(nameL.includes(k)) { month = v; break; }
+  }
+  const yearMatch = nameL.match(/(\d{2,4})/);
+  if(yearMatch) {
+    let y = parseInt(yearMatch[1]);
+    year = y < 100 ? 2000+y : y;
+  }
+  if(!month || !year) return null;
+
+  const YYYY_MM = year+'-'+(month<10?'0':'')+month;
+
+  const data = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+  
+  // Ligne 1 = titres sections, Ligne 2 = headers colonnes, Lignes 3+ = données
+  const chargesFixe = [], chargesVar = [], credits = [], caJournalier = [];
+
+  for(let i=2; i<data.length; i++) {
+    const r = data[i];
+    if(!r || !r.some(c=>c!=='')) continue;
+
+    // ── CHARGES FIXES (colonnes 0-6 = A-G) ──
+    // Col 1=FOURNISSEUR, 2=TYPE, 3=MONTANT HT, 4=TVA, 6=DEDUCTIBLE
+    const cfFourn = String(r[1]||'').trim();
+    const cfMt = parseFloat(String(r[3]||'').replace(',','.'));
+    if(cfFourn && !isNaN(cfMt) && cfMt > 0 && cfFourn.toUpperCase() !== 'FOURNISSEUR' && !cfFourn.toUpperCase().includes('TOTAL')) {
+      const tvaBrut = parseFloat(String(r[4]||'0').replace(',','.')) || 0;
+      // Convertir TVA: 1.2→20, 1.1→10, 1.055→5.5, 0→0
+      const tvaRate = tvaBrut >= 1.2 ? 20 : tvaBrut >= 1.1 ? 10 : tvaBrut > 1 ? 5.5 : 0;
+      chargesFixe.push({
+        fournisseur: cfFourn,
+        type: String(r[2]||'').trim() || 'Divers',
+        montantHT: cfMt,
+        tvaRate,
+        deductible: 'Oui',
+        pointe: String(r[0]||'').trim().toUpperCase() === 'POINTÉ' ? 'Oui' : 'Non',
+      });
+    }
+
+    // ── CHARGES VARIABLES (colonnes 7-13 = H-N) ──
+    // Col 8=FOURNISSEUR, 9=TYPE, 10=MONTANT HT, 11=TVA
+    const cvFourn = String(r[8]||'').trim();
+    const cvMt = parseFloat(String(r[10]||'').replace(',','.'));
+    if(cvFourn && !isNaN(cvMt) && cvMt > 0 && cvFourn.toUpperCase() !== 'FOURNISSEUR' && !cvFourn.toUpperCase().includes('TOTAL')) {
+      const tvaBrut = parseFloat(String(r[11]||'0').replace(',','.')) || 0;
+      const tvaRate = tvaBrut >= 1.2 ? 20 : tvaBrut >= 1.1 ? 10 : tvaBrut > 1 ? 5.5 : 0;
+      chargesVar.push({
+        fournisseur: cvFourn,
+        type: String(r[9]||'').trim() || 'Divers',
+        montantHT: cvMt,
+        tvaRate,
+        deductible: 'Oui',
+        pointe: String(r[7]||'').trim().toUpperCase() === 'POINTÉ' ? 'Oui' : 'Non',
+        exceptionnel: false,
+      });
+    }
+
+    // ── CRÉDITS / EMPRUNTS (colonnes 14-17 = O-R) ──
+    // Col 16=TYPE/NOM, 17=MONTANT
+    const crType = String(r[16]||'').trim();
+    const crMt = parseFloat(String(r[17]||'').replace(',','.'));
+    if(crType && !isNaN(crMt) && crMt > 0 && !crType.toUpperCase().includes('TOTAL') && crType.toUpperCase() !== 'TYPE') {
+      credits.push({
+        fournisseur: String(r[15]||crType).trim(),
+        type: crType,
+        montantHT: crMt,
+        tvaRate: 0,
+        deductible: 'Non',
+        pointe: String(r[14]||'').trim().toUpperCase() === 'POINTÉ' ? 'Oui' : 'Non',
+      });
+    }
+
+    // ── CA JOURNALIER (colonnes 22-26 = W-AA) ──
+    // Col 22=DATE, 23=MONTANT HT, 24=TVA
+    const caDate = r[22];
+    const caMt = parseFloat(String(r[23]||'').replace(',','.'));
+    if(caDate && !isNaN(caMt) && caMt > 0) {
+      let dateStr = '';
+      if(caDate instanceof Date || (typeof caDate === 'object' && caDate?.getTime)) {
+        const d = new Date(caDate);
+        dateStr = d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear();
+      } else if(typeof caDate === 'string' && caDate.match(/\d{4}-\d{2}-\d{2}/)) {
+        const parts = caDate.split('T')[0].split('-');
+        dateStr = parts[2]+'/'+parts[1]+'/'+parts[0];
+      } else if(typeof caDate === 'number') {
+        // Excel serial date
+        const d = new Date(Math.round((caDate - 25569)*86400*1000));
+        dateStr = d.getDate()+'/'+(d.getMonth()+1)+'/'+d.getFullYear();
+      }
+      if(dateStr) {
+        const tvaBrut = parseFloat(String(r[24]||'0').replace(',','.')) || 0;
+        const tvaRate = tvaBrut >= 1.2 ? 20 : tvaBrut >= 1.1 ? 10 : tvaBrut > 1 ? 5.5 : 0;
+        caJournalier.push({ date: dateStr, montantHT: caMt, tvaRate });
+      }
+    }
+  }
+
+  return { YYYY_MM, sheetName, chargesFixe, chargesVar, credits, caJournalier };
+}
+
+function showPilotageCompletPreview() {
+  if(!_wb) { showToast('Chargez un fichier XLSX', 'err'); return; }
+  
+  // Détecter les feuilles mensuelles
+  const monthlySheets = _wb.SheetNames.filter(name => {
+    const nl = name.toLowerCase();
+    return ['janv','fevr','fév','mars','avri','mai','juin','juil','aout','août','sept','octo','nove','dece','déc'].some(m=>nl.includes(m));
+  });
+
+  if(!monthlySheets.length) { showToast('Aucune feuille mensuelle détectée', 'err'); return; }
+
+  // Parser toutes les feuilles mensuelles
+  const allData = monthlySheets.map(s => parsePilotageSheet(s)).filter(Boolean);
+  _pilotagePreviewData = allData;
+
+  // Calculer totaux
+  let totalCF = 0, totalCV = 0, totalCr = 0, totalCA = 0, totalSheets = allData.length;
+  allData.forEach(d => {
+    totalCF += d.chargesFixe.reduce((s,r)=>s+r.montantHT,0);
+    totalCV += d.chargesVar.reduce((s,r)=>s+r.montantHT,0);
+    totalCr += d.credits.reduce((s,r)=>s+r.montantHT,0);
+    totalCA += d.caJournalier.reduce((s,r)=>s+r.montantHT,0);
+  });
+
+  function fmtE(n){return (n||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
+
+  // Afficher la prévisualisation dans un panel dédié
+  // Masquer step1, afficher step_pilotage
+  document.getElementById('step1').className = 'panel';
+  
+  let previewHtml = allData.map(d => `
+    <div style="margin-bottom:6px;padding:10px 14px;background:white;border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div style="font-weight:700;font-size:13px">${d.sheetName} <span style="font-size:11px;color:var(--muted);font-weight:400">(${d.YYYY_MM})</span></div>
+      <div style="display:flex;gap:12px;font-size:11px">
+        <span style="color:#ef4444">📋 CF: ${d.chargesFixe.length} lignes</span>
+        <span style="color:#f59e0b">📋 CV: ${d.chargesVar.length} lignes</span>
+        <span style="color:#6366f1">💳 Crédits: ${d.credits.length} lignes</span>
+        <span style="color:#10b981">📈 CA: ${d.caJournalier.length} lignes</span>
+      </div>
+    </div>
+  `).join('');
+
+  const panel = document.getElementById('pilotage-complet-panel');
+  if(panel) {
+    panel.innerHTML = `
+      <div class="card">
+        <div class="card-head" style="background:linear-gradient(135deg,#4f46e5,#7c3aed)">
+          <div class="card-title" style="color:white">🗂️ Import Tableau Pilotage complet</div>
+          <button class="btn btn-sm" style="background:rgba(255,255,255,0.2);color:white;border:none" onclick="goStep(1)">← Retour</button>
+        </div>
+        <div style="padding:20px 24px">
+          <!-- KPIs -->
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+            <div style="padding:14px;background:#fef2f2;border-radius:10px;border:1px solid #fecaca;text-align:center">
+              <div style="font-size:11px;font-weight:700;color:#991b1b;margin-bottom:4px">CHARGES FIXES</div>
+              <div style="font-size:18px;font-weight:800;color:#ef4444">${fmtE(totalCF)}</div>
+              <div style="font-size:10px;color:var(--muted)">${allData.reduce((s,d)=>s+d.chargesFixe.length,0)} lignes sur ${totalSheets} mois</div>
+            </div>
+            <div style="padding:14px;background:#fffbeb;border-radius:10px;border:1px solid #fcd34d;text-align:center">
+              <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:4px">CHARGES VARIABLES</div>
+              <div style="font-size:18px;font-weight:800;color:#f59e0b">${fmtE(totalCV)}</div>
+              <div style="font-size:10px;color:var(--muted)">${allData.reduce((s,d)=>s+d.chargesVar.length,0)} lignes sur ${totalSheets} mois</div>
+            </div>
+            <div style="padding:14px;background:#f5f3ff;border-radius:10px;border:1px solid #c4b5fd;text-align:center">
+              <div style="font-size:11px;font-weight:700;color:#4c1d95;margin-bottom:4px">CRÉDITS / EMPRUNTS</div>
+              <div style="font-size:18px;font-weight:800;color:#6366f1">${fmtE(totalCr)}</div>
+              <div style="font-size:10px;color:var(--muted)">${allData.reduce((s,d)=>s+d.credits.length,0)} lignes sur ${totalSheets} mois</div>
+            </div>
+            <div style="padding:14px;background:#f0fdf4;border-radius:10px;border:1px solid #86efac;text-align:center">
+              <div style="font-size:11px;font-weight:700;color:#14532d;margin-bottom:4px">CA JOURNALIER</div>
+              <div style="font-size:18px;font-weight:800;color:#10b981">${fmtE(totalCA)}</div>
+              <div style="font-size:10px;color:var(--muted)">${allData.reduce((s,d)=>s+d.caJournalier.length,0)} lignes sur ${totalSheets} mois</div>
+            </div>
+          </div>
+
+          <!-- Détail par mois -->
+          <div style="font-size:13px;font-weight:700;margin-bottom:10px">📅 Détail par mois</div>
+          ${previewHtml}
+
+          <!-- Bouton import -->
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
+            <button class="btn btn-outline" onclick="goStep(1)">← Retour</button>
+            <button class="btn btn-primary" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:10px 24px;font-size:14px" onclick="doPilotageCompletImport()">
+              🚀 Importer ${allData.reduce((s,d)=>s+d.chargesFixe.length+d.chargesVar.length+d.credits.length+d.caJournalier.length,0)} entrées dans Pilotage
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    panel.className = 'panel on';
+  }
+}
+
+async function doPilotageCompletImport() {
+  if(!_pilotagePreviewData || !window._uid) { showToast('Données manquantes', 'err'); return; }
+  
+  const btn = document.querySelector('[onclick="doPilotageCompletImport()"]');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Import en cours...';}
+
+  let imported = 0, errors = 0;
+
+  for(const d of _pilotagePreviewData) {
+    const path = 'pilotage/'+window._uid+'/months/'+d.YYYY_MM;
+    try {
+      // Lire les données existantes
+      const ref = window._doc(window._db, 'pilotage', window._uid, 'months', d.YYYY_MM);
+      const snap = await window._getDoc(ref);
+      const existing = snap.exists() ? snap.data() : {};
+
+      const updates = {};
+
+      // Charges fixes
+      if(d.chargesFixe.length) {
+        const existingCF = existing.chargesFixe || [];
+        const newCF = d.chargesFixe.map(r=>({
+          fournisseur: r.fournisseur,
+          type: r.type,
+          montantHT: r.montantHT,
+          tvaRate: r.tvaRate,
+          deductible: 'Oui',
+          pointe: r.pointe || 'Non',
+          _imported: true
+        }));
+        // Fusionner sans doublons (par fournisseur+montant)
+        const merged = [...existingCF];
+        newCF.forEach(n => {
+          const exists = merged.some(e => e.fournisseur===n.fournisseur && Math.abs(e.montantHT-n.montantHT)<0.01);
+          if(!exists) merged.push(n);
+        });
+        updates.chargesFixe = merged;
+        imported += newCF.length;
+      }
+
+      // Charges variables
+      if(d.chargesVar.length) {
+        const existingCV = existing.chargesVar || [];
+        const newCV = d.chargesVar.map(r=>({
+          fournisseur: r.fournisseur,
+          type: r.type,
+          montantHT: r.montantHT,
+          tvaRate: r.tvaRate,
+          deductible: 'Oui',
+          pointe: r.pointe || 'Non',
+          exceptionnel: false,
+          _imported: true
+        }));
+        const merged = [...existingCV];
+        newCV.forEach(n => {
+          const exists = merged.some(e => e.fournisseur===n.fournisseur && Math.abs(e.montantHT-n.montantHT)<0.01);
+          if(!exists) merged.push(n);
+        });
+        updates.chargesVar = merged;
+        imported += newCV.length;
+      }
+
+      // Crédits → dans chargesFixe avec type "Crédit/Emprunt"
+      if(d.credits.length) {
+        const currentCF = updates.chargesFixe || existing.chargesFixe || [];
+        d.credits.forEach(r => {
+          const exists = currentCF.some(e => e.fournisseur===r.type && Math.abs(e.montantHT-r.montantHT)<0.01);
+          if(!exists) {
+            currentCF.push({
+              fournisseur: r.type,
+              type: 'Crédit/Emprunt',
+              montantHT: r.montantHT,
+              tvaRate: 0,
+              deductible: 'Non',
+              pointe: r.pointe || 'Non',
+              _imported: true
+            });
+            imported++;
+          }
+        });
+        updates.chargesFixe = currentCF;
+      }
+
+      // CA journalier
+      if(d.caJournalier.length) {
+        const existingCA = existing.ca || [];
+        d.caJournalier.forEach(r => {
+          const exists = existingCA.some(e => e.date===r.date);
+          if(!exists) {
+            const tvaRate = r.tvaRate;
+            existingCA.push({
+              date: r.date,
+              ht055: tvaRate === 5.5 ? String(r.montantHT) : '0',
+              ht10:  tvaRate === 10  ? String(r.montantHT) : '0',
+              ht20:  tvaRate === 20  ? String(r.montantHT) : '0',
+              _imported: true
+            });
+            imported++;
+          }
+        });
+        updates.ca = existingCA;
+      }
+
+      if(Object.keys(updates).length) {
+        await window._setDoc(ref, updates, {merge: true});
+      }
+    } catch(e) {
+      console.error('Erreur', d.YYYY_MM, e);
+      errors++;
+    }
+  }
+
+  if(btn){btn.disabled=false;btn.textContent='✅ Import terminé';}
+  
+  // Afficher résultat
+  const panel = document.getElementById('pilotage-complet-panel');
+  if(panel) {
+    panel.innerHTML += `
+      <div style="margin:16px 24px;padding:16px;background:#f0fdf4;border:1px solid #86efac;border-radius:10px;text-align:center">
+        <div style="font-size:20px;margin-bottom:8px">🎉</div>
+        <div style="font-size:16px;font-weight:800;color:#15803d">${imported} entrées importées avec succès !</div>
+        ${errors?`<div style="font-size:12px;color:#ef4444;margin-top:4px">${errors} mois en erreur</div>`:''}
+        <button class="btn btn-primary" style="margin-top:12px" onclick="window.location.href='pilotage.html'">→ Voir dans Pilotage</button>
+      </div>
+    `;
+  }
 }
 
 async function doImport(){
