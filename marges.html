@@ -768,9 +768,12 @@ function calcMN(p){
 }
 
 function calcSim(p, sim){
-  const pvSim = p.pv*(1+(parseFloat(sim.pv)||0)/100);
-  const mpSim = (p.mp||0)*(1-(parseFloat(sim.mp)||0)/100);
-  const moSim = (p.mo||0)*(1-(parseFloat(sim.mo)||0)/100);
+  const _pv = parseFloat(p.pv||p.prixVente)||0;
+  const _mp = parseFloat(p.mp||p.coutMP)||0;
+  const _mo = parseFloat(p.mo||p.coutMain)||0;
+  const pvSim = _pv*(1+(parseFloat(sim.pv)||0)/100);
+  const mpSim = _mp*(1-(parseFloat(sim.mp)||0)/100);
+  const moSim = _mo*(1-(parseFloat(sim.mo)||0)/100);
   const cfSim = (p.cfTotal||0)*(1-(parseFloat(sim.cf)||0)/100);
   const volSim = parseFloat(sim.vol)||parseFloat(p.qte)||1;
   const cvSim = mpSim + moSim + (parseFloat(p.emb)||0) + (parseFloat(p.liv)||0);
@@ -821,6 +824,16 @@ function openProduct(id){
 }
 
 function renderProduct(p){
+  if(!p) return;
+  // Normaliser les champs au cas où p vient directement de Firestore
+  p.pv  = parseFloat(p.pv||p.prixVente)||0;
+  p.mp  = parseFloat(p.mp||p.coutMP)||0;
+  p.mo  = parseFloat(p.mo||p.coutMain)||0;
+  p.emb = parseFloat(p.emb)||0;
+  p.liv = parseFloat(p.liv)||0;
+  p.qte = parseFloat(p.qte||p.quantiteProduites)||1;
+  if(!p.sim) p.sim = {pv:0,mp:0,mo:0,cf:0,vol:p.qte};
+  if(!p.cle) p.cle = {type:'temps',produit:0,total:0};
   const {cv,mb,txMB,cfImpute,mn,txMN} = calcMN(p);
   const sim = p.sim||{pv:0,mp:0,mo:0,cf:0,vol:parseFloat(p.qte)||1};
   const s = calcSim(p,sim);
@@ -1357,9 +1370,9 @@ function updateBulkBar(){
   const count = _selected.size;
   bar.classList.toggle('hidden', count===0);
   if(count>0) document.getElementById('bulk-count').textContent = count+' sélectionné(s)';
-  const allIds = Object.keys(_products);
+  const visibleIds = Object.values(_products).filter(p=>p&&p.nom).map(p=>p.id);
   const btn = document.getElementById('select-all-btn');
-  if(btn) btn.textContent = (_selected.size===allIds.length && allIds.length>0) ? '☑' : '☐';
+  if(btn) btn.textContent = (visibleIds.length>0 && visibleIds.every(id=>_selected.has(id))) ? '☑' : '☐';
 }
 
 function clearSelection(){
@@ -1369,9 +1382,13 @@ function clearSelection(){
 }
 
 function toggleSelectAll(){
-  const allIds = Object.keys(_products);
-  if(_selected.size===allIds.length && allIds.length>0) _selected.clear();
-  else allIds.forEach(id=>_selected.add(id));
+  // Sélectionner uniquement les produits valides et visibles
+  const visibleIds = Object.values(_products)
+    .filter(p => p && p.nom)
+    .map(p => p.id);
+  const allSelected = visibleIds.length>0 && visibleIds.every(id=>_selected.has(id));
+  if(allSelected) _selected.clear();
+  else visibleIds.forEach(id=>_selected.add(id));
   updateBulkBar();
   renderList();
 }
