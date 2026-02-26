@@ -896,6 +896,23 @@ function renderFiche(e) {
             ${infoField('IBAN',e.iban ? maskIBAN(e.iban) : null)}
           </div>
         </div>
+
+        <!-- LIEN PORTAIL SALARIÉ -->
+        <div style="margin-top:14px;padding:13px 15px;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px">
+          <div style="font-size:11px;font-weight:700;color:#065f46;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🔗 Portail salarié — Espace congés</div>
+          ${e.publicId ? `
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <code id="lien-sal-${e.id}" style="font-size:11px;background:white;border:1px solid #d1fae5;padding:5px 9px;border-radius:6px;color:#047857;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">https://alteore.com/espace-salarie.html?id=${e.publicId}</code>
+              <button class="btn btn-rh btn-xs" style="flex-shrink:0" onclick="copyLienSalarie('${e.id}','${e.publicId}')">📋 Copier</button>
+            </div>
+            <div style="font-size:10px;color:#6b7280;margin-top:5px">Envoyez ce lien à l\'employé · Il accède à ses soldes et peut faire ses demandes de congés.</div>
+          ` : `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <div style="font-size:12px;color:#6b7280">Cet employé n\'a pas encore de lien portail (créé avant la mise à jour).</div>
+              <button class="btn btn-rh btn-xs" style="flex-shrink:0" onclick="genererLienSalarie('${e.id}')">🔗 Générer le lien</button>
+            </div>
+          `}
+        </div>
       </div>
     </div>
 
@@ -1330,16 +1347,41 @@ window.saveEmploye = async function() {
   const id = _editId || ('emp_'+Date.now());
   if (!_editId) data.createdAt = Date.now();
 
-  // Conserver les données existantes (docs, evals, photo)
+  // Conserver les données existantes (docs, evals, photo, publicId)
   if (_editId && _employes[_editId]) {
     data.documents  = _employes[_editId].documents  || [];
     data.evaluations= _employes[_editId].evaluations|| [];
     data.photoURL   = _employes[_editId].photoURL   || null;
     data.noteMoyenne= _employes[_editId].noteMoyenne|| null;
+    data.publicId   = _employes[_editId].publicId   || null;
   }
 
+  // Générer un publicId unique à la création
+  if (!data.publicId) {
+    data.publicId = 'emp_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+  }
+
+  // Données publiques minimales (portail salarié)
+  const publicData = {
+    uid:           window._uid,
+    empId:         id,
+    prenom:        data.prenom        || '',
+    nom:           data.nom           || '',
+    poste:         data.poste         || '',
+    departement:   data.departement   || '',
+    typeContrat:   data.typeContrat   || '',
+    couleur:       data.couleur       || '#059669',
+    dateEntree:    data.dateEntree    || '',
+    cpAjustAcquis: data.cpAjustAcquis || 0,
+    rttAjust:      data.rttAjust      || 0,
+    recupHeures:   data.recupHeures   || 0,
+  };
+
   try {
+    // Écriture fiche privée
     await window._setDoc(window._doc(window._db,'rh',window._uid,'employes',id), data);
+    // Écriture / mise à jour fiche publique (portail salarié)
+    await window._setDoc(window._doc(window._db,'rh_employes_public',data.publicId), publicData);
     _employes[id] = { id, ...data };
     closeModal('modalEmploye');
     buildDeptFilter();
@@ -1659,6 +1701,55 @@ function showToast(msg, type='') {
 }
 function openModal(id) { document.getElementById(id).classList.add('show'); }
 window.closeModal = function(id) { document.getElementById(id).classList.remove('show'); };
+
+window.copyLienSalarie = function(empId, publicId) {
+  const lien = 'https://alteore.com/espace-salarie.html?id=' + publicId;
+  navigator.clipboard.writeText(lien).then(() => {
+    showToast('📋 Lien copié !', 'ok');
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = lien; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('📋 Lien copié !', 'ok');
+  });
+};
+
+// Génère un publicId pour un employé existant qui n'en a pas encore
+window.genererLienSalarie = async function(empId) {
+  if (!window._uid || !_employes[empId]) return;
+  const e = _employes[empId];
+  const publicId = 'emp_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+  const publicData = {
+    uid:           window._uid,
+    empId:         empId,
+    prenom:        e.prenom        || '',
+    nom:           e.nom           || '',
+    poste:         e.poste         || '',
+    departement:   e.departement   || '',
+    typeContrat:   e.typeContrat   || '',
+    couleur:       e.couleur       || '#059669',
+    dateEntree:    e.dateEntree    || '',
+    cpAjustAcquis: e.cpAjustAcquis || 0,
+    rttAjust:      e.rttAjust      || 0,
+    recupHeures:   e.recupHeures   || 0,
+  };
+  try {
+    // Sauvegarder publicId dans la fiche privée
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',empId), { publicId });
+    // Créer la fiche publique
+    await window._setDoc(window._doc(window._db,'rh_employes_public',publicId), publicData);
+    // Mettre à jour le cache local
+    _employes[empId].publicId = publicId;
+    // Re-render la fiche pour afficher le lien
+    openFiche(empId);
+    showToast('✅ Lien portail généré !', 'ok');
+  } catch(err) {
+    showToast('Erreur : ' + err.message, 'err');
+    console.error(err);
+  }
+};
 
 // Fermer modals au clic overlay
 document.querySelectorAll('.modal-overlay').forEach(o=>{

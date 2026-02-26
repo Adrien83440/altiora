@@ -527,7 +527,24 @@ async function loadEmps(){
   try{
     const s=await window._getDocs(window._col(window._db,'rh',window._uid,'employes'));
     s.forEach(d=>{ if(d.data().statut!=='archive') _emps[d.id]={id:d.id,...d.data()}; });
-  }catch(e){console.warn(e);}
+    // Diagnostic : si aucun employé trouvé, afficher un message d'aide
+    if(Object.keys(_emps).length===0){
+      console.info('[rh-conges] Aucun employé actif trouvé dans rh/'+window._uid+'/employes');
+    }
+  }catch(e){
+    console.error('[rh-conges] Erreur chargement employés:', e.code, e.message);
+    // Afficher l'erreur dans la table des soldes
+    const tbody=document.getElementById('soldes-body');
+    if(tbody) tbody.innerHTML=`<tr><td colspan="9">
+      <div style="padding:20px;text-align:center;color:#b91c1c;background:#fef2f2;border-radius:8px;font-size:12px">
+        <div style="font-size:20px;margin-bottom:6px">⚠️</div>
+        <b>Impossible de charger les employés</b><br>
+        Code : ${e.code||'inconnu'} — ${e.message||''}<br>
+        <span style="color:#6b7280;font-size:11px;margin-top:4px;display:block">Vérifiez que les règles Firestore sont bien publiées (onglet Règles dans la console Firebase).</span>
+        <button onclick="reloadAll()" style="margin-top:8px;padding:5px 12px;background:#059669;color:white;border:none;border-radius:6px;cursor:pointer;font-size:12px">🔄 Réessayer</button>
+      </div>
+    </td></tr>`;
+  }
 }
 
 // Rechargement complet (employés + demandes + rendu)
@@ -654,7 +671,17 @@ function renderSoldesTable(filter=''){
     !filter || (e.prenom+' '+e.nom).toLowerCase().includes(filter.toLowerCase())
   );
   if(!emps.length){
-    tbody.innerHTML=`<tr><td colspan="9"><div class="empty"><div class="empty-icon">👥</div>Aucun employé actif.</div></td></tr>`;
+    tbody.innerHTML=`<tr><td colspan="9">
+      <div class="empty" style="padding:30px;text-align:center">
+        <div class="empty-icon">👥</div>
+        <div style="font-weight:700;color:var(--text);margin-bottom:6px">Aucun employé actif</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+          Ajoutez des employés dans <b>RH → Employés</b> pour gérer leurs congés.<br>
+          Si vous venez d'en ajouter, cliquez sur 🔄 pour recharger.
+        </div>
+        <button onclick="reloadAll()" style="padding:7px 16px;background:#059669;color:white;border:none;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600">🔄 Recharger les données</button>
+      </div>
+    </td></tr>`;
     return;
   }
   tbody.innerHTML = emps.map(e=>{
