@@ -1,5 +1,5 @@
 // api/fetch-sheet.js
-// Proxy Vercel : liste les onglets d'un Google Sheet public, puis fetch un onglet en CSV + analyse IA
+// Proxy Vercel : liste les onglets d'un Google Sheet public via API v4, puis fetch un onglet en CSV + analyse IA
 
 export const config = { maxDuration: 30 };
 
@@ -13,56 +13,45 @@ export default async function handler(req, res) {
   const { url, gid, analyze = false } = req.body || {};
   if (!url) return res.status(400).json({ error: 'URL manquante' });
 
+  const GOOGLE_API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
+  if (!GOOGLE_API_KEY) return res.status(500).json({ error: 'Clé API Google manquante (GOOGLE_SHEETS_API_KEY)' });
+
   // ── Extraire l'ID du sheet ──
   const idMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
   if (!idMatch) return res.status(400).json({ error: 'Lien Google Sheets invalide' });
   const sheetId = idMatch[1];
 
-  // ── MODE 1 : Liste des onglets (pas de gid fourni) ──
+  // ── MODE 1 : Liste des onglets via API v4 ──
   if (gid === undefined || gid === null) {
     try {
-      // Fetch la page HTML publique du sheet pour extraire les onglets
-      const htmlResp = await fetch(
-        `https://docs.google.com/spreadsheets/d/${sheetId}/edit`,
-        { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Alteore/1.0)' } }
+      const metaResp = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?key=${GOOGLE_API_KEY}&fields=sheets.properties`
       );
-      if (!htmlResp.ok) {
-        if (htmlResp.status === 403) return res.status(403).json({ error: 'Feuille privée — partagez-la en lecture publique.' });
-        return res.status(htmlResp.status).json({ error: `Erreur Google (${htmlResp.status})` });
-      }
-      const html = await htmlResp.text();
 
-      // Extraire les onglets depuis le HTML (pattern Google Sheets)
-      // Les onglets apparaissent dans le JS sous forme "gid":"NNN","name":"Nom"
-      const tabs = [];
-      const tabRegex = /"gid":"(\d+)"[^}]*?"name":"([^"]+)"/g;
-      let m;
-      while ((m = tabRegex.exec(html)) !== null) {
-        tabs.push({ gid: m[1], name: decodeURIComponent(m[2].replace(/\\u(\w{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))) });
+      if (!metaResp.ok) {
+        const err = await metaResp.json().catch(() => ({}));
+        if (metaResp.status === 403) return res.status(403).json({ error: 'Feuille privée — partagez-la en lecture publique.' });
+        if (metaResp.status === 404) return res.status(404).json({ error: 'Feuille introuvable — vérifiez le lien.' });
+        return res.status(metaResp.status).json({ error: err?.error?.message || `Erreur Google (${metaResp.status})` });
       }
 
-      // Fallback : pattern alternatif dans le HTML Google Sheets
-      if (!tabs.length) {
-        const alt = /"sheetId":(\d+),"title":"([^"]+)"/g;
-        while ((m = alt.exec(html)) !== null) {
-          if (!tabs.find(t => t.gid === m[1])) {
-            tabs.push({ gid: m[1], name: m[2] });
-          }
-        }
-      }
+      const meta = await metaResp.json();
+      const tabs = (meta.sheets || []).map(s => ({
+        gid: String(s.properties.sheetId),
+        name: s.properties.title,
+      }));
 
-      // Dernier fallback : on propose juste gid=0
-      if (!tabs.length) {
-        tabs.push({ gid: '0', name: 'Feuille 1 (détection auto)' });
-      }
+      if (!tabs.length) return res.status(400).json({ error: 'Aucun onglet trouvé dans ce sheet.' });
 
       return res.status(200).json({ success: true, sheetId, tabs, mode: 'tabs' });
+
     } catch (e) {
       return res.status(500).json({ error: 'Impossible de lire le sheet : ' + e.message });
     }
   }
 
   // ── MODE 2 : Charger un onglet spécifique en CSV + analyse IA ──
+  // On utilise toujours le CSV export (gratuit, pas de quota) pour les données
   const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
   let csvText;
   try {
@@ -112,7 +101,6 @@ export default async function handler(req, res) {
   rows.forEach(r => {
     headers.forEach(h => {
       const v = String(r[h] || '');
-      // Supprimer espaces, €, puis remplacer , par .
       const cleaned = v.replace(/\s/g, '').replace('€', '').replace(',', '.');
       if (!isNaN(parseFloat(cleaned)) && cleaned !== '') r[h] = cleaned;
     });
