@@ -11,6 +11,7 @@
   const CAN_FIDELISATION = ['trial', 'max', 'master', 'dev'];
   const CAN_IMPORT       = ['pro', 'max', 'master', 'dev'];
   const CAN_CORE         = ['trial', 'pro', 'max', 'master', 'dev'];
+  const CAN_STOCK      = ['max', 'master', 'trial', 'dev'];
   const CAN_BILAN        = ['master', 'trial', 'dev'];
   const CAN_RAPPORT      = ['pro', 'max', 'master', 'dev'];
 
@@ -31,7 +32,7 @@
       return pages.includes(PAGE) ? ' on' : '';
     }
     // Sous-menu KPIs ouvert si on est sur une page KPI
-    const kpisPages = ['cout-revient.html','marges.html','panier-moyen.html','dettes.html'];
+    const kpisPages = ['cout-revient.html','marges.html','panier-moyen.html','dettes.html','gestion-stock.html'];
     const kpisOpen  = kpisPages.includes(PAGE) ? 'style="max-height:400px"' : '';
     // Sous-menu Pilotage ouvert si on est sur pilotage
     const pilOpen   = PAGE === 'pilotage.html' ? 'style="max-height:400px"' : '';
@@ -78,6 +79,7 @@
     <div class="si${active('marges.html')}" id="nav-marges" onclick="location.href='marges.html'"><span class="dot"></span>Marge brute &amp; nette</div>
     <div class="si${active('panier-moyen.html')}" id="nav-panier" onclick="location.href='panier-moyen.html'"><span class="dot"></span>Panier moyen</div>
     <div class="si${active('dettes.html')}" id="nav-dettes" onclick="location.href='dettes.html'"><span class="dot"></span>Dettes &amp; Emprunts</div>
+    <div class="si${active('gestion-stock.html')}" id="nav-stock" onclick="location.href='gestion-stock.html'"><span class="dot"></span>Gestion des Stocks</div>
   </div>
 
   <div class="ni${active('pilotage.html')}" id="nav-pilotage" onclick="toggleAlteoreNav('pil-sub',this)">
@@ -334,6 +336,7 @@ nav#alteore-nav .lbtn{margin-left:auto;background:none;border:none;color:rgba(25
     const upl = document.getElementById('uplan');
     if (upl) upl.textContent = PLAN_NAMES[plan] || plan;
     if (!CAN_FIDELISATION.includes(plan)) lockNavItem('nav-fid',    'Max+',  'fidelisation');
+    if (!CAN_STOCK.includes(plan))       lockNavItem('nav-stock',  'Max+',  'stock');
     if (!CAN_IMPORT.includes(plan))       lockNavItem('nav-import',  'Pro+',  'import');
     if (!CAN_BILAN.includes(plan))        lockNavItem('nav-bilan',   'Master','bilan');
     if (!CAN_RAPPORT.includes(plan))      lockNavItem('nav-rapport', 'Pro+',  'rapport');
@@ -342,6 +345,7 @@ nav#alteore-nav .lbtn{margin-left:auto;background:none;border:none;color:rgba(25
   }
 
   function checkPageAccess(plan) {
+    if (PAGE === 'gestion-stock.html' && !CAN_STOCK.includes(plan))       { showUpgradeModal('stock');       return false; }
     if (PAGE === 'fidelisation.html' && !CAN_FIDELISATION.includes(plan)) { showUpgradeModal('fidelisation'); return false; }
     if (PAGE === 'import.html'       && !CAN_IMPORT.includes(plan))       { showUpgradeModal('import');       return false; }
     if (PAGE === 'bilan.html'        && !CAN_BILAN.includes(plan))        { showUpgradeModal('bilan');        return false; }
