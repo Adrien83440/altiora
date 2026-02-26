@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
-  <title>ALTEORE — Temps de travail</title>
+  <title>ALTEORE — Temps de travail v3</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+  <meta http-equiv="Pragma" content="no-cache"/>
+  <meta http-equiv="Expires" content="0"/>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <style>
@@ -437,37 +440,50 @@ async function loadTempsFromPlanning() {
   var y = _curMois.getFullYear(), m = _curMois.getMonth();
   var nbJours = new Date(y, m+1, 0).getDate();
 
-  // Collecter toutes les clés de semaine uniques du mois
+  // Même logique que rh-planning.html pour générer les clés de semaine
   var weekKeys = {};
-  for (var d = 1; d <= nbJours; d++) {
-    var dt = new Date(y, m, d);
-    var mon = new Date(dt);
-    var day = mon.getDay(), diff = (day === 0) ? -6 : 1 - day;
+  for (var day = 1; day <= nbJours; day++) {
+    var dt = new Date(y, m, day);
+    var mon = new Date(dt.getTime());
+    var dow = mon.getDay();
+    var diff = (dow === 0) ? -6 : 1 - dow;
     mon.setDate(mon.getDate() + diff);
-    mon.setHours(0,0,0,0);
-    var wk = mon.toISOString().slice(0,10).replace(/-/g,'');
+    mon.setHours(0, 0, 0, 0);
+    // weekKey = lundi de la semaine au format YYYYMMDD (sans tirets)
+    var wk = mon.getFullYear()
+      + String(mon.getMonth()+1).padStart(2,'0')
+      + String(mon.getDate()).padStart(2,'0');
     weekKeys[wk] = true;
   }
 
-  console.log('[Temps] Semaines à charger:', Object.keys(weekKeys));
-  console.log('[Temps] UID:', window._uid);
+  console.log('[TempsV3] y='+y+' m='+m+' uid='+window._uid);
+  console.log('[TempsV3] weekKeys='+JSON.stringify(Object.keys(weekKeys)));
 
-  // Charger chaque semaine et agréger par employé
+  // Charger chaque semaine depuis Firestore
+  var colFn = window._collection; // collection(db, 'rh', uid, 'plan_YYYYMMDD')
   for (var wk in weekKeys) {
+    var collPath = 'plan_' + wk;
     try {
-      var snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'plan_'+wk));
-      console.log('[Temps] plan_'+wk+' → '+snap.size+' docs');
-      snap.forEach(function(docSnap) {
-        // docId = YYYY-MM-DD_empId
-        var id = docSnap.id;
-        var underIdx = id.lastIndexOf('_');
-        if (underIdx < 0) return;
-        var dateStr = id.slice(0, underIdx);
-        var empId   = id.slice(underIdx + 1);
+      var snap = await window._getDocs(colFn(window._db, 'rh', window._uid, collPath));
+      console.log('[TempsV3] '+collPath+' → '+snap.size+' docs');
 
-        // Vérifier que ce jour est bien dans le mois en cours
-        var dt2 = new Date(dateStr + 'T12:00:00');
-        if (dt2.getFullYear() !== y || dt2.getMonth() !== m) return;
+      snap.forEach(function(docSnap) {
+        // Format docId dans rh-planning : `${date}_${empId}` où date=YYYY-MM-DD
+        var docId = docSnap.id;
+        console.log('[TempsV3] doc:', docId);
+
+        // Split sur le premier _ après la date (YYYY-MM-DD = 10 chars, puis _)
+        if (docId.length < 12) return;
+        var dateStr = docId.slice(0, 10);   // "YYYY-MM-DD"
+        var empId   = docId.slice(11);      // tout ce qui suit le _ à la position 10
+
+        if (!dateStr || !empId) return;
+
+        // Vérifier que la date est dans le mois affiché
+        var parts = dateStr.split('-');
+        if (parts.length !== 3) return;
+        var docY = parseInt(parts[0]), docM = parseInt(parts[1]) - 1;
+        if (docY !== y || docM !== m) return;
 
         var data = docSnap.data();
         var items = (data.items || []).filter(function(it) { return it.type === 'travail'; });
@@ -475,22 +491,25 @@ async function loadTempsFromPlanning() {
 
         if (!_planningData[empId]) _planningData[empId] = { heures: 0, jours: 0 };
 
-        // Calculer les heures de ce jour
         var hJour = items.reduce(function(s, it) {
           if (it.plages && it.plages.length > 0) {
-            return s + it.plages.reduce(function(ps, p) {
-              return ps + diffH(p.deb, p.fin);
+            return s + it.plages.reduce(function(acc, p) {
+              return acc + diffH(p.deb, p.fin);
             }, 0);
           }
           return s + diffH(it.deb, it.fin);
         }, 0);
 
+        console.log('[TempsV3] empId='+empId+' date='+dateStr+' hJour='+hJour);
         _planningData[empId].heures += hJour;
         _planningData[empId].jours  += 1;
       });
-    } catch(e) { console.warn('plan_'+wk+':', e.message); }
+
+    } catch(e) {
+      console.error('[TempsV3] ERREUR '+collPath+':', e.message, e);
+    }
   }
-  console.log('[Temps] _planningData final:', JSON.stringify(_planningData));
+  console.log('[TempsV3] Résultat final:', JSON.stringify(_planningData));
 }
 
 // Charger également les ajustements manuels sauvegardés (heures sup, notes, absences)
