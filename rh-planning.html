@@ -283,9 +283,9 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
       <button class="mclose" onclick="closeCr()">✕</button>
     </div>
     <div class="modal-body">
-      <div class="mf"><label class="ml">Employé</label><select class="mi" id="cr-emp"></select></div>
+      <div class="mf"><label class="ml">Employé</label><select class="mi" id="cr-emp" onchange="updDur()"></select></div>
       <div class="mrow">
-        <div class="mf"><label class="ml">Date</label><input class="mi" type="date" id="cr-date"/></div>
+        <div class="mf"><label class="ml">Date</label><input class="mi" type="date" id="cr-date" oninput="updDur()"/></div>
         <div class="mf"><label class="ml">Type</label>
           <select class="mi" id="cr-type" onchange="onTypeChange()">
             <option value="travail">💼 Travail</option>
@@ -307,6 +307,9 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
         <div id="cr-plages"></div>
         <div id="cr-dur" style="display:none;font-size:12px;font-weight:600;color:var(--rh-main);padding:7px 10px;background:var(--rh-ghost);border-radius:7px;margin-top:6px"></div>
       </div>
+
+      <!-- ALERTES LÉGALES LIVE -->
+      <div id="cr-live-alert" style="display:flex;flex-direction:column;gap:6px;margin-top:8px"></div>
 
       <div class="mf" style="margin-top:10px"><label class="ml">Note / Poste</label><input class="mi" id="cr-note" placeholder="Ex: Caisse, Cuisine…"/></div>
     </div>
@@ -1066,10 +1069,10 @@ function toggleEmp(id){_hidden.has(id)?_hidden.delete(id):_hidden.add(id);render
 window.toggleEmp=toggleEmp;
 
 function fillEmpSel(){
-  document.getElementById('cr-emp').innerHTML=_emps.map(e=>{
-    const ccnLabel = e.ccn && CCN_RULES[e.ccn] ? ` (${CCN_RULES[e.ccn].label})` : '';
-    return `<option value="${e.id}">${e.prenom||''} ${e.nom||''}${ccnLabel}</option>`;
-  }).join('');
+  // Label court dans la modal — sans CCN (trop verbeux)
+  document.getElementById('cr-emp').innerHTML=_emps.map(e=>
+    `<option value="${e.id}">${e.prenom||''} ${e.nom||''}</option>`
+  ).join('');
 }
 
 // Génère un <select> groupé pour choisir une CCN
@@ -1173,15 +1176,92 @@ function onTypeChange(){
 function updDur(){
   const t=document.getElementById('cr-type')?.value;
   const el=document.getElementById('cr-dur');
+  const alertEl=document.getElementById('cr-live-alert');
   if(!el)return;
-  if(t!=='travail'){el.style.display='none';return;}
+  if(t!=='travail'){
+    el.style.display='none';
+    if(alertEl)alertEl.innerHTML='';
+    return;
+  }
   const total=_plages.reduce((s,p)=>s+diffH(p.deb,p.fin),0);
   if(total>0){
     const parts=_plages.map(p=>`${p.deb}–${p.fin}`).join(' + ');
     el.textContent=`⏱ ${parts} = ${total.toFixed(1)}h`;
     el.style.display='block';
   } else el.style.display='none';
+  // ── ALERTES LIVE ──
+  if(alertEl) alertEl.innerHTML = computeModalAlerts();
 }
+
+function computeModalAlerts(){
+  const eid = document.getElementById('cr-emp')?.value;
+  const date = document.getElementById('cr-date')?.value;
+  if(!eid||!date||_plages.length===0) return '';
+  const emp = _emps.find(e=>e.id===eid);
+  if(!emp) return '';
+  const ccn = getCCN(emp);
+  const alerts = [];
+
+  // 1. Durée journalière — inclut les créneaux déjà enregistrés + la saisie en cours
+  const k = `${date}_${eid}`;
+  const existingH = (_cr[k]?.items||[])
+    .filter(it=>it.type==='travail' && (!_editId || it.id!==(_editId.itemId||null)))
+    .reduce((s,it)=>s+itemTotalH(it),0);
+  const currentH = _plages.reduce((s,p)=>s+diffH(p.deb,p.fin),0);
+  const jourH = existingH + currentH;
+  if(jourH > ccn.jourMax){
+    alerts.push({sev:'error', msg:`Durée journalière dépassée : ${jourH.toFixed(1)}h (max ${ccn.jourMax}h — ${ccn.label})`});
+  }
+
+  // 2. Pause obligatoire — vérifier sur la saisie en cours
+  if(_plages.length===1 && currentH > ccn.pauseApres){
+    alerts.push({sev:'warning', msg:`Pause obligatoire manquante : ${currentH.toFixed(1)}h continues (pause ${ccn.pauseMin} min requise après ${ccn.pauseApres}h)`});
+  } else if(_plages.length>=2){
+    let hasValidPause=false;
+    for(let i=0;i<_plages.length-1;i++){
+      const coupure = toMin(_plages[i+1].deb) - toMin(_plages[i].fin);
+      if(coupure>=ccn.pauseMin){hasValidPause=true;break;}
+    }
+    if(!hasValidPause && currentH>ccn.pauseApres){
+      alerts.push({sev:'warning', msg:`Coupure insuffisante : pause de ${ccn.pauseMin} min requise (actuellement < ${ccn.pauseMin} min)`});
+    }
+  }
+
+  // 3. Repos inter-shift — vérifier avec le créneau de la veille
+  const yesterday = new Date(date+'T12:00:00');
+  yesterday.setDate(yesterday.getDate()-1);
+  const yvKey = `${fmt(yesterday)}_${eid}`;
+  const yvItems = (_cr[yvKey]?.items||[]).filter(it=>it.type==='travail');
+  if(yvItems.length>0){
+    const lastFinYv = Math.max(...yvItems.map(it=>toMin(itemLastFin(it))));
+    const firstDebToday = Math.min(..._plages.map(p=>toMin(p.deb)));
+    const gapH = ((24*60 - lastFinYv) + firstDebToday) / 60;
+    if(gapH < ccn.reposMin){
+      alerts.push({sev:'error', msg:`Repos inter-shift : ${gapH.toFixed(1)}h depuis hier soir (minimum ${ccn.reposMin}h)`});
+    }
+  }
+
+  // 4. Durée hebdo — additionner la semaine courante
+  const days = weekDays(_cur);
+  let hebdoH = existingH + currentH;
+  days.forEach(d=>{
+    const dk=`${fmt(d)}_${eid}`;
+    if(dk===k) return; // déjà compté
+    (_cr[dk]?.items||[]).filter(it=>it.type==='travail').forEach(it=>{ hebdoH+=itemTotalH(it); });
+  });
+  if(hebdoH > ccn.hebdoMax){
+    alerts.push({sev:'error', msg:`Semaine dépassée : ${hebdoH.toFixed(1)}h planifiées (max ${ccn.hebdoMax}h)`});
+  }
+
+  if(!alerts.length) return '<div style="display:flex;align-items:center;gap:6px;padding:7px 10px;background:#f0fdf4;border-radius:8px;font-size:11px;font-weight:600;color:#059669">✅ Aucune infraction légale détectée</div>';
+
+  return alerts.map(a=>`
+    <div style="display:flex;align-items:flex-start;gap:7px;padding:7px 10px;background:${a.sev==='error'?'#fee2e2':'#fef3c7'};border-radius:8px;border-left:3px solid ${a.sev==='error'?'#dc2626':'#d97706'}">
+      <span style="font-size:13px;flex-shrink:0">${a.sev==='error'?'🔴':'🟡'}</span>
+      <span style="font-size:11px;font-weight:600;color:${a.sev==='error'?'#dc2626':'#92400e'};line-height:1.4">${a.msg}</span>
+    </div>`).join('');
+}
+window.computeModalAlerts=computeModalAlerts;
 window.updDur=updDur;window.onTypeChange=onTypeChange;
 
 async function saveCr(){
