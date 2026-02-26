@@ -144,6 +144,23 @@ td.muted{color:var(--muted)}
 .mov-in{color:#059669;font-weight:700;background:#d1fae5;padding:3px 8px;border-radius:5px;font-size:11px}
 .mov-out{color:#dc2626;font-weight:700;background:#fee2e2;padding:3px 8px;border-radius:5px;font-size:11px}
 
+/* ── AUTOCOMPLETE FOURNISSEUR ── */
+.sugg-wrap{position:relative}
+.sugg-list{
+  display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:500;
+  background:#fff;border:1.5px solid var(--blue2);border-radius:10px;
+  box-shadow:0 8px 24px rgba(26,61,206,.15);max-height:220px;overflow-y:auto;
+}
+.sugg-list.show{display:block}
+.sugg-item{
+  padding:9px 12px;font-size:13px;font-weight:600;cursor:pointer;
+  color:var(--text);transition:.1s;display:flex;align-items:center;gap:8px;
+  border-bottom:1px solid #f1f5f9;
+}
+.sugg-item:last-child{border-bottom:none}
+.sugg-item:hover,.sugg-item.focused{background:#eff6ff;color:var(--blue)}
+.sugg-item-empty{padding:10px 12px;font-size:12px;color:var(--muted);font-style:italic}
+
 /* ═══════════════ MOBILE ═══════════════ */
 html,body{overflow-x:hidden;max-width:100vw}
 .hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#0f1f5c;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;box-shadow:0 4px 16px rgba(15,31,92,.45);-webkit-tap-highlight-color:transparent}
@@ -465,8 +482,18 @@ html,body{overflow-x:hidden;max-width:100vw}
         <div class="mfield-wrap"><input class="mfield-in" id="m-cat" placeholder="ex: Boissons, Épicerie…"/></div>
       </div>
       <div class="mfield">
-        <label>Fournisseur</label>
-        <div class="mfield-wrap"><input class="mfield-in" id="m-fournisseur" placeholder="ex: Dupont SA"/></div>
+        <label>Fournisseur <span id="fourn-count" style="font-size:10px;color:var(--muted)"></span></label>
+        <div class="sugg-wrap" id="sugg-wrap-fourn">
+          <div class="mfield-wrap" style="position:relative">
+            <input class="mfield-in" id="m-fournisseur" placeholder="ex: Dupont SA" autocomplete="off"
+              oninput="onFournisseurInput(this)"
+              onfocus="onFournisseurInput(this)"
+              onblur="setTimeout(hideFournSugg,180)"
+              onkeydown="onFournisseurKey(event)"/>
+            <span id="fourn-loading" style="font-size:11px;color:var(--muted);display:none">⏳</span>
+          </div>
+          <div class="sugg-list" id="sugg-fourn"></div>
+        </div>
       </div>
     </div>
     <div class="mgrid2">
@@ -644,6 +671,90 @@ async function saveToFirebase() {
       { products: _state.products, movements: _state.movements, updatedAt: new Date().toISOString() }
     );
   } catch(e) { console.error('Stock save error:', e); showToast('Erreur sauvegarde', true); }
+}
+
+// ═══════════════════════════════════════════════════
+// AUTOCOMPLETE FOURNISSEURS (depuis catalogues Firestore)
+// ═══════════════════════════════════════════════════
+var _suppliers = [];
+var _suppLoaded = false;
+var _fournIdx = -1;
+
+async function loadSuppliersFromCatalogue() {
+  if (_suppLoaded || !window._uid || !window._getDoc || !window._db) return;
+  document.getElementById('fourn-loading').style.display = 'inline';
+  try {
+    var snap = await window._getDoc(window._doc(window._db, 'catalogues', window._uid));
+    if (snap.exists() && snap.data().suppliers) {
+      _suppliers = (snap.data().suppliers || []).filter(Boolean).sort();
+    } else {
+      var snapOld = await window._getDoc(window._doc(window._db, 'suppliers', window._uid));
+      if (snapOld.exists()) {
+        _suppliers = (snapOld.data().list || []).filter(Boolean).sort();
+      }
+    }
+    // Enrichir avec les fournisseurs deja saisis dans les produits stock
+    _state.products.forEach(function(p) {
+      if (p.fournisseur && p.fournisseur.trim() && !_suppliers.includes(p.fournisseur.trim())) {
+        _suppliers.push(p.fournisseur.trim());
+      }
+    });
+    _suppliers.sort();
+    _suppLoaded = true;
+    var cnt = document.getElementById('fourn-count');
+    if (cnt) cnt.textContent = _suppliers.length ? '(' + _suppliers.length + ' disponibles)' : '';
+  } catch(e) { console.warn('loadSuppliers error:', e); }
+  document.getElementById('fourn-loading').style.display = 'none';
+}
+
+function onFournisseurInput(inp) {
+  if (!_suppLoaded) { loadSuppliersFromCatalogue(); }
+  var val = (inp.value || '').toLowerCase().trim();
+  var list = document.getElementById('sugg-fourn');
+  if (!list) return;
+
+  var filtered = _suppliers.filter(function(s) {
+    return !val || s.toLowerCase().includes(val);
+  }).slice(0, 12);
+
+  if (!filtered.length) {
+    list.innerHTML = '<div class="sugg-item-empty">Aucun fournisseur dans Pilotage</div>';
+    list.classList.toggle('show', val.length > 0);
+    return;
+  }
+
+  _fournIdx = -1;
+  list.innerHTML = filtered.map(function(s, i) {
+    var safe = s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    var hl = val ? s.replace(new RegExp('(' + val.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + ')','gi'),'<strong>$1</strong>') : s;
+    return '<div class="sugg-item" data-val="' + safe + '" data-i="' + i + '" onmousedown="pickFournisseur(this)">\uD83C\uDFE2 ' + hl + '</div>';
+  }).join('');
+  list.classList.add('show');
+}
+
+function pickFournisseur(el) {
+  document.getElementById('m-fournisseur').value = el.dataset.val;
+  hideFournSugg();
+}
+
+function hideFournSugg() {
+  var list = document.getElementById('sugg-fourn');
+  if (list) list.classList.remove('show');
+  _fournIdx = -1;
+}
+
+function onFournisseurKey(e) {
+  var list = document.getElementById('sugg-fourn');
+  if (!list || !list.classList.contains('show')) return;
+  var items = list.querySelectorAll('.sugg-item');
+  if (!items.length) return;
+  if (e.key === 'ArrowDown') { e.preventDefault(); _fournIdx = Math.min(_fournIdx + 1, items.length - 1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); _fournIdx = Math.max(_fournIdx - 1, 0); }
+  else if (e.key === 'Enter' && _fournIdx >= 0) { e.preventDefault(); pickFournisseur(items[_fournIdx]); return; }
+  else if (e.key === 'Escape') { hideFournSugg(); return; }
+  else { return; }
+  items.forEach(function(it, i) { it.classList.toggle('focused', i === _fournIdx); });
+  if (_fournIdx >= 0) items[_fournIdx].scrollIntoView({ block: 'nearest' });
 }
 
 // ═══════════════════════════════════════════════════
@@ -1130,6 +1241,7 @@ window.openProdModal = function(id) {
   document.getElementById('m-unite').value = p ? (p.unite||'unité') : 'unité';
   document.getElementById('m-notes').value = p ? (p.notes||'') : '';
   document.getElementById('prodOverlay').classList.add('show');
+  loadSuppliersFromCatalogue();
   setTimeout(function(){ document.getElementById('m-ref').focus(); }, 100);
 };
 window.editProd = window.openProdModal;
@@ -1342,6 +1454,7 @@ document.getElementById('movOverlay').addEventListener('click', function(e){ if(
 // ═══════════════════════════════════════════════════
 window.chargerStock = async function() {
   if (!window._uid) return;
+  _suppLoaded = false; // reset cache pour ce uid
   await loadFromFirebase();
   renderAll();
 };
