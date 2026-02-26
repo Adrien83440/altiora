@@ -131,49 +131,23 @@
   <div class="sub" id="rh-nav-sub" ${rhOpen}>
 
     <div class="rh-sub-group">Accueil</div>
-    <div class="si rh-si${active('rh-dashboard.html')}" onclick="location.href='rh-dashboard.html'">
-      <span class="dot rh-dot"></span>Dashboard RH
-    </div>
+    <div class="si rh-si${active('rh-dashboard.html')}" onclick="location.href='rh-dashboard.html'"><span class="dot rh-dot"></span>Dashboard RH</div>
 
     <div class="rh-sub-group">RH Core</div>
-    <div class="si rh-si${active('rh-employes.html')}" onclick="location.href='rh-employes.html'">
-      <span class="dot rh-dot"></span>Employés &amp; Fiches
-    </div>
-    <div class="si rh-si${active('rh-planning.html')}" onclick="location.href='rh-planning.html'">
-      <span class="dot rh-dot"></span>Planning
-    </div>
-    <div class="si rh-si${active('rh-conges.html')}" onclick="location.href='rh-conges.html'">
-      <span class="dot rh-dot"></span>Congés
-    </div>
-    <div class="si rh-si${active('rh-temps.html')}" onclick="location.href='rh-temps.html'">
-      <span class="dot rh-dot"></span>Temps de travail
-    </div>
-    <div class="si rh-si${active('rh-paie.html')}" onclick="location.href='rh-paie.html'">
-      <span class="dot rh-dot"></span>Paie &amp; Salaires
-    </div>
-    <div class="si rh-si${active('rh-recrutement.html')}" onclick="location.href='rh-recrutement.html'">
-      <span class="dot rh-dot"></span>Recrutement
-    </div>
+    <div class="si rh-si${active('rh-employes.html')}" onclick="location.href='rh-employes.html'"><span class="dot rh-dot"></span>Employés &amp; Fiches</div>
+    <div class="si rh-si${active('rh-planning.html')}" onclick="location.href='rh-planning.html'"><span class="dot rh-dot"></span>Planning</div>
+    <div class="si rh-si${active('rh-conges.html')}" onclick="location.href='rh-conges.html'"><span class="dot rh-dot"></span>Congés</div>
+    <div class="si rh-si${active('rh-temps.html')}" onclick="location.href='rh-temps.html'"><span class="dot rh-dot"></span>Temps de travail</div>
+    <div class="si rh-si${active('rh-paie.html')}" onclick="location.href='rh-paie.html'"><span class="dot rh-dot"></span>Paie &amp; Salaires</div>
+    <div class="si rh-si${active('rh-recrutement.html')}" onclick="location.href='rh-recrutement.html'"><span class="dot rh-dot"></span>Recrutement</div>
 
     <div class="rh-sub-group">Gestion</div>
-    <div class="si rh-si${active('rh-onboarding.html')}" onclick="location.href='rh-onboarding.html'">
-      <span class="dot rh-dot"></span>Onboarding / Offboarding
-    </div>
-    <div class="si rh-si${active('rh-documents.html')}" onclick="location.href='rh-documents.html'">
-      <span class="dot rh-dot"></span>Documents RH
-    </div>
-    <div class="si rh-si${active('rh-entretiens.html')}" onclick="location.href='rh-entretiens.html'">
-      <span class="dot rh-dot"></span>Entretiens annuels
-    </div>
-    <div class="si rh-si${active('rh-conformite.html')}" onclick="location.href='rh-conformite.html'">
-      <span class="dot rh-dot"></span>Conformité &amp; Légal
-    </div>
-    <div class="si rh-si${active('rh-formations.html')}" onclick="location.href='rh-formations.html'">
-      <span class="dot rh-dot"></span>Plan de formation
-    </div>
-    <div class="si rh-si${active('rh-modeles.html')}" onclick="location.href='rh-modeles.html'">
-      <span class="dot rh-dot"></span>Modèles de documents
-    </div>
+    <div class="si rh-si${active('rh-onboarding.html')}" onclick="location.href='rh-onboarding.html'"><span class="dot rh-dot"></span>Onboarding / Offboarding</div>
+    <div class="si rh-si${active('rh-documents.html')}" onclick="location.href='rh-documents.html'"><span class="dot rh-dot"></span>Documents RH</div>
+    <div class="si rh-si${active('rh-entretiens.html')}" onclick="location.href='rh-entretiens.html'"><span class="dot rh-dot"></span>Entretiens annuels</div>
+    <div class="si rh-si${active('rh-conformite.html')}" onclick="location.href='rh-conformite.html'"><span class="dot rh-dot"></span>Conformité &amp; Légal</div>
+    <div class="si rh-si${active('rh-formations.html')}" onclick="location.href='rh-formations.html'"><span class="dot rh-dot"></span>Plan de formation</div>
+    <div class="si rh-si${active('rh-modeles.html')}" onclick="location.href='rh-modeles.html'"><span class="dot rh-dot"></span>Modèles de documents</div>
 
   </div>
 
@@ -225,18 +199,22 @@ nav#alteore-nav .un{font-size:11.5px;font-weight:600;color:#fff}
 nav#alteore-nav .upl{font-size:10px;color:rgba(255,255,255,.3)}
 nav#alteore-nav .lbtn{margin-left:auto;background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;font-size:13px}
 
-/* ── RH MODULE — vert dégradé ── */
-nav#alteore-nav .rh-ns{color:rgba(52,211,153,.45)}
-nav#alteore-nav .rh-ni{border-left-color:transparent}
-nav#alteore-nav .rh-ni:hover{background:rgba(16,185,129,.08)}
-nav#alteore-nav .rh-ni.on{background:rgba(16,185,129,.12);border-left-color:#10b981}
-nav#alteore-nav .rh-chev{color:rgba(52,211,153,.4)}
-nav#alteore-nav .rh-sub-group{font-size:9px;font-weight:700;color:rgba(52,211,153,.35);letter-spacing:1px;text-transform:uppercase;padding:8px 18px 2px 40px;margin-top:2px}
-nav#alteore-nav .rh-si{color:rgba(255,255,255,.38)}
-nav#alteore-nav .rh-si:hover{color:rgba(255,255,255,.8);background:rgba(16,185,129,.07)}
-nav#alteore-nav .rh-si.on{color:#fff;background:rgba(16,185,129,.18);border-left-color:rgba(16,185,129,.7)}
-nav#alteore-nav .rh-dot{background:rgba(52,211,153,.3)}
+/* ── RH MODULE — vert uniquement pour RH ── */
+nav#alteore-nav .rh-ns{color:rgba(52,211,153,.55);letter-spacing:1px}
+nav#alteore-nav .ni.rh-ni{border-left-color:transparent}
+nav#alteore-nav .ni.rh-ni:hover{background:rgba(16,185,129,.08)}
+nav#alteore-nav .ni.rh-ni.on{color:#fff;background:rgba(16,185,129,.13);border-left-color:#10b981}
+nav#alteore-nav .rh-chev{color:rgba(52,211,153,.45) !important}
+nav#alteore-nav .rh-sub-group{font-size:9px;font-weight:700;color:rgba(52,211,153,.4);letter-spacing:1px;text-transform:uppercase;padding:8px 18px 3px 18px;margin-top:4px}
+nav#alteore-nav .rh-si{color:rgba(255,255,255,.4)}
+nav#alteore-nav .rh-si:hover{color:rgba(255,255,255,.82);background:rgba(16,185,129,.07)}
+nav#alteore-nav .rh-si.on{color:#fff;background:rgba(16,185,129,.17);border-left-color:rgba(16,185,129,.75)}
+nav#alteore-nav .rh-dot{background:rgba(52,211,153,.28)}
 nav#alteore-nav .rh-si.on .rh-dot{background:#10b981}
+/* Scroll RH sous-menu — ne jamais dépasser la hauteur de l'écran */
+nav#alteore-nav #rh-nav-sub{overflow-y:auto;max-height:calc(100vh - 420px) !important;scrollbar-width:thin;scrollbar-color:rgba(16,185,129,.25) transparent}
+nav#alteore-nav #rh-nav-sub::-webkit-scrollbar{width:3px}
+nav#alteore-nav #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(16,185,129,.3);border-radius:99px}
 
 /* Mobile hamburger */
 .alteore-hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#0f1f5c;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;box-shadow:0 4px 16px rgba(15,31,92,.45);-webkit-tap-highlight-color:transparent}
