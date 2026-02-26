@@ -794,6 +794,7 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
     const byMonth = {};
     rows.forEach(r => {
       const dateVal = get(r, 'date');
+      if (!dateVal && !forcedMonth) return; // skip empty rows without date
       // Priorité au mois forcé depuis le nom de l'onglet
       const ym = forcedMonth || parseDateToYYYYMM(dateVal) || new Date().toISOString().slice(0, 7);
       if (!byMonth[ym]) byMonth[ym] = [];
@@ -878,7 +879,8 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
 
   else if (destKey === 'marges') {
     for (const r of rows) {
-      const nom = get(r, 'nom') || 'Import';
+      const nom = (get(r, 'nom') || '').trim();
+      if (!nom) continue; // ignorer les lignes sans nom
       const item = { id: uid(), nom, prixVente: getN(r, 'prixVente'), coutMP: getN(r, 'coutMP'), coutMain: getN(r, 'coutMain'), coutIndirect: getN(r, 'coutIndirect'), tvaRate: getN(r, 'tvaRate') || 20, updatedAt: new Date().toISOString() };
       await window._setDoc(window._doc(window._db, 'marges', window._uid, 'produits', item.id), item);
     }
@@ -1235,7 +1237,8 @@ async function importFidelite(){
 async function importMarges(){
   if(!window._uid||!window._setDoc) throw new Error('Non connecté');
   _rows.forEach(async r=>{
-    const nom=String(_mapping['nom']?r[_mapping['nom']]||'Import':'Import');
+    const nom=String(_mapping['nom']?r[_mapping['nom']]||'':'').trim();
+    if(!nom) return; // ignorer les lignes sans nom
     const item={id:uid(),nom,prixVente:pf(_mapping['prixVente']?r[_mapping['prixVente']]:0),coutMP:pf(_mapping['coutMP']?r[_mapping['coutMP']]:0),coutMain:pf(_mapping['coutMain']?r[_mapping['coutMain']]:0),coutIndirect:pf(_mapping['coutIndirect']?r[_mapping['coutIndirect']]:0),tvaRate:pf(_mapping['tvaRate']?r[_mapping['tvaRate']]:20)||20,updatedAt:new Date().toISOString()};
     await window._setDoc(window._doc(window._db,'marges',window._uid,'produits',item.id),item);
   });
