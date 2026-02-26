@@ -6,6 +6,7 @@
 <title>ALTEORE — Gestion des Stocks</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -212,6 +213,7 @@ html,body{overflow-x:hidden;max-width:100vw}
     </div>
     <div class="tb-r">
       <button class="btn btn-o" onclick="location.href='dashboard.html'">← Dashboard</button>
+      <button class="btn btn-o" onclick="openImportModal()">📂 Importer CSV/Excel</button>
       <button class="btn btn-o" id="btn-export-pdf" onclick="exportPDF()">🖨️ Export PDF</button>
       <button class="btn btn-p" onclick="openProdModal()">+ Ajouter produit</button>
     </div>
@@ -487,7 +489,7 @@ html,body{overflow-x:hidden;max-width:100vw}
           <div class="mfield-wrap" style="position:relative">
             <input class="mfield-in" id="m-fournisseur" placeholder="ex: Dupont SA" autocomplete="off"
               oninput="onFournisseurInput(this)"
-              onfocus="onFournisseurInput(this)"
+              onfocus="_suppLoaded ? showFournSugg(this) : onFournisseurInput(this)"
               onblur="setTimeout(hideFournSugg,180)"
               onkeydown="onFournisseurKey(event)"/>
             <span id="fourn-loading" style="font-size:11px;color:var(--muted);display:none">⏳</span>
@@ -580,6 +582,115 @@ html,body{overflow-x:hidden;max-width:100vw}
     <div class="modal-footer">
       <button class="btn btn-o" onclick="closeMovModal()">Annuler</button>
       <button class="btn btn-p" onclick="saveMov()">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════ MODAL IMPORT CSV/EXCEL ═══════ -->
+<div class="overlay" id="importOverlay">
+  <div class="modal" style="max-width:780px;width:95%">
+    <div class="modal-title">📂 Import de produits</div>
+
+    <!-- ÉTAPE 1 : Upload -->
+    <div id="import-step-1">
+      <div id="drop-zone" style="
+        border:2px dashed var(--border);border-radius:14px;padding:36px 20px;
+        text-align:center;cursor:pointer;transition:.2s;background:#f8faff;
+        "
+        onclick="document.getElementById('import-file-input').click()"
+        ondragover="event.preventDefault();this.style.borderColor='var(--blue2)';this.style.background='#eff6ff'"
+        ondragleave="this.style.borderColor='var(--border)';this.style.background='#f8faff'"
+        ondrop="handleImportDrop(event)">
+        <div style="font-size:36px;margin-bottom:10px">📁</div>
+        <div style="font-weight:700;font-size:14px;margin-bottom:6px">Glisse ton fichier ici ou clique pour parcourir</div>
+        <div style="color:var(--muted);font-size:12px">Formats acceptés : CSV, Excel (.xlsx, .xls), ODS, TSV</div>
+        <input type="file" id="import-file-input" accept=".csv,.xlsx,.xls,.ods,.tsv,.txt" style="display:none" onchange="handleImportFile(this.files[0])">
+      </div>
+      <div id="import-file-info" style="display:none;margin-top:12px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;font-size:12px;font-weight:600;color:#065f46"></div>
+    </div>
+
+    <!-- ÉTAPE 2 : Mapping -->
+    <div id="import-step-2" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-weight:700;font-size:13px" id="import-file-name-label"></div>
+          <div style="font-size:11px;color:var(--muted)" id="import-rows-label"></div>
+        </div>
+        <button class="btn btn-o btn-xs" onclick="resetImport()">← Changer de fichier</button>
+      </div>
+
+      <!-- Info doublon -->
+      <div style="margin-bottom:14px;padding:10px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;display:flex;align-items:center;gap:8px;font-size:12px">
+        <span>⚠️</span>
+        <span>Si des références existent déjà dans ton stock, tu pourras choisir <strong>ligne par ligne</strong> ce qu'on fait.</span>
+      </div>
+
+      <!-- Tableau de mapping -->
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">
+        Fais correspondre tes colonnes → nos champs
+      </div>
+      <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin-bottom:14px">
+        <table style="width:100%;border-collapse:collapse;min-width:420px">
+          <thead>
+            <tr style="background:#f8faff">
+              <th style="padding:9px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)">Colonne dans ton fichier</th>
+              <th style="padding:9px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)">Exemple de valeur</th>
+              <th style="padding:9px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)">→ Champ Alteore</th>
+            </tr>
+          </thead>
+          <tbody id="import-mapping-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Prévisualisation -->
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">
+        Prévisualisation (5 premières lignes)
+      </div>
+      <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin-bottom:4px">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:500px" id="import-preview-table"></table>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px" id="import-preview-note"></div>
+    </div>
+
+    <!-- ÉTAPE 2b : Révision des conflits -->
+    <div id="import-step-2b" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-weight:700;font-size:13px">⚠️ Conflits détectés</div>
+          <div style="font-size:11px;color:var(--muted)" id="import-conflict-label"></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-g btn-xs" onclick="resolveAllConflicts('update')">✅ Tout mettre à jour</button>
+          <button class="btn btn-d btn-xs" onclick="resolveAllConflicts('skip')">⏭️ Tout ignorer</button>
+        </div>
+      </div>
+      <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;max-height:320px;overflow-y:auto">
+        <table style="width:100%;border-collapse:collapse;min-width:560px">
+          <thead style="background:#f8faff;position:sticky;top:0">
+            <tr>
+              <th style="padding:9px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)">Réf.</th>
+              <th style="padding:9px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)">Nom</th>
+              <th style="padding:9px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)">Stock existant</th>
+              <th style="padding:9px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)">Nouvelles données</th>
+              <th style="padding:9px 12px;text-align:center;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border)">Action</th>
+            </tr>
+          </thead>
+          <tbody id="import-conflicts-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ÉTAPE 3 : Résultat -->
+    <div id="import-step-3" style="display:none;text-align:center;padding:20px 0">
+      <div style="font-size:48px;margin-bottom:12px" id="import-result-icon">✅</div>
+      <div style="font-size:16px;font-weight:800;margin-bottom:8px" id="import-result-title"></div>
+      <div style="font-size:13px;color:var(--muted)" id="import-result-detail"></div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-o" onclick="closeImportModal()">Fermer</button>
+      <button class="btn btn-p" id="import-do-btn" style="display:none" onclick="doImport()">✅ Importer les produits</button>
+      <button class="btn btn-p" id="import-confirm-btn" style="display:none" onclick="confirmImport()">✅ Confirmer l'import</button>
     </div>
   </div>
 </div>
@@ -707,19 +818,25 @@ async function loadSuppliersFromCatalogue() {
   document.getElementById('fourn-loading').style.display = 'none';
 }
 
-function onFournisseurInput(inp) {
-  if (!_suppLoaded) { loadSuppliersFromCatalogue(); }
+async function onFournisseurInput(inp) {
+  // Attendre le chargement si pas encore fait
+  if (!_suppLoaded) { await loadSuppliersFromCatalogue(); }
+  showFournSugg(inp);
+}
+
+function showFournSugg(inp) {
   var val = (inp.value || '').toLowerCase().trim();
   var list = document.getElementById('sugg-fourn');
   if (!list) return;
 
+  // Afficher tous les fournisseurs si champ vide, filtrer sinon
   var filtered = _suppliers.filter(function(s) {
     return !val || s.toLowerCase().includes(val);
-  }).slice(0, 12);
+  }).slice(0, 14);
 
   if (!filtered.length) {
-    list.innerHTML = '<div class="sugg-item-empty">Aucun fournisseur dans Pilotage</div>';
-    list.classList.toggle('show', val.length > 0);
+    list.innerHTML = '<div class="sugg-item-empty">Aucun fournisseur trouvé dans Pilotage</div>';
+    list.classList.add('show');
     return;
   }
 
@@ -1241,7 +1358,7 @@ window.openProdModal = function(id) {
   document.getElementById('m-unite').value = p ? (p.unite||'unité') : 'unité';
   document.getElementById('m-notes').value = p ? (p.notes||'') : '';
   document.getElementById('prodOverlay').classList.add('show');
-  loadSuppliersFromCatalogue();
+  loadSuppliersFromCatalogue(); // préchargement en background
   setTimeout(function(){ document.getElementById('m-ref').focus(); }, 100);
 };
 window.editProd = window.openProdModal;
@@ -1445,8 +1562,436 @@ function showToast(msg, err) {
   window._toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 2800);
 }
 
+
+// ═══════════════════════════════════════════════════
+// IMPORT CSV / EXCEL
+// ═══════════════════════════════════════════════════
+
+// Champs cibles Alteore
+var IMPORT_FIELDS = [
+  { key: 'ref',        label: 'Référence (SKU)',       required: true },
+  { key: 'name',       label: 'Nom du produit',        required: false },
+  { key: 'cat',        label: 'Catégorie',             required: false },
+  { key: 'fournisseur',label: 'Fournisseur',           required: false },
+  { key: 'pa',         label: 'Prix achat HT (PA)',    required: false },
+  { key: 'pv',         label: 'Prix vente HT (PV)',    required: false },
+  { key: 'stockBase',  label: 'Stock initial (qté)',   required: false },
+  { key: 'min',        label: 'Seuil alerte',          required: false },
+  { key: 'unite',      label: 'Unité',                 required: false },
+  { key: 'notes',      label: 'Notes',                 required: false },
+];
+
+// Mots-clés pour auto-détecter les colonnes
+var IMPORT_ALIASES = {
+  ref:         ['ref', 'sku', 'référence', 'reference', 'code', 'code article', 'article', 'id', 'code produit', 'codeart'],
+  name:        ['nom', 'name', 'produit', 'désignation', 'designation', 'libellé', 'libelle', 'description', 'intitule', 'intitulé'],
+  cat:         ['cat', 'categorie', 'catégorie', 'category', 'famille', 'family', 'rayon', 'type', 'gamme'],
+  fournisseur: ['fournisseur', 'supplier', 'vendor', 'fourn', 'frs', 'fournisseurs'],
+  pa:          ['pa', 'pa ht', 'puht', 'pu ht', 'prix achat', 'prix achat ht', 'prixachat', 'cout', 'coût', 'coût ht', 'cost', 'achat'],
+  pv:          ['pv', 'pv ht', 'pvht', 'prix vente', 'prix vente ht', 'prixvente', 'vente', 'tarif', 'tarif ht', 'price'],
+  stockBase:   ['stock', 'qte', 'qté', 'quantite', 'quantité', 'qty', 'inventory', 'stock initial', 'stock actuel', 'stock dispo'],
+  min:         ['min', 'seuil', 'alerte', 'stock min', 'stock minimum', 'mini', 'minimum', 'reorder'],
+  unite:       ['unite', 'unité', 'unit', 'um', 'uom', 'conditionnement'],
+  notes:       ['notes', 'note', 'commentaire', 'commentaires', 'obs', 'observation', 'remarque'],
+};
+
+var _importRawRows = [];      // données brutes
+var _importHeaders = [];      // colonnes du fichier
+var _importMapping = {};      // { colonne_fichier: champ_alteore | '' }
+var _importFileName = '';
+
+window.openImportModal = function() {
+  resetImport();
+  document.getElementById('importOverlay').classList.add('show');
+};
+
+window.closeImportModal = function() {
+  document.getElementById('importOverlay').classList.remove('show');
+};
+
+function resetImport() {
+  _importRawRows = []; _importHeaders = []; _importMapping = {}; _importFileName = '';
+  document.getElementById('import-step-1').style.display = '';
+  document.getElementById('import-step-2').style.display = 'none';
+  document.getElementById('import-step-3').style.display = 'none';
+  document.getElementById('import-do-btn').style.display = 'none';
+  document.getElementById('import-file-info').style.display = 'none';
+  document.getElementById('import-file-input').value = '';
+  var dz = document.getElementById('drop-zone');
+  dz.style.borderColor = ''; dz.style.background = '';
+}
+
+window.handleImportDrop = function(e) {
+  e.preventDefault();
+  var dz = document.getElementById('drop-zone');
+  dz.style.borderColor = ''; dz.style.background = '';
+  var file = e.dataTransfer.files[0];
+  if (file) handleImportFile(file);
+};
+
+window.handleImportFile = function(file) {
+  if (!file) return;
+  _importFileName = file.name;
+  var ext = file.name.split('.').pop().toLowerCase();
+  var reader = new FileReader();
+
+  if (ext === 'csv' || ext === 'tsv' || ext === 'txt') {
+    reader.onload = function(e) { parseCSV(e.target.result); };
+    reader.readAsText(file, 'UTF-8');
+  } else if (['xlsx','xls','ods'].includes(ext)) {
+    reader.onload = function(e) { parseExcel(e.target.result); };
+    reader.readAsArrayBuffer(file);
+  } else {
+    showToast('Format non supporté : ' + ext, true); return;
+  }
+};
+
+function parseCSV(text) {
+  // Détecter séparateur : ; ou , ou tab
+  var firstLine = text.split('\n')[0] || '';
+  var sep = '\t';
+  if (firstLine.split(';').length > firstLine.split(',').length && firstLine.split(';').length > 2) sep = ';';
+  else if (firstLine.split(',').length > 2) sep = ',';
+
+  var lines = text.split(/\r?\n/).filter(function(l){ return l.trim(); });
+  if (lines.length < 2) { showToast('Fichier vide ou invalide', true); return; }
+
+  var headers = splitLine(lines[0], sep).map(function(h){ return h.trim().replace(/^["']|["']$/g,''); });
+  var rows = lines.slice(1).filter(function(l){ return l.trim(); }).map(function(l) {
+    var vals = splitLine(l, sep).map(function(v){ return v.trim().replace(/^["']|["']$/g,''); });
+    var obj = {};
+    headers.forEach(function(h, i){ obj[h] = vals[i] || ''; });
+    return obj;
+  });
+
+  onImportParsed(headers, rows);
+}
+
+function splitLine(line, sep) {
+  // Gestion des champs entre guillemets
+  var result = [], cur = '', inQ = false;
+  for (var i = 0; i < line.length; i++) {
+    var c = line[i];
+    if (c === '"' || c === "'") { inQ = !inQ; }
+    else if (c === sep && !inQ) { result.push(cur); cur = ''; }
+    else { cur += c; }
+  }
+  result.push(cur);
+  return result;
+}
+
+function parseExcel(buffer) {
+  try {
+    var wb = XLSX.read(buffer, { type: 'array' });
+    var ws = wb.Sheets[wb.SheetNames[0]];
+    var data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    if (data.length < 2) { showToast('Feuille vide', true); return; }
+
+    var headers = data[0].map(function(h){ return String(h||'').trim(); }).filter(function(h,i,a){ return h || i < a.length - 1; });
+    var rows = data.slice(1).filter(function(r){ return r.some(function(v){ return String(v||'').trim(); }); }).map(function(r) {
+      var obj = {};
+      headers.forEach(function(h, i){ obj[h] = String(r[i] === undefined ? '' : r[i]).trim(); });
+      return obj;
+    });
+
+    onImportParsed(headers, rows);
+  } catch(e) { showToast('Erreur lecture Excel : ' + e.message, true); }
+}
+
+function autoDetectMapping(headers) {
+  var mapping = {};
+  headers.forEach(function(h) {
+    var hNorm = h.toLowerCase().trim()
+      .replace(/[_\-]/g,' ')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    mapping[h] = '';
+    Object.keys(IMPORT_ALIASES).forEach(function(fieldKey) {
+      if (mapping[h]) return; // déjà trouvé
+      IMPORT_ALIASES[fieldKey].forEach(function(alias) {
+        var aliasNorm = alias.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+        if (!mapping[h] && (hNorm === aliasNorm || hNorm.includes(aliasNorm) || aliasNorm.includes(hNorm))) {
+          mapping[h] = fieldKey;
+        }
+      });
+    });
+  });
+  return mapping;
+}
+
+function onImportParsed(headers, rows) {
+  _importHeaders = headers;
+  _importRawRows = rows;
+  _importMapping = autoDetectMapping(headers);
+
+  // Info fichier
+  var info = document.getElementById('import-file-info');
+  info.textContent = '✅ ' + _importFileName + ' — ' + rows.length + ' ligne(s) · ' + headers.length + ' colonne(s)';
+  info.style.display = '';
+
+  // Afficher étape 2
+  document.getElementById('import-step-1').style.display = 'none';
+  document.getElementById('import-step-2').style.display = '';
+  document.getElementById('import-do-btn').style.display = '';
+  document.getElementById('import-file-name-label').textContent = '📄 ' + _importFileName;
+  document.getElementById('import-rows-label').textContent = rows.length + ' ligne(s) détectées';
+
+  renderMappingTable();
+  renderImportPreview();
+}
+
+function renderMappingTable() {
+  var body = document.getElementById('import-mapping-body');
+  body.innerHTML = '';
+
+  _importHeaders.forEach(function(h) {
+    // Exemple : première valeur non vide
+    var ex = '';
+    for (var i = 0; i < Math.min(5, _importRawRows.length); i++) {
+      if (_importRawRows[i][h] && _importRawRows[i][h].trim()) { ex = _importRawRows[i][h].trim(); break; }
+    }
+
+    var selOpts = '<option value="">— Ignorer —</option>';
+    IMPORT_FIELDS.forEach(function(f) {
+      var sel = _importMapping[h] === f.key ? ' selected' : '';
+      var req = f.required ? ' ⭐' : '';
+      selOpts += '<option value="' + f.key + '"' + sel + '>' + f.label + req + '</option>';
+    });
+
+    var autoDetected = !!_importMapping[h];
+    var tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid #f1f5f9';
+    tr.innerHTML =
+      '<td style="padding:8px 12px;font-family:monospace;font-size:12px;font-weight:700;background:#f8faff;white-space:nowrap">' +
+        h + (autoDetected ? ' <span style="font-size:9px;background:#d1fae5;color:#065f46;padding:1px 5px;border-radius:4px;font-family:sans-serif">AUTO</span>' : '') +
+      '</td>' +
+      '<td style="padding:8px 12px;font-size:11px;color:var(--muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(ex) + '">' + escHtml(ex || '—') + '</td>' +
+      '<td style="padding:8px 12px">' +
+        '<select class="in-select" style="min-width:180px;font-size:12px" data-col="' + escHtml(h) + '" onchange="onMappingChange(this)">' +
+          selOpts +
+        '</select>' +
+      '</td>';
+    body.appendChild(tr);
+  });
+}
+
+window.onMappingChange = function(sel) {
+  var col = sel.dataset.col;
+  var newVal = sel.value;
+
+  // Empêcher le même champ sur deux colonnes (sauf "ignorer")
+  if (newVal) {
+    Object.keys(_importMapping).forEach(function(c) {
+      if (c !== col && _importMapping[c] === newVal) {
+        _importMapping[c] = '';
+        var otherSel = document.querySelector('select[data-col="' + c.replace(/"/g,'\\"') + '"]');
+        if (otherSel) otherSel.value = '';
+      }
+    });
+  }
+
+  _importMapping[col] = newVal;
+  renderImportPreview();
+};
+
+function renderImportPreview() {
+  var tbl = document.getElementById('import-preview-table');
+  // Champs mappés actifs
+  var activeMappings = Object.keys(_importMapping).filter(function(c){ return _importMapping[c]; });
+  var activeFields = activeMappings.map(function(c){ return { col: c, field: _importMapping[c] }; });
+
+  if (!activeFields.length) {
+    tbl.innerHTML = '<tr><td style="padding:12px;text-align:center;color:var(--muted);font-size:12px">Aucun champ mappé</td></tr>';
+    document.getElementById('import-preview-note').textContent = '';
+    return;
+  }
+
+  var html = '<thead style="background:#f8faff"><tr>';
+  activeFields.forEach(function(af) {
+    var fieldDef = IMPORT_FIELDS.find(function(f){ return f.key === af.field; });
+    html += '<th style="padding:7px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap">' + (fieldDef ? fieldDef.label : af.field) + '</th>';
+  });
+  html += '</tr></thead><tbody>';
+
+  _importRawRows.slice(0, 5).forEach(function(row) {
+    html += '<tr style="border-bottom:1px solid #f1f5f9">';
+    activeFields.forEach(function(af) {
+      var val = row[af.col] || '';
+      html += '<td style="padding:6px 10px;font-size:11px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escHtml(val) + '">' + escHtml(val || '—') + '</td>';
+    });
+    html += '</tr>';
+  });
+  html += '</tbody>';
+  tbl.innerHTML = html;
+
+  var note = document.getElementById('import-preview-note');
+  note.textContent = _importRawRows.length > 5 ? '... et ' + (_importRawRows.length - 5) + ' autre(s) ligne(s)' : '';
+}
+
+// Construit un objet produit depuis une ligne brute + le mapping actif
+function buildProdFromRow(row) {
+  var prod = {};
+  Object.keys(_importMapping).forEach(function(col) {
+    var fieldKey = _importMapping[col];
+    if (!fieldKey) return;
+    var val = (row[col] || '').trim();
+    if (['pa','pv','stockBase','min'].includes(fieldKey)) val = String(pf(val));
+    prod[fieldKey] = val;
+  });
+  return prod;
+}
+
+var _importPending = []; // lignes à importer après résolution conflits
+var _importConflicts = []; // { ref, existIdx, newProd, action: 'update'|'skip' }
+var _importNewRows = [];   // lignes sans conflit → ajout direct
+
+// _importParsedProds : produits construits depuis le mapping (avant résolution conflits)
+var _importParsedProds = [];
+var _conflictDecisions = {};
+
+function buildParsedProds() {
+  var refCol = Object.keys(_importMapping).find(function(c){ return _importMapping[c] === 'ref'; });
+  if (!refCol) return null;
+  var prods = [], errors = 0;
+  _importRawRows.forEach(function(row) {
+    var ref = (row[refCol] || '').trim();
+    if (!ref) { errors++; return; }
+    var prod = { ref: ref };
+    Object.keys(_importMapping).forEach(function(col) {
+      var fieldKey = _importMapping[col];
+      if (!fieldKey || fieldKey === 'ref') return;
+      var val = (row[col] || '').trim().replace(',','.');
+      if (['pa','pv','stockBase','min'].includes(fieldKey)) {
+        var n = parseFloat(val); val = isNaN(n) ? '0' : String(n);
+      }
+      prod[fieldKey] = val;
+    });
+    prods.push(prod);
+  });
+  return { prods: prods, errors: errors };
+}
+
+window.doImport = function() {
+  var refCol = Object.keys(_importMapping).find(function(c){ return _importMapping[c] === 'ref'; });
+  if (!refCol) { showToast('Mappe au moins la colonne Référence (SKU) !', true); return; }
+  var result = buildParsedProds();
+  if (!result) { showToast('Erreur lecture données', true); return; }
+  _importParsedProds = result.prods;
+
+  var conflicts = _importParsedProds.filter(function(prod) {
+    return _state.products.some(function(p){ return (p.ref||'').trim() === prod.ref; });
+  });
+  var newCount = _importParsedProds.length - conflicts.length;
+
+  if (!conflicts.length) { applyImport({}); return; }
+
+  // Init décisions : update par défaut
+  _conflictDecisions = {};
+  conflicts.forEach(function(prod) { _conflictDecisions[prod.ref] = 'update'; });
+
+  document.getElementById('import-step-2').style.display = 'none';
+  document.getElementById('import-step-conflicts').style.display = '';
+  document.getElementById('import-do-btn').style.display = 'none';
+  document.getElementById('import-confirm-btn').style.display = '';
+  document.getElementById('conflicts-count-label').textContent =
+    conflicts.length + ' référence(s) existent déjà dans ton stock';
+  document.getElementById('conflicts-new-label').textContent =
+    newCount + ' nouveau(x) produit(s) seront ajoutés directement.';
+  renderConflictsTable(conflicts);
+};
+
+function renderConflictsTable(conflicts) {
+  var body = document.getElementById('conflicts-body');
+  body.innerHTML = '';
+  conflicts.forEach(function(incoming) {
+    var ref = incoming.ref;
+    var existing = _state.products.find(function(p){ return (p.ref||'').trim() === ref; }) || {};
+    var diffs = [];
+    ['name','cat','pa','pv','stockBase','min','fournisseur','unite'].forEach(function(k) {
+      if (incoming[k] !== undefined && String(incoming[k]) !== String(existing[k]||'')) {
+        var lbl = {name:'Nom',cat:'Catégorie',pa:'PA',pv:'PV',stockBase:'Stock',min:'Seuil',fournisseur:'Fourn.',unite:'Unité'};
+        diffs.push((lbl[k]||k)+' : '+(existing[k]||'—')+' → '+(incoming[k]||'—'));
+      }
+    });
+    var decision = _conflictDecisions[ref] || 'update';
+    var safeRef = ref.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    var tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid #f1f5f9';
+    tr.innerHTML =
+      '<td style="padding:8px 12px;font-family:monospace;font-size:11px;font-weight:700;white-space:nowrap">'+escHtml(ref)+'</td>'+
+      '<td style="padding:8px 12px;font-size:12px;font-weight:600;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(incoming.name||'—')+'</td>'+
+      '<td style="padding:8px 12px;font-size:12px;color:var(--muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(existing.name||'—')+'</td>'+
+      '<td style="padding:8px 12px;font-size:10px;color:var(--muted);max-width:180px">'+(
+        diffs.length
+          ? diffs.slice(0,3).map(function(d){ return '<div>'+escHtml(d)+'</div>'; }).join('')+(diffs.length>3?'<div style="color:var(--blue)">+' + (diffs.length-3)+' autre(s)</div>':'')
+          : '<span style="color:var(--green);font-weight:600">Identique</span>'
+      )+'</td>'+
+      '<td style="padding:8px 12px">'+
+        '<div style="display:flex;gap:5px;justify-content:center">'+
+          '<button class="btn btn-xs '+(decision==='update'?'btn-p':'btn-o')+'" data-ref="'+safeRef+'" data-dec="update" onclick="setConflictDecision(this)">Mettre à jour</button>'+
+          '<button class="btn btn-xs '+(decision==='skip'?'btn-p':'btn-o')+'" data-ref="'+safeRef+'" data-dec="skip" onclick="setConflictDecision(this)">Ignorer</button>'+
+        '</div>'+
+      '</td>';
+    body.appendChild(tr);
+  });
+}
+
+window.setConflictDecision = function(btn) {
+  var ref = btn.dataset.ref, dec = btn.dataset.dec;
+  _conflictDecisions[ref] = dec;
+  // Mettre à jour visuellement les 2 boutons de la même ligne
+  var btns = btn.closest('tr').querySelectorAll('button');
+  btns.forEach(function(b) {
+    b.className = 'btn btn-xs ' + (b.dataset.dec === dec ? 'btn-p' : 'btn-o');
+  });
+};
+
+window.resolveAllConflicts = function(dec) {
+  Object.keys(_conflictDecisions).forEach(function(ref){ _conflictDecisions[ref] = dec; });
+  document.querySelectorAll('#conflicts-body button').forEach(function(b) {
+    b.className = 'btn btn-xs ' + (b.dataset.dec === dec ? 'btn-p' : 'btn-o');
+  });
+};
+
+window.confirmImport = function() { applyImport(_conflictDecisions); };
+
+function applyImport(decisions) {
+  var added = 0, updated = 0, skipped = 0, errors = 0;
+  _importParsedProds.forEach(function(incoming) {
+    var ref = incoming.ref;
+    if (!ref) { errors++; return; }
+    var existIdx = _state.products.findIndex(function(p){ return (p.ref||'').trim() === ref; });
+    if (existIdx >= 0) {
+      if ((decisions[ref] || 'update') === 'skip') { skipped++; return; }
+      Object.keys(incoming).forEach(function(k){ _state.products[existIdx][k] = incoming[k]; });
+      updated++;
+    } else {
+      _state.products.push({
+        id: uid(), ref: ref,
+        name: incoming.name||'', cat: incoming.cat||'',
+        fournisseur: incoming.fournisseur||'',
+        pa: incoming.pa||'0', pv: incoming.pv||'0',
+        stockBase: incoming.stockBase||'0', min: incoming.min||'0',
+        unite: incoming.unite||'unité', notes: incoming.notes||'',
+        createdAt: new Date().toISOString()
+      });
+      added++;
+    }
+  });
+  scheduleSave(); renderAll();
+  ['import-step-2','import-step-conflicts'].forEach(function(id){ document.getElementById(id).style.display='none'; });
+  document.getElementById('import-step-3').style.display = '';
+  document.getElementById('import-do-btn').style.display = 'none';
+  document.getElementById('import-confirm-btn').style.display = 'none';
+  document.getElementById('import-result-icon').textContent = errors===_importParsedProds.length?'❌':'✅';
+  document.getElementById('import-result-title').textContent =
+    added+' ajouté(s) · '+updated+' mis à jour · '+skipped+' ignoré(s)'+(errors?' · '+errors+' erreur(s)':'');
+  document.getElementById('import-result-detail').textContent = 'Données sauvegardées dans Firebase.';
+}
+
+
 // Fermer modals sur overlay click
 document.getElementById('prodOverlay').addEventListener('click', function(e){ if(e.target===this) closeProdModal(); });
+document.getElementById('importOverlay').addEventListener('click', function(e){ if(e.target===this) closeImportModal(); });
 document.getElementById('movOverlay').addEventListener('click', function(e){ if(e.target===this) closeMovModal(); });
 
 // ═══════════════════════════════════════════════════
