@@ -134,6 +134,35 @@ input[type=file]{display:none}
   .gs-input{flex-direction:column!important}
   .gs-field{width:100%}
 }
+
+/* ── Multi-tab review screen ── */
+.review-panel{background:#fff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;margin-top:16px}
+.review-panel-header{padding:14px 18px;background:#f8fafc;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.review-panel-title{font-size:15px;font-weight:700;color:#1e293b}
+.review-tab-row{padding:14px 18px;border-bottom:1px solid #f1f5f9;transition:background .15s}
+.review-tab-row:last-child{border-bottom:none}
+.review-tab-row.disabled{opacity:.45}
+.review-tab-header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.review-tab-name{font-size:13px;font-weight:700;color:#1e293b;flex:1}
+.review-tab-toggle{width:36px;height:20px;border-radius:10px;border:none;cursor:pointer;position:relative;transition:background .2s;flex-shrink:0}
+.review-tab-toggle.on{background:#3b82f6}
+.review-tab-toggle.off{background:#d1d5db}
+.review-tab-toggle::after{content:'';position:absolute;top:3px;width:14px;height:14px;border-radius:50%;background:#fff;transition:left .2s}
+.review-tab-toggle.on::after{left:19px}
+.review-tab-toggle.off::after{left:3px}
+.review-mapping-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.review-field-row{background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px}
+.review-field-label{font-size:11px;font-weight:600;color:#64748b;margin-bottom:4px;display:flex;align-items:center;gap:4px}
+.review-field-label .req{color:#ef4444}
+.review-field-sel{width:100%;font-size:12px;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#1e293b}
+.review-field-sel.mapped{border-color:#3b82f6;background:#eff6ff}
+.review-module-sel{font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#1e293b;font-weight:600}
+.review-month-inp{font-size:12px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;width:90px}
+.review-badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}
+.review-badge.mod{background:#eff6ff;color:#3b82f6}
+.review-badge.month{background:#f0fdf4;color:#16a34a}
+.review-badge.warn{background:#fff7ed;color:#ea580c}
+.review-confirm-bar{padding:14px 18px;background:#f8fafc;border-top:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;gap:12px}
 </style>
 </head>
 <body>
@@ -665,69 +694,64 @@ async function loadSelectedTab() {
     return;
   }
 
-  // ── Multi-onglets : import direct automatique ──
-  // Créer un panneau de progression
-  showMultiImportProgress(gids.map(g => _gsTabsData[g]));
+  // ── Multi-onglets : analyse IA puis écran de review ──
+  const area = document.getElementById('gsArea');
+  
+  // Panneau d'analyse en cours
+  area.innerHTML = `
+    <div style="padding:24px;text-align:center;color:#64748b">
+      <div style="font-size:28px;margin-bottom:12px">🔍</div>
+      <div style="font-weight:700;font-size:15px;color:#1e293b;margin-bottom:6px">Analyse en cours…</div>
+      <div id="review-analysis-status" style="font-size:13px">Récupération des données IA…</div>
+      <div style="margin-top:16px;height:4px;background:#e5e7eb;border-radius:2px;overflow:hidden">
+        <div id="review-analysis-bar" style="height:100%;background:#3b82f6;border-radius:2px;width:0%;transition:width .3s"></div>
+      </div>
+    </div>`;
 
-  let successCount = 0, skipCount = 0;
-  const results = [];
+  const MODULE_MAP = {
+    'pilotage_ca':'ca','pilotage_charges':'charges','stock':'stock',
+    'dettes':'dettes','fidelite_clients':'fidelite','mouvements_stock':'mouvements','marges':'marges'
+  };
+  const MODULE_LABELS = {
+    ca:'📈 CA & Ventes', charges:'💸 Charges', dettes:'🏦 Dettes/Emprunts',
+    stock:'📦 Stock', mouvements:'🔄 Mouvements stock', fidelite:'❤️ Fidélité clients', marges:'📊 Marges produits'
+  };
 
-  for (let i = 0; i < gids.length; i++) {
-    const gid = gids[i];
+  // Analyser tous les onglets en parallèle
+  const analysisData = {};
+  let done = 0;
+  await Promise.all(gids.map(async gid => {
     const tab = _gsTabsData[gid];
-    updateMultiProgress(gid, 'loading');
-
     try {
       const r = await fetch('/api/fetch-sheet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, gid, analyze: true })
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({url, gid, analyze:true})
       });
       const data = await r.json();
-      if (!r.ok || !data.success) throw new Error(data.error || 'Erreur');
-
-      // Détecter module et mois
+      if(!r.ok || !data.success) throw new Error(data.error||'Erreur');
       const ai = data.aiAnalysis;
+      const destKey = ai ? (MODULE_MAP[ai.module]||ai.module) : null;
       const detectedMonth = detectMonthFromTabName(tab.name);
-      const moduleMap = {
-        'pilotage_ca': 'ca', 'pilotage_charges': 'charges', 'stock': 'stock',
-        'dettes': 'dettes', 'fidelite_clients': 'fidelite',
-        'mouvements_stock': 'mouvements', 'marges': 'marges'
-      };
-      const destKey = ai ? (moduleMap[ai.module] || ai.module) : null;
-
-      if (!destKey || destKey === 'inconnu' || !DEST_FIELDS[destKey]) {
-        results.push({ name: tab.name, status: 'skip', reason: 'Module non reconnu par l\'IA' });
-        updateMultiProgress(gid, 'skip');
-        skipCount++;
-        continue;
-      }
-
-      // Appliquer mapping IA
       const localMapping = {};
-      if (ai && ai.mapping) {
-        Object.entries(ai.mapping).forEach(([fieldKey, colName]) => {
-          if (colName && data.headers.includes(colName)) localMapping[fieldKey] = colName;
+      if(ai && ai.mapping){
+        Object.entries(ai.mapping).forEach(([k,v])=>{
+          if(v && data.headers.includes(v)) localMapping[k]=v;
         });
       }
-
-      // Import direct avec le mapping IA
-      await importDataDirect(destKey, data.rows, data.headers, localMapping, detectedMonth);
-      successCount++;
-      results.push({ name: tab.name, status: 'ok', module: destKey, month: detectedMonth, rows: data.rows.length });
-      updateMultiProgress(gid, 'ok');
-
-    } catch (e) {
-      results.push({ name: tab.name, status: 'err', reason: e.message });
-      updateMultiProgress(gid, 'err', e.message);
+      analysisData[gid] = {tab, data, destKey, detectedMonth, mapping:localMapping, enabled:true, error:null};
+    } catch(e) {
+      analysisData[gid] = {tab, data:null, destKey:null, detectedMonth:null, mapping:{}, enabled:false, error:e.message};
     }
-  }
+    done++;
+    document.getElementById('review-analysis-status').textContent = `Analyse de "${tab.name}"… (${done}/${total})`;
+    document.getElementById('review-analysis-bar').style.width = (done/total*100)+'%';
+  }));
 
-  // Résumé final
+  // Afficher l'écran de review
+  showReviewScreen(gids, analysisData, MODULE_LABELS, url);
   btn.disabled = false;
   btn.textContent = '📥 Charger ' + total + ' onglets';
   gsLoading(null);
-  showMultiImportSummary(results, successCount, skipCount);
 }
 
 // ── Afficher le panneau de progression multi-import ──
@@ -1242,6 +1266,202 @@ async function importMarges(){
     const item={id:uid(),nom,prixVente:pf(_mapping['prixVente']?r[_mapping['prixVente']]:0),coutMP:pf(_mapping['coutMP']?r[_mapping['coutMP']]:0),coutMain:pf(_mapping['coutMain']?r[_mapping['coutMain']]:0),coutIndirect:pf(_mapping['coutIndirect']?r[_mapping['coutIndirect']]:0),tvaRate:pf(_mapping['tvaRate']?r[_mapping['tvaRate']]:20)||20,updatedAt:new Date().toISOString()};
     await window._setDoc(window._doc(window._db,'marges',window._uid,'produits',item.id),item);
   });
+}
+
+// ── Écran de review multi-onglets ──
+function showReviewScreen(gids, analysisData, MODULE_LABELS, url) {
+  const area = document.getElementById('gsArea');
+  const ALL_MODULES = Object.keys(DEST_FIELDS);
+
+  function buildTabRow(gid) {
+    const d = analysisData[gid];
+    const {tab, data, destKey, detectedMonth, mapping, enabled, error} = d;
+    const headers = data ? data.headers : [];
+    const fields = destKey && DEST_FIELDS[destKey] ? DEST_FIELDS[destKey] : [];
+    const monthVal = detectedMonth || '';
+
+    const moduleOpts = ALL_MODULES.map(m =>
+      `<option value="${m}" ${destKey===m?'selected':''}>${MODULE_LABELS[m]||m}</option>`
+    ).join('');
+
+    const mappingGrid = fields.length ? `
+      <div class="review-mapping-grid" id="mapping-grid-${gid}">
+        ${fields.map(f => {
+          const cur = mapping[f.key]||'';
+          const opts = `<option value="">— Ne pas importer —</option>` +
+            headers.map(h=>`<option value="${h}" ${cur===h?'selected':''}>${h}</option>`).join('');
+          return `<div class="review-field-row">
+            <div class="review-field-label">${f.label} ${f.required?'<span class="req">*</span>':''}</div>
+            <select class="review-field-sel ${cur?'mapped':''}" 
+              onchange="reviewUpdateMapping('${gid}','${f.key}',this.value)">
+              ${opts}
+            </select>
+          </div>`;
+        }).join('')}
+      </div>` : `<div style="font-size:12px;color:#94a3b8;padding:4px 0">Sélectionnez un module pour voir le mapping</div>`;
+
+    const statusBadge = error
+      ? `<span class="review-badge warn">⚠️ ${error}</span>`
+      : destKey && DEST_FIELDS[destKey]
+        ? `<span class="review-badge mod">${MODULE_LABELS[destKey]||destKey}</span>`
+        : `<span class="review-badge warn">❓ Module inconnu</span>`;
+
+    return `
+      <div class="review-tab-row ${enabled?'':'disabled'}" id="review-row-${gid}">
+        <div class="review-tab-header">
+          <button class="review-tab-toggle ${enabled?'on':'off'}" 
+            title="${enabled?'Désactiver':'Activer'} cet onglet"
+            onclick="reviewToggleTab('${gid}')"></button>
+          <div class="review-tab-name">📋 ${tab.name}</div>
+          ${statusBadge}
+          ${detectedMonth?`<span class="review-badge month">📅 ${detectedMonth}</span>`:''}
+          ${data?`<span style="font-size:11px;color:#94a3b8">${data.rows.length} ligne${data.rows.length>1?'s':''}</span>`:''}
+        </div>
+        <div class="review-tab-meta" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b">
+            <span>Module :</span>
+            <select class="review-module-sel" onchange="reviewUpdateModule('${gid}',this.value)">
+              <option value="">— Sélectionner —</option>
+              ${moduleOpts}
+            </select>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b">
+            <span>Mois :</span>
+            <input class="review-month-inp" type="text" placeholder="AAAA-MM" value="${monthVal}"
+              oninput="reviewUpdateMonth('${gid}',this.value)">
+          </div>
+        </div>
+        <div id="mapping-container-${gid}">${mappingGrid}</div>
+      </div>`;
+  }
+
+  const rowsHtml = gids.map(g => buildTabRow(g)).join('');
+  const enabledCount = gids.filter(g => analysisData[g].enabled).length;
+
+  area.innerHTML = `
+    <div class="review-panel">
+      <div class="review-panel-header">
+        <div>
+          <div class="review-panel-title">🔍 Vérification avant import</div>
+          <div style="font-size:12px;color:#64748b;margin-top:2px">
+            Vérifiez le module et le mapping de chaque onglet. Désactivez ceux à ignorer.
+          </div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="reviewSelectAll()">Tout activer</button>
+      </div>
+      ${rowsHtml}
+      <div class="review-confirm-bar">
+        <div style="font-size:13px;color:#64748b" id="review-count-label">
+          <b id="review-enabled-count">${enabledCount}</b> onglet(s) à importer
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-outline btn-sm" onclick="resetGsSteps()">← Retour</button>
+          <button class="btn btn-p" id="review-confirm-btn" onclick="confirmMultiImport()">
+            🚀 Confirmer et importer
+          </button>
+        </div>
+      </div>
+    </div>`;
+
+  // Stocker les données d'analyse pour confirmMultiImport
+  window._reviewAnalysisData = analysisData;
+  window._reviewGids = gids;
+  window._reviewUrl = url;
+}
+
+// Callbacks review
+function reviewToggleTab(gid) {
+  const d = window._reviewAnalysisData[gid];
+  d.enabled = !d.enabled;
+  const row = document.getElementById('review-row-'+gid);
+  row.classList.toggle('disabled', !d.enabled);
+  const btn = row.querySelector('.review-tab-toggle');
+  btn.classList.toggle('on', d.enabled);
+  btn.classList.toggle('off', !d.enabled);
+  btn.title = (d.enabled?'Désactiver':'Activer') + ' cet onglet';
+  // Mettre à jour le compteur
+  const count = window._reviewGids.filter(g=>window._reviewAnalysisData[g].enabled).length;
+  document.getElementById('review-enabled-count').textContent = count;
+}
+
+function reviewSelectAll() {
+  window._reviewGids.forEach(g => {
+    const d = window._reviewAnalysisData[g];
+    if(!d.enabled) reviewToggleTab(g);
+  });
+}
+
+function reviewUpdateModule(gid, newModule) {
+  const d = window._reviewAnalysisData[gid];
+  d.destKey = newModule;
+  // Rebuild le mapping grid
+  const fields = newModule && DEST_FIELDS[newModule] ? DEST_FIELDS[newModule] : [];
+  const headers = d.data ? d.data.headers : [];
+  const container = document.getElementById('mapping-container-'+gid);
+  if(!fields.length){ container.innerHTML = '<div style="font-size:12px;color:#94a3b8">Aucun mapping disponible</div>'; return; }
+  
+  // Auto-mapping basique par correspondance
+  const newMapping = {};
+  fields.forEach(f => {
+    const found = headers.find(h => f.hint && f.hint.some(hint => h.toLowerCase().includes(hint)));
+    if(found) newMapping[f.key] = found;
+  });
+  d.mapping = newMapping;
+
+  container.innerHTML = `<div class="review-mapping-grid">` +
+    fields.map(f => {
+      const cur = newMapping[f.key]||'';
+      const opts = `<option value="">— Ne pas importer —</option>` +
+        headers.map(h=>`<option value="${h}" ${cur===h?'selected':''}>${h}</option>`).join('');
+      return `<div class="review-field-row">
+        <div class="review-field-label">${f.label}${f.required?' <span class="req">*</span>':''}</div>
+        <select class="review-field-sel ${cur?'mapped':''}" 
+          onchange="reviewUpdateMapping('${gid}','${f.key}',this.value)">${opts}</select>
+      </div>`;
+    }).join('') + `</div>`;
+}
+
+function reviewUpdateMapping(gid, fieldKey, colName) {
+  window._reviewAnalysisData[gid].mapping[fieldKey] = colName;
+  const sel = document.querySelector(`#mapping-container-${gid} select[onchange*="'${fieldKey}'"]`);
+  if(sel) sel.classList.toggle('mapped', !!colName);
+}
+
+function reviewUpdateMonth(gid, val) {
+  window._reviewAnalysisData[gid].detectedMonth = val.trim() || null;
+}
+
+// ── Lancer l'import après review ──
+async function confirmMultiImport() {
+  const gids = window._reviewGids;
+  const analysisData = window._reviewAnalysisData;
+  const toImport = gids.filter(g => analysisData[g].enabled && analysisData[g].destKey && DEST_FIELDS[analysisData[g].destKey]);
+
+  if(!toImport.length){ showToast('Aucun onglet à importer','err'); return; }
+
+  const btn = document.getElementById('review-confirm-btn');
+  btn.disabled = true; btn.textContent = '⏳ Import en cours…';
+
+  showMultiImportProgress(toImport.map(g => analysisData[g].tab));
+
+  let successCount=0, skipCount=0;
+  const results=[];
+
+  for(const gid of toImport){
+    const {tab, data, destKey, detectedMonth, mapping} = analysisData[gid];
+    updateMultiProgress(gid, 'loading');
+    try{
+      await importDataDirect(destKey, data.rows, data.headers, mapping, detectedMonth);
+      successCount++;
+      results.push({name:tab.name, status:'ok', module:destKey, month:detectedMonth, rows:data.rows.length});
+      updateMultiProgress(gid, 'ok');
+    }catch(e){
+      results.push({name:tab.name, status:'err', reason:e.message});
+      updateMultiProgress(gid, 'err', e.message);
+    }
+  }
+
+  showMultiImportSummary(results, successCount, 0);
 }
 
 function resetAll(){
