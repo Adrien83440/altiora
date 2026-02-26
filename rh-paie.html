@@ -587,16 +587,20 @@ async function loadTemps() {
   }
   console.log('[Paie] Semaines planning à charger:', Object.keys(weekKeys));
 
-  for (var wk in weekKeys) {
+  // Utiliser for...of sur Object.keys pour éviter problèmes de closure avec var
+  var wkList = Object.keys(weekKeys);
+  for (var wi = 0; wi < wkList.length; wi++) {
+    var curWk = wkList[wi];
     try {
-      var snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'plan_'+wk));
-      console.log('[Paie] plan_'+wk+' → '+snap.size+' docs');
+      var snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'plan_'+curWk));
+      console.log('[Paie] plan_'+curWk+' → '+snap.size+' docs');
       snap.forEach(function(docSnap) {
         var id = docSnap.id;
-        var underIdx = id.lastIndexOf('_');
-        if (underIdx < 0) return;
-        var dateStr = id.slice(0, underIdx);
-        var empId   = id.slice(underIdx + 1);
+        // Format garanti : YYYY-MM-DD_empId (date = 10 chars fixes, empId = reste)
+        if (id.length < 12) return;
+        var dateStr = id.slice(0, 10);   // "YYYY-MM-DD"
+        var empId   = id.slice(11);      // tout ce qui suit le "_"
+        if (!empId || dateStr[4] !== '-' || dateStr[7] !== '-') return;
         var dt2 = new Date(dateStr + 'T12:00:00');
         if (dt2.getFullYear() !== y || dt2.getMonth() !== m) return;
         var data = docSnap.data();
@@ -609,10 +613,11 @@ async function loadTemps() {
           }
           return s + diffH(it.deb, it.fin);
         }, 0);
+        console.log('[Paie] doc', id, '→ empId:', empId, 'hJour:', hJour.toFixed(2), 'items:', items.length);
         planningData[empId].heures += hJour;
         planningData[empId].jours  += 1;
       });
-    } catch(e) { console.warn('[Paie] plan_'+wk+':', e.message); }
+    } catch(e) { console.warn('[Paie] plan_'+curWk+':', e.message); }
   }
   console.log('[Paie] planningData:', JSON.stringify(planningData));
 
