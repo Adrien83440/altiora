@@ -120,11 +120,10 @@
     <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('campagnes',null),300)"><span class="dot"></span>Campagnes</div>
   </div>
 
-  <div class="ni" id="nav-import" onclick="location.href='import.html'" style="border-top:1px solid rgba(255,255,255,.08);padding-top:10px">
-    <span>📥</span><span>Import de données</span>
-  </div>
-
   <div class="nav-footer">
+    <div class="ni" id="nav-import" onclick="location.href='import.html'" style="border-top:1px solid rgba(255,255,255,.08);padding:10px 0 8px;margin:0">
+      <span>📥</span><span>Import de données</span>
+    </div>
     <div class="ucard" onclick="location.href='profil.html'" style="cursor:pointer;transition:.15s" title="Mon compte">
       <div class="uav" id="av">A</div>
       <div>
