@@ -309,6 +309,15 @@ input[type=file]{display:none}
         <div class="card-body">
           <div style="margin-bottom:16px">
             <div style="font-size:12px;font-weight:700;margin-bottom:8px">&#128205; O&#249; importer ces donn&#233;es ?</div>
+            <div style="margin-bottom:6px">
+              <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">📊 Pilotage mensuel</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+                <button class="btn btn-xs" id="dest-pilotage_ca" onclick="setDest('pilotage_ca',this)" style="border:2px solid var(--blue);background:#eff6ff;color:var(--blue);font-weight:700">📈 Pilotage — CA journalier</button>
+                <button class="btn btn-xs" id="dest-pilotage_chargesFixe" onclick="setDest('pilotage_chargesFixe',this)" style="border:2px solid var(--border)">📋 Pilotage — Charges fixes</button>
+                <button class="btn btn-xs" id="dest-pilotage_chargesVar" onclick="setDest('pilotage_chargesVar',this)" style="border:2px solid var(--border)">📋 Pilotage — Charges variables</button>
+              </div>
+              <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Autres modules</div>
+            </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn btn-xs" id="dest-ca" onclick="setDest('ca',this)" style="border:2px solid var(--border)">&#128200; CA journalier</button>
               <button class="btn btn-xs" id="dest-charges" onclick="setDest('charges',this)" style="border:2px solid var(--border)">&#128184; Charges</button>
@@ -381,6 +390,27 @@ input[type=file]{display:none}
 <script>
 // ── DÉFINITION DES CHAMPS PAR DESTINATION ──
 const DEST_FIELDS = {
+  pilotage_ca: [
+    {key:'date',      label:'Date',               sub:'JJ/MM/AAAA',              required:true,  hint:['date','jour','day','timestamp','datetime']},
+    {key:'ht055',     label:'CA HT 5,5%',         sub:'Ventes taux réduit',      required:false, hint:['5.5','5,5','ht055','ht5','taux réduit','alimentaire']},
+    {key:'ht10',      label:'CA HT 10%',          sub:'Ventes taux intermédiaire',required:false, hint:['10','ht10','taux intermediaire','restauration']},
+    {key:'ht20',      label:'CA HT 20%',          sub:'Ventes taux normal',      required:false, hint:['20','ht20','taux normal','standard','montant','ca','ventes','recettes','total']},
+    {key:'montantHT', label:'CA HT Total',        sub:'Si pas de multi-TVA',     required:false, hint:['ca ht','total ht','chiffre']},
+  ],
+  pilotage_chargesFixe: [
+    {key:'fournisseur',label:'Fournisseur',       sub:'Nom du fournisseur',      required:true,  hint:['fournisseur','supplier','vendor','nom','libellé','description','charge']},
+    {key:'type',       label:'Type / Catégorie',  sub:'Ex: Loyer, Assurance…',   required:false, hint:['type','catégorie','nature','libellé']},
+    {key:'montantHT',  label:'Montant HT (€)',    sub:'Montant hors taxe',       required:true,  hint:['montant','amount','ht','prix','coût','valeur']},
+    {key:'tvaRate',    label:'Taux TVA (%)',       sub:'5.5, 10 ou 20',          required:false, hint:['tva','taux','rate','taxe']},
+    {key:'deductible', label:'Déductible',        sub:'Oui ou Non',              required:false, hint:['deductible','déductible']},
+  ],
+  pilotage_chargesVar: [
+    {key:'fournisseur',label:'Fournisseur',       sub:'Nom du fournisseur',      required:true,  hint:['fournisseur','supplier','vendor','nom','libellé','description','charge']},
+    {key:'type',       label:'Type / Catégorie',  sub:'Ex: Marchandises, Emballages…', required:false, hint:['type','catégorie','nature','libellé']},
+    {key:'montantHT',  label:'Montant HT (€)',    sub:'Montant hors taxe',       required:true,  hint:['montant','amount','ht','prix','coût','valeur']},
+    {key:'tvaRate',    label:'Taux TVA (%)',       sub:'5.5, 10 ou 20',          required:false, hint:['tva','taux','rate','taxe']},
+    {key:'deductible', label:'Déductible',        sub:'Oui ou Non',              required:false, hint:['deductible','déductible']},
+  ],
   ca: [
     {key:'date',      label:'Date',               sub:'JJ/MM/AAAA ou timestamp', required:true,  hint:['date','jour','day','timestamp','datetime']},
     {key:'ht055',     label:'CA HT 5,5%',         sub:'Ventes taux réduit',      required:false, hint:['5.5','5,5','ht055','ht5','taux réduit','alimentaire']},
@@ -709,10 +739,13 @@ async function loadSelectedTab() {
     </div>`;
 
   const MODULE_MAP = {
-    'pilotage_ca':'ca','pilotage_charges':'charges','stock':'stock',
+    'pilotage_ca':'pilotage_ca','pilotage_charges':'pilotage_chargesFixe',
+    'pilotage_charges_fixe':'pilotage_chargesFixe','pilotage_charges_var':'pilotage_chargesVar',
+    'ca':'ca','charges':'charges','stock':'stock',
     'dettes':'dettes','fidelite_clients':'fidelite','mouvements_stock':'mouvements','marges':'marges'
   };
   const MODULE_LABELS = {
+    pilotage_ca:'📈 Pilotage — CA journalier', pilotage_chargesFixe:'📋 Pilotage — Charges fixes', pilotage_chargesVar:'📋 Pilotage — Charges variables',
     ca:'📈 CA & Ventes', charges:'💸 Charges', dettes:'🏦 Dettes/Emprunts',
     stock:'📦 Stock', mouvements:'🔄 Mouvements stock', fidelite:'❤️ Fidélité clients', marges:'📊 Marges produits'
   };
@@ -814,7 +847,79 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
   const get = (r, key) => mapping[key] ? String(r[mapping[key]] || '') : '';
   const getN = (r, key) => localPf(mapping[key] ? r[mapping[key]] : 0);
 
-  if (destKey === 'ca') {
+  // ── Pilotage — CA journalier ──
+  if (destKey === 'pilotage_ca') {
+    const byMonth = {};
+    rows.forEach(r => {
+      const dateVal = get(r, 'date');
+      if (!dateVal && !forcedMonth) return;
+      const ym = forcedMonth || parseDateToYYYYMM(dateVal) || new Date().toISOString().slice(0, 7);
+      if (!byMonth[ym]) byMonth[ym] = [];
+      const entry = { date: parseDateFull(dateVal) || `${ym}-01` };
+      const h055 = localPf(mapping['ht055'] ? r[mapping['ht055']] : 0);
+      const h10  = localPf(mapping['ht10']  ? r[mapping['ht10']]  : 0);
+      const h20  = localPf(mapping['ht20']  ? r[mapping['ht20']]  : 0);
+      const total = localPf(mapping['montantHT'] ? r[mapping['montantHT']] : 0);
+      if (h055) entry.ht055 = String(h055);
+      if (h10)  entry.ht10  = String(h10);
+      if (h20)  entry.ht20  = String(h20);
+      // Si seulement montantHT mappé → mettre en ht20
+      if (!h055 && !h10 && !h20 && total) entry.ht20 = String(total);
+      byMonth[ym].push(entry);
+    });
+    for (const [ym, entries] of Object.entries(byMonth)) {
+      const ref = window._doc(window._db, 'pilotage', window._uid, 'months', ym);
+      const snap = await window._getDoc(ref);
+      const existing = snap.exists() ? snap.data() : {};
+      const caMap = {};
+      (existing.ca || []).forEach(e => caMap[e.date] = e);
+      entries.forEach(e => caMap[e.date] = e);
+      await window._setDoc(ref, { ...existing, ca: Object.values(caMap) }, { merge: true });
+    }
+  }
+
+  // ── Pilotage — Charges fixes ──
+  else if (destKey === 'pilotage_chargesFixe') {
+    const ym = forcedMonth || new Date().toISOString().slice(0, 7);
+    const ref = window._doc(window._db, 'pilotage', window._uid, 'months', ym);
+    const snap = await window._getDoc(ref);
+    const existing = snap.exists() ? snap.data() : {};
+    const newCharges = rows
+      .map(r => ({
+        fournisseur: get(r, 'fournisseur') || '',
+        type:        get(r, 'type') || '',
+        montantHT:   String(getN(r, 'montantHT') || ''),
+        tvaRate:     getN(r, 'tvaRate') || 20,
+        deductible:  get(r, 'deductible') || 'Oui',
+        pointe:      'Non',
+      }))
+      .filter(r => r.fournisseur || parseFloat(r.montantHT) > 0);
+    const merged = [...(existing.chargesFixe || []), ...newCharges];
+    await window._setDoc(ref, { ...existing, chargesFixe: merged }, { merge: true });
+  }
+
+  // ── Pilotage — Charges variables ──
+  else if (destKey === 'pilotage_chargesVar') {
+    const ym = forcedMonth || new Date().toISOString().slice(0, 7);
+    const ref = window._doc(window._db, 'pilotage', window._uid, 'months', ym);
+    const snap = await window._getDoc(ref);
+    const existing = snap.exists() ? snap.data() : {};
+    const newCharges = rows
+      .map(r => ({
+        fournisseur: get(r, 'fournisseur') || '',
+        type:        get(r, 'type') || '',
+        montantHT:   String(getN(r, 'montantHT') || ''),
+        tvaRate:     getN(r, 'tvaRate') || 20,
+        deductible:  get(r, 'deductible') || 'Oui',
+        pointe:      'Non',
+        exceptionnel: false,
+      }))
+      .filter(r => r.fournisseur || parseFloat(r.montantHT) > 0);
+    const merged = [...(existing.chargesVar || []), ...newCharges];
+    await window._setDoc(ref, { ...existing, chargesVar: merged }, { merge: true });
+  }
+
+  else   if (destKey === 'ca') {
     const byMonth = {};
     rows.forEach(r => {
       const dateVal = get(r, 'date');
@@ -1014,7 +1119,7 @@ function resetFile(){
 // ── DESTINATION ──
 function setDest(d,btn){
   _dest=d;
-  const allDests=['ca','charges','dettes','stock','mouvements','fidelite','marges'];
+  const allDests=['pilotage_ca','pilotage_chargesFixe','pilotage_chargesVar','ca','charges','dettes','stock','mouvements','fidelite','marges'];
   allDests.forEach(k=>{
     const b=document.getElementById('dest-'+k);
     if(b){b.style.borderColor=k===d?'var(--blue)':'var(--border)';b.style.background=k===d?'#eff6ff':'';b.style.color=k===d?'var(--blue)':''}
@@ -1135,7 +1240,9 @@ async function doImport(){
   const btn=document.getElementById('importBtn');
   btn.textContent='⏳ Import en cours...';btn.disabled=true;
   try{
-    if(_dest==='ca') await importCA();
+    if(_dest==='pilotage_ca'||_dest==='pilotage_chargesFixe'||_dest==='pilotage_chargesVar')
+      await importDataDirect(_dest,_rows,_headers,_mapping,null);
+    else if(_dest==='ca') await importCA();
     else if(_dest==='charges') await importCharges();
     else if(_dest==='dettes') await importDettes();
     else if(_dest==='stock') await importStock();
