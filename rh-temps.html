@@ -380,9 +380,9 @@
   window._auth = auth;
   window._doc  = doc;
   window._setDoc   = setDoc;
-  window._getDoc   = (col,...s) => getDoc(doc(db, col, ...s));
-  window._getDocs  = (...col)  => getDocs(collection(db, ...col));
-  window._delDoc   = (...s)    => deleteDoc(doc(db, ...s));
+  window._getDoc   = getDoc;
+  window._getDocs  = getDocs;
+  window._deleteDoc = deleteDoc;
   window._collection = collection;
   window._query    = query;
   window._where    = where;
@@ -411,7 +411,7 @@ _curMois.setDate(1);
 window.initTemps = async function() {
   if (!window._uid) return;
   try {
-    const ps = await window._getDoc('rh_params', window._uid);
+    const ps = await window._getDoc(window._doc(window._db, 'rh_params', window._uid));
     _params = ps.exists() ? ps.data() : {};
   } catch(e) { _params = {}; }
   await loadEmployes();
@@ -423,7 +423,7 @@ window.initTemps = async function() {
 async function loadEmployes() {
   _employes = [];
   try {
-    const snap = await window._getDocs('rh', window._uid, 'employes');
+    const snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'employes'));
     snap.forEach(d => _employes.push({ id: d.id, ...d.data() }));
     _employes.sort((a,b) => (a.nom||'').localeCompare(b.nom||''));
   } catch(e) { console.warn('Employés:', e); }
@@ -433,7 +433,7 @@ async function loadTemps() {
   _tempsMap = {};
   const moisKey = getMoisKey();
   try {
-    const snap = await window._getDocs('rh', window._uid, 'temps');
+    const snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'temps'));
     snap.forEach(d => {
       const data = d.data();
       if (data.mois === moisKey) {
@@ -898,7 +898,7 @@ async function deleteTemps(empId) {
   if (!confirm('Supprimer la saisie de cet employé pour ce mois ?')) return;
   var docId = getMoisKey() + '_' + empId;
   try {
-    await window._delDoc(window._db, 'rh', window._uid, 'temps', docId);
+    await window._deleteDoc(window._doc(window._db, 'rh', window._uid, 'temps', docId));
     delete _tempsMap[empId];
     delete _modified[empId];
     render();
@@ -935,7 +935,7 @@ async function importFromPlanning() {
   var found = false;
   for (var wk in weekKeys) {
     try {
-      var snap = await window._getDocs('rh', window._uid, 'plan_'+wk);
+      var snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'plan_'+wk));
       snap.forEach(doc => {
         // clé = YYYY-MM-DD_empId
         var parts = doc.id.split('_');
