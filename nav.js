@@ -199,7 +199,7 @@ nav#alteore-nav .un{font-size:11.5px;font-weight:600;color:#fff}
 nav#alteore-nav .upl{font-size:10px;color:rgba(255,255,255,.3)}
 nav#alteore-nav .lbtn{margin-left:auto;background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;font-size:13px}
 
-/* ── RH MODULE — vert uniquement pour RH ── */
+/* ── RH MODULE — vert sur items RH ── */
 nav#alteore-nav .rh-ns{color:rgba(52,211,153,.55);letter-spacing:1px}
 nav#alteore-nav .ni.rh-ni{border-left-color:transparent}
 nav#alteore-nav .ni.rh-ni:hover{background:rgba(16,185,129,.08)}
@@ -211,10 +211,34 @@ nav#alteore-nav .rh-si:hover{color:rgba(255,255,255,.82);background:rgba(16,185,
 nav#alteore-nav .rh-si.on{color:#fff;background:rgba(16,185,129,.17);border-left-color:rgba(16,185,129,.75)}
 nav#alteore-nav .rh-dot{background:rgba(52,211,153,.28)}
 nav#alteore-nav .rh-si.on .rh-dot{background:#10b981}
-/* Scroll RH sous-menu — ne jamais dépasser la hauteur de l'écran */
+/* Scroll RH sous-menu */
 nav#alteore-nav #rh-nav-sub{overflow-y:auto;max-height:calc(100vh - 420px) !important;scrollbar-width:thin;scrollbar-color:rgba(16,185,129,.25) transparent}
 nav#alteore-nav #rh-nav-sub::-webkit-scrollbar{width:3px}
 nav#alteore-nav #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(16,185,129,.3);border-radius:99px}
+
+/* ── THÈME VERT GLOBAL — toute la sidebar passe en vert quand RH est ouvert ── */
+nav#alteore-nav.rh-mode{background:linear-gradient(180deg,#052e16 0%,#064e23 50%,#065f2c 100%);transition:background .45s ease}
+nav#alteore-nav.rh-mode .logo{border-bottom-color:rgba(52,211,153,.15)}
+nav#alteore-nav.rh-mode .logo-t{background:linear-gradient(135deg,#34d399,#6ee7b7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+nav#alteore-nav.rh-mode .ns{color:rgba(52,211,153,.35)}
+nav#alteore-nav.rh-mode .rh-ns{color:rgba(52,211,153,.7)}
+nav#alteore-nav.rh-mode .ni{color:rgba(255,255,255,.5);transition:.15s}
+nav#alteore-nav.rh-mode .ni:hover{background:rgba(52,211,153,.08)}
+nav#alteore-nav.rh-mode .ni.on{background:rgba(52,211,153,.12);border-left-color:#34d399}
+nav#alteore-nav.rh-mode .ni.rh-ni.on{background:rgba(52,211,153,.18);border-left-color:#10b981}
+nav#alteore-nav.rh-mode .si{color:rgba(255,255,255,.38)}
+nav#alteore-nav.rh-mode .si:hover{background:rgba(52,211,153,.07)}
+nav#alteore-nav.rh-mode .si.on{background:rgba(52,211,153,.15);border-left-color:rgba(52,211,153,.65)}
+nav#alteore-nav.rh-mode .si.on .dot{background:#34d399}
+nav#alteore-nav.rh-mode .rh-sub-group{color:rgba(52,211,153,.55)}
+nav#alteore-nav.rh-mode .rh-si:hover{background:rgba(52,211,153,.1)}
+nav#alteore-nav.rh-mode .rh-si.on{background:rgba(52,211,153,.2);border-left-color:#10b981}
+nav#alteore-nav.rh-mode .nav-footer{border-top-color:rgba(52,211,153,.15)}
+nav#alteore-nav.rh-mode .ucard{background:rgba(52,211,153,.1)}
+nav#alteore-nav.rh-mode .uav{background:linear-gradient(135deg,#10b981,#34d399)}
+nav#alteore-nav.rh-mode .chev{color:rgba(52,211,153,.35)}
+nav#alteore-nav.rh-mode .rh-chev{color:rgba(52,211,153,.7) !important}
+nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,211,153,.35)}
 
 /* Mobile hamburger */
 .alteore-hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#0f1f5c;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;box-shadow:0 4px 16px rgba(15,31,92,.45);-webkit-tap-highlight-color:transparent}
@@ -266,13 +290,47 @@ nav#alteore-nav #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(16,185,129,
   window.toggleAlteoreNav = function(subId, el) {
     var sub = document.getElementById(subId);
     if (!sub) return;
+    var nav = document.getElementById('alteore-nav');
     var isOpen = sub.style.maxHeight && sub.style.maxHeight !== '0px';
+    // Fermer tous les sous-menus
     document.querySelectorAll('nav#alteore-nav .sub').forEach(function(s) { s.style.maxHeight = '0px'; });
-    if (!isOpen) { sub.style.maxHeight = '700px'; }
+    if (!isOpen) {
+      sub.style.maxHeight = '700px';
+      // Thème vert si RH, bleu sinon
+      if (nav) {
+        if (subId === 'rh-nav-sub') nav.classList.add('rh-mode');
+        else nav.classList.remove('rh-mode');
+      }
+    } else {
+      // Fermeture du menu RH : repasser en bleu
+      if (nav && subId === 'rh-nav-sub') nav.classList.remove('rh-mode');
+    }
   };
 
   window.toggleNav = window.toggleAlteoreNav;
   window.toggleFidNav = function(el) { window.toggleAlteoreNav('fid-nav-sub', el); };
+
+  // Activer rh-mode automatiquement si on est déjà sur une page RH
+  (function() {
+    var RH = ['rh-dashboard.html','rh-employes.html','rh-planning.html','rh-conges.html',
+              'rh-temps.html','rh-paie.html','rh-recrutement.html','rh-onboarding.html',
+              'rh-documents.html','rh-entretiens.html','rh-conformite.html',
+              'rh-formations.html','rh-modeles.html','rh-rapport.html'];
+    var page = location.pathname.split('/').pop();
+    if (RH.indexOf(page) !== -1) {
+      var tryApply = function(tries) {
+        var nav = document.getElementById('alteore-nav');
+        var sub = document.getElementById('rh-nav-sub');
+        if (nav && sub) {
+          nav.classList.add('rh-mode');
+          sub.style.maxHeight = '700px';
+        } else if (tries < 20) {
+          setTimeout(function() { tryApply(tries + 1); }, 100);
+        }
+      };
+      tryApply(0);
+    }
+  })();
 
   window.alteoreToggleSidebar = function() {
     var nav = document.getElementById('alteore-nav');
