@@ -269,23 +269,34 @@
               <input type="text" inputmode="decimal" id="inp-resultat" placeholder="50 000" oninput="calc()"/>
               <span class="field-unit">€/an</span>
             </div>
-            <div class="field-hint">Pour calculer IS et capacité dividendes</div>
+            <div class="field-hint">Pour calculer IS et dividendes distribuables</div>
           </div>
           <div class="field">
-            <label>Taux d'imposition (IR estimé)</label>
+            <label>Parts fiscales (foyer fiscal)</label>
             <div class="field-wrap">
-              <input type="text" inputmode="decimal" id="inp-ir" placeholder="30" oninput="calc()"/>
-              <span class="field-unit">%</span>
+              <input type="text" inputmode="decimal" id="inp-parts" placeholder="1" oninput="calc()"/>
+              <span class="field-unit">parts</span>
             </div>
-            <div class="field-hint" id="ir-hint">Tranche marginale estimée</div>
+            <div class="field-hint" id="parts-hint">1 part = célibataire · +0,5 par enfant · 2 = couple marié</div>
           </div>
           <div class="field">
-            <label>Ancienneté dirigeant</label>
+            <label>Autres revenus du foyer</label>
             <div class="field-wrap">
-              <input type="text" inputmode="decimal" id="inp-anciennete" placeholder="0" oninput="calc()"/>
-              <span class="field-unit">ans</span>
+              <input type="text" inputmode="decimal" id="inp-autres-revenus" placeholder="0" oninput="calc()"/>
+              <span class="field-unit">€/an</span>
             </div>
-            <div class="field-hint">Taux réduit 1re année TNS</div>
+            <div class="field-hint">Revenus conjoint ou autres (salaire, loyers...)</div>
+          </div>
+        </div>
+        <!-- IR calculé automatiquement — lecture seule -->
+        <div style="margin-top:10px;padding:12px 16px;background:#f0fdf4;border:1px solid var(--rh-border);border-radius:10px;display:flex;align-items:center;justify-content:space-between;gap:12px" id="ir-auto-row">
+          <div>
+            <div style="font-size:11px;font-weight:700;color:var(--rh-dark)">✨ IR estimé automatiquement (barème 2025)</div>
+            <div style="font-size:10px;color:var(--muted);margin-top:2px" id="ir-hint">Basé sur votre revenu net + dividendes · <span id="ir-detail-hint"></span></div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:18px;font-weight:800;color:var(--rh-main)" id="ir-auto-display">—</div>
+            <div style="font-size:10px;color:var(--muted)" id="ir-taux-display">Taux moyen</div>
           </div>
         </div>
       </div>
@@ -341,6 +352,15 @@
           <div class="net-stat-val" id="banner-ratio">—</div>
         </div>
       </div>
+    </div>
+
+    <!-- SIMULATION IR DÉTAILLÉE -->
+    <div class="card" id="irSimCard" style="display:none">
+      <div class="card-head">
+        <div class="card-title">🧮 Impôt sur le revenu — Simulation barème 2025</div>
+        <div style="font-size:11px;color:var(--muted)">Quotient familial · Taux moyen · Taux marginal</div>
+      </div>
+      <div class="card-body" id="irSimContent"></div>
     </div>
 
     <!-- DÉCOMPOSITION -->
@@ -515,15 +535,18 @@ async function loadSaved() {
       _netMens  = d.netMens  || 0;
       _divMens  = d.divMens  || 0;
       _resultat = d.resultat || 0;
-      _tauxIR   = d.tauxIR   || 30;
       _freq     = d.freq     || 'mensuel';
+      // Nouveaux champs foyer fiscal
+      if (d.nbParts)     document.getElementById('inp-parts').value = d.nbParts;
+      if (d.autresRevAn) document.getElementById('inp-autres-revenus').value = fmtN(d.autresRevAn);
 
       // Remplir les champs
       if (_brutMens > 0) document.getElementById('inp-brut').value = fmtN(_brutMens);
       if (_netMens  > 0) document.getElementById('inp-net').value  = fmtN(_netMens);
       if (_divMens  > 0) document.getElementById('inp-div').value  = fmtN(_divMens);
       if (_resultat > 0) document.getElementById('inp-resultat').value = fmtN(_resultat);
-      document.getElementById('inp-ir').value = _tauxIR;
+      if (d.nbParts && d.nbParts !== 1) document.getElementById('inp-parts').value = d.nbParts;
+      if (d.autresRevAn && d.autresRevAn > 0) document.getElementById('inp-autres-revenus').value = fmtN(d.autresRevAn);
 
       // Activer le bon statut
       document.querySelectorAll('.statut-btn').forEach(function(b) {
@@ -584,127 +607,237 @@ function onBrutInput(val) {
 window.onNetInput = onNetInput;
 window.onBrutInput = onBrutInput;
 
-// ══ BARÈME IR 2025 (revenu net imposable annuel → taux moyen) ══
-function calcIR(revenuNetImposable) {
-  // Barème progressif 2025 (1 part)
-  // 0€ → 11 294€      : 0%
-  // 11 294€ → 28 797€ : 11%
-  // 28 797€ → 82 341€ : 30%
-  // 82 341€ → 177 106€: 41%
-  // > 177 106€        : 45%
-  var rni = Math.max(0, revenuNetImposable);
+// ══ BARÈME IR 2025 ══════════════════════════════════════════════════
+// Source : https://www.service-public.fr/particuliers/vosdroits/F1419
+// Barème 2025 sur revenus 2024 (déclaration mai 2025)
+
+// Calcul impôt brut sur 1 part (quotient familial = RNI / nbParts)
+function calcIR_1part(quotient) {
+  var q = Math.max(0, quotient);
   var impot = 0;
-  if (rni > 177106) { impot += (rni - 177106) * 0.45; rni = 177106; }
-  if (rni > 82341)  { impot += (rni - 82341)  * 0.41; rni = 82341;  }
-  if (rni > 28797)  { impot += (rni - 28797)  * 0.30; rni = 28797;  }
-  if (rni > 11294)  { impot += (rni - 11294)  * 0.11; rni = 11294;  }
+  // Tranches 2025 (barème sur 1 part)
+  if (q > 177106) { impot += (q - 177106) * 0.45; q = 177106; }
+  if (q > 82341)  { impot += (q - 82341)  * 0.41; q = 82341;  }
+  if (q > 28797)  { impot += (q - 28797)  * 0.30; q = 28797;  }
+  if (q > 11294)  { impot += (q - 11294)  * 0.11; q = 11294;  }
   return Math.max(0, impot);
 }
 
-function getTauxMoyen(revenuNetImposable) {
-  var rni = Math.max(0, revenuNetImposable);
-  if (rni === 0) return 0;
-  // Abattement 10% plafonné 14 171€ min 495€
-  var abat = Math.min(Math.max(rni * 0.10, 495), 14171);
-  var rniNet = rni - abat;
-  var impot = calcIR(rniNet);
-  return Math.min(impot / rni * 100, 45);
+// Calcul complet avec quotient familial (nbParts) et plafonnement avantage QF
+// nbParts : 1 = célibataire, 2 = couple marié/pacsé, +0.5 par enfant à charge
+// Retourne { impot, tauxMoyen, tauxMarginal, rni, economieQF }
+function calcIR(rniAvantAbat, nbParts, includeAbattSalaire) {
+  nbParts = Math.max(0.5, parseFloat(nbParts) || 1);
+  var inclAbat = (includeAbattSalaire !== false); // true par défaut
+
+  var rni = Math.max(0, rniAvantAbat);
+  if (rni === 0) return { impot:0, tauxMoyen:0, tauxMarginal:0, rni:0, revenuFiscal:0 };
+
+  // Abattement 10% pour frais professionnels (salariés + assimilés)
+  // TNS : pas d'abattement 10% (ils déduisent les charges réelles via BIC/BNC)
+  var revenuFiscal = rni;
+  if (inclAbat) {
+    var abat = Math.min(Math.max(rni * 0.10, 495), 14171);
+    revenuFiscal = rni - abat;
+  }
+
+  // Calcul sur 1 part
+  var impot1part = calcIR_1part(revenuFiscal);
+  var impotBrut1 = impot1part * 1; // impôt si 1 part
+
+  // Calcul avec quotient familial
+  var quotient = revenuFiscal / nbParts;
+  var impotQF  = calcIR_1part(quotient) * nbParts;
+
+  // Plafonnement de l'avantage du QF : 1 678 € par demi-part supplémentaire en 2025
+  // (La réduction d'impôt liée aux demi-parts supplémentaires est plafonnée)
+  var demisPartsSupp = (nbParts - 1) * 2; // nb de demi-parts au-dessus de 1
+  var plafondAvantage = demisPartsSupp * 1678;
+  var avantageQF = impotBrut1 - impotQF;
+  if (avantageQF > plafondAvantage && plafondAvantage > 0) {
+    // Avantage plafonné
+    impotQF = impotBrut1 - plafondAvantage;
+  }
+  var impot = Math.max(0, impotQF);
+
+  // Taux moyen = impôt / RNI brut
+  var tauxMoyen = rni > 0 ? (impot / rni * 100) : 0;
+
+  // Tranche marginale
+  var q = revenuFiscal / nbParts;
+  var tMarg = q > 177106 ? 45 : q > 82341 ? 41 : q > 28797 ? 30 : q > 11294 ? 11 : 0;
+
+  return {
+    impot:        Math.round(impot * 100) / 100,
+    tauxMoyen:    Math.min(tauxMoyen, 45),
+    tauxMarginal: tMarg,
+    rni:          rni,
+    revenuFiscal: revenuFiscal,
+    economieQF:   Math.max(0, avantageQF > plafondAvantage ? plafondAvantage : avantageQF)
+  };
 }
 
-// ══ CALCUL PRINCIPAL ══
+// Compatibilité avec l'ancien getTauxMoyen (utilisé dans renderDivSection)
+function getTauxMoyen(revenuNetImposable, nbParts, inclAbat) {
+  var r = calcIR(revenuNetImposable, nbParts || 1, inclAbat);
+  return r.tauxMoyen;
+}
+
+// ══ CALCUL PRINCIPAL ══════════════════════════════════════════════════
 function calc() {
   var s = STATUTS[_statut];
 
-  // Lire valeurs
-  var netInput  = parseF(document.getElementById('inp-net').value);
-  var brutInput = parseF(document.getElementById('inp-brut').value);
-  var divMens   = parseF(document.getElementById('inp-div').value);
-  var resultat  = parseF(document.getElementById('inp-resultat').value);
-  // IR : si champ rempli par l'utilisateur on l'utilise, sinon on calcule auto
-  var irSaisi   = parseF(document.getElementById('inp-ir').value);
+  // ── Lire les valeurs saisies ──
+  var netInput    = parseF(document.getElementById('inp-net').value);
+  var brutInput   = parseF(document.getElementById('inp-brut').value);
+  var divMens     = parseF(document.getElementById('inp-div').value);
+  var resultat    = parseF(document.getElementById('inp-resultat').value);
+  var nbParts     = Math.max(0.5, parseF(document.getElementById('inp-parts').value) || 1);
+  var autresRevAn = parseF(document.getElementById('inp-autres-revenus').value);
 
   if (_freq === 'annuel') { netInput /= 12; brutInput /= 12; divMens /= 12; }
 
-  var brut = brutInput > 0 ? brutInput : 0;
-  var net  = netInput  > 0 ? netInput  : 0;
-
-  // ── Si dividendes seuls (sans rémunération) : mode dividende-only ──
+  var brut    = brutInput > 0 ? brutInput : 0;
+  var net     = netInput  > 0 ? netInput  : 0;
   var divOnly = (brut === 0 && net === 0 && divMens > 0);
 
   if (brut === 0 && net === 0 && divMens === 0 && resultat === 0) {
     hideResults(); return;
   }
 
-  // ── Calcul cotisations (seulement si rémunération saisie) ──
-  var result = { regime: s.regime, brut: 0, net: 0, cotisations: 0, chargesPat: 0, cotDetail: [], coutEntreprise: 0 };
+  // ── Cotisations sociales ──
+  var result = { regime: s.regime, brut:0, net:0, cotisations:0, chargesPat:0, cotDetail:[], coutEntreprise:0 };
   if (!divOnly) {
-    if (s.regime === 'tns')     result = calcTNS(brut, net, s);
+    if      (s.regime === 'tns')     result = calcTNS(brut, net, s);
     else if (s.regime === 'salarie') result = calcAssimileSalarie(brut, net);
     else if (s.regime === 'micro')   result = calcMicro(brut, net);
   }
 
-  // ── IR auto via barème 2025 ──
-  // Revenu imposable = rémunération nette + dividendes (PFU optionnel → barème)
-  // Pour TNS : cotisations déductibles → base = net
-  // Pour assimilé salarié : abattement 10% déjà intégré dans barème
-  var remunNette = result.net || 0;
-  var divBrut = divMens * 12; // annuel
-  var revenuBrut_an = remunNette * 12 + divBrut; // total annuel brut
-  var tauxAutoCalc = getTauxMoyen(revenuBrut_an);
-  var tauxIR = irSaisi > 0 ? irSaisi : Math.round(tauxAutoCalc * 10) / 10;
+  var remunNette = result.net || 0; // net mensuel après cotisations sociales
 
-  // Mettre à jour le champ IR si calculé automatiquement
-  if (irSaisi === 0) {
-    var irField = document.getElementById('inp-ir');
-    if (irField && irField !== document.activeElement) {
-      irField.value = tauxIR.toFixed(1);
-      irField.placeholder = tauxIR.toFixed(1);
-    }
-    // Indicateur visuel "calculé auto"
-    var irHint = document.getElementById('ir-hint');
-    if (irHint) irHint.textContent = '✨ Calculé automatiquement (barème 2025, 1 part)';
+  // ── CALCUL IR AUTOMATIQUE AVEC BARÈME 2025 ──────────────────────────
+  // Revenu net imposable annuel = rémunération + autres revenus du foyer
+  // TNS : la CSG déductible et les cotisations TNS réduisent le revenu imposable
+  //       → on part du revenu NET (déjà net de cotisations)
+  //       → pas d'abattement 10% (TNS déclare en BIC/BNC avec charges réelles)
+  // Assimilé salarié : on applique l'abattement 10% sur la rémunération brute
+  // Micro : pas d'abattement 10% (abattement spécifique micro déjà appliqué)
+
+  var rniRemunerationAn; // revenu imposable lié à la rémunération
+  var inclAbat10 = false;
+
+  if (s.regime === 'tns' || s.regime === 'micro') {
+    // TNS/Micro : déclare en BIC/BNC — pas d'abattement 10%
+    // Base imposable = revenu net (cotisations déjà déduites)
+    // Pour TNS : la CSG NON déductible (~2,4% du net) est déjà dans les cotisations
+    //            mais la CSG DÉDUCTIBLE (6,8%) réduit le RNI → déjà dans calcCotTNS
+    rniRemunerationAn = remunNette * 12;
+    inclAbat10 = false;
   } else {
-    var irHint = document.getElementById('ir-hint');
-    if (irHint) irHint.textContent = 'Tranche marginale estimée';
+    // Assimilé salarié : déclare le brut, abattement 10% appliqué dans calcIR
+    rniRemunerationAn = result.brut * 12;
+    inclAbat10 = true;
   }
 
-  // ── Calculs finaux ──
-  var divPFU  = divMens * 0.30; // flat tax 30%
-  var divNet  = divMens - divPFU;
-  var irMens  = (remunNette * 12 * tauxIR / 100) / 12;
-  var irDivMens = divMens * 0.128; // part IR du PFU (12,8%)
-  var netApresIR = remunNette - irMens;
-  var coutTotal = result.coutEntreprise;
+  // Revenu total du foyer (incluant autres revenus du foyer)
+  var rniTotalAn = rniRemunerationAn + autresRevAn;
+
+  // ── Option 1 : Sans dividendes (revenus PFU → hors barème)
+  var irResult_sansDivPFU  = calcIR(rniTotalAn, nbParts, inclAbat10);
+  // ── Option 2 : Avec dividendes au barème (si l'utilisateur opte pour le barème)
+  // Les dividendes au barème : base imposable = dividendes bruts (PS 17,2% déjà prélevée)
+  // Simplification : on ajoute les dividendes bruts au revenu imposable
+  var rniTotalAvecDiv_an   = rniTotalAn + divMens * 12;
+  var irResult_avecDivBarem = calcIR(rniTotalAvecDiv_an, nbParts, inclAbat10);
+
+  // IR mensuel sur la rémunération seule (PFU pour dividendes)
+  var irMens_remun   = irResult_sansDivPFU.impot / 12;
+  // IR marginal sur les dividendes si option barème
+  var irDiv_barem_an = irResult_avecDivBarem.impot - irResult_sansDivPFU.impot;
+  var irDiv_barem    = irDiv_barem_an / 12;
+
+  var tauxMoyen     = irResult_sansDivPFU.tauxMoyen;   // sur rémunération seule
+  var tauxMarginal  = irResult_sansDivPFU.tauxMarginal; // tranche marginale
+
+  // ── Afficher le résultat IR dans l'interface ──
+  var irAutoDisplay = document.getElementById('ir-auto-display');
+  var irTauxDisplay = document.getElementById('ir-taux-display');
+  var irDetailHint  = document.getElementById('ir-detail-hint');
+  if (irAutoDisplay) {
+    irAutoDisplay.textContent = '~' + fmtE(irMens_remun, 0) + '/mois';
+  }
+  if (irTauxDisplay) {
+    irTauxDisplay.textContent = 'Taux moyen ' + tauxMoyen.toFixed(1) + '% · Tranche marginale ' + tauxMarginal + '%';
+  }
+  if (irDetailHint) {
+    var partsLabel = nbParts === 1 ? '1 part (célibataire)' : nbParts + ' parts';
+    irDetailHint.textContent = partsLabel + ' · RNI ' + fmtE(rniTotalAn, 0) + '/an';
+  }
+
+  // ── Calculs finaux PFU dividendes ──
+  var divPFU      = divMens * 0.30;          // flat tax 30% (IR 12,8% + PS 17,2%)
+  var divNetPFU   = divMens - divPFU;
+  // Option barème dividendes : PS 17,2% + IR marginal
+  var divPS       = divMens * 0.172;
+  var divNetBarem = divMens - divPS - irDiv_barem; // net après PS + IR barème
+
+  var netApresIR  = remunNette - irMens_remun;
+  var coutTotal   = result.coutEntreprise;
 
   // ── Affichage KPIs ──
   var set = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
-  set('kpi-net',        divOnly ? (divNet > 0 ? fmtE(divNet, 0) : '—') : fmtE(remunNette, 0));
-  set('kpi-cot',        fmtE(result.cotisations, 0));
-  set('kpi-cot-sub',    pct(result.cotisations / (result.brut||1) * 100)+' du brut');
-  set('kpi-cout',       divOnly ? '—' : fmtE(coutTotal, 0));
-  set('kpi-ir',         '~'+fmtE(irMens, 0)+'/mois');
-  set('kpi-net-ir',     fmtE(netApresIR, 0));
+  set('kpi-net',     divOnly ? (divNetPFU > 0 ? fmtE(divNetPFU, 0) : '—') : fmtE(remunNette, 0));
+  set('kpi-cot',     fmtE(result.cotisations, 0));
+  set('kpi-cot-sub', pct(result.cotisations / Math.max(result.brut, 1) * 100) + ' du brut');
+  set('kpi-cout',    divOnly ? '—' : fmtE(coutTotal, 0));
+  set('kpi-ir',      '~' + fmtE(irMens_remun, 0) + '/mois');
+  set('kpi-net-ir',  fmtE(netApresIR, 0));
+
+  // ── Coloriser kpi-ir selon la tranche ──
+  var kpiIrBox = document.getElementById('kpiRow') && document.querySelector('#kpiRow .kpi-box.blue');
+  // (pas de changement de couleur dynamique sur les KPI boxes pour l'instant)
 
   // ── Banner ──
   document.getElementById('netBanner').style.display = '';
   if (divOnly) {
-    set('banner-net',    fmtE(divNet, 0)+'/mois (net PFU)');
-    set('banner-statut', 'Dividendes nets après PFU 30% · '+s.label);
-    set('banner-cout-an','—');
-    set('banner-net-an', fmtE(divNet * 12, 0));
+    set('banner-net',    fmtE(divNetPFU, 0) + '/mois (net PFU)');
+    set('banner-statut', 'Dividendes nets après PFU 30% · ' + s.label);
+    set('banner-cout-an', '—');
+    set('banner-net-an',  fmtE(divNetPFU * 12, 0));
     var ratioBanner = document.getElementById('banner-ratio');
     if (ratioBanner) { ratioBanner.textContent = '70%'; ratioBanner.className = 'net-stat-val orange'; }
   } else {
-    set('banner-net',    fmtE(remunNette, 0)+'/mois');
-    set('banner-statut', 'Net mensuel estimé · '+s.label);
-    set('banner-cout-an',fmtE(coutTotal * 12, 0));
-    set('banner-net-an', fmtE(remunNette * 12, 0));
+    set('banner-net',    fmtE(remunNette, 0) + '/mois');
+    set('banner-statut', 'Net mensuel avant IR · ' + s.label);
+    set('banner-cout-an', fmtE(coutTotal * 12, 0));
+    set('banner-net-an',  fmtE(remunNette * 12, 0));
     var ratio = coutTotal > 0 ? (remunNette / coutTotal * 100) : 0;
     var ratioBanner = document.getElementById('banner-ratio');
-    if (ratioBanner) { ratioBanner.textContent = pct(ratio); ratioBanner.className = 'net-stat-val '+(ratio>=60?'green':ratio>=45?'orange':'red'); }
+    if (ratioBanner) {
+      ratioBanner.textContent = pct(ratio);
+      ratioBanner.className = 'net-stat-val ' + (ratio >= 60 ? 'green' : ratio >= 45 ? 'orange' : 'red');
+    }
   }
 
-  // ── Décomposition (seulement si rémunération) ──
+  // ── Section simulation IR détaillée (nouvelle) ──
+  renderIRSimulation({
+    regime:         s.regime,
+    remunNette:     remunNette,
+    rniRemunerationAn: rniRemunerationAn,
+    rniTotalAn:     rniTotalAn,
+    nbParts:        nbParts,
+    inclAbat10:     inclAbat10,
+    irResult:       irResult_sansDivPFU,
+    irMens_remun:   irMens_remun,
+    tauxMoyen:      tauxMoyen,
+    tauxMarginal:   tauxMarginal,
+    divMens:        divMens,
+    divNetPFU:      divNetPFU,
+    divNetBarem:    divNetBarem,
+    netApresIR:     netApresIR
+  });
+
+  // ── Décomposition cotisations ──
   if (!divOnly) {
     document.getElementById('decompSection').style.display = '';
     renderCotTable(result);
@@ -716,8 +849,95 @@ function calc() {
   }
 
   // ── Dividendes ──
-  if (divMens > 0 || resultat > 0) renderDivSection(divMens, divNet, resultat, s.regime, tauxIR, tauxAutoCalc);
-  else document.getElementById('divCard').style.display = 'none';
+  if (divMens > 0 || resultat > 0) {
+    renderDivSection(divMens, divNetPFU, resultat, s.regime, tauxMoyen, tauxMarginal, nbParts, rniTotalAn, inclAbat10, divNetBarem);
+  } else {
+    document.getElementById('divCard').style.display = 'none';
+  }
+}
+
+// ══ SIMULATION IR DÉTAILLÉE ══════════════════════════════════════════
+function renderIRSimulation(d) {
+  // Injecter dans un conteneur dédié sous le banner
+  var container = document.getElementById('irSimCard');
+  if (!container) return;
+  container.style.display = '';
+  // Injecter dans le card-body (pas dans irSimCard directement qui a card-head + card-body)
+  var irSimContent = document.getElementById('irSimContent');
+  if (irSimContent) container = irSimContent;
+  else { container = container.querySelector('.card-body') || container; }
+
+  var ecoQF = d.irResult.economieQF || 0;
+  var inclAbatLabel = d.inclAbat10
+    ? 'Abattement 10% appliqué (salariés / assimilés) : −' + fmtE(d.rniRemunerationAn * 0.1 > 14171 ? 14171 : Math.max(d.rniRemunerationAn * 0.1, 495), 0)
+    : "Régime BIC/BNC : pas d'abattement 10% (TNS)";
+
+  container.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+      <div style="padding:12px;background:#f8faff;border-radius:10px;border:1px solid #e2e8f0">
+        <div style="font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Revenu net imposable</div>
+        <div style="font-size:15px;font-weight:800">${fmtE(d.rniTotalAn, 0)}/an</div>
+        <div style="font-size:9px;color:var(--muted);margin-top:2px">${inclAbatLabel}</div>
+      </div>
+      <div style="padding:12px;background:#fef9c3;border-radius:10px;border:1px solid #fde68a">
+        <div style="font-size:9px;font-weight:700;color:#92400e;text-transform:uppercase;margin-bottom:4px">Impôt sur le revenu</div>
+        <div style="font-size:15px;font-weight:800;color:#d97706">${fmtE(d.irResult.impot, 0)}/an</div>
+        <div style="font-size:9px;color:#92400e;margin-top:2px">≈ ${fmtE(d.irMens_remun, 0)}/mois</div>
+      </div>
+      <div style="padding:12px;background:${d.tauxMarginal >= 30 ? '#fef2f2' : d.tauxMarginal >= 11 ? '#fef9c3' : '#f0fdf4'};border-radius:10px;border:1px solid ${d.tauxMarginal >= 30 ? '#fecaca' : d.tauxMarginal >= 11 ? '#fde68a' : '#bbf7d0'}">
+        <div style="font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:4px">Taux marginal</div>
+        <div style="font-size:15px;font-weight:800;color:${d.tauxMarginal >= 30 ? '#dc2626' : d.tauxMarginal >= 11 ? '#d97706' : '#059669'}">${d.tauxMarginal}%</div>
+        <div style="font-size:9px;color:var(--muted);margin-top:2px">Taux moyen ${d.tauxMoyen.toFixed(1)}%</div>
+      </div>
+      <div style="padding:12px;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0">
+        <div style="font-size:9px;font-weight:700;color:#065f2c;text-transform:uppercase;margin-bottom:4px">Net réel après IR</div>
+        <div style="font-size:15px;font-weight:800;color:#059669">${fmtE(d.netApresIR, 0)}/mois</div>
+        <div style="font-size:9px;color:var(--muted);margin-top:2px">${fmtE(d.netApresIR * 12, 0)}/an</div>
+      </div>
+    </div>
+
+    <!-- Barème progressif visuel -->
+    <div style="margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:8px">📊 Position dans le barème progressif 2025 (${d.nbParts} part${d.nbParts > 1 ? 's' : ''})</div>
+      <div style="display:flex;align-items:stretch;border-radius:8px;overflow:hidden;height:28px">
+        ${renderBaremeVisuel(d.rniTotalAn / d.nbParts, d.nbParts)}
+      </div>
+      <div style="display:flex;gap:14px;margin-top:6px;flex-wrap:wrap">
+        ${['#e5e7eb:0%:Exonéré (≤11 294€)', '#86efac:11%:11% (11 294 → 28 797€)', '#fcd34d:30%:30% (28 797 → 82 341€)', '#f87171:41%:41% (82 341 → 177 106€)', '#dc2626:45%:45% (>177 106€)'].map(function(s){
+          var parts = s.split(':');
+          return '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;border-radius:2px;background:'+parts[0]+';flex-shrink:0"></div>'+parts[2]+'</div>';
+        }).join('')}
+      </div>
+    </div>
+
+    ${ecoQF > 0 ? '<div style="padding:8px 12px;background:#f0fdf4;border-radius:8px;font-size:11px;color:#065f2c;margin-top:8px">✅ Économie grâce au quotient familial ('+d.nbParts+' parts) : <strong>'+fmtE(ecoQF, 0)+'/an</strong></div>' : ''}
+
+    <div style="font-size:10px;color:var(--muted);margin-top:8px;padding:8px 10px;background:#f8faff;border-radius:6px">
+      💡 Ce calcul est une <strong>estimation</strong> basée sur les données saisies. L'IR réel dépend de votre déclaration complète (crédits d'impôt, revenus fonciers, PEA, etc.). Consultez votre expert-comptable ou utilisez votre espace impots.gouv.fr.
+    </div>
+  `;
+}
+
+function renderBaremeVisuel(quotient, nbParts) {
+  // Représentation visuelle de la position dans les tranches
+  var tranches = [
+    { min:0,      max:11294,  color:'#e5e7eb', label:'0%' },
+    { min:11294,  max:28797,  color:'#86efac', label:'11%' },
+    { min:28797,  max:82341,  color:'#fcd34d', label:'30%' },
+    { min:82341,  max:177106, color:'#f87171', label:'41%' },
+    { min:177106, max:250000, color:'#dc2626', label:'45%' },
+  ];
+  var total = 250000;
+  var q = quotient; // quotient = RNI / nbParts
+
+  return tranches.map(function(tr) {
+    var width = ((tr.max - tr.min) / total * 100).toFixed(1);
+    var inTranche = q > tr.min;
+    var opacity = inTranche ? '1' : '0.25';
+    var isCurrentTranche = q > tr.min && q <= tr.max;
+    var border = isCurrentTranche ? '3px solid #1a1f36' : 'none';
+    return '<div style="width:'+width+'%;background:'+tr.color+';opacity:'+opacity+';display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#374151;border:'+border+';transition:all .3s;overflow:hidden;white-space:nowrap" title="Tranche '+tr.label+'">'+(parseFloat(width) > 5 ? tr.label : '')+'</div>';
+  }).join('');
 }
 
 // ══ CALCUL TNS (gérant majoriatire SARL, EURL) ══
@@ -988,17 +1208,21 @@ function renderComparaison(brut, regimeCurrent) {
 }
 
 // ══ DIVIDENDES ══
-function renderDivSection(divMens, divNet, resultat, regime, tauxIR, tauxAutoCalc) {
+function renderDivSection(divMens, divNetPFU, resultat, regime, tauxMoyen, tauxMarginal, nbParts, rniTotalAn, inclAbat10, divNetBarem) {
   var card = document.getElementById('divCard');
   card.style.display = '';
 
-  var pfuDiv    = divMens * 0.30;          // PFU = IR 12,8% + PS 17,2%
-  var netPFU    = divMens - pfuDiv;
-  // Option barème : PS 17,2% + IR au taux moyen calculé
-  var ps        = divMens * 0.172;
-  var tMoy      = (tauxAutoCalc || tauxIR) / 100;
-  var irBarem   = divMens * tMoy;
-  var netBarem  = Math.max(0, divMens - ps - irBarem);
+  var pfuDiv    = divMens * 0.30;               // PFU = IR 12,8% + PS 17,2%
+  var netPFU    = divMens * 0.70;               // net après PFU flat
+  // Option barème : calcul de l'IR MARGINAL sur les dividendes
+  // = différence entre l'IR avec et sans dividendes intégrés dans le barème
+  var rniAvecDiv   = (rniTotalAn || 0) + divMens * 12;
+  var irAvecDiv_an = calcIR(rniAvecDiv, nbParts || 1, inclAbat10 !== false).impot;
+  var irSansDivAn  = calcIR(rniTotalAn || 0, nbParts || 1, inclAbat10 !== false).impot;
+  var irMargDiv_mens = Math.max(0, irAvecDiv_an - irSansDivAn) / 12;
+  var ps           = divMens * 0.172;           // Prélèvements sociaux 17,2%
+  var netBarem     = Math.max(0, divMens - ps - irMargDiv_mens);
+  var tMoy         = (tauxMoyen || 0) / 100;
   // Quelle option est plus favorable ?
   var pfuMieux  = netPFU >= netBarem;
   // Cotisations TNS sur dividendes (SARL TMN, simplifiée)
@@ -1035,7 +1259,7 @@ function renderDivSection(divMens, divNet, resultat, regime, tauxIR, tauxAutoCal
 
     <!-- Comparaison PFU vs Barème -->
     <div style="background:#f8faff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:12px">
-      <div style="font-size:11px;font-weight:700;margin-bottom:10px;color:#374151">📊 PFU vs Option barème IR (taux moyen ${pct(tMoy*100)})</div>
+      <div style="font-size:11px;font-weight:700;margin-bottom:10px;color:#374151">📊 PFU vs Option barème IR — Taux marginal ${tauxMarginal}% · Taux moyen ${tauxMoyen.toFixed(1)}%</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div style="padding:10px;background:${pfuMieux?'#f0fdf4':'#fff'};border:1.5px solid ${pfuMieux?'#10b981':'#e2e8f0'};border-radius:8px">
           <div style="font-size:10px;font-weight:700;color:${pfuMieux?'#059669':'#6b7280'};margin-bottom:4px">${pfuMieux?'✅ ':''} PFU (30% fixe)</div>
@@ -1045,11 +1269,11 @@ function renderDivSection(divMens, divNet, resultat, regime, tauxIR, tauxAutoCal
         <div style="padding:10px;background:${!pfuMieux?'#f0fdf4':'#fff'};border:1.5px solid ${!pfuMieux?'#10b981':'#e2e8f0'};border-radius:8px">
           <div style="font-size:10px;font-weight:700;color:${!pfuMieux?'#059669':'#6b7280'};margin-bottom:4px">${!pfuMieux?'✅ ':''} Barème IR</div>
           <div style="font-size:16px;font-weight:800;color:${!pfuMieux?'#059669':'#374151'}">${fmtE(netBarem,0)}/mois</div>
-          <div style="font-size:10px;color:var(--muted)">PS 17,2% + IR ${pct(tMoy*100)}</div>
+          <div style="font-size:10px;color:var(--muted)">PS 17,2% + IR marginal ~${pct(tauxMarginal)}</div>
         </div>
       </div>
       <div style="font-size:10px;color:var(--muted);margin-top:8px">
-        💡 Option barème avantageuse si votre taux marginal est inférieur à 12,8%. ${tauxAutoCalc > 12.8 ? 'Dans votre cas, le PFU semble plus avantageux.' : tauxAutoCalc > 0 ? 'Dans votre cas, le barème pourrait être avantageux.' : 'Renseignez votre revenu pour une comparaison précise.'}
+        💡 Option barème avantageuse si votre taux marginal est inférieur à 12,8%. Votre tranche marginale est ${tauxMarginal}% → ${tauxMarginal < 12.8 ? "le barème IR est plus avantageux pour vous." : tauxMarginal === 12.8 ? "résultat équivalent." : "le PFU (30%) est plus avantageux."}
       </div>
     </div>
 
@@ -1091,23 +1315,25 @@ function renderDivSection(divMens, divNet, resultat, regime, tauxIR, tauxAutoCal
 }
 
 function hideResults() {
-  document.getElementById('netBanner').style.display = 'none';
+  document.getElementById('netBanner').style.display  = 'none';
+  document.getElementById('irSimCard').style.display  = 'none';
   document.getElementById('decompSection').style.display = 'none';
-  document.getElementById('divCard').style.display = 'none';
+  document.getElementById('divCard').style.display    = 'none';
 }
 
 // ══ SAVE ══
 async function saveDirigeant() {
   if (!window._uid) return;
   var data = {
-    statut:    _statut,
-    freq:      _freq,
-    brutMens:  parseF(document.getElementById('inp-brut').value) / (_freq==='annuel'?12:1),
-    netMens:   parseF(document.getElementById('inp-net').value) / (_freq==='annuel'?12:1),
-    divMens:   parseF(document.getElementById('inp-div').value) / (_freq==='annuel'?12:1),
-    resultat:  parseF(document.getElementById('inp-resultat').value),
-    tauxIR:    parseF(document.getElementById('inp-ir').value),
-    updatedAt: new Date().toISOString()
+    statut:      _statut,
+    freq:        _freq,
+    brutMens:    parseF(document.getElementById('inp-brut').value) / (_freq==='annuel'?12:1),
+    netMens:     parseF(document.getElementById('inp-net').value)  / (_freq==='annuel'?12:1),
+    divMens:     parseF(document.getElementById('inp-div').value)  / (_freq==='annuel'?12:1),
+    resultat:    parseF(document.getElementById('inp-resultat').value),
+    nbParts:     Math.max(0.5, parseF(document.getElementById('inp-parts').value) || 1),
+    autresRevAn: parseF(document.getElementById('inp-autres-revenus').value),
+    updatedAt:   new Date().toISOString()
   };
   try {
     await window._setDoc(window._doc(window._db, 'rh_params', window._uid + '_dirigeant'), data);
@@ -1128,8 +1354,13 @@ function toggleMobileNav() {
 }
 window.toggleMobileNav=toggleMobileNav;
 
-// Recalc à chaque changement
-['inp-div','inp-resultat','inp-ir','inp-anciennete'].forEach(function(id){
+// Recalc à chaque changement sur tous les champs de saisie
+window.calc = calc;
+window.setStatut = setStatut;
+window.setFreq = setFreq;
+window.saveDirigeant = saveDirigeant;
+
+['inp-div','inp-resultat','inp-parts','inp-autres-revenus'].forEach(function(id){
   var el=document.getElementById(id);
   if(el)el.addEventListener('input',calc);
 });
