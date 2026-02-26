@@ -1,5 +1,5 @@
-// ── nav.js — Alteore ── v3 (nav centralisée + module RH Master)
-(function() {
+// ── nav.js — Alteore ── v4 (nav centralisée + module RH Master + dirigeant)
+(function () {
 
   // ════════════════════════════════════════════════
   // CONFIG PLANS
@@ -16,143 +16,163 @@
   const CAN_RAPPORT      = ['pro', 'max', 'master', 'dev'];
   const CAN_RH           = ['master', 'trial', 'dev'];
 
-  // Pages RH
+  // Pages RH (contrôle d'accès + détection page active)
   const RH_PAGES = [
-    'rh-dashboard.html','rh-employes.html','rh-planning.html','rh-conges.html',
-    'rh-temps.html','rh-paie.html','rh-recrutement.html','rh-onboarding.html',
-    'rh-documents.html','rh-entretiens.html','rh-conformite.html',
-    'rh-formations.html','rh-modeles.html','rh-rapport.html'
+    'rh-dashboard.html', 'rh-employes.html', 'rh-planning.html', 'rh-conges.html',
+    'rh-temps.html', 'rh-paie.html', 'rh-dirigeant.html', 'rh-recrutement.html',
+    'rh-onboarding.html', 'rh-documents.html', 'rh-entretiens.html',
+    'rh-conformite.html', 'rh-formations.html', 'rh-modeles.html', 'rh-rapport.html'
   ];
 
   // ════════════════════════════════════════════════
-  // PAGE ACTIVE — détection automatique
+  // PAGE ACTIVE
   // ════════════════════════════════════════════════
   const PAGE = location.pathname.split('/').pop() || 'dashboard.html';
 
   // ════════════════════════════════════════════════
-  // INJECTION NAV HTML
+  // BUILD NAV HTML
   // ════════════════════════════════════════════════
   function buildNavHTML() {
-    function active(page) { return PAGE === page ? ' on' : ''; }
-    function activeNI(pages) { return pages.includes(PAGE) ? ' on' : ''; }
+    function a(page)  { return PAGE === page ? ' on' : ''; }
+    function aNI(arr) { return arr.includes(PAGE) ? ' on' : ''; }
 
-    const kpisPages = ['cout-revient.html','marges.html','panier-moyen.html','dettes.html','gestion-stock.html'];
-    const kpisOpen  = kpisPages.includes(PAGE) ? 'style="max-height:400px"' : '';
-    const pilOpen   = PAGE === 'pilotage.html' || PAGE === 'cashflow.html' ? 'style="max-height:400px"' : '';
-    const fidOpen   = PAGE === 'fidelisation.html' ? 'style="max-height:400px"' : '';
-    const rhOpen    = ''; // Jamais ouvert automatiquement — uniquement sur clic
+    const kpisPages = ['cout-revient.html', 'marges.html', 'panier-moyen.html', 'dettes.html', 'gestion-stock.html'];
+    const kpisOpen  = kpisPages.includes(PAGE)                                   ? 'style="max-height:500px"' : '';
+    const pilOpen   = ['pilotage.html', 'cashflow.html'].includes(PAGE)          ? 'style="max-height:500px"' : '';
+    const fidOpen   = PAGE === 'fidelisation.html'                               ? 'style="max-height:500px"' : '';
+    const rhOpen    = RH_PAGES.includes(PAGE)                                    ? 'style="max-height:4000px"' : '';
 
     return `
-<nav id="alteore-nav">
+<nav id="alteore-nav"${RH_PAGES.includes(PAGE) ? ' class="rh-mode"' : ''}>
   <div class="nav-scroll-area">
-  <div class="logo">
-    <svg width="32" height="28" viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="nav-lg-ae" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#00e5ff"/>
-          <stop offset="100%" stop-color="#1a3dce"/>
-        </linearGradient>
-      </defs>
-      <polygon points="38,80 55,20 72,80 65,80 55,45 45,80" fill="url(#nav-lg-ae)"/>
-      <polygon points="68,24 105,24 102,32 68,32" fill="url(#nav-lg-ae)"/>
-      <polygon points="68,44 100,44 97,52 68,52" fill="url(#nav-lg-ae)"/>
-      <polygon points="68,64 95,64 92,72 68,72" fill="url(#nav-lg-ae)"/>
-    </svg>
-    <div class="logo-t">ALTEORE</div>
-  </div>
 
-  <div class="ns">Principal</div>
-
-  <div class="ni${active('dashboard.html')}" id="nav-dashboard" onclick="location.href='dashboard.html'">
-    <span>🏠</span><span>Tableau de bord</span>
-  </div>
-
-  <div class="ni${active('suivi-ca.html')}" id="nav-suivi" onclick="location.href='suivi-ca.html'">
-    <span>📈</span><span>Suivi CA &amp; Résultats</span>
-  </div>
-
-  <div class="ni${activeNI(kpisPages)}" id="nav-kpis" onclick="toggleAlteoreNav('kpis-sub',this)">
-    <span>🎯</span><span style="flex:1">KPIs Clés</span><span class="chev" id="chev-kpis">›</span>
-  </div>
-  <div class="sub" id="kpis-sub" ${kpisOpen}>
-    <div class="si${active('cout-revient.html')}" id="nav-cout" onclick="location.href='cout-revient.html'"><span class="dot"></span>Coût de revient</div>
-    <div class="si${active('marges.html')}" id="nav-marges" onclick="location.href='marges.html'"><span class="dot"></span>Marge brute &amp; nette</div>
-    <div class="si${active('panier-moyen.html')}" id="nav-panier" onclick="location.href='panier-moyen.html'"><span class="dot"></span>Panier moyen</div>
-    <div class="si${active('dettes.html')}" id="nav-dettes" onclick="location.href='dettes.html'"><span class="dot"></span>Dettes &amp; Emprunts</div>
-    <div class="si${active('gestion-stock.html')}" id="nav-stock" onclick="location.href='gestion-stock.html'"><span class="dot"></span>Gestion des Stocks</div>
-  </div>
-
-  <div class="ni${active('pilotage.html')}" id="nav-pilotage" onclick="toggleAlteoreNav('pil-sub',this)">
-    <span>🧭</span><span style="flex:1">Pilotage</span><span class="chev" id="chev-pil">›</span>
-  </div>
-  <div class="sub" id="pil-sub" ${pilOpen}>
-    <div class="si${active('pilotage.html')}" onclick="location.href='pilotage.html?year=2025'"><span class="dot"></span>Pilotage 2025</div>
-    <div class="si" onclick="location.href='pilotage.html?year=2026'"><span class="dot"></span>Pilotage 2026</div>
-    <div class="si" onclick="location.href='pilotage.html?year=2027'"><span class="dot"></span>Pilotage 2027</div>
-    <div class="si${active('cashflow.html')}" onclick="location.href='cashflow.html'" style="border-top:1px solid rgba(255,255,255,.06);margin-top:4px;padding-top:8px">
-      <span class="dot" style="background:#0d9488"></span>💧 Cashflow
+    <div class="logo">
+      <svg width="32" height="28" viewBox="0 0 120 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="nav-lg-ae" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#00e5ff"/><stop offset="100%" stop-color="#1a3dce"/>
+          </linearGradient>
+        </defs>
+        <polygon points="38,80 55,20 72,80 65,80 55,45 45,80" fill="url(#nav-lg-ae)"/>
+        <polygon points="68,24 105,24 102,32 68,32"           fill="url(#nav-lg-ae)"/>
+        <polygon points="68,44 100,44 97,52 68,52"            fill="url(#nav-lg-ae)"/>
+        <polygon points="68,64 95,64 92,72 68,72"             fill="url(#nav-lg-ae)"/>
+      </svg>
+      <div class="logo-t">ALTEORE</div>
     </div>
-  </div>
 
-  <div class="ns">Rapports</div>
-  <div class="ni${active('rapport-annuel.html')}" id="nav-rapport" onclick="location.href='rapport-annuel.html'">
-    <span>📄</span><span style="flex:1">Rapport annuel PDF</span>
-    <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.25);color:#6ee7b7;padding:2px 7px;border-radius:20px">Nouveau</span>
-  </div>
+    <div class="ns">Principal</div>
 
-  <div class="ns">Intelligence IA</div>
-  <div class="ni${active('bilan.html')}" id="nav-bilan" onclick="location.href='bilan.html'">
-    <span>🤖</span><span style="flex:1">Analyse de Bilan</span>
-    <span style="font-size:10px;font-weight:700;background:rgba(79,126,248,0.3);color:#a5b4fc;padding:2px 7px;border-radius:20px">IA</span>
-  </div>
+    <div class="ni${a('dashboard.html')}" id="nav-dashboard" onclick="location.href='dashboard.html'">
+      <span>🏠</span><span>Tableau de bord</span>
+    </div>
 
-  <div class="ns">Fidélisation</div>
-  <div class="ni${active('fidelisation.html')}" id="nav-fid" onclick="toggleAlteoreNav('fid-nav-sub',this)">
-    <span>💎</span><span style="flex:1">Fidélisation</span>
-    <span class="chev">›</span>
-  </div>
-  <div class="sub" id="fid-nav-sub" ${fidOpen}>
-    <div class="si${active('fidelisation.html')}" onclick="location.href='fidelisation.html'"><span class="dot"></span>Dashboard fidélité</div>
-    <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('clients',null),300)"><span class="dot"></span>Clients</div>
-    <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('carte',null),300)"><span class="dot"></span>Carte fidélité</div>
-    <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('points',null),300)"><span class="dot"></span>Points &amp; Récompenses</div>
-    <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('coupons',null),300)"><span class="dot"></span>Coupons &amp; Offres</div>
-    <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('campagnes',null),300)"><span class="dot"></span>Campagnes</div>
-  </div>
+    <div class="ni${a('suivi-ca.html')}" id="nav-suivi" onclick="location.href='suivi-ca.html'">
+      <span>📈</span><span>Suivi CA &amp; Résultats</span>
+    </div>
 
-  <!-- ══════════════════════════════════════ -->
-  <!-- MODULE RH — Plan Master               -->
-  <!-- ══════════════════════════════════════ -->
-  <div class="ns rh-ns">Ressources Humaines</div>
-  <div class="ni rh-ni${activeNI(RH_PAGES)}" id="nav-rh" onclick="toggleAlteoreNav('rh-nav-sub',this)">
-    <span>👥</span><span style="flex:1">Module RH</span>
-    <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.2);color:#6ee7b7;padding:2px 6px;border-radius:20px;margin-right:4px">Master</span>
-    <span class="chev rh-chev">›</span>
-  </div>
-  <div class="sub" id="rh-nav-sub" ${rhOpen}>
+    <!-- KPIs -->
+    <div class="ni${aNI(kpisPages)}" id="nav-kpis" onclick="toggleAlteoreNav('kpis-sub',this)">
+      <span>🎯</span><span style="flex:1">KPIs Clés</span><span class="chev" id="chev-kpis">›</span>
+    </div>
+    <div class="sub" id="kpis-sub" ${kpisOpen}>
+      <div class="si${a('cout-revient.html')}"  id="nav-cout"   onclick="location.href='cout-revient.html'"><span class="dot"></span>Coût de revient</div>
+      <div class="si${a('marges.html')}"         id="nav-marges" onclick="location.href='marges.html'"><span class="dot"></span>Marge brute &amp; nette</div>
+      <div class="si${a('panier-moyen.html')}"   id="nav-panier" onclick="location.href='panier-moyen.html'"><span class="dot"></span>Panier moyen</div>
+      <div class="si${a('dettes.html')}"         id="nav-dettes" onclick="location.href='dettes.html'"><span class="dot"></span>Dettes &amp; Emprunts</div>
+      <div class="si${a('gestion-stock.html')}"  id="nav-stock"  onclick="location.href='gestion-stock.html'"><span class="dot"></span>Gestion des Stocks</div>
+    </div>
 
-    <div class="rh-sub-group">Accueil</div>
-    <div class="si rh-si${active('rh-dashboard.html')}" onclick="location.href='rh-dashboard.html'"><span class="dot rh-dot"></span>Dashboard RH</div>
+    <!-- Pilotage -->
+    <div class="ni${aNI(['pilotage.html','cashflow.html'])}" id="nav-pilotage" onclick="toggleAlteoreNav('pil-sub',this)">
+      <span>🧭</span><span style="flex:1">Pilotage</span><span class="chev" id="chev-pil">›</span>
+    </div>
+    <div class="sub" id="pil-sub" ${pilOpen}>
+      <div class="si${a('pilotage.html')}" onclick="location.href='pilotage.html?year=2025'"><span class="dot"></span>Pilotage 2025</div>
+      <div class="si"                      onclick="location.href='pilotage.html?year=2026'"><span class="dot"></span>Pilotage 2026</div>
+      <div class="si"                      onclick="location.href='pilotage.html?year=2027'"><span class="dot"></span>Pilotage 2027</div>
+      <div class="si${a('cashflow.html')}" onclick="location.href='cashflow.html'" style="border-top:1px solid rgba(255,255,255,.06);margin-top:4px;padding-top:8px">
+        <span class="dot" style="background:#0d9488"></span>💧 Cashflow
+      </div>
+    </div>
 
-    <div class="rh-sub-group">RH Core</div>
-    <div class="si rh-si${active('rh-employes.html')}" onclick="location.href='rh-employes.html'"><span class="dot rh-dot"></span>Employés &amp; Fiches</div>
-    <div class="si rh-si${active('rh-planning.html')}" onclick="location.href='rh-planning.html'"><span class="dot rh-dot"></span>Planning</div>
-    <div class="si rh-si${active('rh-conges.html')}" onclick="location.href='rh-conges.html'"><span class="dot rh-dot"></span>Congés</div>
-    <div class="si rh-si${active('rh-temps.html')}" onclick="location.href='rh-temps.html'"><span class="dot rh-dot"></span>Temps de travail</div>
-    <div class="si rh-si${active('rh-paie.html')}" onclick="location.href='rh-paie.html'"><span class="dot rh-dot"></span>Paie &amp; Salaires</div>
-    <div class="si rh-si${active('rh-recrutement.html')}" onclick="location.href='rh-recrutement.html'"><span class="dot rh-dot"></span>Recrutement</div>
+    <!-- Rapports -->
+    <div class="ns">Rapports</div>
+    <div class="ni${a('rapport-annuel.html')}" id="nav-rapport" onclick="location.href='rapport-annuel.html'">
+      <span>📄</span><span style="flex:1">Rapport annuel PDF</span>
+      <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.25);color:#6ee7b7;padding:2px 7px;border-radius:20px">Nouveau</span>
+    </div>
 
-    <div class="rh-sub-group">Gestion</div>
-    <div class="si rh-si${active('rh-onboarding.html')}" onclick="location.href='rh-onboarding.html'"><span class="dot rh-dot"></span>Onboarding / Offboarding</div>
-    <div class="si rh-si${active('rh-documents.html')}" onclick="location.href='rh-documents.html'"><span class="dot rh-dot"></span>Documents RH</div>
-    <div class="si rh-si${active('rh-entretiens.html')}" onclick="location.href='rh-entretiens.html'"><span class="dot rh-dot"></span>Entretiens annuels</div>
-    <div class="si rh-si${active('rh-conformite.html')}" onclick="location.href='rh-conformite.html'"><span class="dot rh-dot"></span>Conformité &amp; Légal</div>
-    <div class="si rh-si${active('rh-formations.html')}" onclick="location.href='rh-formations.html'"><span class="dot rh-dot"></span>Plan de formation</div>
-    <div class="si rh-si${active('rh-modeles.html')}" onclick="location.href='rh-modeles.html'"><span class="dot rh-dot"></span>Modèles de documents</div>
+    <!-- IA -->
+    <div class="ns">Intelligence IA</div>
+    <div class="ni${a('bilan.html')}" id="nav-bilan" onclick="location.href='bilan.html'">
+      <span>🤖</span><span style="flex:1">Analyse de Bilan</span>
+      <span style="font-size:10px;font-weight:700;background:rgba(79,126,248,.3);color:#a5b4fc;padding:2px 7px;border-radius:20px">IA</span>
+    </div>
 
-  </div>
+    <!-- Fidélisation -->
+    <div class="ns">Fidélisation</div>
+    <div class="ni${a('fidelisation.html')}" id="nav-fid" onclick="toggleAlteoreNav('fid-nav-sub',this)">
+      <span>💎</span><span style="flex:1">Fidélisation</span><span class="chev">›</span>
+    </div>
+    <div class="sub" id="fid-nav-sub" ${fidOpen}>
+      <div class="si${a('fidelisation.html')}" onclick="location.href='fidelisation.html'"><span class="dot"></span>Dashboard fidélité</div>
+      <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('clients',null),300)"><span class="dot"></span>Clients</div>
+      <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('carte',null),300)"><span class="dot"></span>Carte fidélité</div>
+      <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('points',null),300)"><span class="dot"></span>Points &amp; Récompenses</div>
+      <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('coupons',null),300)"><span class="dot"></span>Coupons &amp; Offres</div>
+      <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('campagnes',null),300)"><span class="dot"></span>Campagnes</div>
+    </div>
+
+    <!-- ═══════════════════════════════════ -->
+    <!-- MODULE RH — Plan Master            -->
+    <!-- ═══════════════════════════════════ -->
+    <div class="ns rh-ns">Ressources Humaines</div>
+    <div class="ni rh-ni${aNI(RH_PAGES)}" id="nav-rh" onclick="toggleAlteoreNav('rh-nav-sub',this)">
+      <span>👥</span><span style="flex:1">Module RH</span>
+      <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.2);color:#6ee7b7;padding:2px 6px;border-radius:20px;margin-right:4px">Master</span>
+      <span class="chev rh-chev">›</span>
+    </div>
+    <div class="sub" id="rh-nav-sub" ${rhOpen}>
+
+      <div class="rh-sub-group">Accueil</div>
+      <div class="si rh-si${a('rh-dashboard.html')}" onclick="location.href='rh-dashboard.html'">
+        <span class="dot rh-dot"></span>Dashboard RH
+      </div>
+
+      <div class="rh-sub-group">RH Core</div>
+      <div class="si rh-si${a('rh-employes.html')}"  onclick="location.href='rh-employes.html'"><span class="dot rh-dot"></span>Employés &amp; Fiches</div>
+      <div class="si rh-si${a('rh-planning.html')}"  onclick="location.href='rh-planning.html'"><span class="dot rh-dot"></span>Planning</div>
+      <div class="si rh-si${a('rh-conges.html')}"    onclick="location.href='rh-conges.html'"><span class="dot rh-dot"></span>Congés</div>
+      <div class="si rh-si${a('rh-temps.html')}"     onclick="location.href='rh-temps.html'"><span class="dot rh-dot"></span>Temps de travail</div>
+
+      <div class="rh-sub-group">Rémunération</div>
+      <div class="si rh-si${a('rh-paie.html')}" onclick="location.href='rh-paie.html'">
+        <span class="dot rh-dot"></span>
+        <span style="flex:1">Paie &amp; Salaires</span>
+        <span style="font-size:9px;font-weight:700;background:rgba(239,68,68,.15);color:#f87171;padding:1px 5px;border-radius:4px;flex-shrink:0">Indicatif</span>
+      </div>
+      <div class="si rh-si${a('rh-dirigeant.html')}" onclick="location.href='rh-dirigeant.html'">
+        <span class="dot rh-dot"></span>
+        <span style="flex:1">Rémunération dirigeant</span>
+        <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.2);color:#6ee7b7;padding:1px 5px;border-radius:4px;flex-shrink:0">Nouveau</span>
+      </div>
+
+      <div class="rh-sub-group">Recrutement</div>
+      <div class="si rh-si${a('rh-recrutement.html')}" onclick="location.href='rh-recrutement.html'"><span class="dot rh-dot"></span>Recrutement</div>
+
+      <div class="rh-sub-group">Gestion</div>
+      <div class="si rh-si${a('rh-onboarding.html')}"  onclick="location.href='rh-onboarding.html'"><span class="dot rh-dot"></span>Onboarding / Offboarding</div>
+      <div class="si rh-si${a('rh-documents.html')}"   onclick="location.href='rh-documents.html'"><span class="dot rh-dot"></span>Documents RH</div>
+      <div class="si rh-si${a('rh-entretiens.html')}"  onclick="location.href='rh-entretiens.html'"><span class="dot rh-dot"></span>Entretiens annuels</div>
+      <div class="si rh-si${a('rh-conformite.html')}"  onclick="location.href='rh-conformite.html'"><span class="dot rh-dot"></span>Conformité &amp; Légal</div>
+      <div class="si rh-si${a('rh-formations.html')}"  onclick="location.href='rh-formations.html'"><span class="dot rh-dot"></span>Plan de formation</div>
+      <div class="si rh-si${a('rh-modeles.html')}"     onclick="location.href='rh-modeles.html'"><span class="dot rh-dot"></span>Modèles de documents</div>
+
+    </div><!-- /rh-nav-sub -->
 
   </div><!-- /nav-scroll-area -->
+
   <div class="nav-footer">
     <div class="ni" id="nav-import" onclick="location.href='import.html'" style="border-top:1px solid rgba(255,255,255,.08);padding:10px 0 8px;margin:0">
       <span>📥</span><span>Import de données</span>
@@ -166,9 +186,9 @@
       <button class="lbtn" onclick="event.stopPropagation();(window.doLogout||window.handleLogout||function(){window._signOut&&window._signOut(window._auth).then(()=>location.href='index.html')})()">⎋</button>
     </div>
     <div style="display:flex;justify-content:center;gap:14px;padding:10px 0 2px">
-      <a href="mentions-legales.html" style="font-size:10px;color:rgba(255,255,255,.22);text-decoration:none;transition:color .2s" onmouseover="this.style.color='rgba(255,255,255,.6)'" onmouseout="this.style.color='rgba(255,255,255,.22)'">Mentions</a>
-      <a href="cgv.html" style="font-size:10px;color:rgba(255,255,255,.22);text-decoration:none;transition:color .2s" onmouseover="this.style.color='rgba(255,255,255,.6)'" onmouseout="this.style.color='rgba(255,255,255,.22)'">CGV</a>
-      <a href="confidentialite.html" style="font-size:10px;color:rgba(255,255,255,.22);text-decoration:none;transition:color .2s" onmouseover="this.style.color='rgba(255,255,255,.6)'" onmouseout="this.style.color='rgba(255,255,255,.22)'">Confidentialité</a>
+      <a href="mentions-legales.html"  style="font-size:10px;color:rgba(255,255,255,.22);text-decoration:none;transition:color .2s" onmouseover="this.style.color='rgba(255,255,255,.6)'" onmouseout="this.style.color='rgba(255,255,255,.22)'">Mentions</a>
+      <a href="cgv.html"               style="font-size:10px;color:rgba(255,255,255,.22);text-decoration:none;transition:color .2s" onmouseover="this.style.color='rgba(255,255,255,.6)'" onmouseout="this.style.color='rgba(255,255,255,.22)'">CGV</a>
+      <a href="confidentialite.html"   style="font-size:10px;color:rgba(255,255,255,.22);text-decoration:none;transition:color .2s" onmouseover="this.style.color='rgba(255,255,255,.6)'" onmouseout="this.style.color='rgba(255,255,255,.22)'">Confidentialité</a>
     </div>
   </div>
 </nav>`;
@@ -179,13 +199,12 @@
   // ════════════════════════════════════════════════
   const NAV_CSS = `
 <style id="alteore-nav-css">
+/* ── BASE ── */
 nav#alteore-nav{width:250px;height:100vh;background:linear-gradient(180deg,#0f1f5c,#162366);position:fixed;top:0;left:0;display:flex;flex-direction:column;overflow:hidden;z-index:99;box-sizing:border-box}
 nav#alteore-nav .nav-scroll-area{flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.12) transparent}
 nav#alteore-nav .nav-scroll-area::-webkit-scrollbar{width:4px}
 nav#alteore-nav .nav-scroll-area::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:99px}
-nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgba(52,211,153,.3)}
 nav#alteore-nav .logo{display:flex;align-items:center;gap:10px;padding:22px 18px;border-bottom:1px solid rgba(255,255,255,.08)}
-nav#alteore-nav .logo-i{width:33px;height:33px;background:rgba(255,255,255,.14);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px}
 nav#alteore-nav .logo-t{font-size:17px;font-weight:800;color:#fff;letter-spacing:1px}
 nav#alteore-nav .ns{font-size:10px;font-weight:700;color:rgba(255,255,255,.28);letter-spacing:1px;text-transform:uppercase;padding:12px 18px 4px}
 nav#alteore-nav .ni{display:flex;align-items:center;gap:9px;padding:9px 18px;color:rgba(255,255,255,.55);font-size:12.5px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:.15s}
@@ -205,22 +224,20 @@ nav#alteore-nav .un{font-size:11.5px;font-weight:600;color:#fff}
 nav#alteore-nav .upl{font-size:10px;color:rgba(255,255,255,.3)}
 nav#alteore-nav .lbtn{margin-left:auto;background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;font-size:13px}
 
-/* ── RH MODULE — vert sur items RH ── */
-nav#alteore-nav .rh-ns{color:rgba(52,211,153,.55);letter-spacing:1px}
+/* ── RH — couleurs vertes ── */
+nav#alteore-nav .rh-ns{color:rgba(52,211,153,.55)}
 nav#alteore-nav .ni.rh-ni{border-left-color:transparent}
 nav#alteore-nav .ni.rh-ni:hover{background:rgba(16,185,129,.08)}
 nav#alteore-nav .ni.rh-ni.on{color:#fff;background:rgba(16,185,129,.13);border-left-color:#10b981}
-nav#alteore-nav .rh-chev{color:rgba(52,211,153,.45) !important}
+nav#alteore-nav .rh-chev{color:rgba(52,211,153,.45)!important}
 nav#alteore-nav .rh-sub-group{font-size:9px;font-weight:700;color:rgba(52,211,153,.4);letter-spacing:1px;text-transform:uppercase;padding:8px 18px 3px 18px;margin-top:4px}
 nav#alteore-nav .rh-si{color:rgba(255,255,255,.4)}
 nav#alteore-nav .rh-si:hover{color:rgba(255,255,255,.82);background:rgba(16,185,129,.07)}
 nav#alteore-nav .rh-si.on{color:#fff;background:rgba(16,185,129,.17);border-left-color:rgba(16,185,129,.75)}
 nav#alteore-nav .rh-dot{background:rgba(52,211,153,.28)}
 nav#alteore-nav .rh-si.on .rh-dot{background:#10b981}
-/* Le sous-menu RH s'étend normalement — c'est la nav entière qui scrolle */
-/* rh-nav-sub utilise le .sub standard — pas de règle spéciale nécessaire */
 
-/* ── THÈME VERT GLOBAL — toute la sidebar passe en vert quand RH est ouvert ── */
+/* ── THÈME VERT GLOBAL quand RH ouvert ── */
 nav#alteore-nav.rh-mode{background:linear-gradient(180deg,#052e16 0%,#064e23 50%,#065f2c 100%);transition:background .45s ease}
 nav#alteore-nav.rh-mode .logo{border-bottom-color:rgba(52,211,153,.15)}
 nav#alteore-nav.rh-mode .logo-t{background:linear-gradient(135deg,#34d399,#6ee7b7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
@@ -241,11 +258,10 @@ nav#alteore-nav.rh-mode .nav-footer{border-top-color:rgba(52,211,153,.15);backgr
 nav#alteore-nav.rh-mode .ucard{background:rgba(52,211,153,.1)}
 nav#alteore-nav.rh-mode .uav{background:linear-gradient(135deg,#10b981,#34d399)}
 nav#alteore-nav.rh-mode .chev{color:rgba(52,211,153,.35)}
-nav#alteore-nav.rh-mode .rh-chev{color:rgba(52,211,153,.7) !important}
-nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,211,153,.35)}
+nav#alteore-nav.rh-mode .rh-chev{color:rgba(52,211,153,.7)!important}
+nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgba(52,211,153,.3)}
 
-
-/* Mobile hamburger */
+/* ── HAMBURGER MOBILE ── */
 .alteore-hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#0f1f5c;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;box-shadow:0 4px 16px rgba(15,31,92,.45);-webkit-tap-highlight-color:transparent}
 .alteore-hamburger span{display:block;width:20px;height:2.5px;background:#fff;border-radius:2px;transition:all .25s ease}
 .alteore-hamburger.open span:nth-child(1){transform:translateY(7.5px) rotate(45deg)}
@@ -261,19 +277,26 @@ nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,
 </style>`;
 
   // ════════════════════════════════════════════════
-  // INJECTION DANS LE DOM
+  // INJECTION DOM
   // ════════════════════════════════════════════════
   function injectNav() {
     if (document.getElementById('alteore-nav')) return;
+
     if (!document.getElementById('alteore-nav-css')) {
       document.head.insertAdjacentHTML('beforeend', NAV_CSS);
     }
+
+    // Hamburger
     if (!document.querySelector('.alteore-hamburger')) {
       document.body.insertAdjacentHTML('afterbegin',
-        `<button class="alteore-hamburger" id="alteore-hamburger" onclick="alteoreToggleSidebar()" aria-label="Menu"><span></span><span></span><span></span></button>
+        `<button class="alteore-hamburger" id="alteore-hamburger" onclick="alteoreToggleSidebar()" aria-label="Menu">
+           <span></span><span></span><span></span>
+         </button>
          <div class="alteore-nav-overlay" id="alteoreNavOverlay" onclick="alteoreCloseSidebar()"></div>`
       );
     }
+
+    // Supprimer anciens éléments des pages inline
     const oldNav = document.querySelector('nav:not(#alteore-nav), aside.sidebar');
     if (oldNav) oldNav.remove();
     const oldHamburger = document.querySelector('.hamburger');
@@ -283,58 +306,60 @@ nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,
 
     document.body.insertAdjacentHTML('afterbegin', buildNavHTML());
 
+    // Marge main
     const mainEl = document.querySelector('main, .main, div.main');
-    if (mainEl && !mainEl.style.marginLeft) {
-      mainEl.style.marginLeft = '250px';
-    }
+    if (mainEl && !mainEl.style.marginLeft) mainEl.style.marginLeft = '250px';
   }
 
   // ════════════════════════════════════════════════
-  // FONCTIONS NAVIGATION (globales)
+  // TOGGLE SOUS-MENUS
   // ════════════════════════════════════════════════
-  window.toggleAlteoreNav = function(subId, el) {
+  window.toggleAlteoreNav = function (subId, el) {
     var sub = document.getElementById(subId);
     if (!sub) return;
     var nav = document.getElementById('alteore-nav');
     var isOpen = sub.style.maxHeight && sub.style.maxHeight !== '0px';
-    // Fermer tous les sous-menus
-    document.querySelectorAll('nav#alteore-nav .sub').forEach(function(s) { s.style.maxHeight = '0px'; });
+
+    // Fermer tous
+    document.querySelectorAll('nav#alteore-nav .sub').forEach(function (s) {
+      s.style.maxHeight = '0px';
+    });
+
     if (!isOpen) {
-      sub.style.maxHeight = '2000px';
-      // Thème vert si RH, bleu sinon
+      sub.style.maxHeight = '4000px';
       if (nav) {
         if (subId === 'rh-nav-sub') nav.classList.add('rh-mode');
         else nav.classList.remove('rh-mode');
       }
     } else {
-      // Fermeture du menu RH : repasser en bleu
       if (nav && subId === 'rh-nav-sub') nav.classList.remove('rh-mode');
     }
   };
 
-  window.toggleNav = window.toggleAlteoreNav;
-  window.toggleFidNav = function(el) { window.toggleAlteoreNav('fid-nav-sub', el); };
+  window.toggleNav    = window.toggleAlteoreNav;
+  window.toggleFidNav = function (el) { window.toggleAlteoreNav('fid-nav-sub', el); };
 
-
-
-  window.alteoreToggleSidebar = function() {
-    var nav = document.getElementById('alteore-nav');
+  // ════════════════════════════════════════════════
+  // HAMBURGER MOBILE
+  // ════════════════════════════════════════════════
+  window.alteoreToggleSidebar = function () {
+    var nav     = document.getElementById('alteore-nav');
     var overlay = document.getElementById('alteoreNavOverlay');
-    var btn = document.getElementById('alteore-hamburger');
-    if (nav) nav.classList.toggle('open');
+    var btn     = document.getElementById('alteore-hamburger');
+    if (nav)     nav.classList.toggle('open');
     if (overlay) overlay.classList.toggle('show');
-    if (btn) btn.classList.toggle('open');
+    if (btn)     btn.classList.toggle('open');
   };
-  window.alteoreCloseSidebar = function() {
-    var nav = document.getElementById('alteore-nav');
+  window.alteoreCloseSidebar = function () {
+    var nav     = document.getElementById('alteore-nav');
     var overlay = document.getElementById('alteoreNavOverlay');
-    var btn = document.getElementById('alteore-hamburger');
-    if (nav) nav.classList.remove('open');
+    var btn     = document.getElementById('alteore-hamburger');
+    if (nav)     nav.classList.remove('open');
     if (overlay) overlay.classList.remove('show');
-    if (btn) btn.classList.remove('open');
+    if (btn)     btn.classList.remove('open');
   };
   window.toggleSidebar = window.alteoreToggleSidebar;
-  window.closeSidebar = window.alteoreCloseSidebar;
+  window.closeSidebar  = window.alteoreCloseSidebar;
 
   // ════════════════════════════════════════════════
   // MODALE UPGRADE
@@ -355,7 +380,9 @@ nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,
         </div>
         <div style="margin-top:16px;font-size:11px;color:#9ca3af">Annulation à tout moment · 15j d'essai gratuit</div>
       </div>`;
-    modal.addEventListener('click', function(e) { if (e.target === modal) modal.style.display = 'none'; });
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) modal.style.display = 'none';
+    });
     document.body.appendChild(modal);
     if (!document.getElementById('nav-modal-style')) {
       const s = document.createElement('style');
@@ -368,25 +395,27 @@ nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,
   function showUpgradeModal(upgrade) {
     injectUpgradeModal();
     const configs = {
-      fidelisation: { icon:'💎', title:'Fidélisation — Plan Max requis',     desc:'La gestion des clients, cartes de fidélité, coupons et campagnes SMS est disponible dès le plan <strong>Max (99€/mois)</strong> ou <strong>Master (169€/mois)</strong>.', cta:'⭐ Passer au plan Max' },
-      bilan:        { icon:'🤖', title:'Analyse de Bilan — Plan Master requis', desc:'L\'analyse de bilan comptable par intelligence artificielle est disponible avec le plan <strong>Master (169€/mois)</strong>.', cta:'⭐ Passer au plan Master' },
-      rapport:      { icon:'📄', title:'Rapport annuel PDF — Plan Pro requis', desc:'La génération de rapports annuels PDF est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta:'⭐ Passer au plan Pro' },
-      import:       { icon:'📥', title:'Import/Export — Plan Pro requis',     desc:"L'import et l'export de données est disponible dès le plan <strong>Pro (69€/mois)</strong>.", cta:'⭐ Passer au plan Pro' },
-      rh:           { icon:'👥', title:'Module RH — Plan Master requis',      desc:'La gestion complète des ressources humaines (employés, planning, congés, paie, recrutement, conformité…) est disponible avec le plan <strong>Master (169€/mois)</strong>.', cta:'⭐ Passer au plan Master' },
-      core:         { icon:'📊', title:'Fonctionnalité Premium',              desc:'Cette fonctionnalité est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta:'⭐ Voir les plans' }
+      fidelisation: { icon: '💎', title: 'Fidélisation — Plan Max requis',       desc: 'La gestion des clients, cartes de fidélité, coupons et campagnes SMS est disponible dès le plan <strong>Max (99€/mois)</strong> ou <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
+      bilan:        { icon: '🤖', title: 'Analyse de Bilan — Plan Master requis', desc: 'L\'analyse de bilan comptable par intelligence artificielle est disponible avec le plan <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Master' },
+      rapport:      { icon: '📄', title: 'Rapport annuel PDF — Plan Pro requis',  desc: 'La génération de rapports annuels PDF est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Passer au plan Pro' },
+      import:       { icon: '📥', title: 'Import/Export — Plan Pro requis',        desc: "L'import et l'export de données est disponible dès le plan <strong>Pro (69€/mois)</strong>.", cta: '⭐ Passer au plan Pro' },
+      rh:           { icon: '👥', title: 'Module RH — Plan Master requis',         desc: 'La gestion complète des ressources humaines (employés, planning, congés, paie, rémunération dirigeant…) est disponible avec le plan <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Master' },
+      core:         { icon: '📊', title: 'Fonctionnalité Premium',                 desc: 'Cette fonctionnalité est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Voir les plans' }
     };
     const cfg = configs[upgrade] || configs.core;
-    document.getElementById('nav-modal-icon').textContent    = cfg.icon;
-    document.getElementById('nav-modal-title').textContent   = cfg.title;
-    document.getElementById('nav-modal-desc').innerHTML      = cfg.desc;
-    document.getElementById('nav-modal-cta').textContent     = cfg.cta;
-    document.getElementById('nav-modal-cta').onclick = function() { location.href = 'profil.html?tab=abonnement&upgrade=' + upgrade; };
+    document.getElementById('nav-modal-icon').textContent  = cfg.icon;
+    document.getElementById('nav-modal-title').textContent = cfg.title;
+    document.getElementById('nav-modal-desc').innerHTML    = cfg.desc;
+    document.getElementById('nav-modal-cta').textContent   = cfg.cta;
+    document.getElementById('nav-modal-cta').onclick = function () {
+      location.href = 'profil.html?tab=abonnement&upgrade=' + upgrade;
+    };
     document.getElementById('nav-upgrade-modal').style.display = 'flex';
   }
   window._showUpgradeModal = showUpgradeModal;
 
   // ════════════════════════════════════════════════
-  // VERROUILLAGE PLAN
+  // VERROUILLAGE PAR PLAN
   // ════════════════════════════════════════════════
   function lockNavItem(id, badge, upgrade) {
     const el = document.getElementById(id);
@@ -403,35 +432,41 @@ nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,
       el.appendChild(b);
     }
     el.setAttribute('onclick', '');
-    el.addEventListener('click', function(e) {
-      e.preventDefault(); e.stopImmediatePropagation();
+    el.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
       showUpgradeModal(upgrade);
     }, true);
     const subMap = { 'nav-fid': 'fid-nav-sub', 'nav-rh': 'rh-nav-sub' };
-    if (subMap[id]) { const s = document.getElementById(subMap[id]); if (s) s.style.display = 'none'; }
+    if (subMap[id]) {
+      const s = document.getElementById(subMap[id]);
+      if (s) s.style.display = 'none';
+    }
   }
 
   function applyNavPlan(plan) {
     window._userPlan = plan;
     const upl = document.getElementById('uplan');
     if (upl) upl.textContent = PLAN_NAMES[plan] || plan;
+
     if (!CAN_FIDELISATION.includes(plan)) lockNavItem('nav-fid',    'Max+',   'fidelisation');
     if (!CAN_STOCK.includes(plan))        lockNavItem('nav-stock',  'Max+',   'stock');
     if (!CAN_IMPORT.includes(plan))       lockNavItem('nav-import', 'Pro+',   'import');
     if (!CAN_BILAN.includes(plan))        lockNavItem('nav-bilan',  'Master', 'bilan');
     if (!CAN_RAPPORT.includes(plan))      lockNavItem('nav-rapport','Pro+',   'rapport');
     if (!CAN_RH.includes(plan))           lockNavItem('nav-rh',     'Master', 'rh');
+
     const mainEl = document.querySelector('main, .main');
     if (mainEl) mainEl.style.visibility = 'visible';
   }
 
   function checkPageAccess(plan) {
-    if (PAGE === 'gestion-stock.html'   && !CAN_STOCK.includes(plan))        { showUpgradeModal('stock');        return false; }
-    if (PAGE === 'fidelisation.html'    && !CAN_FIDELISATION.includes(plan)) { showUpgradeModal('fidelisation'); return false; }
-    if (PAGE === 'import.html'          && !CAN_IMPORT.includes(plan))       { showUpgradeModal('import');       return false; }
-    if (PAGE === 'bilan.html'           && !CAN_BILAN.includes(plan))        { showUpgradeModal('bilan');        return false; }
-    if (PAGE === 'rapport-annuel.html'  && !CAN_RAPPORT.includes(plan))      { showUpgradeModal('rapport');      return false; }
-    if (RH_PAGES.includes(PAGE)         && !CAN_RH.includes(plan))           { showUpgradeModal('rh');           return false; }
+    if (PAGE === 'gestion-stock.html'  && !CAN_STOCK.includes(plan))        { showUpgradeModal('stock');        return false; }
+    if (PAGE === 'fidelisation.html'   && !CAN_FIDELISATION.includes(plan)) { showUpgradeModal('fidelisation'); return false; }
+    if (PAGE === 'import.html'         && !CAN_IMPORT.includes(plan))       { showUpgradeModal('import');       return false; }
+    if (PAGE === 'bilan.html'          && !CAN_BILAN.includes(plan))        { showUpgradeModal('bilan');        return false; }
+    if (PAGE === 'rapport-annuel.html' && !CAN_RAPPORT.includes(plan))      { showUpgradeModal('rapport');      return false; }
+    if (RH_PAGES.includes(PAGE)        && !CAN_RH.includes(plan))           { showUpgradeModal('rh');           return false; }
     const corePages = ['pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','cashflow.html'];
     if (corePages.includes(PAGE) && !CAN_CORE.includes(plan)) { showUpgradeModal('core'); return false; }
     return true;
@@ -442,8 +477,9 @@ nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,
   // ════════════════════════════════════════════════
   const mainEl = document.querySelector('main, .main');
   if (mainEl && !window._firebaseReady) mainEl.style.visibility = 'hidden';
+
   // Failsafe 2s — ne jamais bloquer la page
-  setTimeout(function() { if (mainEl) mainEl.style.visibility = 'visible'; }, 2000);
+  setTimeout(function () { if (mainEl) mainEl.style.visibility = 'visible'; }, 2000);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', injectNav);
@@ -453,28 +489,32 @@ nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,
 
   function waitForFirebase(cb, tries) {
     tries = tries || 0;
-    if (window._uid && window._getDoc && window._db && window._doc) { cb(); }
-    else if (tries < 30) { setTimeout(function() { waitForFirebase(cb, tries + 1); }, 100); }
-    else {
+    if (window._uid && window._getDoc && window._db && window._doc) {
+      cb();
+    } else if (tries < 30) {
+      setTimeout(function () { waitForFirebase(cb, tries + 1); }, 100);
+    } else {
       if (mainEl) mainEl.style.visibility = 'visible';
       applyNavPlan('dev');
     }
   }
 
-  waitForFirebase(async function() {
+  waitForFirebase(async function () {
     try {
       const snap = await window._getDoc(window._doc(window._db, 'users', window._uid));
       const plan = snap.exists() ? (snap.data().plan || 'free') : 'free';
       const user = window._auth && window._auth.currentUser;
       if (user) {
-        const n = user.displayName || user.email?.split('@')[0] || '';
-        const av = document.getElementById('av'); if (av) av.textContent = n[0]?.toUpperCase() || 'A';
-        const un = document.getElementById('uname'); if (un) un.textContent = n;
+        const n  = user.displayName || user.email?.split('@')[0] || '';
+        const av = document.getElementById('av');
+        const un = document.getElementById('uname');
+        if (av) av.textContent = n[0]?.toUpperCase() || 'A';
+        if (un) un.textContent = n;
       }
       if (!checkPageAccess(plan)) { applyNavPlan(plan); return; }
       applyNavPlan(plan);
       handleProfilParams();
-    } catch(e) {
+    } catch (e) {
       if (mainEl) mainEl.style.visibility = 'visible';
       applyNavPlan('pro');
     }
@@ -484,7 +524,7 @@ nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,
     if (PAGE !== 'profil.html') return;
     const params = new URLSearchParams(location.search);
     if (params.get('tab') !== 'abonnement') return;
-    setTimeout(function() {
+    setTimeout(function () {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
       document.querySelectorAll('.panel').forEach(p => p.classList.remove('on'));
       const abonTab = Array.from(document.querySelectorAll('.tab')).find(t => t.textContent.includes('Abonnement'));
