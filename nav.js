@@ -346,7 +346,8 @@ nav#alteore-nav .lbtn{margin-left:auto;background:none;border:none;color:rgba(25
     if (PAGE === 'import.html'       && !CAN_IMPORT.includes(plan))       { showUpgradeModal('import');       return false; }
     if (PAGE === 'bilan.html'        && !CAN_BILAN.includes(plan))        { showUpgradeModal('bilan');        return false; }
     if (PAGE === 'rapport-annuel.html' && !CAN_RAPPORT.includes(plan))    { showUpgradeModal('rapport');      return false; }
-    const corePages = ['pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','dashboard.html','cashflow.html','rapport-annuel.html'];
+    // dashboard.html = toujours accessible (page d'accueil)
+    const corePages = ['pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','cashflow.html'];
     if (corePages.includes(PAGE) && !CAN_CORE.includes(plan)) { showUpgradeModal('core'); return false; }
     return true;
   }
@@ -371,7 +372,12 @@ nav#alteore-nav .lbtn{margin-left:auto;background:none;border:none;color:rgba(25
     tries = tries || 0;
     if (window._uid && window._getDoc && window._db && window._doc) { cb(); }
     else if (tries < 30) { setTimeout(function() { waitForFirebase(cb, tries + 1); }, 100); }
-    else { if (mainEl) mainEl.style.visibility = 'visible'; applyNavPlan('pro'); }
+    else {
+      // Firebase timeout — afficher la page sans bloquer (Firestore rules protègent côté serveur)
+      if (mainEl) mainEl.style.visibility = 'visible';
+      // Ne pas appeler checkPageAccess ici pour éviter les faux positifs
+      applyNavPlan('dev');
+    }
   }
 
   waitForFirebase(async function() {
