@@ -40,7 +40,7 @@
     const kpisOpen  = kpisPages.includes(PAGE) ? 'style="max-height:400px"' : '';
     const pilOpen   = PAGE === 'pilotage.html' || PAGE === 'cashflow.html' ? 'style="max-height:400px"' : '';
     const fidOpen   = PAGE === 'fidelisation.html' ? 'style="max-height:400px"' : '';
-    const rhOpen    = RH_PAGES.includes(PAGE) ? 'style="max-height:700px"' : '';
+    const rhOpen    = RH_PAGES.includes(PAGE) ? 'style="max-height:2000px"' : '';
 
     return `
 <nav id="alteore-nav">
@@ -177,7 +177,7 @@
   // ════════════════════════════════════════════════
   const NAV_CSS = `
 <style id="alteore-nav-css">
-nav#alteore-nav{width:250px;min-height:100vh;background:linear-gradient(180deg,#0f1f5c,#162366);position:fixed;top:0;left:0;display:flex;flex-direction:column;padding-bottom:20px;overflow-y:auto;z-index:99}
+nav#alteore-nav{width:250px;height:100vh;background:linear-gradient(180deg,#0f1f5c,#162366);position:fixed;top:0;left:0;display:flex;flex-direction:column;padding-bottom:20px;overflow-y:auto;overflow-x:hidden;z-index:99;box-sizing:border-box;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.12) transparent}
 nav#alteore-nav .logo{display:flex;align-items:center;gap:10px;padding:22px 18px;border-bottom:1px solid rgba(255,255,255,.08)}
 nav#alteore-nav .logo-i{width:33px;height:33px;background:rgba(255,255,255,.14);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px}
 nav#alteore-nav .logo-t{font-size:17px;font-weight:800;color:#fff;letter-spacing:1px}
@@ -185,14 +185,14 @@ nav#alteore-nav .ns{font-size:10px;font-weight:700;color:rgba(255,255,255,.28);l
 nav#alteore-nav .ni{display:flex;align-items:center;gap:9px;padding:9px 18px;color:rgba(255,255,255,.55);font-size:12.5px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:.15s}
 nav#alteore-nav .ni:hover{color:#fff;background:rgba(255,255,255,.06)}
 nav#alteore-nav .ni.on{color:#fff;background:rgba(255,255,255,.1);border-left-color:#4f7ef8}
-nav#alteore-nav .sub{overflow:hidden;max-height:0;transition:max-height .35s ease}
+nav#alteore-nav .sub{overflow:hidden;max-height:0;transition:max-height .5s ease}
 nav#alteore-nav .si{display:flex;align-items:center;gap:7px;padding:7px 18px 7px 40px;color:rgba(255,255,255,.4);font-size:12px;cursor:pointer;border-left:3px solid transparent;transition:.15s}
 nav#alteore-nav .si:hover{color:rgba(255,255,255,.75);background:rgba(255,255,255,.04)}
 nav#alteore-nav .si.on{color:#fff;background:rgba(79,126,248,.15);border-left-color:rgba(79,126,248,.6)}
 nav#alteore-nav .dot{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.25);display:inline-block;flex-shrink:0}
 nav#alteore-nav .si.on .dot{background:#4f7ef8}
 nav#alteore-nav .chev{font-size:11px;color:rgba(255,255,255,.3);transition:transform .25s;margin-left:auto}
-nav#alteore-nav .nav-footer{margin-top:auto;padding:12px 18px 0;border-top:1px solid rgba(255,255,255,.08)}
+nav#alteore-nav .nav-footer{margin-top:20px;padding:12px 18px 0;border-top:1px solid rgba(255,255,255,.08)}
 nav#alteore-nav .ucard{display:flex;align-items:center;gap:8px;padding:8px;background:rgba(255,255,255,.07);border-radius:8px}
 nav#alteore-nav .uav{width:29px;height:29px;background:linear-gradient(135deg,#4f7ef8,#6366f1);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff}
 nav#alteore-nav .un{font-size:11.5px;font-weight:600;color:#fff}
@@ -211,10 +211,8 @@ nav#alteore-nav .rh-si:hover{color:rgba(255,255,255,.82);background:rgba(16,185,
 nav#alteore-nav .rh-si.on{color:#fff;background:rgba(16,185,129,.17);border-left-color:rgba(16,185,129,.75)}
 nav#alteore-nav .rh-dot{background:rgba(52,211,153,.28)}
 nav#alteore-nav .rh-si.on .rh-dot{background:#10b981}
-/* Scroll RH sous-menu */
-nav#alteore-nav #rh-nav-sub{overflow-y:auto;max-height:calc(100vh - 420px) !important;scrollbar-width:thin;scrollbar-color:rgba(16,185,129,.25) transparent}
-nav#alteore-nav #rh-nav-sub::-webkit-scrollbar{width:3px}
-nav#alteore-nav #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(16,185,129,.3);border-radius:99px}
+/* Le sous-menu RH s'étend normalement — c'est la nav entière qui scrolle */
+nav#alteore-nav #rh-nav-sub{overflow:visible}
 
 /* ── THÈME VERT GLOBAL — toute la sidebar passe en vert quand RH est ouvert ── */
 nav#alteore-nav.rh-mode{background:linear-gradient(180deg,#052e16 0%,#064e23 50%,#065f2c 100%);transition:background .45s ease}
@@ -239,6 +237,9 @@ nav#alteore-nav.rh-mode .uav{background:linear-gradient(135deg,#10b981,#34d399)}
 nav#alteore-nav.rh-mode .chev{color:rgba(52,211,153,.35)}
 nav#alteore-nav.rh-mode .rh-chev{color:rgba(52,211,153,.7) !important}
 nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,211,153,.35)}
+nav#alteore-nav::-webkit-scrollbar{width:4px}
+nav#alteore-nav::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:99px}
+nav#alteore-nav.rh-mode::-webkit-scrollbar-thumb{background:rgba(52,211,153,.25);border-radius:99px}
 
 /* Mobile hamburger */
 .alteore-hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#0f1f5c;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;box-shadow:0 4px 16px rgba(15,31,92,.45);-webkit-tap-highlight-color:transparent}
@@ -295,7 +296,7 @@ nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,
     // Fermer tous les sous-menus
     document.querySelectorAll('nav#alteore-nav .sub').forEach(function(s) { s.style.maxHeight = '0px'; });
     if (!isOpen) {
-      sub.style.maxHeight = '700px';
+      sub.style.maxHeight = '2000px';
       // Thème vert si RH, bleu sinon
       if (nav) {
         if (subId === 'rh-nav-sub') nav.classList.add('rh-mode');
@@ -323,7 +324,7 @@ nav#alteore-nav.rh-mode #rh-nav-sub::-webkit-scrollbar-thumb{background:rgba(52,
         var sub = document.getElementById('rh-nav-sub');
         if (nav && sub) {
           nav.classList.add('rh-mode');
-          sub.style.maxHeight = '700px';
+          sub.style.maxHeight = '2000px';
         } else if (tries < 20) {
           setTimeout(function() { tryApply(tries + 1); }, 100);
         }
