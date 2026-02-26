@@ -177,7 +177,7 @@
   // ════════════════════════════════════════════════
   const NAV_CSS = `
 <style id="alteore-nav-css">
-nav#alteore-nav{width:250px;height:100vh;background:linear-gradient(180deg,#0f1f5c,#162366);position:fixed;top:0;left:0;display:flex;flex-direction:column;padding-bottom:20px;overflow-y:auto;overflow-x:hidden;z-index:99;box-sizing:border-box;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.12) transparent}
+nav#alteore-nav{width:250px;height:100vh;background:linear-gradient(180deg,#0f1f5c,#162366);position:fixed;top:0;left:0;display:block;padding-bottom:0;overflow-y:auto;overflow-x:hidden;z-index:99;box-sizing:border-box;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.12) transparent}
 nav#alteore-nav .logo{display:flex;align-items:center;gap:10px;padding:22px 18px;border-bottom:1px solid rgba(255,255,255,.08)}
 nav#alteore-nav .logo-i{width:33px;height:33px;background:rgba(255,255,255,.14);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px}
 nav#alteore-nav .logo-t{font-size:17px;font-weight:800;color:#fff;letter-spacing:1px}
@@ -192,7 +192,7 @@ nav#alteore-nav .si.on{color:#fff;background:rgba(79,126,248,.15);border-left-co
 nav#alteore-nav .dot{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.25);display:inline-block;flex-shrink:0}
 nav#alteore-nav .si.on .dot{background:#4f7ef8}
 nav#alteore-nav .chev{font-size:11px;color:rgba(255,255,255,.3);transition:transform .25s;margin-left:auto}
-nav#alteore-nav .nav-footer{margin-top:20px;padding:12px 18px 0;border-top:1px solid rgba(255,255,255,.08)}
+nav#alteore-nav .nav-footer{margin-top:24px;padding:12px 18px 8px;border-top:1px solid rgba(255,255,255,.08);background:inherit;position:sticky;bottom:0}
 nav#alteore-nav .ucard{display:flex;align-items:center;gap:8px;padding:8px;background:rgba(255,255,255,.07);border-radius:8px}
 nav#alteore-nav .uav{width:29px;height:29px;background:linear-gradient(135deg,#4f7ef8,#6366f1);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff}
 nav#alteore-nav .un{font-size:11.5px;font-weight:600;color:#fff}
@@ -231,7 +231,7 @@ nav#alteore-nav.rh-mode .si.on .dot{background:#34d399}
 nav#alteore-nav.rh-mode .rh-sub-group{color:rgba(52,211,153,.55)}
 nav#alteore-nav.rh-mode .rh-si:hover{background:rgba(52,211,153,.1)}
 nav#alteore-nav.rh-mode .rh-si.on{background:rgba(52,211,153,.2);border-left-color:#10b981}
-nav#alteore-nav.rh-mode .nav-footer{border-top-color:rgba(52,211,153,.15)}
+nav#alteore-nav.rh-mode .nav-footer{border-top-color:rgba(52,211,153,.15);background:linear-gradient(180deg,transparent,#065f2c 18px)}
 nav#alteore-nav.rh-mode .ucard{background:rgba(52,211,153,.1)}
 nav#alteore-nav.rh-mode .uav{background:linear-gradient(135deg,#10b981,#34d399)}
 nav#alteore-nav.rh-mode .chev{color:rgba(52,211,153,.35)}
