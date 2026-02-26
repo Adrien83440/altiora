@@ -40,7 +40,7 @@
     const kpisOpen  = kpisPages.includes(PAGE) ? 'style="max-height:400px"' : '';
     const pilOpen   = PAGE === 'pilotage.html' || PAGE === 'cashflow.html' ? 'style="max-height:400px"' : '';
     const fidOpen   = PAGE === 'fidelisation.html' ? 'style="max-height:400px"' : '';
-    const rhOpen    = RH_PAGES.includes(PAGE) ? 'style="max-height:2000px"' : '';
+    const rhOpen    = ''; // Jamais ouvert automatiquement — uniquement sur clic
 
     return `
 <nav id="alteore-nav">
@@ -311,27 +311,7 @@ nav#alteore-nav.rh-mode::-webkit-scrollbar-thumb{background:rgba(52,211,153,.25)
   window.toggleNav = window.toggleAlteoreNav;
   window.toggleFidNav = function(el) { window.toggleAlteoreNav('fid-nav-sub', el); };
 
-  // Activer rh-mode automatiquement si on est déjà sur une page RH
-  (function() {
-    var RH = ['rh-dashboard.html','rh-employes.html','rh-planning.html','rh-conges.html',
-              'rh-temps.html','rh-paie.html','rh-recrutement.html','rh-onboarding.html',
-              'rh-documents.html','rh-entretiens.html','rh-conformite.html',
-              'rh-formations.html','rh-modeles.html','rh-rapport.html'];
-    var page = location.pathname.split('/').pop();
-    if (RH.indexOf(page) !== -1) {
-      var tryApply = function(tries) {
-        var nav = document.getElementById('alteore-nav');
-        var sub = document.getElementById('rh-nav-sub');
-        if (nav && sub) {
-          nav.classList.add('rh-mode');
-          sub.style.maxHeight = '2000px';
-        } else if (tries < 20) {
-          setTimeout(function() { tryApply(tries + 1); }, 100);
-        }
-      };
-      tryApply(0);
-    }
-  })();
+
 
   window.alteoreToggleSidebar = function() {
     var nav = document.getElementById('alteore-nav');
