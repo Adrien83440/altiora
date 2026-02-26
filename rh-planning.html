@@ -261,7 +261,7 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 
 <!-- MODAL CRÉNEAU -->
 <div class="overlay" id="modalCr">
-  <div class="modal">
+  <div class="modal" style="max-width:500px">
     <div class="modal-head">
       <h3 id="cr-title">➕ Nouveau créneau</h3>
       <button class="mclose" onclick="closeCr()">✕</button>
@@ -281,14 +281,18 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
           </select>
         </div>
       </div>
+
+      <!-- PLAGES HORAIRES (multi-plages pour coupures) -->
       <div id="cr-hrs">
-        <div class="mrow">
-          <div class="mf"><label class="ml">Heure début</label><input class="mi" type="time" id="cr-deb" value="09:00" oninput="updDur()"/></div>
-          <div class="mf"><label class="ml">Heure fin</label><input class="mi" type="time" id="cr-fin" value="17:00" oninput="updDur()"/></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <label class="ml" style="margin:0">Plages horaires</label>
+          <button type="button" onclick="addPlage()" style="font-size:11px;font-weight:700;padding:3px 10px;border:1.5px solid var(--rh-border);border-radius:6px;background:var(--rh-ghost);color:var(--rh-main);cursor:pointer">+ Coupure</button>
         </div>
+        <div id="cr-plages"></div>
+        <div id="cr-dur" style="display:none;font-size:12px;font-weight:600;color:var(--rh-main);padding:7px 10px;background:var(--rh-ghost);border-radius:7px;margin-top:6px"></div>
       </div>
-      <div class="mf"><label class="ml">Note / Poste</label><input class="mi" id="cr-note" placeholder="Ex: Caisse, Cuisine…"/></div>
-      <div id="cr-dur" style="display:none;font-size:12px;font-weight:600;color:var(--rh-main);padding:7px 10px;background:var(--rh-ghost);border-radius:7px;margin-top:-8px"></div>
+
+      <div class="mf" style="margin-top:10px"><label class="ml">Note / Poste</label><input class="mi" id="cr-note" placeholder="Ex: Caisse, Cuisine…"/></div>
     </div>
     <div class="modal-foot">
       <button class="btn btn-danger btn-sm" id="cr-del" onclick="delCr()" style="display:none;margin-right:auto">🗑 Supprimer</button>
@@ -441,7 +445,10 @@ function updStats(){
   let h=0,cg=0,ab=0;
   const act=_emps.filter(e=>!_hidden.has(e.id)).length;
   Object.values(_cr).forEach(c=>(c.items||[]).forEach(i=>{
-    if(i.type==='travail')h+=diffH(i.deb,i.fin);
+    if(i.type==='travail'){
+      if(i.plages&&i.plages.length>0) i.plages.forEach(p=>h+=diffH(p.deb,p.fin));
+      else h+=diffH(i.deb,i.fin);
+    }
     if(i.type==='conge')cg++;
     if(i.type==='maladie')ab++;
   }));
@@ -528,7 +535,7 @@ function renderJour(){
       <div class="day-card-head">
         <div class="${cc} g-av" style="width:28px;height:28px;font-size:11px">${(e.prenom||'?')[0]}${(e.nom||'')[0]||''}</div>
         <div><div style="font-size:12px;font-weight:700">${e.prenom||''} ${e.nom||''}</div>
-        <div style="font-size:10px;color:var(--muted)">${items.length?items.reduce((s,it)=>s+diffH(it.deb,it.fin),0).toFixed(1)+'h':'Libre'}</div></div>
+        <div style="font-size:10px;color:var(--muted)">${items.length?items.reduce((s,it)=>it.plages?.length>0?s+it.plages.reduce((a,p)=>a+diffH(p.deb,p.fin),0):s+diffH(it.deb,it.fin),0).toFixed(1)+'h':'Libre'}</div></div>
       </div>
       <div class="day-card-body">
         ${items.length?items.map(it=>pill(it,k)).join(''):
@@ -555,7 +562,11 @@ function renderMois(){
       return `<div class="m-cell ${isToday(date)?'m-today':''} ${!cur?'m-other':''}"
         onclick="setView('jour');_cur=new Date('${kp}T12:00:00');render()">
         <div class="m-dnum"><span style="${isToday(date)?'background:var(--rh-main);color:white;border-radius:50%;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-size:11px':''}">${date.getDate()}</span></div>
-        ${allItems.slice(0,2).map(({e,it})=>`<div class="m-pill t-${it.type}">${e.prenom||''} ${it.deb||''}${it.fin?'→'+it.fin:''}</div>`).join('')}
+        ${allItems.slice(0,2).map(({e,it})=>{
+          const plages=it.plages&&it.plages.length>0?it.plages:(it.deb?[{deb:it.deb,fin:it.fin}]:[]);
+          const timeTxt=plages.length>1?plages.map(p=>p.deb).join('|'):(plages[0]?plages[0].deb+'→'+(plages[0].fin||''):'');
+          return `<div class="m-pill t-${it.type}">${e.prenom||''} ${timeTxt}</div>`;
+        }).join('')}
         ${total>2?`<div class="m-more">+${total-2}</div>`:''}
       </div>`;
     }).join('')}
@@ -565,16 +576,40 @@ function renderMois(){
 
 // ── PILL ──
 function pill(it,k){
-  const dur=it.deb&&it.fin?diffH(it.deb,it.fin).toFixed(1)+'h':'';
+  // Calcul durée totale avec support multi-plages
+  const plages = it.plages && it.plages.length>0 ? it.plages : (it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
+  const totalH = plages.reduce((s,p)=>s+diffH(p.deb,p.fin),0);
+  const durTxt = totalH>0 ? totalH.toFixed(1)+'h' : '';
+
+  // Affichage des plages : pills séparées si coupure
+  let timeTxt;
+  if(plages.length>1){
+    timeTxt = plages.map(p=>`${p.deb}–${p.fin}`).join(' <span style="color:rgba(0,0,0,0.3)">|</span> ');
+  } else {
+    timeTxt = plages[0] ? `${plages[0].deb} → ${plages[0].fin}` : '';
+  }
+
   return `<div class="cr-pill t-${it.type}" onclick="event.stopPropagation();editCr('${k}','${it.id}')">
-    <div class="cr-time">${it.deb||''}${it.fin?' → '+it.fin:''} ${dur?'('+dur+')':''}</div>
+    <div class="cr-time">${timeTxt}${durTxt?' <span style="opacity:.7">('+durTxt+')</span>':''}</div>
     <div class="cr-lbl">${TYPE_ICO[it.type]||'📋'} ${it.note||TYPE_LBL[it.type]||it.type}</div>
     <span class="cr-x" onclick="event.stopPropagation();qDelCr('${k}','${it.id}')">✕</span>
   </div>`;
 }
 
 // ── STATS EMP ──
-function empWeekH(eid,days){let h=0;days.forEach(d=>{(_cr[`${fmt(d)}_${eid}`]?.items||[]).forEach(i=>{if(i.type==='travail')h+=diffH(i.deb,i.fin);});});return h;}
+function empWeekH(eid,days){
+  let h=0;
+  days.forEach(d=>{
+    (_cr[`${fmt(d)}_${eid}`]?.items||[]).forEach(i=>{
+      if(i.type==='travail'){
+        // Support multi-plages
+        if(i.plages&&i.plages.length>0) i.plages.forEach(p=>h+=diffH(p.deb,p.fin));
+        else h+=diffH(i.deb,i.fin);
+      }
+    });
+  });
+  return h;
+}
 
 // ══ LÉGENDE ══
 function renderLegend(){
@@ -591,19 +626,61 @@ window.toggleEmp=toggleEmp;
 function fillEmpSel(){document.getElementById('cr-emp').innerHTML=_emps.map(e=>`<option value="${e.id}">${e.prenom||''} ${e.nom||''}</option>`).join('');}
 
 // ══ MODAL CRÉNEAU ══
+// ── PLAGES (multi-plages / coupures) ──
+let _plages = []; // [{deb:'09:00',fin:'17:00'}]
+
+function renderPlages(){
+  const wrap = document.getElementById('cr-plages');
+  if(!wrap) return;
+  const isTravail = document.getElementById('cr-type')?.value === 'travail';
+  wrap.innerHTML = _plages.map((p,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      ${i>0?`<div style="font-size:10px;font-weight:700;color:var(--muted);width:46px;text-align:center;flex-shrink:0">coupure</div>`:`<div style="width:46px;flex-shrink:0"></div>`}
+      <input type="time" class="mi" value="${p.deb}" style="flex:1" oninput="updPlage(${i},'deb',this.value)"/>
+      <span style="color:var(--muted);font-size:13px">→</span>
+      <input type="time" class="mi" value="${p.fin}" style="flex:1" oninput="updPlage(${i},'fin',this.value)"/>
+      ${_plages.length>1?`<button onclick="removePlage(${i})" style="width:24px;height:24px;border-radius:6px;border:1px solid #fecaca;background:#fee2e2;color:#ef4444;cursor:pointer;font-size:14px;line-height:1;flex-shrink:0">×</button>`:`<div style="width:24px;flex-shrink:0"></div>`}
+    </div>`).join('');
+  updDur();
+}
+
+function addPlage(){
+  const last = _plages[_plages.length-1];
+  // Suggestion : coupure 1h après la fin de la dernière plage
+  const prevFin = last?.fin || '12:00';
+  const [h,m] = prevFin.split(':').map(Number);
+  const newDeb = `${String(h+1).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  const newFin = `${String(h+2).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  _plages.push({deb:newDeb, fin:newFin});
+  renderPlages();
+}
+window.addPlage=addPlage;
+
+function removePlage(i){
+  if(_plages.length<=1) return;
+  _plages.splice(i,1);
+  renderPlages();
+}
+window.removePlage=removePlage;
+
+function updPlage(i,field,val){
+  if(_plages[i]) _plages[i][field]=val;
+  updDur();
+}
+window.updPlage=updPlage;
+
 function openCreneauModal(empId='',date=''){
   _editId=null;
+  _plages=[{deb:'09:00',fin:'17:00'}];
   document.getElementById('cr-title').textContent='➕ Nouveau créneau';
   document.getElementById('cr-del').style.display='none';
   if(empId)document.getElementById('cr-emp').value=empId;
   if(date)document.getElementById('cr-date').value=date;
   else document.getElementById('cr-date').value=fmt(_cur);
   document.getElementById('cr-type').value='travail';
-  document.getElementById('cr-deb').value='09:00';
-  document.getElementById('cr-fin').value='17:00';
   document.getElementById('cr-note').value='';
   document.getElementById('cr-hrs').style.display='block';
-  updDur();
+  renderPlages();
   document.getElementById('modalCr').classList.add('show');
 }
 window.openCreneauModal=openCreneauModal;
@@ -617,10 +694,10 @@ function editCr(k,itemId){
   document.getElementById('cr-emp').value=eid;
   document.getElementById('cr-date').value=date;
   document.getElementById('cr-type').value=it.type||'travail';
-  document.getElementById('cr-deb').value=it.deb||'09:00';
-  document.getElementById('cr-fin').value=it.fin||'17:00';
   document.getElementById('cr-note').value=it.note||'';
-  onTypeChange();updDur();
+  // Charger les plages : soit it.plages (nouveau format), soit it.deb/fin (ancien format)
+  _plages = it.plages ? JSON.parse(JSON.stringify(it.plages)) : [{deb:it.deb||'09:00',fin:it.fin||'17:00'}];
+  onTypeChange();
   document.getElementById('modalCr').classList.add('show');
 }
 window.editCr=editCr;
@@ -630,14 +707,21 @@ window.closeCr=closeCr;
 
 function onTypeChange(){
   const t=document.getElementById('cr-type').value;
-  document.getElementById('cr-hrs').style.display=(t==='repos'||t==='conge')?'none':'block';
-  updDur();
+  const show = t!=='repos' && t!=='conge';
+  document.getElementById('cr-hrs').style.display=show?'block':'none';
+  renderPlages();
 }
 function updDur(){
-  const d=document.getElementById('cr-deb').value,f=document.getElementById('cr-fin').value,h=diffH(d,f);
+  const t=document.getElementById('cr-type')?.value;
   const el=document.getElementById('cr-dur');
-  if(h>0&&document.getElementById('cr-type').value==='travail'){el.textContent=`⏱ Durée : ${h.toFixed(1)}h`;el.style.display='block';}
-  else el.style.display='none';
+  if(!el)return;
+  if(t!=='travail'){el.style.display='none';return;}
+  const total=_plages.reduce((s,p)=>s+diffH(p.deb,p.fin),0);
+  if(total>0){
+    const parts=_plages.map(p=>`${p.deb}–${p.fin}`).join(' + ');
+    el.textContent=`⏱ ${parts} = ${total.toFixed(1)}h`;
+    el.style.display='block';
+  } else el.style.display='none';
 }
 window.updDur=updDur;window.onTypeChange=onTypeChange;
 
@@ -646,7 +730,18 @@ async function saveCr(){
   if(!eid||!date){showToast('Sélectionnez un employé et une date');return;}
   const k=`${date}_${eid}`;
   if(!_cr[k])_cr[k]={items:[]};
-  const it={id:'c'+Date.now(),type:document.getElementById('cr-type').value,deb:document.getElementById('cr-deb').value,fin:document.getElementById('cr-fin').value,note:document.getElementById('cr-note').value};
+  const type=document.getElementById('cr-type').value;
+  // Construire l'objet item avec plages
+  const plagesData = (type==='travail'||type==='formation'||type==='astreinte') ? _plages.filter(p=>p.deb&&p.fin) : [];
+  const it={
+    id:'c'+Date.now(),
+    type,
+    // Compatibilité ancien format : deb/fin = première plage
+    deb: plagesData[0]?.deb||'',
+    fin: plagesData[plagesData.length-1]?.fin||'',
+    plages: plagesData.length>0 ? plagesData : undefined,
+    note:document.getElementById('cr-note').value
+  };
   if(_editId){
     if(_editId.k!==k){
       _cr[_editId.k].items=(_cr[_editId.k].items||[]).filter(i=>i.id!==_editId.itemId);
@@ -764,7 +859,14 @@ function exportPDF(){
     rows+=`<tr><td style="font-weight:700;padding:7px 10px;border:1px solid #e2e8f0;background:#f8faff;white-space:nowrap">${e.prenom||''} ${e.nom||''}</td>`;
     days.forEach(d=>{
       const k=`${fmt(d)}_${e.id}`;const items=(_cr[k]?.items||[]);
-      const txt=items.map(i=>i.type==='travail'?`${i.deb}–${i.fin}${i.note?' ('+i.note+')':''}`:TYPE_LBL[i.type]||i.type).join('<br>');
+      const txt=items.map(i=>{
+        if(i.type==='travail'){
+          const plages=i.plages&&i.plages.length>0?i.plages:[{deb:i.deb,fin:i.fin}];
+          const h=plages.reduce((s,p)=>s+diffH(p.deb,p.fin),0);
+          return plages.map(p=>`${p.deb}–${p.fin}`).join(' | ')+(i.note?' ('+i.note+')':'')+(h>0?' '+h.toFixed(1)+'h':'');
+        }
+        return TYPE_LBL[i.type]||i.type;
+      }).join('<br>');
       rows+=`<td style="padding:7px 10px;border:1px solid #e2e8f0;font-size:11px;min-width:72px">${txt||'—'}</td>`;
     });
     rows+=`</tr>`;
