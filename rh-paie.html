@@ -258,8 +258,8 @@
     </div>
     <div class="topbar-right">
       <button class="btn btn-outline btn-sm" onclick="window.location.href='rh-temps.html'">⏱ Temps de travail</button>
+      <button class="btn btn-outline btn-sm" onclick="window.location.href='rh-dirigeant.html'">👔 Rémunération dirigeant</button>
       <button class="btn btn-outline btn-sm" id="btn-recap" onclick="showRecap()">📊 Récapitulatif</button>
-      <button class="btn btn-rh btn-sm" onclick="exportAllPDF()">📄 Exporter fiches</button>
     </div>
   </div>
 
@@ -276,6 +276,12 @@
       <div class="mois-stat"><span class="dot" style="background:var(--orange)"></span><strong id="stat-attente">0</strong> en attente</div>
       <div class="mois-stat"><span class="dot" style="background:var(--blue)"></span>Masse salariale : <strong id="stat-masse">—</strong></div>
     </div>
+  </div>
+
+  <!-- DISCLAIMER LÉGAL -->
+  <div style="background:#fefce8;border-bottom:1px solid #fde68a;padding:10px 28px;display:flex;align-items:center;gap:10px;font-size:12px;color:#92400e;">
+    <span style="font-size:16px">⚠️</span>
+    <span><strong>Document à titre indicatif uniquement</strong> — Ces simulations ne remplacent pas les bulletins de paie officiels établis par votre cabinet comptable ou expert-comptable. Basé sur les taux URSSAF 2025. Hors réduction Fillon, PAS, mutuelle et spécificités conventionnelles.</span>
   </div>
 
   <!-- CONTENT -->
@@ -362,7 +368,7 @@
     <div class="modal-foot">
       <button class="btn btn-outline" onclick="closeFicheModal()">Fermer</button>
       <button class="btn btn-rh" onclick="saveFiche()">💾 Sauvegarder</button>
-      <button class="btn" style="background:#1e293b;color:white" onclick="printFiche()">🖨️ Imprimer fiche</button>
+      <button class="btn" style="background:#1e293b;color:white" onclick="printFiche()">🖨️ Aperçu indicatif</button>
     </div>
   </div>
 </div>
@@ -540,16 +546,25 @@ async function loadEmps() {
 
 async function loadTemps() {
   _tempsData = {};
-  var moisKey = getMoisKey();
+  var moisKey = getMoisKey(); // ex: "2026-02"
+  // Les docs sont nommés YYYY-MM_empId dans rh/{uid}/temps
+  // On charge seulement ceux du mois courant en lisant par docId
   try {
     var snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'temps'));
     snap.forEach(function(d) {
-      var data = d.data();
-      if (data.mois === moisKey) {
-        _tempsData[data.employeId] = data;
+      var docId = d.id; // ex: "2026-02_emp123"
+      var data  = d.data();
+      // Filtrer par préfixe YYYY-MM_ OU par champ mois (double sécurité)
+      var matchById  = docId.startsWith(moisKey + '_');
+      var matchField = (data.mois === moisKey);
+      if (matchById || matchField) {
+        var empId = data.employeId || docId.slice(moisKey.length + 1);
+        if (empId) _tempsData[empId] = data;
+        console.log('[Paie] Temps chargé:', empId, 'H:', data.heuresTravaillees, 'Sup:', data.heureSup, 'Source:', data.source);
       }
     });
   } catch(e) { console.error('loadTemps:', e); }
+  console.log('[Paie] _tempsData final:', JSON.stringify(Object.keys(_tempsData)));
 }
 
 async function loadPaie() {
@@ -835,8 +850,8 @@ function openFiche(empId) {
       <label for="fi-valide" style="font-size:12px;font-weight:600;cursor:pointer">Marquer comme validée (fiche de paie approuvée)</label>
     </div>
 
-    <div style="font-size:10px;color:var(--muted);background:#f8faff;padding:10px;border-radius:8px;margin-top:12px">
-      ⚠️ Estimation indicative basée sur les taux légaux URSSAF 2025 (PMSS = 3 925 €). Hors réduction Fillon, mutuelle obligatoire et prélèvement à la source.
+    <div style="font-size:11px;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;padding:12px 14px;border-radius:8px;margin-top:12px;line-height:1.6">
+      ⚠️ <strong>Document indicatif uniquement.</strong> Cette simulation est basée sur les taux URSSAF 2025 (PMSS = 3 925 €). Elle ne prend pas en compte la réduction Fillon, le prélèvement à la source, la mutuelle obligatoire, ni les spécificités de votre convention collective. <strong>Seul votre cabinet comptable peut établir les bulletins de paie officiels.</strong>
     </div>
   `;
 
