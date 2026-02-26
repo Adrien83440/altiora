@@ -1395,11 +1395,22 @@ function toggleSelectAll(){
 
 async function _deleteOneProduct(id){
   const p = _products[id];
-  if(!p) return;
+  if(!p) { console.warn('_deleteOneProduct: product not found', id); return; }
+  
+  console.log('Deleting:', id, 'source:', p.source, 'nom:', p.nom);
+  
   if(p.source==='cout-revient'){
-    await window._deleteDoc(window._doc(window._db,'produits',window._uid,'items',id.replace('cr_','')));
+    const fsId = id.replace('cr_','');
+    console.log('→ produits/items/', fsId);
+    await window._deleteDoc(window._doc(window._db,'produits',window._uid,'items',fsId));
   } else {
-    const fsId = id.startsWith('mg_') ? id.slice(3) : id;
+    // Produits saisis dans Marges : ID Firestore = tout ce qui suit 'mg_prod_' ou 'mg_'
+    // Le vrai ID Firestore est stocké dans p.id ou extrait du prefixe
+    let fsId;
+    if(id.startsWith('mg_prod_')) fsId = id.slice(3); // garde 'prod_TIMESTAMP'
+    else if(id.startsWith('mg_')) fsId = id.slice(3);
+    else fsId = id;
+    console.log('→ marges/produits/', fsId);
     await window._deleteDoc(window._doc(window._db,'marges',window._uid,'produits',fsId));
   }
   delete _products[id];
