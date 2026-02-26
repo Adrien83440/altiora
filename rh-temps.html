@@ -449,10 +449,14 @@ async function loadTempsFromPlanning() {
     weekKeys[wk] = true;
   }
 
+  console.log('[Temps] Semaines à charger:', Object.keys(weekKeys));
+  console.log('[Temps] UID:', window._uid);
+
   // Charger chaque semaine et agréger par employé
   for (var wk in weekKeys) {
     try {
       var snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'plan_'+wk));
+      console.log('[Temps] plan_'+wk+' → '+snap.size+' docs');
       snap.forEach(function(docSnap) {
         // docId = YYYY-MM-DD_empId
         var id = docSnap.id;
@@ -486,6 +490,7 @@ async function loadTempsFromPlanning() {
       });
     } catch(e) { console.warn('plan_'+wk+':', e.message); }
   }
+  console.log('[Temps] _planningData final:', JSON.stringify(_planningData));
 }
 
 // Charger également les ajustements manuels sauvegardés (heures sup, notes, absences)
@@ -792,6 +797,35 @@ function renderChart() {
 function onHInput() {}
 function saveAll() {}
 function toggleAll() {}
+
+// Sauvegarde des heures supplémentaires (seul champ manuel)
+async function onSupInput(empId, value) {
+  if (!window._uid) return;
+  var sup = parseFloat((value||'').replace(',','.')) || 0;
+  var ex  = _tempsMap[empId] || {};
+  var d   = getMergedData(empId);
+  var data = {
+    employeId:         empId,
+    employeNom:        getEmpNom(empId),
+    mois:              getMoisKey(),
+    heuresTravaillees: d.heures,
+    joursPresence:     d.jours,
+    heureSup:          sup,
+    absences:          parseFloat(ex.absences) || 0,
+    note:              ex.note || '',
+    source:            'planning+ajust',
+    updatedAt:         new Date().toISOString()
+  };
+  try {
+    var docId = getMoisKey() + '_' + empId;
+    await window._setDoc(window._doc(window._db, 'rh', window._uid, 'temps', docId), data);
+    _tempsMap[empId] = { id: docId, ...data };
+    var el = document.getElementById('inp-s-'+empId);
+    if (el) { el.className = 'h-input saved'; el.title = 'Sauvegardé ✓'; }
+    showToast('✅ H. sup sauvegardées', 'ok');
+    renderKpis(); renderAlertes();
+  } catch(e) { showToast('Erreur : '+e.message, 'err'); console.error(e); }
+}
 
 function getEmpNom(empId) {
   var emp = _employes.find(e => e.id === empId);
