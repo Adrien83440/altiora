@@ -544,27 +544,111 @@ async function loadEmps() {
   } catch(e) { console.error('loadEmps:', e); }
 }
 
+// ── Calcul heures depuis plan_{wk} (même logique que rh-temps) ──
+function diffH(a, b) {
+  if (!a || !b) return 0;
+  var ap = a.split(':').map(Number), bp = b.split(':').map(Number);
+  return Math.max(0, ((bp[0]*60 + bp[1]) - (ap[0]*60 + ap[1])) / 60);
+}
+
 async function loadTemps() {
   _tempsData = {};
-  var moisKey = getMoisKey(); // ex: "2026-02"
-  // Les docs sont nommés YYYY-MM_empId dans rh/{uid}/temps
-  // On charge seulement ceux du mois courant en lisant par docId
+  var y = _curMois.getFullYear(), m = _curMois.getMonth();
+  var nbJours = new Date(y, m+1, 0).getDate();
+  var moisKey = getMoisKey();
+
+  // ── Étape 1 : charger heures ajustées manuellement depuis rh/{uid}/temps ──
+  var manuelData = {};
   try {
-    var snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'temps'));
-    snap.forEach(function(d) {
-      var docId = d.id; // ex: "2026-02_emp123"
+    var snapM = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'temps'));
+    snapM.forEach(function(d) {
+      var docId = d.id;
       var data  = d.data();
-      // Filtrer par préfixe YYYY-MM_ OU par champ mois (double sécurité)
       var matchById  = docId.startsWith(moisKey + '_');
       var matchField = (data.mois === moisKey);
       if (matchById || matchField) {
         var empId = data.employeId || docId.slice(moisKey.length + 1);
-        if (empId) _tempsData[empId] = data;
-        console.log('[Paie] Temps chargé:', empId, 'H:', data.heuresTravaillees, 'Sup:', data.heureSup, 'Source:', data.source);
+        if (empId) manuelData[empId] = data;
       }
     });
-  } catch(e) { console.error('loadTemps:', e); }
-  console.log('[Paie] _tempsData final:', JSON.stringify(Object.keys(_tempsData)));
+  } catch(e) { console.warn('[Paie] loadTemps manuel:', e); }
+
+  // ── Étape 2 : calculer heures depuis plan_{wk} (identique à rh-temps) ──
+  var planningData = {};
+  var weekKeys = {};
+  for (var d = 1; d <= nbJours; d++) {
+    var dt = new Date(y, m, d);
+    var mon = new Date(dt);
+    var day = mon.getDay(), diff = (day === 0) ? -6 : 1 - day;
+    mon.setDate(mon.getDate() + diff);
+    mon.setHours(0,0,0,0);
+    var wk = mon.toISOString().slice(0,10).replace(/-/g,'');
+    weekKeys[wk] = true;
+  }
+  console.log('[Paie] Semaines planning à charger:', Object.keys(weekKeys));
+
+  for (var wk in weekKeys) {
+    try {
+      var snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'plan_'+wk));
+      console.log('[Paie] plan_'+wk+' → '+snap.size+' docs');
+      snap.forEach(function(docSnap) {
+        var id = docSnap.id;
+        var underIdx = id.lastIndexOf('_');
+        if (underIdx < 0) return;
+        var dateStr = id.slice(0, underIdx);
+        var empId   = id.slice(underIdx + 1);
+        var dt2 = new Date(dateStr + 'T12:00:00');
+        if (dt2.getFullYear() !== y || dt2.getMonth() !== m) return;
+        var data = docSnap.data();
+        var items = (data.items || []).filter(function(it) { return it.type === 'travail'; });
+        if (!items.length) return;
+        if (!planningData[empId]) planningData[empId] = { heures: 0, jours: 0 };
+        var hJour = items.reduce(function(s, it) {
+          if (it.plages && it.plages.length > 0) {
+            return s + it.plages.reduce(function(ps, p) { return ps + diffH(p.deb, p.fin); }, 0);
+          }
+          return s + diffH(it.deb, it.fin);
+        }, 0);
+        planningData[empId].heures += hJour;
+        planningData[empId].jours  += 1;
+      });
+    } catch(e) { console.warn('[Paie] plan_'+wk+':', e.message); }
+  }
+  console.log('[Paie] planningData:', JSON.stringify(planningData));
+
+  // ── Étape 3 : fusionner (manuel prioritaire sur planning) ──
+  // On crée _tempsData pour chaque employé qui a du planning ou du manuel
+  var allEmpIds = new Set([...Object.keys(manuelData), ...Object.keys(planningData)]);
+  allEmpIds.forEach(function(empId) {
+    var manuel   = manuelData[empId]   || null;
+    var planning = planningData[empId] || null;
+
+    if (manuel) {
+      // Données manuelles : on garde mais on enrichit avec planning si heuresTravaillees = 0
+      var hReal = parseFloat(manuel.heuresTravaillees) || 0;
+      if (hReal === 0 && planning) {
+        _tempsData[empId] = {
+          ...manuel,
+          heuresTravaillees: planning.heures,
+          joursPresence: planning.jours,
+          source: 'planning+ajust'
+        };
+      } else {
+        _tempsData[empId] = manuel;
+      }
+    } else if (planning) {
+      // Uniquement planning
+      _tempsData[empId] = {
+        employeId:         empId,
+        mois:              moisKey,
+        heuresTravaillees: planning.heures,
+        joursPresence:     planning.jours,
+        heureSup:          0,
+        source:            'planning'
+      };
+    }
+    console.log('[Paie] Temps final', empId, '->', _tempsData[empId] ? _tempsData[empId].heuresTravaillees+'h src:'+_tempsData[empId].source : 'vide');
+  });
 }
 
 async function loadPaie() {

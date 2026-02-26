@@ -277,7 +277,7 @@
               <input type="text" inputmode="decimal" id="inp-ir" placeholder="30" oninput="calc()"/>
               <span class="field-unit">%</span>
             </div>
-            <div class="field-hint">Tranche marginale estimée</div>
+            <div class="field-hint" id="ir-hint">Tranche marginale estimée</div>
           </div>
           <div class="field">
             <label>Ancienneté dirigeant</label>
@@ -475,8 +475,12 @@ const STATUTS = {
   }
 };
 
-// PMSS 2025
-const PMSS_A = 3925 * 12; // annuel
+// ── Constantes 2025 ──
+const PMSS   = 3925;           // PMSS mensuel 2025
+const PMSS_A = PMSS * 12;      // PMSS annuel = 47 100€
+const PASS   = PMSS_A;         // PASS 2025 = PMSS_A = 47 100€
+const SMIC_A = 11.88*35*52;    // SMIC annuel ≈ 21 622€
+const SMIC_M = SMIC_A / 12;    // SMIC mensuel ≈ 1 802€
 
 // ══ STATE ══
 var _statut    = 'sarl-gerant-maj';
@@ -580,79 +584,140 @@ function onBrutInput(val) {
 window.onNetInput = onNetInput;
 window.onBrutInput = onBrutInput;
 
+// ══ BARÈME IR 2025 (revenu net imposable annuel → taux moyen) ══
+function calcIR(revenuNetImposable) {
+  // Barème progressif 2025 (1 part)
+  // 0€ → 11 294€      : 0%
+  // 11 294€ → 28 797€ : 11%
+  // 28 797€ → 82 341€ : 30%
+  // 82 341€ → 177 106€: 41%
+  // > 177 106€        : 45%
+  var rni = Math.max(0, revenuNetImposable);
+  var impot = 0;
+  if (rni > 177106) { impot += (rni - 177106) * 0.45; rni = 177106; }
+  if (rni > 82341)  { impot += (rni - 82341)  * 0.41; rni = 82341;  }
+  if (rni > 28797)  { impot += (rni - 28797)  * 0.30; rni = 28797;  }
+  if (rni > 11294)  { impot += (rni - 11294)  * 0.11; rni = 11294;  }
+  return Math.max(0, impot);
+}
+
+function getTauxMoyen(revenuNetImposable) {
+  var rni = Math.max(0, revenuNetImposable);
+  if (rni === 0) return 0;
+  // Abattement 10% plafonné 14 171€ min 495€
+  var abat = Math.min(Math.max(rni * 0.10, 495), 14171);
+  var rniNet = rni - abat;
+  var impot = calcIR(rniNet);
+  return Math.min(impot / rni * 100, 45);
+}
+
 // ══ CALCUL PRINCIPAL ══
 function calc() {
   var s = STATUTS[_statut];
 
   // Lire valeurs
-  var netInput   = parseF(document.getElementById('inp-net').value);
-  var brutInput  = parseF(document.getElementById('inp-brut').value);
-  var divMens    = parseF(document.getElementById('inp-div').value);
-  var resultat   = parseF(document.getElementById('inp-resultat').value);
-  var tauxIR     = parseF(document.getElementById('inp-ir').value) || 30;
+  var netInput  = parseF(document.getElementById('inp-net').value);
+  var brutInput = parseF(document.getElementById('inp-brut').value);
+  var divMens   = parseF(document.getElementById('inp-div').value);
+  var resultat  = parseF(document.getElementById('inp-resultat').value);
+  // IR : si champ rempli par l'utilisateur on l'utilise, sinon on calcule auto
+  var irSaisi   = parseF(document.getElementById('inp-ir').value);
 
   if (_freq === 'annuel') { netInput /= 12; brutInput /= 12; divMens /= 12; }
 
-  // Déterminer brut et net selon le sens de saisie
   var brut = brutInput > 0 ? brutInput : 0;
   var net  = netInput  > 0 ? netInput  : 0;
 
-  if (brut === 0 && net === 0) {
+  // ── Si dividendes seuls (sans rémunération) : mode dividende-only ──
+  var divOnly = (brut === 0 && net === 0 && divMens > 0);
+
+  if (brut === 0 && net === 0 && divMens === 0 && resultat === 0) {
     hideResults(); return;
   }
 
-  var result = {};
-
-  if (s.regime === 'tns') {
-    result = calcTNS(brut, net, s);
-  } else if (s.regime === 'salarie') {
-    result = calcAssimileSalarie(brut, net);
-  } else if (s.regime === 'micro') {
-    result = calcMicro(brut, net);
+  // ── Calcul cotisations (seulement si rémunération saisie) ──
+  var result = { regime: s.regime, brut: 0, net: 0, cotisations: 0, chargesPat: 0, cotDetail: [], coutEntreprise: 0 };
+  if (!divOnly) {
+    if (s.regime === 'tns')     result = calcTNS(brut, net, s);
+    else if (s.regime === 'salarie') result = calcAssimileSalarie(brut, net);
+    else if (s.regime === 'micro')   result = calcMicro(brut, net);
   }
 
-  // IR estimé
-  var irMens = (result.net * 12 * tauxIR / 100) / 12;
-  var netApresIR = result.net - irMens;
+  // ── IR auto via barème 2025 ──
+  // Revenu imposable = rémunération nette + dividendes (PFU optionnel → barème)
+  // Pour TNS : cotisations déductibles → base = net
+  // Pour assimilé salarié : abattement 10% déjà intégré dans barème
+  var remunNette = result.net || 0;
+  var divBrut = divMens * 12; // annuel
+  var revenuBrut_an = remunNette * 12 + divBrut; // total annuel brut
+  var tauxAutoCalc = getTauxMoyen(revenuBrut_an);
+  var tauxIR = irSaisi > 0 ? irSaisi : Math.round(tauxAutoCalc * 10) / 10;
 
-  // Dividendes
-  var divNet = divMens > 0 ? divMens * (1 - 0.30) : 0; // PFU 30%
-  var divCot = 0;
-  // TNS SARL : dividendes > 10% capital soumis à cotisations (simplification : on informe)
+  // Mettre à jour le champ IR si calculé automatiquement
+  if (irSaisi === 0) {
+    var irField = document.getElementById('inp-ir');
+    if (irField && irField !== document.activeElement) {
+      irField.value = tauxIR.toFixed(1);
+      irField.placeholder = tauxIR.toFixed(1);
+    }
+    // Indicateur visuel "calculé auto"
+    var irHint = document.getElementById('ir-hint');
+    if (irHint) irHint.textContent = '✨ Calculé automatiquement (barème 2025, 1 part)';
+  } else {
+    var irHint = document.getElementById('ir-hint');
+    if (irHint) irHint.textContent = 'Tranche marginale estimée';
+  }
 
-  // Coût total entreprise
+  // ── Calculs finaux ──
+  var divPFU  = divMens * 0.30; // flat tax 30%
+  var divNet  = divMens - divPFU;
+  var irMens  = (remunNette * 12 * tauxIR / 100) / 12;
+  var irDivMens = divMens * 0.128; // part IR du PFU (12,8%)
+  var netApresIR = remunNette - irMens;
   var coutTotal = result.coutEntreprise;
 
-  // Afficher KPIs
-  document.getElementById('kpi-net').textContent     = fmtE(result.net, 0);
-  document.getElementById('kpi-cot').textContent     = fmtE(result.cotisations, 0);
-  document.getElementById('kpi-cot-sub').textContent = pct(result.cotisations / (result.brut||1) * 100)+' du brut';
-  document.getElementById('kpi-cout').textContent    = fmtE(coutTotal, 0);
-  document.getElementById('kpi-ir').textContent      = '~'+fmtE(irMens, 0);
-  document.getElementById('kpi-net-ir').textContent  = fmtE(netApresIR, 0);
+  // ── Affichage KPIs ──
+  var set = function(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+  set('kpi-net',        divOnly ? (divNet > 0 ? fmtE(divNet, 0) : '—') : fmtE(remunNette, 0));
+  set('kpi-cot',        fmtE(result.cotisations, 0));
+  set('kpi-cot-sub',    pct(result.cotisations / (result.brut||1) * 100)+' du brut');
+  set('kpi-cout',       divOnly ? '—' : fmtE(coutTotal, 0));
+  set('kpi-ir',         '~'+fmtE(irMens, 0)+'/mois');
+  set('kpi-net-ir',     fmtE(netApresIR, 0));
 
-  // Banner
+  // ── Banner ──
   document.getElementById('netBanner').style.display = '';
-  document.getElementById('banner-net').textContent   = fmtE(result.net, 0)+'/mois';
-  document.getElementById('banner-statut').textContent = 'Net mensuel estimé · '+s.label;
-  document.getElementById('banner-cout-an').textContent  = fmtE(coutTotal * 12, 0);
-  document.getElementById('banner-net-an').textContent   = fmtE(result.net * 12, 0);
-  var ratio = coutTotal > 0 ? (result.net / coutTotal * 100) : 0;
-  document.getElementById('banner-ratio').textContent    = pct(ratio);
-  document.getElementById('banner-ratio').className      = 'net-stat-val '+(ratio>=60?'green':ratio>=45?'orange':'red');
+  if (divOnly) {
+    set('banner-net',    fmtE(divNet, 0)+'/mois (net PFU)');
+    set('banner-statut', 'Dividendes nets après PFU 30% · '+s.label);
+    set('banner-cout-an','—');
+    set('banner-net-an', fmtE(divNet * 12, 0));
+    var ratioBanner = document.getElementById('banner-ratio');
+    if (ratioBanner) { ratioBanner.textContent = '70%'; ratioBanner.className = 'net-stat-val orange'; }
+  } else {
+    set('banner-net',    fmtE(remunNette, 0)+'/mois');
+    set('banner-statut', 'Net mensuel estimé · '+s.label);
+    set('banner-cout-an',fmtE(coutTotal * 12, 0));
+    set('banner-net-an', fmtE(remunNette * 12, 0));
+    var ratio = coutTotal > 0 ? (remunNette / coutTotal * 100) : 0;
+    var ratioBanner = document.getElementById('banner-ratio');
+    if (ratioBanner) { ratioBanner.textContent = pct(ratio); ratioBanner.className = 'net-stat-val '+(ratio>=60?'green':ratio>=45?'orange':'red'); }
+  }
 
-  // Décomposition
-  document.getElementById('decompSection').style.display = '';
-  renderCotTable(result);
-  renderChart(result);
-  renderVizBar(result);
+  // ── Décomposition (seulement si rémunération) ──
+  if (!divOnly) {
+    document.getElementById('decompSection').style.display = '';
+    renderCotTable(result);
+    renderChart(result);
+    renderVizBar(result);
+    if (result.brut > 0) renderComparaison(result.brut, s.regime);
+  } else {
+    document.getElementById('decompSection').style.display = 'none';
+  }
 
-  // Dividendes
-  if (divMens > 0 || resultat > 0) renderDivSection(divMens, divNet, resultat, s.regime, tauxIR);
+  // ── Dividendes ──
+  if (divMens > 0 || resultat > 0) renderDivSection(divMens, divNet, resultat, s.regime, tauxIR, tauxAutoCalc);
   else document.getElementById('divCard').style.display = 'none';
-
-  // Comparaison TNS vs Assimilé
-  if (result.brut > 0) renderComparaison(result.brut, s.regime);
 }
 
 // ══ CALCUL TNS (gérant majoriatire SARL, EURL) ══
@@ -693,16 +758,23 @@ function calcCotTNS(net) {
   var rows = [];
   var total = 0;
 
+  // Taux TNS 2025 — Source URSSAF / SSI
+  var nAn = n * 12; // revenu annuel pour calculs plafonds
+  // Maladie-maternité : taux progressif 2025
+  var tauxMaladie = nAn <= PASS * 0.5 ? 0.0 : (nAn <= PASS ? 0.0317 : 0.065);
+  // Allocations familiales : exo < 110% PASS, réduit < 140% PASS, plein sinon
+  var tauxAF = nAn <= PASS * 1.10 ? 0.0 : (nAn <= PASS * 1.40 ? 0.0215 : 0.0525);
   var items = [
-    { cat:'SANTÉ',     label:'Maladie-maternité',         base:n,         taux:0.065  },
-    { cat:'SANTÉ',     label:'Indemnités journalières',   base:n,         taux:0.0085 },
-    { cat:'RETRAITE',  label:'Retraite de base',          base:Math.min(n*12,PMSS_A)/12, taux:0.1775, note:'+0,60% déplaf.' },
-    { cat:'RETRAITE',  label:'Retraite déplafonnée',      base:n,         taux:0.006  },
-    { cat:'RETRAITE',  label:'Retraite complémentaire',   base:Math.min(n*12,PMSS_A*3.66)/12, taux:0.07 },
-    { cat:'PRÉVOY.',   label:'Invalidité-décès',          base:n,         taux:0.013  },
-    { cat:'FAMILLE',   label:'Allocations familiales',    base:n,         taux:n*12 <= 43992 ? 0.0 : 0.031 }, // exo si net annuel ≤ 43992
-    { cat:'FORMATION', label:'Formation professionnelle', base:3925,      taux:0.0025 },
-    { cat:'CSG/CRDS',  label:'CSG/CRDS (9,70% × 98,25%)',base:n*0.9825,  taux:0.097  },
+    { cat:'SANTÉ',     label:'Maladie-maternité ('+pct(tauxMaladie*100)+')',  base:n,                          taux:tauxMaladie  },
+    { cat:'SANTÉ',     label:'Indemnités journalières (0,85%)',               base:Math.min(n, PMSS*5),         taux:0.0085       },
+    { cat:'RETRAITE',  label:'Retraite de base (17,75% plafonné)',            base:Math.min(n, PMSS),           taux:0.1775       },
+    { cat:'RETRAITE',  label:'Retraite de base déplafonnée (0,60%)',          base:n,                          taux:0.006        },
+    { cat:'RETRAITE',  label:'Retraite complémentaire (7,00%)',               base:Math.min(n*12,PMSS_A*3.66)/12, taux:0.07      },
+    { cat:'PRÉVOY.',   label:'Invalidité-décès (1,30%)',                      base:Math.min(n, PMSS*5),         taux:0.013        },
+    { cat:'FAMILLE',   label:'Allocations familiales ('+pct(tauxAF*100)+')', base:n,                          taux:tauxAF       },
+    { cat:'FORMATION', label:'Formation professionnelle (0,25%)',             base:PMSS,                       taux:0.0025       },
+    { cat:'CSG/CRDS',  label:'CSG déductible (6,80% × 98,25%)',              base:n * 0.9825,                  taux:0.068        },
+    { cat:'CSG/CRDS',  label:'CSG non déductible + CRDS (2,90% × 98,25%)',   base:n * 0.9825,                  taux:0.029        },
   ];
 
   items.forEach(function(it) {
@@ -716,9 +788,8 @@ function calcCotTNS(net) {
 
 // ══ CALCUL ASSIMILÉ SALARIÉ (SAS, gérant minoritaire) ══
 function calcAssimileSalarie(brutInput, netInput) {
-  // Réutiliser la logique de rh-employes
-  const PMSS = 3925;
-  const SMIC_M = 11.88 * 35 * 52 / 12;
+  // Taux assimilé salarié 2025 — utilise les constantes globales
+  // PMSS = 3925, SMIC_M = 1802
 
   function cot(brut) {
     var b = brut, assiette_csg = b * 0.9825, plaf1 = Math.min(b, PMSS);
@@ -917,38 +988,105 @@ function renderComparaison(brut, regimeCurrent) {
 }
 
 // ══ DIVIDENDES ══
-function renderDivSection(divMens, divNet, resultat, regime, tauxIR) {
+function renderDivSection(divMens, divNet, resultat, regime, tauxIR, tauxAutoCalc) {
   var card = document.getElementById('divCard');
   card.style.display = '';
-  var isSnap = regime === 'salarie'; // SAS : dividendes non soumis aux cot.
 
-  var pfuDiv  = divMens * 0.30;
-  var netDiv  = divMens - pfuDiv;
+  var pfuDiv    = divMens * 0.30;          // PFU = IR 12,8% + PS 17,2%
+  var netPFU    = divMens - pfuDiv;
+  // Option barème : PS 17,2% + IR au taux moyen calculé
+  var ps        = divMens * 0.172;
+  var tMoy      = (tauxAutoCalc || tauxIR) / 100;
+  var irBarem   = divMens * tMoy;
+  var netBarem  = Math.max(0, divMens - ps - irBarem);
+  // Quelle option est plus favorable ?
+  var pfuMieux  = netPFU >= netBarem;
+  // Cotisations TNS sur dividendes (SARL TMN, simplifiée)
+  var divCotTNS = regime === 'tns' ? divMens * 0.45 * 0.80 : 0; // indicatif
+
+  // IS si résultat saisi
+  var isTheorique = 0, baseTaux15 = 0, baseTaux25 = 0;
+  if (resultat > 0) {
+    baseTaux15   = Math.min(resultat, 42500);
+    baseTaux25   = Math.max(0, resultat - 42500);
+    isTheorique  = baseTaux15 * 0.15 + baseTaux25 * 0.25;
+  }
+  var resultatApresIS = Math.max(0, resultat - isTheorique);
 
   document.getElementById('divContent').innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
-      <div style="background:#f8faff;border-radius:10px;padding:14px">
+    <!-- 3 cases PFU -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:14px">
+      <div style="background:#f8faff;border:1px solid #c7d2fe;border-radius:10px;padding:14px">
         <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">Dividendes bruts</div>
         <div style="font-size:18px;font-weight:800">${fmtE(divMens,0)}/mois</div>
         <div style="font-size:10px;color:var(--muted);margin-top:3px">${fmtE(divMens*12,0)}/an</div>
       </div>
-      <div style="background:#fef3c7;border-radius:10px;padding:14px">
-        <div style="font-size:10px;color:#92400e;text-transform:uppercase;font-weight:700;margin-bottom:6px">PFU (Flat Tax 30%)</div>
-        <div style="font-size:18px;font-weight:800;color:var(--orange)">−${fmtE(pfuDiv,0)}/mois</div>
+      <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:14px">
+        <div style="font-size:10px;color:#92400e;text-transform:uppercase;font-weight:700;margin-bottom:6px">PFU — Flat Tax 30%</div>
+        <div style="font-size:18px;font-weight:800;color:#d97706">−${fmtE(pfuDiv,0)}/mois</div>
         <div style="font-size:10px;color:var(--muted);margin-top:3px">IR 12,8% + PS 17,2%</div>
       </div>
-      <div style="background:#f0fdf4;border-radius:10px;padding:14px">
-        <div style="font-size:10px;color:var(--rh-dark);text-transform:uppercase;font-weight:700;margin-bottom:6px">Net après PFU</div>
-        <div style="font-size:18px;font-weight:800;color:var(--rh-main)">${fmtE(netDiv,0)}/mois</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:3px">Versé sur compte perso</div>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:14px">
+        <div style="font-size:10px;color:#065f2c;text-transform:uppercase;font-weight:700;margin-bottom:6px">Net après PFU ✓</div>
+        <div style="font-size:18px;font-weight:800;color:#059669">${fmtE(netPFU,0)}/mois</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:3px">${fmtE(netPFU*12,0)}/an</div>
       </div>
     </div>
-    ${regime === 'tns' ? `<div style="margin-top:12px;background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:11px;color:#92400e">
-      ⚠️ <strong>Attention SARL TMN</strong> : les dividendes supérieurs à 10% du capital social + comptes courants d'associés sont soumis aux cotisations TNS. Consultez votre expert-comptable.
-    </div>` : `<div style="margin-top:12px;background:#f0fdf4;border:1px solid var(--rh-border);border-radius:8px;padding:10px 14px;font-size:11px;color:var(--rh-dark)">
-      ✅ <strong>SAS/SASU</strong> : les dividendes ne sont pas soumis aux cotisations sociales (uniquement PFU 30% ou option barème IR).
+
+    <!-- Comparaison PFU vs Barème -->
+    <div style="background:#f8faff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:12px">
+      <div style="font-size:11px;font-weight:700;margin-bottom:10px;color:#374151">📊 PFU vs Option barème IR (taux moyen ${pct(tMoy*100)})</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="padding:10px;background:${pfuMieux?'#f0fdf4':'#fff'};border:1.5px solid ${pfuMieux?'#10b981':'#e2e8f0'};border-radius:8px">
+          <div style="font-size:10px;font-weight:700;color:${pfuMieux?'#059669':'#6b7280'};margin-bottom:4px">${pfuMieux?'✅ ':''} PFU (30% fixe)</div>
+          <div style="font-size:16px;font-weight:800;color:${pfuMieux?'#059669':'#374151'}">${fmtE(netPFU,0)}/mois</div>
+          <div style="font-size:10px;color:var(--muted)">IR 12,8% + PS 17,2%</div>
+        </div>
+        <div style="padding:10px;background:${!pfuMieux?'#f0fdf4':'#fff'};border:1.5px solid ${!pfuMieux?'#10b981':'#e2e8f0'};border-radius:8px">
+          <div style="font-size:10px;font-weight:700;color:${!pfuMieux?'#059669':'#6b7280'};margin-bottom:4px">${!pfuMieux?'✅ ':''} Barème IR</div>
+          <div style="font-size:16px;font-weight:800;color:${!pfuMieux?'#059669':'#374151'}">${fmtE(netBarem,0)}/mois</div>
+          <div style="font-size:10px;color:var(--muted)">PS 17,2% + IR ${pct(tMoy*100)}</div>
+        </div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:8px">
+        💡 Option barème avantageuse si votre taux marginal est inférieur à 12,8%. ${tauxAutoCalc > 12.8 ? 'Dans votre cas, le PFU semble plus avantageux.' : tauxAutoCalc > 0 ? 'Dans votre cas, le barème pourrait être avantageux.' : 'Renseignez votre revenu pour une comparaison précise.'}
+      </div>
+    </div>
+
+    <!-- Alerte selon statut -->
+    ${regime === 'tns' ? `
+    <div style="background:#fef9c3;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;font-size:11px;color:#92400e;margin-bottom:10px">
+      ⚠️ <strong>SARL/EURL gérant majoritaire :</strong> les dividendes dépassant 10% du capital social + comptes courants d'associés sont soumis aux cotisations TNS (~45%). Ils s'ajoutent alors à votre assiette de cotisations. Consultez votre expert-comptable.
+    </div>` : `
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;font-size:11px;color:#065f2c;margin-bottom:10px">
+      ✅ <strong>SAS/SASU :</strong> les dividendes ne sont pas soumis aux cotisations sociales — uniquement PFU 30% ou option barème IR.
     </div>`}
-    ${resultat > 0 ? `<div style="margin-top:10px;font-size:11px;color:var(--muted)">📊 Résultat net entreprise : <strong>${fmtE(resultat,0)}</strong> — IS théorique : <strong>${fmtE(resultat <= 42500 ? resultat*0.15 : 42500*0.15+(resultat-42500)*0.25,0)}</strong> (15% sur 42 500 € puis 25%)</div>` : ''}
+
+    <!-- IS si résultat saisi -->
+    ${resultat > 0 ? `
+    <div style="background:#f8faff;border:1px solid #c7d2fe;border-radius:10px;padding:14px">
+      <div style="font-size:11px;font-weight:700;margin-bottom:10px;color:#374151">🏢 Impôt sur les Sociétés (IS) théorique</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px">
+        <div style="text-align:center">
+          <div style="font-size:9px;color:var(--muted);font-weight:700">Résultat net</div>
+          <div style="font-size:14px;font-weight:800">${fmtE(resultat,0)}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:9px;color:var(--muted);font-weight:700">IS (15% + 25%)</div>
+          <div style="font-size:14px;font-weight:800;color:#ef4444">−${fmtE(isTheorique,0)}</div>
+          <div style="font-size:9px;color:var(--muted)">${fmtE(baseTaux15,0)}×15% + ${fmtE(baseTaux25,0)}×25%</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:9px;color:var(--muted);font-weight:700">Distribuable</div>
+          <div style="font-size:14px;font-weight:800;color:#10b981">${fmtE(resultatApresIS,0)}</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:9px;color:var(--muted);font-weight:700">Si distribué en div.</div>
+          <div style="font-size:14px;font-weight:800;color:#6366f1">${fmtE(resultatApresIS*0.70,0)}</div>
+          <div style="font-size:9px;color:var(--muted)">Net après PFU</div>
+        </div>
+      </div>
+    </div>` : ''}
   `;
 }
 
