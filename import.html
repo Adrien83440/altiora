@@ -282,11 +282,7 @@ input[type=file]{display:none}
           <div class="card-title">&#128065;&#65039; Aper&#231;u du fichier <span id="previewFilename" style="font-size:11px;color:var(--muted);font-weight:500;margin-left:8px"></span></div>
           <div style="display:flex;gap:8px;align-items:center">
             <span id="previewStats" style="font-size:11px;color:var(--muted)"></span>
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:11px;font-weight:600;color:var(--text)">Ligne d'en-tête :</span>
-              <input type="number" id="headerRowInput" value="1" min="1" max="20" style="width:46px;padding:3px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;font-weight:700;text-align:center" title="Numéro de la ligne contenant les noms de colonnes (1=première ligne)"/>
-              <button class="btn btn-xs btn-outline" onclick="applyHeaderRow()" style="font-size:11px;padding:3px 8px">↺ Appliquer</button>
-            </div>
+
             <button class="btn btn-o btn-xs" onclick="resetFile()">&#x2715; Changer</button>
           </div>
         </div>
@@ -296,10 +292,14 @@ input[type=file]{display:none}
               <span style="font-size:12px;font-weight:600">Feuille :</span>
               <select id="sheetSelect" class="map-sel" style="width:200px" onchange="selectSheet()"></select>
             </div>
-            <div style="display:flex;align-items:center;gap:8px">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               <span style="font-size:12px;font-weight:600">Ligne d'en-tête :</span>
-              <input type="number" id="headerRowInput" value="1" min="1" max="20" style="width:56px;padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-weight:700;text-align:center" onchange="selectSheet()" title="Numéro de la ligne contenant les noms de colonnes (1 = première ligne)"/>
-              <span style="font-size:11px;color:var(--muted)">(1 = 1ère ligne)</span>
+              <input type="number" id="headerRowInput" value="1" min="1" max="20" style="width:50px;padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-weight:700;text-align:center" onchange="applyHeaderRow()" title="Ligne des en-têtes (1=première ligne)"/>
+              <span style="font-size:12px;font-weight:600;margin-left:4px">Colonnes :</span>
+              <input type="number" id="colStartInput" value="1" min="1" placeholder="De" style="width:44px;padding:5px 6px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-weight:700;text-align:center" title="1ère colonne (1=A)" onchange="applyHeaderRow()"/>
+              <span style="font-size:11px;color:var(--muted)">à</span>
+              <input type="number" id="colEndInput" value="" min="1" placeholder="fin" style="width:44px;padding:5px 6px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-weight:700;text-align:center" title="Dernière colonne (vide=toutes)" onchange="applyHeaderRow()"/>
+              <button class="btn btn-xs btn-outline" onclick="applyHeaderRow()" style="font-size:11px;padding:4px 10px">↺ Appliquer</button>
             </div>
           </div>
           <div class="preview-wrap"><table class="preview-table" id="previewTable"></table></div>
@@ -550,16 +550,35 @@ function readXLSX(file){
   };
   reader.readAsBinaryString(file);
 }
+function getColRange(){
+  const start = Math.max(1, parseInt(document.getElementById('colStartInput')?.value)||1) - 1;
+  const endVal = document.getElementById('colEndInput')?.value;
+  const end = endVal ? Math.max(start+1, parseInt(endVal)) : null;
+  return {start, end};
+}
+
+function applyColFilter(headers, rows){
+  const {start, end} = getColRange();
+  if(start === 0 && !end) return {headers, rows}; // pas de filtre
+  const filteredH = end ? headers.slice(start, end) : headers.slice(start);
+  // Filtrer les en-têtes vides
+  const validH = filteredH.filter(h=>h && h.trim());
+  const filteredR = rows.map(r=>{
+    const obj={};
+    validH.forEach(h=>{ obj[h] = r[h]??''; });
+    return obj;
+  }).filter(r=>Object.values(r).some(v=>String(v).trim()));
+  return {headers: validH, rows: filteredR};
+}
+
 async function applyHeaderRow(){
-  if(_wb){
-    // Fichier local XLSX
-    const idx = parseInt(document.getElementById('sheetSelect')?.value)||0;
-    parseSheet(idx, '');
-  } else if(_gsLastUrl) {
-    // Google Sheets : re-fetch avec la bonne ligne d'en-tête
-    const btn = document.querySelector('[onclick="applyHeaderRow()"]');
-    if(btn){btn.textContent='⏳';btn.disabled=true;}
-    try{
+  const btn = document.querySelector('[onclick="applyHeaderRow()"]');
+  if(btn){btn.textContent='⏳';btn.disabled=true;}
+  try{
+    if(_wb){
+      const idx = parseInt(document.getElementById('sheetSelect')?.value)||0;
+      parseSheet(idx, '');
+    } else if(_gsLastUrl) {
       const headerRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
       const r = await fetch('/api/fetch-sheet', {
         method:'POST',
@@ -568,12 +587,14 @@ async function applyHeaderRow(){
       });
       const data = await r.json();
       if(!r.ok||!data.success) throw new Error(data.error||'Erreur');
-      _headers = data.headers;
-      _rows = data.rows;
+      // Appliquer le filtre de colonnes
+      const filtered = applyColFilter(data.headers, data.rows);
+      _headers = filtered.headers;
+      _rows = filtered.rows;
       showPreview('Google Sheets — ' + (_gsLastName||''));
-    }catch(e){ showToast('Erreur : '+e.message,'err'); }
-    finally{ if(btn){btn.textContent='↺ Appliquer';btn.disabled=false;} }
-  }
+    }
+  }catch(e){ showToast('Erreur : '+e.message,'err'); }
+  finally{ if(btn){btn.textContent='↺ Appliquer';btn.disabled=false;} }
 }
 
 function selectSheet(){const idx=parseInt(document.getElementById('sheetSelect').value);parseSheet(idx,'')}
@@ -586,12 +607,17 @@ function parseSheet(idx,filename){
   const headerRowIdx = headerRowNum - 1;
   // Construire les headers en combinant plusieurs lignes si besoin (ignore lignes vides avant)
   const rawHeaders = data[headerRowIdx] || data[0];
-  _headers = rawHeaders.map(h=>String(h).trim()).filter(h=>h);
-  _rows = data.slice(headerRowIdx+1).filter(r=>r.some(c=>c!==''&&c!==0)).map(r=>{
+  let allHeaders = rawHeaders.map(h=>String(h).trim());
+  const allRows = data.slice(headerRowIdx+1).filter(r=>r.some(c=>c!==''&&c!==0)).map(r=>{
     const obj={};
-    _headers.forEach((h,i)=>obj[h]=r[i]===undefined?'':r[i]);
+    allHeaders.forEach((h,i)=>obj[h]=r[i]===undefined?'':r[i]);
     return obj;
   });
+  // Appliquer filtre colonnes
+  const {start, end} = getColRange();
+  const slicedH = end ? allHeaders.slice(start,end) : allHeaders.slice(start);
+  _headers = slicedH.filter(h=>h);
+  _rows = allRows.map(r=>{const o={};_headers.forEach(h=>o[h]=r[h]??'');return o;}).filter(r=>Object.values(r).some(v=>String(v).trim()));
   showPreview(filename||_wb.SheetNames[idx]||'');
 }
 function readCSV(file){
