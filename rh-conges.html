@@ -201,6 +201,7 @@
     </div>
     <div class="topbar-right">
       <select class="filter-select" id="year-sel" onchange="onYearChange()"></select>
+      <button class="btn btn-outline btn-sm" id="btn-refresh" onclick="reloadAll()" title="Recharger les employés et demandes" style="min-width:36px">🔄</button>
       <button class="btn btn-outline btn-sm" onclick="openAjustModal()">⚙️ Ajuster soldes</button>
       <button class="btn btn-rh btn-sm" onclick="openNewDemandeModal()">+ Demande</button>
     </div>
@@ -500,6 +501,11 @@ window.initConges = async function() {
   await loadEmps();
   await loadDemandes();
   renderAll();
+  // Recharger automatiquement si l'onglet reprend le focus
+  // (cas : manager ouvre rh-employes dans un autre onglet et crée un employé)
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.visibilityState==='visible') reloadAll();
+  });
 };
 
 function buildYearSel(){
@@ -523,6 +529,19 @@ async function loadEmps(){
     s.forEach(d=>{ if(d.data().statut!=='archive') _emps[d.id]={id:d.id,...d.data()}; });
   }catch(e){console.warn(e);}
 }
+
+// Rechargement complet (employés + demandes + rendu)
+async function reloadAll(){
+  const btn=document.getElementById('btn-refresh');
+  if(btn){btn.textContent='⏳';btn.disabled=true;}
+  await loadParams();
+  await loadEmps();
+  await loadDemandes();
+  renderAll();
+  if(btn){btn.textContent='🔄';btn.disabled=false;}
+  showToast('✅ Données rechargées','ok');
+}
+window.reloadAll=reloadAll;
 
 async function loadDemandes(){
   _demandes=[];
@@ -697,7 +716,8 @@ function renderDemandes(search=''){
   list.innerHTML = items.map(d=>{
     const emp = _emps[d.empId]||{};
     const col = emp.couleur || COLORS_EMP[Object.keys(_emps).indexOf(d.empId)%COLORS_EMP.length];
-    const name = `${emp.prenom||''} ${emp.nom||''}`.trim() || 'Employé inconnu';
+    const name = `${emp.prenom||''} ${emp.nom||''}`.trim() || '⚠️ Employé introuvable';
+    const sourceBadge = d.source==='salarie' ? '<span style="font-size:9px;font-weight:700;background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:10px;margin-left:4px">📱 Portail</span>' : '';
     const bg = TYPE_COLORS[d.type]+'22'||'#f3f4f6';
     const debFmt = d.dateDebut ? new Date(d.dateDebut+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'}) : '?';
     const finFmt = d.dateFin   ? new Date(d.dateFin+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'}) : debFmt;
@@ -705,7 +725,7 @@ function renderDemandes(search=''){
       <div class="dem-type-icon" style="background:${bg}">${TYPE_ICO[d.type]||'📋'}</div>
       <div class="emp-av" style="background:${col};width:32px;height:32px;border-radius:8px;font-size:13px;font-weight:700;color:white;display:flex;align-items:center;justify-content:center;flex-shrink:0">${(emp.prenom||'?').charAt(0).toUpperCase()}</div>
       <div class="dem-info">
-        <div class="dem-name">${name} — <span style="color:${TYPE_COLORS[d.type]||'#374151'}">${TYPE_LBL[d.type]||d.type}</span><span class="dem-jours">${d.nbJours||0}j</span></div>
+        <div class="dem-name">${name}${sourceBadge} — <span style="color:${TYPE_COLORS[d.type]||'#374151'}">${TYPE_LBL[d.type]||d.type}</span><span class="dem-jours">${d.nbJours||0}j</span></div>
         <div class="dem-dates">📅 ${debFmt}${d.dateFin&&d.dateFin!==d.dateDebut?' → '+finFmt:''}</div>
         ${d.motif?`<div class="dem-motif">"${d.motif}"</div>`:''}
         ${d.motifRefus?`<div class="dem-motif" style="color:var(--red)">Motif refus : ${d.motifRefus}</div>`:''}
@@ -999,8 +1019,18 @@ async function saveAjust(){
     recupHeures:   parseFloat(document.getElementById('aj-recup')?.value)||0,
   };
   try{
+    // Mise à jour fiche privée
     await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',empId),data);
     Object.assign(_emps[empId],data);
+    // Synchroniser fiche publique (portail salarié) si publicId existe
+    const emp=_emps[empId];
+    if(emp?.publicId){
+      await window._updateDoc(window._doc(window._db,'rh_employes_public',emp.publicId),{
+        cpAjustAcquis: data.cpAjustAcquis,
+        rttAjust:      data.rttAjust,
+        recupHeures:   data.recupHeures,
+      });
+    }
     closeModal('modal-ajust');
     renderAll();
     showToast('✅ Soldes mis à jour','ok');
