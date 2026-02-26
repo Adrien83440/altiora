@@ -84,14 +84,13 @@
     .product-item:hover{background:#fafbff;}
     .product-item.active{background:var(--blue-ghost);border-left-color:var(--blue-main);}
     .product-item.selected{background:#eff6ff;border-left-color:#3b82f6;}
-    .product-cb{width:15px;height:15px;border-radius:4px;border:1.5px solid #d1d5db;appearance:none;-webkit-appearance:none;cursor:pointer;flex-shrink:0;transition:all .15s;background:#fff;}
+    .product-cb{width:15px;height:15px;border-radius:4px;border:1.5px solid #d1d5db;appearance:none;-webkit-appearance:none;cursor:pointer;flex-shrink:0;background:#fff;margin-top:1px;}
     .product-cb:checked{background:#3b82f6;border-color:#3b82f6;}
     .bulk-bar{background:#1e293b;color:#fff;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:600;border-top:2px solid #3b82f6;}
     .bulk-bar.hidden{display:none;}
-    .btn-bulk-del{background:#ef4444;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:5px;}
+    .btn-bulk-del{background:#ef4444;color:#fff;border:none;border-radius:7px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;}
     .btn-bulk-del:hover{background:#dc2626;}
-    .btn-bulk-cancel{background:rgba(255,255,255,0.12);color:#fff;border:none;border-radius:7px;padding:6px 10px;font-size:12px;cursor:pointer;}
-    .btn-bulk-cancel:hover{background:rgba(255,255,255,0.2);}
+    .btn-bulk-cancel{background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:7px;padding:6px 10px;font-size:12px;cursor:pointer;}
     .product-emoji{font-size:18px;}
     .product-info{flex:1;min-width:0;}
     .product-name{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -539,7 +538,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
         <div class="panel-head">
           <div class="panel-title">📦 Produits</div>
           <div style="display:flex;gap:6px;align-items:center">
-            <button class="btn btn-outline btn-xs" id="select-all-btn" onclick="toggleSelectAll()" title="Tout sélectionner">☐</button>
+            <button class="btn btn-outline btn-xs" id="select-all-btn" onclick="toggleSelectAll()" title="Tout sélectionner" style="font-size:14px;padding:2px 7px">☐</button>
             <button class="btn btn-primary btn-xs" onclick="openNewProductModal()">+ Nouveau</button>
           </div>
         </div>
@@ -550,7 +549,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
         <div class="bulk-bar hidden" id="bulkBar">
           <span id="bulk-count">0 sélectionné(s)</span>
           <div style="display:flex;gap:6px">
-            <button class="btn-bulk-cancel" onclick="clearSelection()">✕ Annuler</button>
+            <button class="btn-bulk-cancel" onclick="clearSelection()">✕</button>
             <button class="btn-bulk-del" onclick="deleteSelected()">🗑 Supprimer</button>
           </div>
         </div>
@@ -718,7 +717,20 @@ async function loadProducts(){
   // 2. Charger depuis module Marges (saisie directe)
   try{
     const snap = await window._getDocs(window._collection(window._db,'marges',window._uid,'produits'));
-    snap.forEach(d=>_products['mg_'+d.id]={id:'mg_'+d.id,...d.data(),source:'marges'});
+    snap.forEach(d=>{
+      const raw = d.data();
+      // Normaliser les champs des produits importés (coutMP→mp, coutMain→mo, etc.)
+      const normalized = {
+        id:'mg_'+d.id, source:'marges', ...raw,
+        mp:  parseFloat(raw.mp||raw.coutMP||0),
+        mo:  parseFloat(raw.mo||raw.coutMain||0),
+        emb: parseFloat(raw.emb||0),
+        liv: parseFloat(raw.liv||0),
+        pv:  parseFloat(raw.pv||raw.prixVente||0),
+        qte: parseFloat(raw.qte||raw.quantiteProduites||1)||1,
+      };
+      _products['mg_'+d.id] = normalized;
+    });
   }catch(e){console.warn(e);}
 
   renderList();
@@ -782,9 +794,9 @@ function renderList(filter=''){
   list.innerHTML = items.map(p=>{
     const {mb,txMB}=calcMB(p);
     const cls=txMB>=30?'mb-good':txMB>=10?'mb-warn':'mb-bad';
-    const isSel=_selected.has(p.id);
-    return `<div class="product-item ${_currentId===p.id?'active':''} ${isSel?'selected':''}" onclick="handleItemClick(event,'${p.id}')">
-      <input type="checkbox" class="product-cb" ${isSel?'checked':''} onclick="event.stopPropagation();toggleSelect('${p.id}',this.checked)"/>
+    const sel=_selected.has(p.id);
+    return `<div class="product-item ${_currentId===p.id?'active':''} ${sel?'selected':''}" onclick="handleItemClick(event,'${p.id}')">
+      <input type="checkbox" class="product-cb" ${sel?'checked':''} onclick="event.stopPropagation();toggleSelect('${p.id}',this.checked)"/>
       <span class="product-emoji">${p.emoji||'📦'}</span>
       <div class="product-info">
         <div class="product-name">${p.nom}</div>
@@ -1323,20 +1335,10 @@ async function saveProduct(id){
   }
 }
 
-// ── SELECTION MULTIPLE ──
-function updateBulkBar(){
-  const bar = document.getElementById('bulkBar');
-  const count = _selected.size;
-  if(count > 0){
-    bar.classList.remove('hidden');
-    document.getElementById('bulk-count').textContent = count + ' sélectionné(s)';
-  } else {
-    bar.classList.add('hidden');
-  }
-  // Update select-all button
-  const allItems = Object.keys(_products);
-  const btn = document.getElementById('select-all-btn');
-  if(btn) btn.textContent = _selected.size === allItems.length && allItems.length > 0 ? '☑' : '☐';
+// ── SÉLECTION MULTIPLE ──
+function handleItemClick(e, id){
+  if(e.target.classList.contains('product-cb')) return;
+  openProduct(id);
 }
 
 function toggleSelect(id, checked){
@@ -1346,11 +1348,14 @@ function toggleSelect(id, checked){
   renderList();
 }
 
-function handleItemClick(e, id){
-  // Si clic sur la checkbox, déjà géré par toggleSelect
-  if(e.target.classList.contains('product-cb')) return;
-  // Sinon ouvrir le produit
-  openProduct(id);
+function updateBulkBar(){
+  const bar = document.getElementById('bulkBar');
+  const count = _selected.size;
+  bar.classList.toggle('hidden', count===0);
+  if(count>0) document.getElementById('bulk-count').textContent = count+' sélectionné(s)';
+  const allIds = Object.keys(_products);
+  const btn = document.getElementById('select-all-btn');
+  if(btn) btn.textContent = (_selected.size===allIds.length && allIds.length>0) ? '☑' : '☐';
 }
 
 function clearSelection(){
@@ -1361,60 +1366,49 @@ function clearSelection(){
 
 function toggleSelectAll(){
   const allIds = Object.keys(_products);
-  if(_selected.size === allIds.length && allIds.length > 0){
-    _selected.clear();
-  } else {
-    allIds.forEach(id => _selected.add(id));
-  }
+  if(_selected.size===allIds.length && allIds.length>0) _selected.clear();
+  else allIds.forEach(id=>_selected.add(id));
   updateBulkBar();
   renderList();
 }
 
+async function _deleteOneProduct(id){
+  const p = _products[id];
+  if(!p) return;
+  if(p.source==='cout-revient'){
+    await window._deleteDoc(window._doc(window._db,'produits',window._uid,'items',id.replace('cr_','')));
+  } else {
+    const fsId = id.startsWith('mg_') ? id.slice(3) : id;
+    await window._deleteDoc(window._doc(window._db,'marges',window._uid,'produits',fsId));
+  }
+  delete _products[id];
+}
+
 async function deleteSelected(){
-  const ids = [..._selected];
+  const ids=[..._selected];
   if(!ids.length) return;
-  if(!confirm(`Supprimer ${ids.length} produit(s) ? Cette action est irréversible.`)) return;
-  const btn = document.querySelector('.btn-bulk-del');
-  if(btn){ btn.disabled=true; btn.textContent='⏳...'; }
-  let ok=0, err=0;
+  if(!confirm(`Supprimer ${ids.length} produit(s) ?`)) return;
+  const btn=document.querySelector('.btn-bulk-del');
+  if(btn){btn.disabled=true;btn.textContent='⏳...';}
+  let ok=0,err=0;
   for(const id of ids){
-    try{
-      const p = _products[id];
-      if(!p){ err++; continue; }
-      if(p.source==='cout-revient'){
-        await window._deleteDoc(window._doc(window._db,'produits',window._uid,'items',id.replace('cr_','')));
-      } else {
-        // marges collection (source='marges' ou import sans source)
-        const firestoreId = id.startsWith('mg_') ? id.slice(3) : id;
-        await window._deleteDoc(window._doc(window._db,'marges',window._uid,'produits',firestoreId));
-      }
-      delete _products[id];
-      ok++;
-    }catch(e){ console.error(e); err++; }
+    try{ await _deleteOneProduct(id); ok++; }
+    catch(e){ console.error(e); err++; }
   }
   _selected.clear();
   if(_currentId && !_products[_currentId]){
-    _currentId = null;
+    _currentId=null;
     document.getElementById('rightPanel').innerHTML=`<div class="empty-state"><div class="empty-icon">🗑</div><h3 style="font-size:16px;font-weight:700;color:var(--text)">${ok} produit(s) supprimé(s)</h3></div>`;
   }
   updateBulkBar();
   renderList();
-  if(err > 0) showToast(`${ok} supprimé(s), ${err} erreur(s)`,'warning');
-  else showToast(`${ok} produit(s) supprimé(s)`,'ok');
+  showToast(err>0?`${ok} supprimé(s), ${err} erreur(s)`:`${ok} produit(s) supprimé(s)`, err>0?'warning':'ok');
 }
 
 async function deleteProduct(id){
   if(!confirm('Supprimer ce produit ?'))return;
   try{
-    const p = _products[id];
-    if(!p){ showToast('Produit introuvable','err'); return; }
-    if(p.source==='cout-revient'){
-      await window._deleteDoc(window._doc(window._db,'produits',window._uid,'items',id.replace('cr_','')));
-    } else {
-      const firestoreId = id.startsWith('mg_') ? id.slice(3) : id;
-      await window._deleteDoc(window._doc(window._db,'marges',window._uid,'produits',firestoreId));
-    }
-    delete _products[id];
+    await _deleteOneProduct(id);
     _selected.delete(id);
     _currentId=null;
     updateBulkBar();
