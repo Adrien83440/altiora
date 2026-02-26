@@ -218,7 +218,7 @@ nav#alteore-nav .rh-si.on{color:#fff;background:rgba(16,185,129,.17);border-left
 nav#alteore-nav .rh-dot{background:rgba(52,211,153,.28)}
 nav#alteore-nav .rh-si.on .rh-dot{background:#10b981}
 /* Le sous-menu RH s'étend normalement — c'est la nav entière qui scrolle */
-nav#alteore-nav #rh-nav-sub{overflow:visible}
+/* rh-nav-sub utilise le .sub standard — pas de règle spéciale nécessaire */
 
 /* ── THÈME VERT GLOBAL — toute la sidebar passe en vert quand RH est ouvert ── */
 nav#alteore-nav.rh-mode{background:linear-gradient(180deg,#052e16 0%,#064e23 50%,#065f2c 100%);transition:background .45s ease}
