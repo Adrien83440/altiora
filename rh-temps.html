@@ -199,7 +199,7 @@
       <p>Suivi mensuel des heures · Comparaison contrat vs réel · Heures supplémentaires</p>
     </div>
     <div class="topbar-right">
-      <button class="btn btn-ghost btn-sm" onclick="importFromPlanning()" id="btn-import">📅 Importer du planning</button>
+      <button class="btn btn-ghost btn-sm" onclick="reloadAndRender()" id="btn-refresh">🔄 Recalculer depuis planning</button>
       <button class="btn btn-outline btn-sm" onclick="openExport()">📊 Récapitulatif</button>
       <button class="btn btn-rh btn-sm" onclick="openSaisie(null)">+ Saisie manuelle</button>
     </div>
@@ -236,10 +236,9 @@
       <!-- TABLEAU EMPLOYÉS -->
       <div class="table-card">
         <div class="card-head">
-          <div class="card-title">👥 Heures par employé <span id="unsaved-badge" style="display:none;background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;margin-left:6px">⚠️ Modifications non sauvegardées</span></div>
+          <div class="card-title">👥 Heures par employé</div>
           <div style="display:flex;gap:6px">
-            <button class="btn btn-ghost btn-xs" onclick="toggleAll()">☐ Tout saisir</button>
-            <button class="btn btn-rh btn-xs" id="btn-save-all" onclick="saveAll()" style="display:none">💾 Sauvegarder tout</button>
+            <span style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px">📅 Calculé depuis rh-planning.html</span>
           </div>
         </div>
         <div class="table-wrap">
@@ -308,16 +307,12 @@
           <option value="">Sélectionner…</option>
         </select>
       </div>
-      <div class="mrow">
-        <div class="mfield">
-          <label>Heures travaillées</label>
-          <input class="minput" type="text" inputmode="decimal" id="s-heures" placeholder="Ex: 151.67" oninput="calcEcart()"/>
-        </div>
-        <div class="mfield">
-          <label>Jours de présence</label>
-          <input class="minput" type="text" inputmode="decimal" id="s-jours" placeholder="Ex: 21"/>
-        </div>
+      <!-- Heures auto depuis planning -->
+      <div id="s-planning-info" style="background:var(--rh-ghost);border:1px solid var(--rh-border);border-radius:9px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--rh-main)">
+        📅 Les heures et jours sont calculés automatiquement depuis le planning.
       </div>
+      <input type="hidden" id="s-heures"/>
+      <input type="hidden" id="s-jours"/>
       <div class="mrow">
         <div class="mfield">
           <label>Heures supplémentaires</label>
@@ -398,12 +393,12 @@
 
 <script>
 // ══ ÉTAT ══
-var _employes   = [];
-var _tempsMap   = {};   // { moisKey_empId : { heuresTravaillees, joursPresence, heureSup, absences, note } }
-var _params     = {};
-var _curMois    = new Date();
-var _modified   = {};   // { empId: {heures, jours, sup, abs, note} }  — saisies en cours
-var _chartH     = null;
+var _employes     = [];
+var _tempsMap     = {};  // { empId: {heuresTravaillees, joursPresence, heureSup, absences, note} } — données manuelles sauvegardées
+var _planningData = {};  // { empId: {heures, jours} } — calculé depuis rh-planning
+var _params       = {};
+var _curMois      = new Date();
+var _chartH       = null;
 
 _curMois.setDate(1);
 
@@ -416,7 +411,7 @@ window.initTemps = async function() {
   } catch(e) { _params = {}; }
   await loadEmployes();
   updateMoisLabel();
-  await loadTemps();
+  await Promise.all([loadTempsFromPlanning(), loadTemps()]);
   render();
 };
 
@@ -429,18 +424,92 @@ async function loadEmployes() {
   } catch(e) { console.warn('Employés:', e); }
 }
 
+// ══ CALCUL HEURES DEPUIS PLANNING ══
+async function loadTempsFromPlanning() {
+  _planningData = {};
+  var y = _curMois.getFullYear(), m = _curMois.getMonth();
+  var nbJours = new Date(y, m+1, 0).getDate();
+
+  // Collecter toutes les clés de semaine uniques du mois
+  var weekKeys = {};
+  for (var d = 1; d <= nbJours; d++) {
+    var dt = new Date(y, m, d);
+    var mon = new Date(dt);
+    var day = mon.getDay(), diff = (day === 0) ? -6 : 1 - day;
+    mon.setDate(mon.getDate() + diff);
+    mon.setHours(0,0,0,0);
+    var wk = mon.toISOString().slice(0,10).replace(/-/g,'');
+    weekKeys[wk] = true;
+  }
+
+  // Charger chaque semaine et agréger par employé
+  for (var wk in weekKeys) {
+    try {
+      var snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'plan_'+wk));
+      snap.forEach(function(docSnap) {
+        // docId = YYYY-MM-DD_empId
+        var id = docSnap.id;
+        var underIdx = id.lastIndexOf('_');
+        if (underIdx < 0) return;
+        var dateStr = id.slice(0, underIdx);
+        var empId   = id.slice(underIdx + 1);
+
+        // Vérifier que ce jour est bien dans le mois en cours
+        var dt2 = new Date(dateStr + 'T12:00:00');
+        if (dt2.getFullYear() !== y || dt2.getMonth() !== m) return;
+
+        var data = docSnap.data();
+        var items = (data.items || []).filter(function(it) { return it.type === 'travail'; });
+        if (!items.length) return;
+
+        if (!_planningData[empId]) _planningData[empId] = { heures: 0, jours: 0 };
+
+        // Calculer les heures de ce jour
+        var hJour = items.reduce(function(s, it) {
+          if (it.plages && it.plages.length > 0) {
+            return s + it.plages.reduce(function(ps, p) {
+              return ps + diffH(p.deb, p.fin);
+            }, 0);
+          }
+          return s + diffH(it.deb, it.fin);
+        }, 0);
+
+        _planningData[empId].heures += hJour;
+        _planningData[empId].jours  += 1;
+      });
+    } catch(e) { /* semaine sans données */ }
+  }
+}
+
+// Charger également les ajustements manuels sauvegardés (heures sup, notes, absences)
 async function loadTemps() {
   _tempsMap = {};
-  const moisKey = getMoisKey();
+  var moisKey = getMoisKey();
   try {
-    const snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'temps'));
-    snap.forEach(d => {
-      const data = d.data();
+    var snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'temps'));
+    snap.forEach(function(d) {
+      var data = d.data();
       if (data.mois === moisKey) {
         _tempsMap[data.employeId] = { id: d.id, ...data };
       }
     });
   } catch(e) { console.warn('Temps:', e); }
+}
+
+// Fusionner planning + ajustements manuels → données affichées
+function getMergedData(empId) {
+  var planning  = _planningData[empId]  || null;
+  var manual    = _tempsMap[empId]      || null;
+  // Heures travaillées : planning en priorité, fallback manuel
+  var heures = planning ? Math.round(planning.heures * 10) / 10
+             : (manual  ? parseFloat(manual.heuresTravaillees) || 0 : 0);
+  var jours  = planning ? planning.jours
+             : (manual  ? parseFloat(manual.joursPresence) || 0 : 0);
+  var sup    = manual ? parseFloat(manual.heureSup)  || 0 : 0;
+  var abs    = manual ? parseFloat(manual.absences)  || 0 : 0;
+  var note   = manual ? (manual.note || '') : '';
+  var source = planning ? 'planning' : (manual ? 'manuel' : 'vide');
+  return { heures, jours, sup, abs, note, source };
 }
 
 // ══ UTILS ══
@@ -506,13 +575,13 @@ function render() {
 function renderKpis() {
   var totalReel = 0, totalTheo = 0, totalSup = 0, nbSaisis = 0;
 
-  _employes.forEach(emp => {
-    var t = _tempsMap[emp.id] || _modified[emp.id];
+  _employes.forEach(function(emp) {
+    var d    = getMergedData(emp.id);
     var theo = heuresTheo(emp);
     totalTheo += theo;
-    if (t && (parseFloat(t.heuresTravaillees) > 0 || parseFloat(t.joursPresence) > 0)) {
-      totalReel += parseFloat(t.heuresTravaillees) || 0;
-      totalSup  += parseFloat(t.heureSup) || 0;
+    if (d.heures > 0 || d.jours > 0) {
+      totalReel += d.heures;
+      totalSup  += d.sup;
       nbSaisis++;
     }
   });
@@ -546,31 +615,24 @@ function renderTable() {
   }
 
   tbody.innerHTML = _employes.map(emp => {
-    var t     = _tempsMap[emp.id];
-    var mod   = _modified[emp.id];
-    var data  = mod || t;
+    var d     = getMergedData(emp.id);
     var theo  = heuresTheo(emp);
-    var reel  = parseFloat(data?.heuresTravaillees) || 0;
-    var jours = parseFloat(data?.joursPresence) || 0;
-    var sup   = parseFloat(data?.heureSup) || 0;
+    var reel  = d.heures;
+    var jours = d.jours;
+    var sup   = d.sup;
     var ecart = reel > 0 ? reel - theo : null;
     var pct   = theo > 0 ? Math.min(reel / theo * 100, 130) : 0;
     var initials = ((emp.prenom||'').charAt(0) + (emp.nom||'').charAt(0)).toUpperCase();
     var color = getAvatarColor(emp.nom);
-    var hasMod = !!mod;
-    var hasSaved = !!t && !mod;
 
-    // Badge statut
+    // Badge source
     var statut = '';
-    if (hasMod) statut = '<span class="badge badge-orange">⚠️ Modifié</span>';
-    else if (hasSaved) statut = '<span class="badge badge-green">✅ Sauvegardé</span>';
-    else statut = '<span class="badge badge-muted">— Non saisi</span>';
+    if (d.source === 'planning') statut = '<span class="badge badge-green">📅 Planning</span>';
+    else if (d.source === 'manuel') statut = '<span class="badge badge-blue">✏️ Manuel</span>';
+    else statut = '<span class="badge badge-muted">— Non planifié</span>';
 
     // Couleur progression
     var progColor = pct >= 95 ? 'var(--rh-main)' : pct >= 70 ? '#3b82f6' : pct > 0 ? '#f59e0b' : '#e2e8f0';
-
-    // Input état
-    var inputCls = hasMod ? 'h-input modified' : hasSaved ? 'h-input saved' : 'h-input';
 
     return `<tr>
       <td>
@@ -585,25 +647,19 @@ function renderTable() {
       <td><span class="badge badge-blue">${emp.typeContrat||'CDI'}</span></td>
       <td><span style="font-weight:700">${fmtH(theo)}</span></td>
       <td>
-        <div style="display:flex;align-items:center;gap:6px;justify-content:flex-end">
-          <input class="${inputCls}" id="inp-h-${emp.id}" type="text" inputmode="decimal"
-            value="${reel > 0 ? reel : ''}" placeholder="—"
-            onchange="onHInput('${emp.id}','heuresTravaillees',this.value)"
-            onfocus="this.select()"/>
-        </div>
+        <span style="font-weight:800;color:${reel > 0 ? 'var(--rh-main)' : 'var(--muted)'}">${reel > 0 ? fmtH(reel) : '—'}</span>
+        ${d.source === 'planning' ? '<span style="font-size:9px;color:var(--muted);display:block">Calculé planning</span>' : ''}
       </td>
       <td>
-        <input class="${inputCls}" id="inp-j-${emp.id}" type="text" inputmode="decimal"
-          value="${jours > 0 ? jours : ''}" placeholder="—"
-          onchange="onHInput('${emp.id}','joursPresence',this.value)"
-          onfocus="this.select()" style="width:50px"/>
+        <span style="font-weight:700;color:${jours > 0 ? 'var(--text)' : 'var(--muted)'}">${jours > 0 ? jours + 'j' : '—'}</span>
       </td>
       <td>${ecart !== null ? fmtEcart(ecart) : '<span style="color:var(--muted)">—</span>'}</td>
       <td>
-        <input class="${inputCls}" id="inp-s-${emp.id}" type="text" inputmode="decimal"
+        <input class="h-input ${d.source === 'manuel' ? 'saved' : ''}" id="inp-s-${emp.id}" type="text" inputmode="decimal"
           value="${sup > 0 ? sup : ''}" placeholder="0"
-          onchange="onHInput('${emp.id}','heureSup',this.value)"
-          onfocus="this.select()" style="width:50px"/>
+          onchange="onSupInput('${emp.id}', this.value)"
+          onfocus="this.select()" style="width:50px"
+          title="Heures supplémentaires à ajouter manuellement"/>
       </td>
       <td style="min-width:120px">
         <div class="prog-wrap">
@@ -612,10 +668,10 @@ function renderTable() {
         </div>
       </td>
       <td>
-        <div style="display:flex;gap:4px;justify-content:flex-end">
+        <div style="display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap">
           ${statut}
-          <button class="btn btn-ghost btn-xs" onclick="openSaisie('${emp.id}')" title="Saisie détaillée">✏️</button>
-          ${t ? `<button class="btn btn-danger btn-xs" onclick="deleteTemps('${emp.id}')" title="Supprimer">🗑</button>` : ''}
+          <button class="btn btn-ghost btn-xs" onclick="openSaisie('${emp.id}')" title="Ajouter note / heures sup">📝</button>
+          ${_tempsMap[emp.id] ? `<button class="btn btn-danger btn-xs" onclick="deleteTemps('${emp.id}')" title="Supprimer ajustements manuels">🗑</button>` : ''}
         </div>
       </td>
     </tr>`;
@@ -629,21 +685,19 @@ function renderAlertes() {
   var now = new Date();
   var isCurrentMonth = getMoisKey() === (now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0'));
 
-  _employes.forEach(emp => {
-    var t    = _tempsMap[emp.id];
+  _employes.forEach(function(emp) {
+    var d    = getMergedData(emp.id);
     var theo = heuresTheo(emp);
-    if (!t) {
+    if (d.source === 'vide') {
       if (isCurrentMonth && now.getDate() > 15) {
-        alertes.push({ type:'warn', msg:`${emp.prenom||''} ${emp.nom||''} : aucune saisie ce mois` });
+        alertes.push({ type:'warn', msg:(emp.prenom||'')+' '+(emp.nom||'')+' : aucun créneau planifié ce mois' });
       }
       return;
     }
-    var reel  = parseFloat(t.heuresTravaillees) || 0;
-    var sup   = parseFloat(t.heureSup) || 0;
-    var ecart = reel - theo;
-    if (sup > 10) alertes.push({ type:'warn', msg:`${emp.prenom||''} ${emp.nom||''} : ${sup}h sup. à traiter` });
-    if (ecart < -10) alertes.push({ type:'err', msg:`${emp.prenom||''} ${emp.nom||''} : ${Math.abs(ecart).toFixed(1)}h de déficit` });
-    if (reel > theo * 1.2) alertes.push({ type:'info', msg:`${emp.prenom||''} ${emp.nom||''} : dépassement ${(reel-theo).toFixed(1)}h (120%+)` });
+    var ecart = d.heures - theo;
+    if (d.sup > 10) alertes.push({ type:'warn', msg:(emp.prenom||'')+' '+(emp.nom||'')+' : '+d.sup+'h sup. à traiter' });
+    if (ecart < -10) alertes.push({ type:'err', msg:(emp.prenom||'')+' '+(emp.nom||'')+' : '+Math.abs(ecart).toFixed(1)+'h de déficit vs contrat' });
+    if (d.heures > theo * 1.2) alertes.push({ type:'info', msg:(emp.prenom||'')+' '+(emp.nom||'')+' : dépassement '+(d.heures-theo).toFixed(1)+'h (120%+)' });
   });
 
   if (!alertes.length) {
@@ -664,13 +718,10 @@ function renderAlertes() {
 function renderTop() {
   var body = document.getElementById('top-body');
   var ranked = _employes
-    .filter(emp => _tempsMap[emp.id] && parseFloat(_tempsMap[emp.id].heuresTravaillees) > 0)
-    .map(emp => ({
-      emp,
-      h: parseFloat(_tempsMap[emp.id].heuresTravaillees) || 0,
-      theo: heuresTheo(emp)
-    }))
-    .sort((a,b) => b.h - a.h);
+    .map(function(emp) { return { emp, d: getMergedData(emp.id), theo: heuresTheo(emp) }; })
+    .filter(function(r) { return r.d.heures > 0; })
+    .map(function(r) { return { emp: r.emp, h: r.d.heures, theo: r.theo }; })
+    .sort(function(a,b) { return b.h - a.h; });
 
   if (!ranked.length) {
     body.innerHTML = '<div style="font-size:12px;color:var(--muted);text-align:center;padding:10px 0">Aucune saisie ce mois</div>';
@@ -700,10 +751,11 @@ function renderChart() {
   if (_chartH) { try { _chartH.destroy(); } catch(e) {} }
 
   var labels = [], reels = [], theos = [];
-  _employes.forEach(emp => {
-    if (!_tempsMap[emp.id]) return;
+  _employes.forEach(function(emp) {
+    var d = getMergedData(emp.id);
+    if (d.source === 'vide') return;
     labels.push((emp.prenom||'').charAt(0)+'.'+(emp.nom||'').split(' ')[0]);
-    reels.push(parseFloat(_tempsMap[emp.id].heuresTravaillees)||0);
+    reels.push(d.heures);
     theos.push(heuresTheo(emp));
   });
 
@@ -730,82 +782,16 @@ function renderChart() {
 }
 
 // ══ SAISIE INLINE ══
-function onHInput(empId, field, value) {
-  if (!_modified[empId]) {
-    // Copier les données existantes
-    var ex = _tempsMap[empId] || {};
-    _modified[empId] = {
-      employeId: empId,
-      employeNom: getEmpNom(empId),
-      mois: getMoisKey(),
-      heuresTravaillees: parseFloat(ex.heuresTravaillees)||0,
-      joursPresence: parseFloat(ex.joursPresence)||0,
-      heureSup: parseFloat(ex.heureSup)||0,
-      absences: parseFloat(ex.absences)||0,
-      note: ex.note||''
-    };
-  }
-  var v = parseFloat(value.replace(',','.')) || 0;
-  _modified[empId][field] = v;
-
-  // Mettre à jour visuel input
-  ['inp-h-','inp-j-','inp-s-'].forEach(pfx => {
-    var el = document.getElementById(pfx+empId);
-    if (el) { el.className = 'h-input modified'; }
-  });
-
-  // Afficher badge + bouton sauvegarder
-  document.getElementById('unsaved-badge').style.display = '';
-  document.getElementById('btn-save-all').style.display  = '';
-
-  renderKpis();
-  renderAlertes();
-  renderTop();
-}
+function onHInput() {}
+function saveAll() {}
+function toggleAll() {}
 
 function getEmpNom(empId) {
   var emp = _employes.find(e => e.id === empId);
   return emp ? (emp.prenom||'')+' '+(emp.nom||'') : '';
 }
 
-async function saveAll() {
-  var ids = Object.keys(_modified);
-  if (!ids.length) return;
-  var btn = document.getElementById('btn-save-all');
-  btn.disabled = true; btn.textContent = '⏳ Sauvegarde…';
 
-  var ok = 0, err = 0;
-  for (var empId of ids) {
-    try {
-      var data = { ..._modified[empId], updatedAt: new Date().toISOString() };
-      var docId = getMoisKey() + '_' + empId;
-      await window._setDoc(window._doc(window._db, 'rh', window._uid, 'temps', docId), data);
-      _tempsMap[empId] = { id: docId, ...data };
-      delete _modified[empId];
-      // Feedback visuel
-      ['inp-h-','inp-j-','inp-s-'].forEach(pfx => {
-        var el = document.getElementById(pfx+empId);
-        if (el) el.className = 'h-input saved';
-      });
-      ok++;
-    } catch(e) { console.error(e); err++; }
-  }
-
-  document.getElementById('unsaved-badge').style.display = 'none';
-  btn.style.display = 'none';
-  btn.disabled = false; btn.textContent = '💾 Sauvegarder tout';
-  showToast(err ? `${ok} sauvegardé(s), ${err} erreur(s)` : `✅ ${ok} saisie(s) sauvegardée(s)`, err ? 'warn' : 'ok');
-  renderKpis();
-}
-
-function toggleAll() {
-  // Focus sur le premier input vide
-  var first = _employes.find(e => !_tempsMap[e.id] && !_modified[e.id]);
-  if (first) {
-    var el = document.getElementById('inp-h-'+first.id);
-    if (el) { el.focus(); el.select(); }
-  }
-}
 
 // ══ MODAL SAISIE DÉTAILLÉE ══
 function openSaisie(empId) {
@@ -815,7 +801,7 @@ function openSaisie(empId) {
     _employes.map(e => `<option value="${e.id}" ${e.id===empId?'selected':''}>${e.prenom||''} ${e.nom||''} — ${e.typeContrat||'CDI'} ${e.heuresHebdo||35}h</option>`).join('');
 
   if (empId) {
-    var t = _tempsMap[empId] || _modified[empId] || {};
+    var t = _tempsMap[empId] || {};
     document.getElementById('s-heures').value = t.heuresTravaillees || '';
     document.getElementById('s-jours').value  = t.joursPresence || '';
     document.getElementById('s-sup').value    = t.heureSup || '';
@@ -838,45 +824,45 @@ function onEmpChange() {
   var theo  = heuresTheo(emp);
   var recap = document.getElementById('s-recap');
   recap.style.display = '';
-  recap.innerHTML = `<div class="recap-row neutral">
-    <span style="font-size:11px;color:var(--muted)">Heures théoriques ce mois</span>
-    <span style="font-size:13px;font-weight:800">${fmtH(theo)}</span>
-  </div>`;
   calcEcart();
 }
 
 function calcEcart() {
   var empId = document.getElementById('s-emp').value;
   if (!empId) return;
-  var emp  = _employes.find(e => e.id === empId);
+  var emp  = _employes.find(function(e) { return e.id === empId; });
   if (!emp) return;
+  var d    = getMergedData(empId);
   var theo = heuresTheo(emp);
-  var reel = parseFloat(document.getElementById('s-heures').value.replace(',','.')) || 0;
-  var sup  = parseFloat(document.getElementById('s-sup').value.replace(',','.'))    || 0;
+  var reel = d.heures;
+  var sup  = parseFloat(document.getElementById('s-sup').value.replace(',','.')) || 0;
   var ecart = reel - theo;
   var recap = document.getElementById('s-recap');
   var cls   = ecart > 0 ? 'green' : ecart < 0 ? 'red' : 'neutral';
 
-  recap.innerHTML = `
-    <div class="recap-row neutral"><span style="font-size:11px;color:var(--muted)">Heures théoriques</span><span style="font-size:13px;font-weight:800">${fmtH(theo)}</span></div>
-    ${reel > 0 ? `<div class="recap-row ${cls}"><span style="font-size:11px;color:var(--muted)">Écart (réel - théo.)</span><span style="font-size:13px;font-weight:800">${ecart>0?'+':''}${fmtH(ecart)}</span></div>` : ''}
-    ${sup > 0 ? `<div class="recap-row orange"><span style="font-size:11px;color:var(--muted)">H. sup. déclarées</span><span style="font-size:13px;font-weight:800;color:#d97706">+${fmtH(sup)}</span></div>` : ''}
-  `;
+  recap.style.display = '';
+  recap.innerHTML =
+    '<div class="recap-row neutral"><span style="font-size:11px;color:var(--muted)">Heures planning ce mois</span><span style="font-size:13px;font-weight:800;color:var(--rh-main)">' + fmtH(reel) + ' (' + d.jours + ' j)</span></div>' +
+    '<div class="recap-row neutral"><span style="font-size:11px;color:var(--muted)">Heures théoriques contrat</span><span style="font-size:13px;font-weight:800">' + fmtH(theo) + '</span></div>' +
+    (reel > 0 ? '<div class="recap-row ' + cls + '"><span style="font-size:11px;color:var(--muted)">Écart</span><span style="font-size:13px;font-weight:800">' + (ecart>0?'+':'') + fmtH(ecart) + '</span></div>' : '') +
+    (sup > 0 ? '<div class="recap-row orange"><span style="font-size:11px;color:var(--muted)">H. sup.</span><span style="font-size:13px;font-weight:800;color:#d97706">+' + fmtH(sup) + '</span></div>' : '');
 }
 
 async function saveSaisie() {
   var empId = document.getElementById('s-emp').value;
   if (!empId) { showToast('Sélectionnez un employé', 'warn'); return; }
 
+  var merged = getMergedData(empId);
   var data = {
     employeId:         empId,
     employeNom:        getEmpNom(empId),
     mois:              getMoisKey(),
-    heuresTravaillees: parseFloat(document.getElementById('s-heures').value.replace(',','.')) || 0,
-    joursPresence:     parseFloat(document.getElementById('s-jours').value.replace(',','.'))  || 0,
+    heuresTravaillees: merged.heures,   // depuis planning
+    joursPresence:     merged.jours,    // depuis planning
     heureSup:          parseFloat(document.getElementById('s-sup').value.replace(',','.'))    || 0,
     absences:          parseFloat(document.getElementById('s-abs').value.replace(',','.'))    || 0,
     note:              document.getElementById('s-note').value.trim(),
+    source:            'planning+ajust',
     updatedAt:         new Date().toISOString()
   };
 
@@ -884,7 +870,6 @@ async function saveSaisie() {
     var docId = getMoisKey() + '_' + empId;
     await window._setDoc(window._doc(window._db, 'rh', window._uid, 'temps', docId), data);
     _tempsMap[empId] = { id: docId, ...data };
-    delete _modified[empId];
     closeModal('modal-saisie');
     render();
     showToast('✅ Saisie enregistrée', 'ok');
@@ -900,128 +885,22 @@ async function deleteTemps(empId) {
   try {
     await window._deleteDoc(window._doc(window._db, 'rh', window._uid, 'temps', docId));
     delete _tempsMap[empId];
-    delete _modified[empId];
     render();
     showToast('Saisie supprimée', 'ok');
   } catch(e) { showToast('Erreur : '+e.message, 'err'); }
 }
 
-// ══ IMPORT DEPUIS PLANNING ══
-async function importFromPlanning() {
-  var btn = document.getElementById('btn-import');
-  btn.disabled = true; btn.textContent = '⏳ Import…';
-
-  var y = _curMois.getFullYear(), m = _curMois.getMonth();
-  var nb = new Date(y, m+1, 0).getDate();
-
-  // Collecter toutes les clés de semaine du mois
-  var weekKeys = {};
-  for (var d = 1; d <= nb; d++) {
-    var dt = new Date(y, m, d);
-    var mon = new Date(dt);
-    var day = mon.getDay(), diff = (day===0) ? -6 : 1-day;
-    mon.setDate(mon.getDate()+diff);
-    mon.setHours(0,0,0,0);
-    var wk = mon.toISOString().slice(0,10).replace(/-/g,'');
-    weekKeys[wk] = true;
-  }
-
-  // Agréger heures par employé depuis le planning
-  var heuresParEmp = {}; // empId → {heures, jours}
-  _employes.forEach(emp => {
-    heuresParEmp[emp.id] = { heures: 0, jours: 0 };
-  });
-
-  var found = false;
-  for (var wk in weekKeys) {
-    try {
-      var snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'plan_'+wk));
-      snap.forEach(doc => {
-        // clé = YYYY-MM-DD_empId
-        var parts = doc.id.split('_');
-        var empId = parts[parts.length-1];
-        var dateStr = parts.slice(0, parts.length-1).join('_');
-        // Vérifier que le jour est dans le mois
-        var dt2 = new Date(dateStr+'T12:00:00');
-        if (dt2.getFullYear()!==y || dt2.getMonth()!==m) return;
-        if (!heuresParEmp[empId]) return;
-        var data = doc.data();
-        var items = (data.items||[]).filter(it => it.type==='travail');
-        if (!items.length) return;
-        found = true;
-        // Calculer heures du jour
-        var hJour = items.reduce((s, it) => {
-          if (it.plages && it.plages.length > 0) {
-            return s + it.plages.reduce((ps,p) => {
-              if (!p.deb||!p.fin) return ps;
-              var a=p.deb.split(':').map(Number), b=p.fin.split(':').map(Number);
-              return ps + Math.max(0,((b[0]*60+b[1])-(a[0]*60+a[1]))/60);
-            }, 0);
-          }
-          if (!it.deb||!it.fin) return s;
-          var a=it.deb.split(':').map(Number), b=it.fin.split(':').map(Number);
-          return s + Math.max(0,((b[0]*60+b[1])-(a[0]*60+a[1]))/60);
-        }, 0);
-        heuresParEmp[empId].heures += hJour;
-        heuresParEmp[empId].jours  += 1;
-      });
-    } catch(e) { /* semaine sans données */ }
-  }
-
-  btn.disabled = false; btn.textContent = '📅 Importer du planning';
-
-  if (!found) {
-    showToast('Aucun créneau planifié ce mois', 'warn');
-    return;
-  }
-
-  // Pré-remplir les inputs
-  var nbImported = 0;
-  _employes.forEach(emp => {
-    var h = heuresParEmp[emp.id];
-    if (!h || h.heures === 0) return;
-    if (!_modified[emp.id]) {
-      var ex = _tempsMap[emp.id] || {};
-      _modified[emp.id] = {
-        employeId: emp.id,
-        employeNom: getEmpNom(emp.id),
-        mois: getMoisKey(),
-        heuresTravaillees: Math.round(h.heures * 10) / 10,
-        joursPresence: h.jours,
-        heureSup: parseFloat(ex.heureSup)||0,
-        absences: parseFloat(ex.absences)||0,
-        note: ex.note||''
-      };
-    } else {
-      _modified[emp.id].heuresTravaillees = Math.round(h.heures * 10) / 10;
-      _modified[emp.id].joursPresence     = h.jours;
-    }
-    nbImported++;
-  });
-
-  if (nbImported > 0) {
-    document.getElementById('unsaved-badge').style.display = '';
-    document.getElementById('btn-save-all').style.display  = '';
-  }
-
-  renderTable();
-  renderKpis();
-  showToast(`📅 ${nbImported} employé(s) importé(s) depuis le planning — vérifiez puis sauvegardez`, 'ok');
-}
 
 // ══ RÉCAPITULATIF EXPORT ══
 function openExport() {
   document.getElementById('exp-titre').textContent = getMoisLabel();
   var body = document.getElementById('exp-body');
 
-  var rows = _employes.map(emp => {
-    var t    = _tempsMap[emp.id];
+  var rows = _employes.map(function(emp) {
+    var d    = getMergedData(emp.id);
     var theo = heuresTheo(emp);
-    var reel = parseFloat(t?.heuresTravaillees) || 0;
-    var jours= parseFloat(t?.joursPresence) || 0;
-    var sup  = parseFloat(t?.heureSup) || 0;
-    var ecart= reel > 0 ? reel - theo : null;
-    return { emp, theo, reel, jours, sup, ecart, note: t?.note||'' };
+    var ecart= d.heures > 0 ? d.heures - theo : null;
+    return { emp, theo, reel: d.heures, jours: d.jours, sup: d.sup, ecart, note: d.note, source: d.source };
   });
 
   var totalReel = rows.reduce((s,r)=>s+r.reel,0);
@@ -1081,26 +960,21 @@ function printRecap() {
 // ══ NAVIGATION MOIS ══
 function prevMois() {
   _curMois.setMonth(_curMois.getMonth()-1);
-  _modified = {};
   reloadAndRender();
 }
 function nextMois() {
   _curMois.setMonth(_curMois.getMonth()+1);
-  _modified = {};
   reloadAndRender();
 }
 function goToday() {
   _curMois = new Date();
   _curMois.setDate(1);
-  _modified = {};
   reloadAndRender();
 }
 
 async function reloadAndRender() {
   document.getElementById('tbody').innerHTML = '<tr><td colspan="9"><div class="loader"><div class="spin"></div><span>Chargement…</span></div></td></tr>';
-  document.getElementById('unsaved-badge').style.display = 'none';
-  document.getElementById('btn-save-all').style.display  = 'none';
-  await loadTemps();
+  await Promise.all([loadTempsFromPlanning(), loadTemps()]);
   render();
 }
 
@@ -1108,7 +982,9 @@ window.prevMois = prevMois; window.nextMois = nextMois; window.goToday = goToday
 window.openSaisie = openSaisie; window.saveSaisie = saveSaisie; window.deleteTemps = deleteTemps;
 window.onEmpChange = onEmpChange; window.calcEcart = calcEcart;
 window.saveAll = saveAll; window.toggleAll = toggleAll;
-window.importFromPlanning = importFromPlanning; window.openExport = openExport; window.printRecap = printRecap;
+window.onSupInput = onSupInput;
+window.openExport = openExport; window.printRecap = printRecap;
+window.reloadAndRender = reloadAndRender;
 
 // ══ UTILS ══
 function closeModal(id) { document.getElementById(id).classList.remove('show'); }
