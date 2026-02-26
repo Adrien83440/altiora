@@ -304,8 +304,23 @@ input[type=file]{display:none}
           </div>
           <div class="preview-wrap"><table class="preview-table" id="previewTable"></table></div>
         </div>
-        <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end">
-          <button class="btn btn-p" onclick="goStep(2)">Suivant &#8594; Mapper les colonnes</button>
+        <!-- Destination rapide pour Pilotage complet -->
+        <div id="dest-quick-bar" class="hidden" style="padding:12px 20px;border-top:1px solid var(--border);background:#faf5ff">
+          <div style="font-size:12px;font-weight:700;color:#6b21a8;margin-bottom:8px">🗂️ Feuilles à importer dans Pilotage :</div>
+          <div id="sheet-checklist" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-xs btn-outline" onclick="selectAllSheets()">Tout cocher</button>
+            <button class="btn btn-xs btn-outline" onclick="deselectAllSheets()">Tout décocher</button>
+            <span id="sheet-count" style="font-size:11px;color:var(--muted)"></span>
+          </div>
+        </div>
+        <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:12px;font-weight:600;color:var(--muted)">Destination :</span>
+            <button id="quick-dest-complet" class="btn btn-sm" style="border:2px solid #7c3aed;background:#f5f3ff;color:#7c3aed;font-weight:700" onclick="quickSetPilotageComplet()">🗂️ Tableau Pilotage complet</button>
+            <button id="quick-dest-mapping" class="btn btn-sm btn-outline" onclick="quickSetMapping()">🗺️ Autre destination →</button>
+          </div>
+          <button class="btn btn-p" id="step1-next-btn" onclick="goStep1Next()">Suivant &#8594;</button>
         </div>
       </div>
     </div>
@@ -1219,9 +1234,21 @@ function showPreview(filename){
     <tbody>${Array.from({length:maxRows},(_,i)=>`<tr>${_headers.map(h=>`<td>${_rows[i][h]??''}</td>`).join('')}</tr>`).join('')}</tbody>`;
   document.getElementById('previewCard').classList.remove('hidden');
   document.getElementById('parseControls').classList.remove('hidden');
-  // S'assurer que le bouton Appliquer est actif
   const applyBtn = document.getElementById('applyHeaderBtn');
   if(applyBtn){applyBtn.disabled=false;applyBtn.textContent='↺ Appliquer';}
+  // Afficher la barre de destination rapide si xlsx avec feuilles mensuelles
+  if(_wb) {
+    const monthKw = ['janv','fev','fév','mars','avr','mai','juin','juil','aout','août','sept','oct','nov','dec','déc'];
+    const hasMonthly = _wb.SheetNames.some(n => monthKw.some(k=>n.toLowerCase().includes(k)));
+    if(hasMonthly) {
+      // Auto-suggérer Pilotage complet
+      quickSetPilotageComplet();
+    } else {
+      // Afficher juste les boutons sans cocher
+      document.getElementById('quick-dest-mapping').style.cssText = 'border:2px solid #1a3dce;background:#eff6ff;color:#1a3dce;font-weight:700';
+      document.getElementById('step1-next-btn').textContent = 'Suivant → Mapper les colonnes';
+    }
+  }
   document.getElementById('uploadCard').classList.add('hidden');
   showToast(`✅ ${_rows.length} lignes chargées !`,'ok');
 }
@@ -1353,6 +1380,84 @@ function parseDateFull(v){
   return new Date().toISOString().slice(0,10);
 }
 
+
+
+// ── STEP 1 QUICK DESTINATION ──
+let _quickMode = 'mapping'; // 'pilotage_complet' or 'mapping'
+let _selectedSheets = new Set();
+
+function quickSetPilotageComplet() {
+  _quickMode = 'pilotage_complet';
+  _dest = 'pilotage_complet';
+  document.getElementById('quick-dest-complet').style.cssText = 'border:2px solid #7c3aed;background:#f5f3ff;color:#7c3aed;font-weight:700';
+  document.getElementById('quick-dest-mapping').style.cssText = 'border:2px solid var(--border);background:white;color:var(--text)';
+  document.getElementById('step1-next-btn').textContent = '🗂️ Prévisualiser l\'import →';
+  // Show sheet checklist if xlsx
+  if(_wb) buildSheetChecklist();
+}
+
+function quickSetMapping() {
+  _quickMode = 'mapping';
+  document.getElementById('quick-dest-complet').style.cssText = 'border:2px solid var(--border);background:white;color:var(--text);font-weight:400';
+  document.getElementById('quick-dest-mapping').style.cssText = 'border:2px solid #1a3dce;background:#eff6ff;color:#1a3dce;font-weight:700';
+  document.getElementById('step1-next-btn').textContent = 'Suivant → Mapper les colonnes';
+  document.getElementById('dest-quick-bar').classList.add('hidden');
+}
+
+function goStep1Next() {
+  if(!_rows.length && !_wb) { showToast("Chargez d'abord un fichier", 'err'); return; }
+  if(_quickMode === 'pilotage_complet') {
+    if(!_wb) { showToast('Le mode Pilotage complet nécessite un fichier XLSX', 'err'); return; }
+    showPilotageCompletPreview();
+  } else {
+    goStep(2);
+  }
+}
+
+function buildSheetChecklist() {
+  if(!_wb) return;
+  const bar = document.getElementById('dest-quick-bar');
+  const list = document.getElementById('sheet-checklist');
+  
+  // Detect monthly sheets
+  const monthKeywords = ['janv','fev','fév','mars','avr','mai','juin','juil','aout','août','sept','oct','nov','dec','déc'];
+  
+  bar.classList.remove('hidden');
+  _selectedSheets.clear();
+  
+  list.innerHTML = _wb.SheetNames.map(name => {
+    const isMonthly = monthKeywords.some(k => name.toLowerCase().includes(k));
+    if(isMonthly) _selectedSheets.add(name);
+    return `<label style="display:flex;align-items:center;gap:5px;padding:5px 10px;border:1.5px solid ${isMonthly?'#7c3aed':'var(--border)'};border-radius:7px;background:${isMonthly?'#f5f3ff':'white'};cursor:pointer;font-size:12px;font-weight:${isMonthly?'700':'400'}">
+      <input type="checkbox" ${isMonthly?'checked':''} onchange="toggleSheet('${name}',this.checked)" style="accent-color:#7c3aed"/>
+      ${name}
+    </label>`;
+  }).join('');
+  
+  updateSheetCount();
+}
+
+function toggleSheet(name, checked) {
+  if(checked) _selectedSheets.add(name);
+  else _selectedSheets.delete(name);
+  updateSheetCount();
+}
+
+function selectAllSheets() {
+  _wb.SheetNames.forEach(n => _selectedSheets.add(n));
+  buildSheetChecklist();
+}
+
+function deselectAllSheets() {
+  _selectedSheets.clear();
+  document.querySelectorAll('#sheet-checklist input[type=checkbox]').forEach(cb => cb.checked = false);
+  updateSheetCount();
+}
+
+function updateSheetCount() {
+  const el = document.getElementById('sheet-count');
+  if(el) el.textContent = `${_selectedSheets.size} feuille(s) sélectionnée(s)`;
+}
 
 // ══════════════════════════════════════════════════════════════
 // IMPORT TABLEAU PILOTAGE COMPLET (format multi-sections)
@@ -1486,16 +1591,22 @@ function parsePilotageSheet(sheetName) {
 function showPilotageCompletPreview() {
   if(!_wb) { showToast('Chargez un fichier XLSX', 'err'); return; }
   
-  // Détecter les feuilles mensuelles
-  const monthlySheets = _wb.SheetNames.filter(name => {
-    const nl = name.toLowerCase();
-    return ['janv','fevr','fév','mars','avri','mai','juin','juil','aout','août','sept','octo','nove','dece','déc'].some(m=>nl.includes(m));
-  });
+  // Utiliser les feuilles sélectionnées par l'utilisateur
+  let sheetsToImport = [];
+  if(_selectedSheets && _selectedSheets.size > 0) {
+    sheetsToImport = [..._selectedSheets];
+  } else {
+    // Fallback: feuilles mensuelles auto-détectées
+    sheetsToImport = _wb.SheetNames.filter(name => {
+      const nl = name.toLowerCase();
+      return ['janv','fevr','fév','mars','avri','mai','juin','juil','aout','août','sept','octo','nove','dece','déc'].some(m=>nl.includes(m));
+    });
+  }
 
-  if(!monthlySheets.length) { showToast('Aucune feuille mensuelle détectée', 'err'); return; }
+  if(!sheetsToImport.length) { showToast('Aucune feuille sélectionnée', 'err'); return; }
 
-  // Parser toutes les feuilles mensuelles
-  const allData = monthlySheets.map(s => parsePilotageSheet(s)).filter(Boolean);
+  // Parser les feuilles sélectionnées
+  const allData = sheetsToImport.map(s => parsePilotageSheet(s)).filter(Boolean);
   _pilotagePreviewData = allData;
 
   // Calculer totaux
