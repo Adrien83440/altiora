@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { url, gid, analyze = false } = req.body || {};
+  const { url, gid, analyze = false, headerRow = 1 } = req.body || {};
   if (!url) return res.status(400).json({ error: 'URL manquante' });
 
   const GOOGLE_API_KEY = process.env.GOOGLE_SHEETS_API_KEY;
@@ -85,10 +85,12 @@ export default async function handler(req, res) {
   const lines = csvText.split(/\r?\n/).filter(l => l.trim());
   if (lines.length < 2) return res.status(400).json({ error: 'Onglet vide ou sans données' });
 
-  const firstLine = lines[0];
+  // Ligne d'en-tête configurable (1-based), par défaut ligne 1
+  const headerIdx = Math.max(0, (parseInt(headerRow) || 1) - 1);
+  const firstLine = lines[headerIdx] || lines[0];
   const sep = firstLine.split(';').length > firstLine.split(',').length ? ';' : ',';
-  const headers = splitCsvLine(lines[0], sep).filter(h => h);
-  const rows = lines.slice(1)
+  const headers = splitCsvLine(firstLine, sep).filter(h => h);
+  const rows = lines.slice(headerIdx + 1)
     .map(l => {
       const vals = splitCsvLine(l, sep);
       const obj = {};
