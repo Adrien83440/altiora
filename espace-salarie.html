@@ -157,7 +157,7 @@
     /* CAL */
     .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;}
     .cal-hdr{font-size:9.5px;font-weight:700;color:var(--muted);padding:2px 0;}
-    .cal-day{aspect-ratio:1;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;}
+    .cal-day{aspect-ratio:1;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:500;} .cal-day.work{font-weight:600;} .cal-day.off{opacity:0.4;}
     .cal-day.today{outline:2px solid var(--g3);font-weight:800;}
     .cal-day.abs{color:white;font-weight:700;}
     .cal-day.abs-pending{opacity:.6;}
@@ -576,6 +576,14 @@ function renderCal() {
   var firstDow = (new Date(y,m,1).getDay()+6)%7;
   document.getElementById('cal-title').textContent = new Date(y,m,1).toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
 
+  // Planning de travail depuis _params.horaires
+  var DOW_KEY = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+  var horaires = (_params && _params.horaires) || {
+    lundi:{actif:true}, mardi:{actif:true}, mercredi:{actif:true},
+    jeudi:{actif:true}, vendredi:{actif:true}, samedi:{actif:false}, dimanche:{actif:false}
+  };
+
+  // Map des absences
   var map = {};
   _demandes.filter(function(d) { return d.statut==='approved'||d.statut==='pending'; }).forEach(function(d) {
     if (!d.dateDebut) return;
@@ -590,33 +598,50 @@ function renderCal() {
 
   var today = new Date();
   var hdrs = ['L','M','M','J','V','S','D'];
-  var html = '';
-  hdrs.forEach(function(h) { html += '<div class="cal-hdr">'+h+'</div>'; });
-  for (var i=0; i<firstDow; i++) html += '<div></div>';
+  var calHtml = '';
+  hdrs.forEach(function(h) { calHtml += '<div class="cal-hdr">'+h+'</div>'; });
+  for (var i=0; i<firstDow; i++) calHtml += '<div></div>';
+
   for (var d=1; d<=nb; d++) {
     var dow = (firstDow+d-1)%7;
-    var we  = dow >= 5;
+    var jourKey = DOW_KEY[dow];
+    var travaille = horaires[jourKey] && horaires[jourKey].actif;
     var abs = map[d];
     var isToday = d===today.getDate() && m===today.getMonth() && y===today.getFullYear();
-    var bg  = abs ? COLORS[abs.type] : 'transparent';
-    var cls = 'cal-day'+(isToday?' today':'')+(we?' we':'')+(abs?' abs':'')+(abs&&abs.pending?' abs-pending':'');
-    var col = abs ? 'white' : (we ? '#d1d5db' : 'var(--text)');
-    var ttl = abs ? LABELS[abs.type]+(abs.pending?' (en attente)':'') : '';
-    html += '<div class="'+cls+'" style="background:'+bg+';color:'+col+'" title="'+ttl+'">'+d+'</div>';
+    var bg, col, ttl='', cls='cal-day';
+    if (isToday) cls += ' today';
+    if (abs) {
+      bg  = abs.pending ? (COLORS[abs.type]+'bb') : COLORS[abs.type];
+      col = 'white';
+      ttl = LABELS[abs.type]+(abs.pending?' (en attente)':'');
+      cls += ' abs'+(abs.pending?' abs-pending':'');
+    } else if (travaille) {
+      bg  = 'rgba(5,150,105,0.10)';
+      col = '#059669';
+      var h = horaires[jourKey];
+      ttl = 'Jour travaillé'+(h.deb&&h.fin?' · '+h.deb+' – '+h.fin:'');
+      cls += ' work';
+    } else {
+      bg  = 'transparent';
+      col = '#d1d5db';
+      cls += ' off';
+    }
+    var style = 'background:'+bg+';color:'+col+';';
+    if (isToday) style += 'outline:2px solid #059669;outline-offset:-2px;';
+    calHtml += '<div class="'+cls+'" style="'+style+'" title="'+ttl+'">'+d+'</div>';
   }
-  document.getElementById('cal-grid').innerHTML = html;
+  document.getElementById('cal-grid').innerHTML = calHtml;
 
   var usedTypes = {};
   _demandes.filter(function(d) {
     return d.dateDebut && new Date(d.dateDebut+'T12:00:00').getMonth()===m && new Date(d.dateDebut+'T12:00:00').getFullYear()===y;
   }).forEach(function(d) { usedTypes[d.type]=true; });
-  document.getElementById('cal-legend').innerHTML = Object.keys(usedTypes).map(function(t) {
-    return '<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)">'
-      +'<div style="width:9px;height:9px;border-radius:2px;background:'+(COLORS[t]||'#6b7280')+'"></div>'+(LABELS[t]||t)
-      +'</div>';
+  var legHtml = '<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)"><div style="width:9px;height:9px;border-radius:2px;background:rgba(5,150,105,0.3)"></div>Travaillé</div>';
+  legHtml += Object.keys(usedTypes).map(function(t) {
+    return '<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)"><div style="width:9px;height:9px;border-radius:2px;background:'+(COLORS[t]||'#6b7280')+'"></div>'+(LABELS[t]||t)+'</div>';
   }).join('');
+  document.getElementById('cal-legend').innerHTML = legHtml;
 }
-
 function prevM() { _calMonth.setMonth(_calMonth.getMonth()-1); renderCal(); }
 function nextM() { _calMonth.setMonth(_calMonth.getMonth()+1); renderCal(); }
 window.prevM=prevM; window.nextM=nextM;
