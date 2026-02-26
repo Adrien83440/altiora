@@ -282,13 +282,25 @@ input[type=file]{display:none}
           <div class="card-title">&#128065;&#65039; Aper&#231;u du fichier <span id="previewFilename" style="font-size:11px;color:var(--muted);font-weight:500;margin-left:8px"></span></div>
           <div style="display:flex;gap:8px;align-items:center">
             <span id="previewStats" style="font-size:11px;color:var(--muted)"></span>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:11px;font-weight:600;color:var(--text)">Ligne d'en-tête :</span>
+              <input type="number" id="headerRowInput" value="1" min="1" max="20" style="width:46px;padding:3px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:12px;font-weight:700;text-align:center" title="Numéro de la ligne contenant les noms de colonnes (1=première ligne)"/>
+              <button class="btn btn-xs btn-outline" onclick="applyHeaderRow()" style="font-size:11px;padding:3px 8px">↺ Appliquer</button>
+            </div>
             <button class="btn btn-o btn-xs" onclick="resetFile()">&#x2715; Changer</button>
           </div>
         </div>
         <div class="card-body" style="padding:0">
-          <div id="sheetSelector" class="hidden" style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
-            <span style="font-size:12px;font-weight:600">Feuille :</span>
-            <select id="sheetSelect" class="map-sel" style="width:200px" onchange="selectSheet()"></select>
+          <div id="sheetSelector" class="hidden" style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:12px;font-weight:600">Feuille :</span>
+              <select id="sheetSelect" class="map-sel" style="width:200px" onchange="selectSheet()"></select>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:12px;font-weight:600">Ligne d'en-tête :</span>
+              <input type="number" id="headerRowInput" value="1" min="1" max="20" style="width:56px;padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-weight:700;text-align:center" onchange="selectSheet()" title="Numéro de la ligne contenant les noms de colonnes (1 = première ligne)"/>
+              <span style="font-size:11px;color:var(--muted)">(1 = 1ère ligne)</span>
+            </div>
           </div>
           <div class="preview-wrap"><table class="preview-table" id="previewTable"></table></div>
         </div>
@@ -470,7 +482,7 @@ const DEST_FIELDS = {
 };
 
 // ── ÉTAT GLOBAL ──
-let _wb=null, _headers=[], _rows=[], _mapping={}, _ignored=new Set(), _dest='ca', _fmt='xlsx', _currentStep=1;
+let _wb=null, _headers=[], _rows=[], _mapping={}, _ignored=new Set(), _dest='ca', _fmt='xlsx', _currentStep=1, _gsRawData=null, _gsLastUrl=null, _gsLastGid=null, _gsLastName=null;
 
 // ── NAVIGATION SIDEBAR ──
 function toggleNav(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('on')}
@@ -538,14 +550,49 @@ function readXLSX(file){
   };
   reader.readAsBinaryString(file);
 }
+async function applyHeaderRow(){
+  if(_wb){
+    // Fichier local XLSX
+    const idx = parseInt(document.getElementById('sheetSelect')?.value)||0;
+    parseSheet(idx, '');
+  } else if(_gsLastUrl) {
+    // Google Sheets : re-fetch avec la bonne ligne d'en-tête
+    const btn = document.querySelector('[onclick="applyHeaderRow()"]');
+    if(btn){btn.textContent='⏳';btn.disabled=true;}
+    try{
+      const headerRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
+      const r = await fetch('/api/fetch-sheet', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({url:_gsLastUrl, gid:_gsLastGid, analyze:false, headerRow})
+      });
+      const data = await r.json();
+      if(!r.ok||!data.success) throw new Error(data.error||'Erreur');
+      _headers = data.headers;
+      _rows = data.rows;
+      showPreview('Google Sheets — ' + (_gsLastName||''));
+    }catch(e){ showToast('Erreur : '+e.message,'err'); }
+    finally{ if(btn){btn.textContent='↺ Appliquer';btn.disabled=false;} }
+  }
+}
+
 function selectSheet(){const idx=parseInt(document.getElementById('sheetSelect').value);parseSheet(idx,'')}
 function parseSheet(idx,filename){
   const ws=_wb.Sheets[_wb.SheetNames[idx]];
   const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
   if(!data.length){showToast('Feuille vide','err');return}
-  _headers=data[0].map(h=>String(h).trim()).filter(h=>h);
-  _rows=data.slice(1).filter(r=>r.some(c=>c!=='')).map(r=>{const obj={};_headers.forEach((h,i)=>obj[h]=r[i]);return obj;});
-  showPreview(filename||_wb.SheetNames[document.getElementById('sheetSelect').value||0]);
+  // Ligne d'en-tête configurable (1-based)
+  const headerRowNum = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
+  const headerRowIdx = headerRowNum - 1;
+  // Construire les headers en combinant plusieurs lignes si besoin (ignore lignes vides avant)
+  const rawHeaders = data[headerRowIdx] || data[0];
+  _headers = rawHeaders.map(h=>String(h).trim()).filter(h=>h);
+  _rows = data.slice(headerRowIdx+1).filter(r=>r.some(c=>c!==''&&c!==0)).map(r=>{
+    const obj={};
+    _headers.forEach((h,i)=>obj[h]=r[i]===undefined?'':r[i]);
+    return obj;
+  });
+  showPreview(filename||_wb.SheetNames[idx]||'');
 }
 function readCSV(file){
   const reader=new FileReader();
@@ -706,12 +753,23 @@ async function loadSelectedTab() {
       const r = await fetch('/api/fetch-sheet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, gid, analyze: true })
+        body: JSON.stringify({ url, gid, analyze: true, headerRow: Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1) })
       });
       const data = await r.json();
       if (!r.ok || !data.success) throw new Error(data.error || 'Erreur serveur');
-      _headers = data.headers;
-      _rows = data.rows;
+      // Appliquer la ligne d'en-tête configurée
+      const gsHeaderRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1) - 1;
+      if(gsHeaderRow > 0 && data.allRows) {
+        // Si l'API renvoie allRows, recalculer depuis la bonne ligne
+        const rawH = data.allRows[gsHeaderRow] || data.allRows[0];
+        _headers = rawH.map(h=>String(h).trim()).filter(h=>h);
+        _rows = data.allRows.slice(gsHeaderRow+1).filter(r=>Object.values(r).some(c=>c!==''&&c!==null)).map(r=>{
+          const obj={};_headers.forEach((h,i)=>obj[h]=Array.isArray(r)?r[i]:r[h]);return obj;
+        });
+      } else {
+        _headers = data.headers;
+        _rows = data.rows;
+      }
       showPreview('Google Sheets — ' + name);
       if (data.aiAnalysis) applyAiAnalysis(data.aiAnalysis);
     } catch (e) {
