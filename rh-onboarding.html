@@ -463,7 +463,8 @@ var TASKS_ONBOARDING=[
     {id:'mutuelle',label:'Adhésion mutuelle / prévoyance transmise au salarié'},
     {id:'pieces',label:'Collecte des pièces justificatives (CNI, RIB, attestation SS)'},
     {id:'dossier-employe',label:'Création du dossier salarié dans le module Employés'},
-    {id:'visite-med',label:'Visite médicale d\'embauche planifiée'}
+    {id:'visite-med',label:'Visite médicale d\'embauche planifiée'},
+    {id:'droit-image',label:'Droit à l\'image : signature si l\'entreprise dispose de caméras ou utilise des photos/vidéos du salarié',note:'Obligatoire si présence de caméras de surveillance ou usage d\'images à des fins de communication'}
   ]},
   {phase:'J-15',label:'15 jours avant',emoji:'🗓',color:'#6366f1',tag:'tag-on',tasks:[
     {id:'planning-j1',label:'Planning du 1er jour communiqué au salarié'},
@@ -653,6 +654,7 @@ function renderOnboarding(d){
           +'</div>'
         +'</div>'
         +'<div style="display:flex;gap:6px">'
+          +(d.empId?'<a href="rh-employes.html" class="btn btn-rh btn-sm" title="Voir la fiche employé">👤 Fiche employé</a>':'')
           +'<button class="btn btn-ghost btn-sm" onclick="archiveDossier(\''+d.id+'\')">📦 Archiver</button>'
           +'<button class="btn btn-danger btn-sm" onclick="deleteDossier(\''+d.id+'\')">🗑</button>'
         +'</div>'
@@ -1108,6 +1110,8 @@ async function createDossier(type){
     };
     closeModal('modal-on');
     clearModalOn();
+    // ── Création automatique de la fiche employé ──
+    await createEmployeFromOnboarding(d, id);
   } else {
     var prenom=document.getElementById('off-prenom').value.trim();
     var nom=document.getElementById('off-nom').value.trim();
@@ -1135,6 +1139,71 @@ async function createDossier(type){
   else renderList();
   updateCounts();
   openDossier(id);
+}
+
+// ── CRÉATION AUTOMATIQUE FICHE EMPLOYÉ ──
+async function createEmployeFromOnboarding(dossier, dossierId){
+  if(!window._uid) return;
+  var empId = 'emp_' + Date.now();
+  var publicId = 'emp_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+
+  // Couleurs pour l'avatar (rotation)
+  var colors=['#059669','#0ea5e9','#6366f1','#f59e0b','#ec4899','#14b8a6','#8b5cf6','#ef4444'];
+  var couleur = colors[Math.floor(Math.random()*colors.length)];
+
+  var empData={
+    prenom: dossier.prenom,
+    nom: dossier.nom,
+    poste: dossier.poste||null,
+    email: dossier.email||null,
+    typeContrat: dossier.contrat||'CDI',
+    dateEntree: dossier.dateJ||null,
+    heuresHebdo: 35,
+    frequence: 'mensuel',
+    categoriePoste: 'employe',
+    statut: 'actif',
+    couleur: couleur,
+    publicId: publicId,
+    onboardingId: dossierId,   // lien retour vers le dossier onboarding
+    periodeEssai: {active:false},
+    documents: [],
+    evaluations: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    // Champs vides à compléter plus tard
+    dateNaissance: null, nationalite: null, adresse: null,
+    telephone: null, nss: null, departement: null,
+    dateFinContrat: null, salaireBrut: null, salaireNet: null,
+    salaireSuperBrut: null, iban: null, ccn: null,
+    photoURL: null, noteMoyenne: null
+  };
+
+  var publicData={
+    uid: window._uid,
+    empId: empId,
+    prenom: dossier.prenom||'',
+    nom: dossier.nom||'',
+    poste: dossier.poste||'',
+    departement: '',
+    typeContrat: dossier.contrat||'CDI',
+    couleur: couleur,
+    dateEntree: dossier.dateJ||'',
+    cpAjustAcquis: 0,
+    rttAjust: 0,
+    recupHeures: 0
+  };
+
+  try{
+    await window._setDoc(window._doc(window._db,'rh',window._uid,'employes',empId), empData);
+    await window._setDoc(window._doc(window._db,'rh_employes_public',publicId), publicData);
+    // Stocker l'empId dans le dossier pour lien retour
+    _dossiers[dossierId].empId = empId;
+    await window._setDoc(window._doc(window._db,'rh_onboarding',window._uid,'dossiers',dossierId), {empId: empId},{merge:true});
+    showToast('👤 Fiche employé créée automatiquement','ok');
+  }catch(e){
+    console.error('Erreur création employé:',e);
+    showToast('⚠️ Dossier créé, fiche employé à créer manuellement','warn');
+  }
 }
 
 // ── CALCULS ──
