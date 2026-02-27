@@ -47,6 +47,12 @@
     .filter-sel:focus{border-color:var(--rh-main);}
     .emp-list{flex:1;overflow-y:auto;}
     .emp-item{display:flex;align-items:center;gap:9px;padding:10px 14px;cursor:pointer;border-left:3px solid transparent;transition:all .15s;}
+    .emp-item[draggable="true"]{user-select:none;}
+    .emp-item.drag-over{background:#e0f2fe;border-left-color:#0ea5e9;transform:scale(1.01);}
+    .emp-item.dragging{opacity:0.4;background:#f0fdf4;}
+    .drag-handle{font-size:14px;color:#d1d5db;cursor:grab;flex-shrink:0;padding:0 2px;transition:color .15s;}
+    .drag-handle:hover{color:#6b7280;}
+    .drag-handle:active{cursor:grabbing;}
     .emp-item:hover{background:#fafffe;}
     .emp-item.active{background:var(--rh-ghost);border-left-color:var(--rh-main);}
     .emp-av{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:white;flex-shrink:0;position:relative;}
@@ -781,7 +787,15 @@ function renderList() {
       if (j>=0 && j<=30) expireSoon = true;
     }
 
-    return `<div class="emp-item ${_currentId===e.id?'active':''} ${archived?'archived':''}" onclick="openFiche('${e.id}')">
+    return `<div class="emp-item ${_currentId===e.id?'active':''} ${archived?'archived':''}"
+      draggable="true"
+      data-id="${e.id}"
+      onclick="handleEmpItemClick(event,'${e.id}')"
+      ondragstart="onDragStart(event,'${e.id}')"
+      ondragover="onDragOver(event)"
+      ondragleave="onDragLeave(event)"
+      ondrop="onDrop(event,'${e.id}')">
+      <span class="drag-handle" title="Déplacer" onclick="event.stopPropagation()">⠿</span>
       <div class="emp-av" style="background:${color}">
         ${e.photoURL ? `<img src="${e.photoURL}" alt="${nom}" onerror="this.style.display='none'"/>` : ''}
         <div class="emp-av-fallback" style="background:${color}">${init}</div>
@@ -810,6 +824,113 @@ function toggleArchived() {
 // ══════════════════════════
 // FICHE
 // ══════════════════════════
+// ── DRAG & DROP ──────────────────────────────────────────────────────────────
+let _dragId = null;
+let _dragOrder = []; // ordre personnalisé [{id, order}]
+
+function handleEmpItemClick(e, id) {
+  if (e.target.classList.contains('drag-handle')) return;
+  openFiche(id);
+}
+
+function onDragStart(e, id) {
+  _dragId = id;
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', id);
+}
+
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const item = e.currentTarget;
+  if (!item.classList.contains('dragging')) {
+    item.classList.add('drag-over');
+  }
+}
+
+function onDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function onDrop(e, targetId) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!_dragId || _dragId === targetId) { _dragId = null; return; }
+
+  // Réorganiser l'ordre dans _employes
+  const list = document.getElementById('emp-list');
+  const allItems = [...list.querySelectorAll('.emp-item[data-id]')];
+  const ids = allItems.map(el => el.dataset.id);
+
+  const fromIdx = ids.indexOf(_dragId);
+  const toIdx   = ids.indexOf(targetId);
+  if (fromIdx === -1 || toIdx === -1) { _dragId = null; return; }
+
+  // Appliquer le nouvel ordre
+  ids.splice(fromIdx, 1);
+  ids.splice(toIdx, 0, _dragId);
+
+  // Persister l'ordre localement + mettre à jour l'affichage
+  _empOrder = ids;
+  _dragId = null;
+
+  // Re-render avec le nouvel ordre
+  renderListOrdered(ids);
+}
+
+// Ordre personnalisé (stocké en mémoire — reset au reload)
+let _empOrder = null;
+
+function renderListOrdered(orderedIds) {
+  const list = document.getElementById('emp-list');
+  const ordered = orderedIds.map(id => _employes[id]).filter(Boolean);
+
+  // Recréer les items dans le nouvel ordre
+  list.innerHTML = ordered.map(e => {
+    const nom = `${e.prenom||''} ${e.nom||''}`.trim()||'Employé';
+    const init = nom.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    const color = e.couleur || COLORS[0];
+    const badgeCls = getBadgeCls(e.typeContrat);
+    const archived = e.statut==='archive';
+    let expireSoon = false;
+    if (e.typeContrat==='CDD' && e.dateFinContrat) {
+      const j = Math.ceil((new Date(e.dateFinContrat)-Date.now())/86400000);
+      if (j>=0 && j<=30) expireSoon = true;
+    }
+    return `<div class="emp-item ${_currentId===e.id?'active':''} ${archived?'archived':''}"
+      draggable="true" data-id="${e.id}"
+      onclick="handleEmpItemClick(event,'${e.id}')"
+      ondragstart="onDragStart(event,'${e.id}')"
+      ondragover="onDragOver(event)"
+      ondragleave="onDragLeave(event)"
+      ondrop="onDrop(event,'${e.id}')">
+      <span class="drag-handle" title="Déplacer" onclick="event.stopPropagation()">⠿</span>
+      <div class="emp-av" style="background:${color}">
+        ${e.photoURL ? `<img src="${e.photoURL}" alt="${nom}" onerror="this.style.display='none'"/>` : ''}
+        <div class="emp-av-fallback" style="background:${color}">${init}</div>
+      </div>
+      <div class="emp-info">
+        <div class="emp-name">${nom}</div>
+        <div class="emp-sub">${e.poste||'—'}${e.departement?' · '+e.departement:''}</div>
+      </div>
+      <span class="emp-badge ${expireSoon?'b-expire':badgeCls}">${expireSoon?'⚠️ CDD':e.typeContrat||'CDI'}</span>
+    </div>`;
+  }).join('');
+
+  // Réactiver fin de drag
+  list.querySelectorAll('.emp-item[draggable]').forEach(el => {
+    el.addEventListener('dragend', () => el.classList.remove('dragging'));
+  });
+}
+
+window.handleEmpItemClick = handleEmpItemClick;
+window.onDragStart = onDragStart;
+window.onDragOver = onDragOver;
+window.onDragLeave = onDragLeave;
+window.onDrop = onDrop;
+
+
 function openFiche(id) {
   _currentId = id;
   renderList(); // update active state
@@ -1099,166 +1220,277 @@ function renderStars(note) {
 //          pauseApres (h → déclenchement pause), pauseMin (min), note (info clé)
 // ─────────────────────────────────────────────────────────────────────────────
 const CCN_RULES = {
-
-  // ── CODE DU TRAVAIL (référence de base) ──────────────────────────────────
-  'droit_commun': {
-    label:'Code du travail', idcc:null,
+  "droit_commun": {
+    label:"Code du travail", idcc:null,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'Art. L3121-18 : 10h/j max · Art. L3121-20 : 48h/sem · Art. L3121-33 : pause 20 min après 6h'
+    note:"Art. L3121-18 : 10h/j max · Art. L3121-20 : 48h/sem · Art. L3121-33 : pause 20 min après 6h",
+    primes:[], anciennete:[], treizieme:false, mutuelle:"Selon accord", congesPayes:25, rtts:0
   },
-
-  // ── HÉBERGEMENT / RESTAURATION ───────────────────────────────────────────
-  'chr': {
-    label:'Hôtels-Cafés-Restaurants (CHR)', idcc:1979,
+  "chr": {
+    label:"Hôtels-Cafés-Restaurants (CHR)", idcc:1979,
     jourMax:11.5, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    reposHebdo:35, // repos hebdo consécutif minimum
-    note:'IDCC 1979 · Amplitude 13h max · Repos hebdo 2j consécutifs possible · HS majorées 10% dès 36h'
+    note:"IDCC 1979 · Amplitude 13h max · HS majorées 10% dès 36h · Repos hebdo 2j consécutifs",
+    primes:[
+      {nom:"Indemnité nourriture", montant:"4,10 €/repas", obligatoire:true, note:"En nature ou compensatrice (1 à 2 repas/jour selon poste)"},
+      {nom:"Majoration nuit", montant:"+10% min", obligatoire:true, note:"Travail entre 22h et 7h"},
+      {nom:"Prime dimanche", montant:"+10% min", obligatoire:true, note:"Si travail habituel le dimanche"},
+      {nom:"Prime ancienneté", montant:"Voir grille CCN", obligatoire:true, note:"Dès 1 an : +1% du SMIC · 2 ans : +2% · etc."}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:4},{annees:10,pct:6},{annees:15,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire (OCIANE, MUTEX…)", congesPayes:25, rtts:0
   },
-  'restauration_rapide': {
-    label:'Restauration rapide', idcc:1501,
+  "restauration_rapide": {
+    label:"Restauration rapide", idcc:1501,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 1501 · Modulation annuelle possible · Temps partiel fréquent (plannings variables)'
+    note:"IDCC 1501 · Modulation annuelle possible · Temps partiel fréquent (plannings variables)",
+    primes:[
+      {nom:"Indemnité nourriture", montant:"3,88 €/repas", obligatoire:true, note:"Si pas de repas gratuit fourni"},
+      {nom:"Prime habillage", montant:"~1% du salaire mensuel", obligatoire:false, note:"Si tenue obligatoire imposée par l'employeur"},
+      {nom:"Majoration heures de nuit", montant:"+10%", obligatoire:true, note:"Entre 21h et 6h"}
+    ],
+    anciennete:[{annees:3,pct:1},{annees:5,pct:2},{annees:8,pct:3},{annees:12,pct:4}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-
-  // ── COMMERCE / DISTRIBUTION ──────────────────────────────────────────────
-  'commerce': {
-    label:'Commerce de détail non alimentaire', idcc:1517,
+  "commerce": {
+    label:"Commerce de détail non alimentaire", idcc:1517,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 1517 · Modulation · Dimanche exceptionnel possible'
+    note:"IDCC 1517 · Modulation · Dimanche exceptionnel possible",
+    primes:[
+      {nom:"Prime ancienneté", montant:"3% dès 3 ans", obligatoire:true, note:"3% à 3 ans · 6% à 6 ans · 9% à 9 ans · +1%/an"},
+      {nom:"Prime de dimanche", montant:"+25%", obligatoire:true, note:"Si travail habituel le dimanche"},
+      {nom:"Prime de panier", montant:"Selon accord", obligatoire:false, note:"Si plus de 6h de travail effectif"}
+    ],
+    anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9},{annees:12,pct:12},{annees:15,pct:15}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-  'commerce_alimentaire': {
-    label:'Commerce alimentaire (supermarchés)', idcc:2216,
+  "commerce_alimentaire": {
+    label:"Commerce alimentaire (supermarchés)", idcc:2216,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 2216 · Travail dominical fréquent · Pause payée 20 min après 6h'
+    note:"IDCC 2216 · Travail dominical fréquent · Pause payée 20 min après 6h",
+    primes:[
+      {nom:"Prime de dimanche", montant:"+25% ou +30%", obligatoire:true, note:"Selon avenant ou accord d'entreprise"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de vacances", montant:"1/10e des congés", obligatoire:true, note:"Versée avec le salaire de juin"},
+      {nom:"Indemnité repas", montant:"Selon accord", obligatoire:false, note:"Pour temps de travail supérieur à 6h"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8},{annees:15,pct:10}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-  'grande_distribution': {
-    label:'Grande distribution', idcc:2216,
+  "grande_distribution": {
+    label:"Grande distribution", idcc:2216,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 2216 · Amplitude max 12h · Repos hebdo dimanche si possible'
+    note:"IDCC 2216 · Amplitude max 12h · Repos hebdo dimanche si possible",
+    primes:[
+      {nom:"Prime de dimanche", montant:"+25% ou +30%", obligatoire:true, note:"Selon accord d'entreprise"},
+      {nom:"Prime ancienneté", montant:"+2% à +10%", obligatoire:true, note:"Progression par paliers de 3 ans"},
+      {nom:"13e mois", montant:"1 mois de salaire brut", obligatoire:true, note:"Généralement versé en novembre/décembre"},
+      {nom:"Prime de vacances", montant:"1/10e masse congés", obligatoire:true, note:"Versée en juin"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8},{annees:15,pct:10}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-
-  // ── BOULANGERIE / ALIMENTATION ───────────────────────────────────────────
-  'boulangerie': {
-    label:'Boulangerie-Pâtisserie artisanale', idcc:843,
+  "boulangerie": {
+    label:"Boulangerie-Pâtisserie artisanale", idcc:843,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 843 · Travail de nuit courant (panification) · Majoration nuit +25% · Repos hebdo lundi fréquent'
+    note:"IDCC 843 · Travail de nuit courant · Majoration nuit +25% · Repos hebdo lundi fréquent",
+    primes:[
+      {nom:"Prime de nuit", montant:"+25% min", obligatoire:true, note:"Travail avant 5h ou après 21h"},
+      {nom:"Prime dimanche et jours fériés", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche/férié travaillé"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Indemnité repas", montant:"5,12 €/repas", obligatoire:true, note:"Si repas pris sur le lieu de travail"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire (PROBTP ou autre)", congesPayes:25, rtts:0
   },
-  'patisserie': {
-    label:'Pâtisserie (entreprises artisanales)', idcc:1267,
+  "patisserie": {
+    label:"Pâtisserie (entreprises artisanales)", idcc:1267,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 1267 · Nuit possible · Dimanche travaillé majoré'
+    note:"IDCC 1267 · Nuit possible · Dimanche travaillé majoré",
+    primes:[
+      {nom:"Prime de nuit", montant:"+25%", obligatoire:true, note:"Travail de nuit (avant 6h ou après 20h)"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Indemnité repas", montant:"Selon CCN", obligatoire:true, note:"En nature ou compensatrice"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-  'boucherie': {
-    label:'Boucherie-Charcuterie artisanale', idcc:953,
+  "boucherie": {
+    label:"Boucherie-Charcuterie artisanale", idcc:953,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 953 · Horaires tôt le matin · Dimanche matin courant'
+    note:"IDCC 953 · Horaires tôt le matin · Dimanche matin courant",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime dimanche", montant:"+25%", obligatoire:true, note:"Dimanche travaillé majoré 25%"},
+      {nom:"Indemnité habillement", montant:"Selon accord", obligatoire:false, note:"Si tenue de travail obligatoire"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-
-  // ── BTP / ARTISANAT ──────────────────────────────────────────────────────
-  'btp': {
-    label:'Bâtiment (BTP ouvriers)', idcc:1597,
+  "btp": {
+    label:"Bâtiment (BTP ouvriers)", idcc:1597,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 1597 · Modulation annuelle · Intempéries · Grand déplacement'
+    note:"IDCC 1597 · Modulation annuelle · Intempéries · Grand déplacement",
+    primes:[
+      {nom:"Indemnité trajet/déplacement", montant:"Variable (grille zonale)", obligatoire:true, note:"Petit ou grand déplacement selon distance chantier"},
+      {nom:"Prime ancienneté", montant:"+3% à +10%", obligatoire:true, note:"3% à 3 ans · 5% à 5 ans · 7% à 7 ans · 10% à 10 ans"},
+      {nom:"Prime de panier", montant:"10,30 € min/jour", obligatoire:true, note:"Si repas pris hors domicile sur chantier"},
+      {nom:"Indemnité intempéries", montant:"Prise en charge FNTP", obligatoire:true, note:"Chômage intempéries : cotisation CNETP"},
+      {nom:"Congés payés BTP", montant:"Gérés par la CIBTP", obligatoire:true, note:"Taux 18% du brut congés payés BTP"}
+    ],
+    anciennete:[{annees:3,pct:3},{annees:5,pct:5},{annees:7,pct:7},{annees:10,pct:10}],
+    treizieme:false, mutuelle:"Obligatoire (PRO BTP)", congesPayes:30, rtts:0
   },
-  'btp_etam': {
-    label:'BTP — ETAM (techniciens/agents de maîtrise)', idcc:2609,
+  "btp_etam": {
+    label:"BTP — ETAM (techniciens/agents de maîtrise)", idcc:2609,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 2609 · Forfait jours possible pour cadres · RTT'
+    note:"IDCC 2609 · Forfait jours possible pour cadres · RTT",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+1%/an jusqu'à 15%", obligatoire:true, note:"1% par an, plafonnée à 15%"},
+      {nom:"Indemnité de déplacement", montant:"Grille zonale BTP", obligatoire:true, note:"Selon distance domicile-chantier"},
+      {nom:"Prime de 13e mois", montant:"1 mois de salaire", obligatoire:true, note:"Versée en décembre dans la majorité des accords"},
+      {nom:"Prime de vacances", montant:"1/10e congés payés", obligatoire:true, note:"Versée avec le départ en congé principal"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:5},{annees:10,pct:10},{annees:15,pct:15}],
+    treizieme:true, mutuelle:"Obligatoire (PRO BTP)", congesPayes:25, rtts:12
   },
-
-  // ── COIFFURE / ESTHÉTIQUE ────────────────────────────────────────────────
-  'coiffure': {
-    label:'Coiffure', idcc:2596,
+  "coiffure": {
+    label:"Coiffure", idcc:2596,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 2596 · Repos dimanche + 1 autre jour · Samedi travaillé courant'
+    note:"IDCC 2596 · Repos dimanche + 1 autre jour · Samedi travaillé courant",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+3% dès 3 ans", obligatoire:true, note:"3% à 3 ans · 6% à 6 ans · 9% à 9 ans"},
+      {nom:"Prime service/pourboires", montant:"Variable", obligatoire:false, note:"Redistribution possible via prime mensuelle"},
+      {nom:"Indemnité repas", montant:"Selon accord", obligatoire:false, note:"Si travail en coupure sans retour domicile"}
+    ],
+    anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-  'esthetique': {
-    label:'Esthétique-Cosmétique-Parfumerie', idcc:3032,
+  "esthetique": {
+    label:"Esthétique-Cosmétique-Parfumerie", idcc:3032,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 3032 · Temps partiel fréquent · Salons ouverts samedi/dimanche'
+    note:"IDCC 3032 · Temps partiel fréquent · Salons ouverts samedi/dimanche",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+1% dès 3 ans", obligatoire:true, note:"1% à 3 ans · 2% à 6 ans · 3% à 9 ans"},
+      {nom:"Prime commission/résultats", montant:"Variable", obligatoire:false, note:"Souvent intégrée dans la rémunération variable produits"}
+    ],
+    anciennete:[{annees:3,pct:1},{annees:6,pct:2},{annees:9,pct:3}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-
-  // ── SANTÉ / MÉDICO-SOCIAL ────────────────────────────────────────────────
-  'sante': {
-    label:'Santé (FEHAP / EHPAD)', idcc:29,
+  "sante": {
+    label:"Santé (FEHAP / EHPAD)", idcc:29,
     jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 29 · Gardes 12h autorisées · Cycles de travail · Repos compensateur obligatoire'
+    note:"IDCC 29 · Gardes 12h autorisées · Cycles de 4 semaines",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+1% dès 1 an", obligatoire:true, note:"1% à 1 an · 2% à 2 ans · … · 15% à 15 ans"},
+      {nom:"Prime de nuit", montant:"+9,15 € min/nuit", obligatoire:true, note:"Pour chaque nuit travaillée (21h-6h)"},
+      {nom:"Prime dimanche/jours fériés", montant:"+16,85 €/jour", obligatoire:true, note:"Pour chaque dimanche et jour férié travaillé"},
+      {nom:"Sujétions spéciales handicap", montant:"+3,03 €/h", obligatoire:true, note:"Structures accueillant des personnes handicapées"},
+      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:true, note:"Versé en décembre"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:5},{annees:10,pct:10},{annees:15,pct:15}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:18
   },
-  'cabinet_medical': {
-    label:'Cabinet médical / Para-médical', idcc:1748,
+  "transport": {
+    label:"Transports routiers", idcc:16,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 1748 · Fermeture le mercredi après-midi souvent · Pas de travail de nuit en général'
+    note:"IDCC 16 · Modulation · Temps de service réglementé CE 561/2006",
+    primes:[
+      {nom:"Prime de fin d'année", montant:"1 mois de salaire", obligatoire:true, note:"Équivalent 13e mois (accord de branche)"},
+      {nom:"Indemnité de repas", montant:"16,20 € min (grand déplacement)", obligatoire:true, note:"Petite restauration : 8,10 € · Déjeuner : 16,20 €"},
+      {nom:"Prime ancienneté", montant:"+2% dès 2 ans", obligatoire:true, note:"2% à 2 ans · 4% à 5 ans · 6% à 8 ans · 8% à 12 ans"},
+      {nom:"Prime de nuit", montant:"+20%", obligatoire:true, note:"Conduite entre 22h et 5h"}
+    ],
+    anciennete:[{annees:2,pct:2},{annees:5,pct:4},{annees:8,pct:6},{annees:12,pct:8}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-  'pharmacie': {
-    label:"Pharmacie d'officine", idcc:1996,
+  "metallurgie": {
+    label:"Métallurgie (nouvelle CCN 2024)", idcc:1672,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 1996 · Gardes dimanche/nuit obligatoires par roulement · Pause 20 min payée'
+    note:"IDCC 1672 · Nouvelle CCN 2024 (fusion) · Forfait-jours · Classifications A à H",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+3% à 5 ans", obligatoire:true, note:"3% à 5 ans · 5% à 10 ans · 8% à 15 ans · 12% à 20 ans"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:true, note:"Maintenu depuis les anciens accords métallurgie"},
+      {nom:"Prime panier de nuit", montant:"7,10 € min", obligatoire:true, note:"Pour tout travail de nuit (21h-6h)"},
+      {nom:"Majoration heures de nuit", montant:"+25% à +50%", obligatoire:true, note:"+25% avant 22h/après 5h · +50% entre 22h et 5h"}
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:5},{annees:15,pct:8},{annees:20,pct:12}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-
-  // ── NETTOYAGE / PROPRETÉ ─────────────────────────────────────────────────
-  'nettoyage': {
-    label:'Nettoyage et services associés', idcc:3043,
+  "syntec": {
+    label:"Syntec (Ingénieurs et Cadres)", idcc:1486,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 3043 · Horaires décalés (tôt matin / tard soir) · Multi-sites fréquent · Temps partiel très courant'
+    note:"IDCC 1486 · Forfait-jours cadres · 218j/an max · RTT nombreux",
+    primes:[
+      {nom:"Prime de vacances", montant:"30% de la masse CP", obligatoire:true, note:"Versée avec les congés payés (art. 23 de la CCN)"},
+      {nom:"Prime ancienneté ETAM", montant:"+1%/an jusqu'à 7%", obligatoire:true, note:"Pour les ETAM : +1% par an, plafonné à 7%"},
+      {nom:"Ticket restaurant", montant:"60% pris en charge min", obligatoire:false, note:"Pratique quasi-systématique dans la branche"},
+      {nom:"Mutuelle + prévoyance", montant:"50% employeur", obligatoire:true, note:"Minimum légal + surcomplémentaire fréquente"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:4,pct:4},{annees:5,pct:5},{annees:6,pct:6},{annees:7,pct:7}],
+    treizieme:false, mutuelle:"Obligatoire (50% employeur)", congesPayes:25, rtts:15
   },
-
-  // ── TRANSPORT ────────────────────────────────────────────────────────────
-  'transport_routier': {
-    label:'Transport routier (conducteurs)', idcc:16,
-    jourMax:10, hebdoMax:56, hebdoMoyMax:48, reposMin:11, pauseApres:4.5, pauseMin:45,
-    note:'IDCC 16 · Règlement CE 561/2006 : 4h30 max sans pause 45 min · 56h/sem max · 90h/2 semaines'
-  },
-  'transport_voyageurs': {
-    label:'Transport en commun (conducteurs)', idcc:1424,
+  "bureaux_entreprise": {
+    label:"Bureaux d'études techniques (BET)", idcc:1486,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 1424 · Amplitude journalière max 13h · Coupures comptabilisées'
+    note:"IDCC 1486 · Identique Syntec pour les BET · 218 jours forfait cadres",
+    primes:[
+      {nom:"Prime de vacances", montant:"30% masse CP", obligatoire:true, note:"Obligation conventionnelle Syntec/BET"},
+      {nom:"Prime ancienneté ETAM", montant:"+1%/an jusqu'à 7%", obligatoire:true, note:"Plafonnée à 7% pour ETAM"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:5},{annees:7,pct:7}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:15
   },
-
-  // ── AUTOMOBILE ───────────────────────────────────────────────────────────
-  'automobile': {
-    label:"Services de l'automobile (réparation/vente)", idcc:1090,
+  "immobilier": {
+    label:"Immobilier (agents et gestionnaires)", idcc:1527,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:"IDCC 1090 · Modulation · Samedi travaillé courant · Congé principal été"
+    note:"IDCC 1527 · Forfait-jours cadres · Commissions variables · RTT",
+    primes:[
+      {nom:"Commission sur transactions", montant:"Variable (% CA)", obligatoire:false, note:"Prévue dans le contrat — réglementée par la CCN"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans · 8% à 12 ans"},
+      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:true, note:"Prévu dans de nombreux accords d'entreprise du secteur"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:12
   },
-
-  // ── IMMOBILIER ───────────────────────────────────────────────────────────
-  'immobilier': {
-    label:'Immobilier / Agences', idcc:1527,
+  "agriculture": {
+    label:"Production agricole", idcc:7252,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 1527 · Forfait jours pour négociateurs non-salariés · Samedi travaillé'
+    note:"IDCC 7252 · Saisons · Modulation annuelle · Travail saisonnier courant",
+    primes:[
+      {nom:"Prime de fin de saison", montant:"Selon accord", obligatoire:false, note:"Variable selon culture et région"},
+      {nom:"Indemnité repas", montant:"4,40 € min", obligatoire:true, note:"Si repas non fourni sur le lieu de travail"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:false, note:"2% à 3 ans · 4% à 6 ans (accord de branche)"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4}],
+    treizieme:false, mutuelle:"Obligatoire (CCMSA)", congesPayes:25, rtts:0
   },
-
-  // ── SÉCURITÉ ─────────────────────────────────────────────────────────────
-  'securite': {
-    label:'Prévention-Sécurité privée', idcc:1351,
-    jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 1351 · Vacation max 12h · Repos entre vacations 12h minimum · Cycles modulation'
-  },
-
-  // ── AGRICULTURE ──────────────────────────────────────────────────────────
-  'agriculture': {
-    label:'Agriculture / Exploitations agricoles', idcc:7024,
+  "proprete": {
+    label:"Propreté et services associés", idcc:3043,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:"IDCC 7024 · Modulation saisonnière · Périodes hautes jusqu'à 60h/sem possibles en accord"
+    note:"IDCC 3043 · Amplitude 13h possible · Horaires décalés (matin/soir)",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans · 8% à 12 ans"},
+      {nom:"Prime de salissure", montant:"~15-20 €/mois", obligatoire:false, note:"Si travaux particulièrement salissants"},
+      {nom:"Prime de nuit", montant:"+20%", obligatoire:true, note:"Entre 21h et 6h"},
+      {nom:"Indemnité transport", montant:"50% titre de transport", obligatoire:true, note:"Remboursement légal abonnement transports en commun"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-  'viticulture': {
-    label:'Viticulture', idcc:9111,
-    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:"IDCC 9111 · Vendanges : modulation spécifique · Saisonniers fréquents"
-  },
-
-  // ── SERVICES À LA PERSONNE ───────────────────────────────────────────────
-  'sap': {
-    label:'Services à la personne (SAP)', idcc:3127,
-    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 3127 · Interventions courtes multiples · Temps de déplacement comptabilisé · Temps partiel dominant'
-  },
-  'aide_domicile': {
-    label:'Aide à domicile (associations)', idcc:2941,
-    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:'IDCC 2941 · Astreintes · Déplacements indemnisés · Amplitude 13h possible'
-  },
-
+  "securite": {
+    label:"Entreprises de sécurité privée", idcc:1351,
+    jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:12, pauseApres:6, pauseMin:20,
+    note:"IDCC 1351 · Amplitude 12h · Cycles de garde · Vacation longue",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+1%/an jusqu'à 7%", obligatoire:true, note:"1% par an, plafond 7% à 7 ans"},
+      {nom:"Prime de nuit", montant:"+10% min", obligatoire:true, note:"Travail entre 21h et 6h"},
+      {nom:"Prime dimanches et jours fériés", montant:"+10% min", obligatoire:true, note:"Pour chaque dimanche/férié travaillé"},
+      {nom:"Prime de tenue", montant:"~20 €/mois", obligatoire:false, note:"Entretien de la tenue obligatoire"},
+      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:false, note:"Prévu dans certains accords d'entreprise"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:4,pct:4},{annees:5,pct:5},{annees:6,pct:6},{annees:7,pct:7}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  }
 };
 
 // Groupes pour affichage dans les selects
@@ -1305,21 +1537,114 @@ function populateCCNSelect(selId, currentVal) {
 
 // Afficher la note de la CCN sélectionnée
 function onCCNChange() {
-  const sel = document.getElementById('f-ccn');
-  const note = document.getElementById('f-ccn-note');
+  const sel = document.getElementById("f-ccn");
+  const note = document.getElementById("f-ccn-note");
   if(!sel || !note) return;
   const key = sel.value;
   const rule = CCN_RULES[key];
-  if(rule && rule.note) {
-    note.style.display = '';
-    note.innerHTML = '<strong>' + rule.label + (rule.idcc ? ' <span style="color:#6b7280;font-weight:400">(IDCC '+rule.idcc+')</span>' : '') + '</strong><br>' +
-      '⏱ Jour max : <b>' + rule.jourMax + 'h</b> &nbsp;·&nbsp; 📅 Hebdo max : <b>' + rule.hebdoMax + 'h</b> &nbsp;·&nbsp; ☕ Pause : <b>' + rule.pauseMin + ' min après ' + rule.pauseApres + 'h</b> &nbsp;·&nbsp; 🌙 Repos : <b>' + rule.reposMin + 'h</b><br>' +
-      '<span style="color:#6b7280;font-size:10px">' + (rule.note||'') + '</span>';
-  } else {
-    note.style.display = 'none';
+  if(!rule) { note.style.display="none"; return; }
+
+  // Primes HTML
+  let primesHtml = "";
+  if((rule.primes||[]).length > 0) {
+    const items = rule.primes.map(p => {
+      const bg = p.obligatoire ? "#f0fdf4" : "#fafafa";
+      const border = p.obligatoire ? "#d1fae5" : "#f1f5f9";
+      const icon = p.obligatoire ? "✅" : "ℹ️";
+      return `<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;padding:7px 9px;background:${bg};border:1px solid ${border};border-radius:7px">
+        <span style="flex-shrink:0;font-size:12px">${icon}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;font-weight:700;color:#111827">${p.nom} <span style="font-weight:600;color:#059669">— ${p.montant}</span></div>
+          <div style="font-size:10px;color:#6b7280;margin-top:2px">${p.note}</div>
+        </div>
+      </div>`;
+    }).join("");
+    primesHtml = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0">
+      <div style="font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">💶 Primes &amp; Indemnités obligatoires</div>
+      ${items}
+    </div>`;
   }
+
+  // Ancienneté HTML
+  let ancHtml = "";
+  if((rule.anciennete||[]).length > 0) {
+    const badges = rule.anciennete.map(a =>
+      `<span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe">${a.annees}an${a.annees>1?"s":""} : +${a.pct}%</span>`
+    ).join("");
+    ancHtml = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0">
+      <div style="font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📈 Grille d'ancienneté</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">${badges}</div>
+    </div>`;
+  }
+
+  // Badges infos complémentaires
+  const treizBadge = rule.treizieme ? `<span style="font-size:11px;font-weight:700;padding:4px 10px;background:#fefce8;border:1px solid #fde047;border-radius:20px;color:#713f12">🎁 13e mois obligatoire</span>` : "";
+  const cpBadge = `<span style="font-size:11px;font-weight:600;padding:4px 10px;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:20px;color:#3730a3">🏖 ${rule.congesPayes||25} jours CP/an</span>`;
+  const rttBadge = rule.rtts > 0 ? `<span style="font-size:11px;font-weight:600;padding:4px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:20px;color:#065f46">⏳ ${rule.rtts} RTT/an</span>` : "";
+  const mutBadge = rule.mutuelle ? `<span style="font-size:11px;font-weight:600;padding:4px 10px;background:#fdf4ff;border:1px solid #e9d5ff;border-radius:20px;color:#6b21a8">🏥 ${rule.mutuelle}</span>` : "";
+  const infosHtml = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:6px">${treizBadge}${cpBadge}${rttBadge}${mutBadge}</div>`;
+
+  const idccBadge = rule.idcc ? `<span style="font-size:11px;font-weight:600;padding:2px 8px;background:#f0f4ff;border-radius:20px;color:#4f46e5">IDCC ${rule.idcc}</span>` : "";
+
+  note.style.display = "";
+  note.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <strong style="font-size:13px">${rule.label}</strong>
+      ${idccBadge}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+      <span style="font-size:11px;font-weight:700;padding:3px 9px;background:#f1f5f9;border-radius:6px">⏱ Jour max : ${rule.jourMax}h</span>
+      <span style="font-size:11px;font-weight:700;padding:3px 9px;background:#f1f5f9;border-radius:6px">📅 Hebdo max : ${rule.hebdoMax}h</span>
+      <span style="font-size:11px;font-weight:700;padding:3px 9px;background:#f1f5f9;border-radius:6px">☕ Pause : ${rule.pauseMin} min / ${rule.pauseApres}h</span>
+      <span style="font-size:11px;font-weight:700;padding:3px 9px;background:#f1f5f9;border-radius:6px">🌙 Repos : ${rule.reposMin}h</span>
+    </div>
+    <div style="font-size:11px;color:#6b7280;font-style:italic">${rule.note||""}</div>
+    ${infosHtml}
+    ${primesHtml}
+    ${ancHtml}
+    <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #e2e8f0">
+      <div style="font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">✏️ Notes personnalisées (modifications manuelles)</div>
+      <textarea id="ccn-custom-note" rows="3" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:12px;color:#374151;resize:vertical;outline:none" placeholder="Ex : Prime ancienneté négociée à +4% dès 2 ans · Accord d'entreprise sur 13e mois...">${window._ccnCustomNotes && window._ccnCustomNotes[key] ? window._ccnCustomNotes[key] : ""}</textarea>
+      <div style="display:flex;justify-content:flex-end;margin-top:4px">
+        <button onclick="saveCCNCustomNote('${key}')" style="font-size:11px;font-weight:700;padding:5px 12px;background:#1a3dce;color:white;border:none;border-radius:7px;cursor:pointer">💾 Sauvegarder ma note</button>
+      </div>
+    </div>
+  `;
 }
 window.onCCNChange = onCCNChange;
+
+// Stockage notes personnalisées CCN (en mémoire + Firestore)
+window._ccnCustomNotes = {};
+
+async function saveCCNCustomNote(ccnKey) {
+  const textarea = document.getElementById("ccn-custom-note");
+  if(!textarea) return;
+  const val = textarea.value.trim();
+  window._ccnCustomNotes[ccnKey] = val;
+  // Persister en Firestore si uid dispo
+  if(window._uid && window._setDoc && window._doc && window._db) {
+    try {
+      await window._setDoc(
+        window._doc(window._db, "rh", window._uid, "ccn_notes", "custom"),
+        window._ccnCustomNotes,
+        {merge:true}
+      );
+      // Feedback visuel
+      const btn = document.querySelector("[onclick*='saveCCNCustomNote']");
+      if(btn) { btn.textContent = "✅ Sauvegardé"; setTimeout(()=>{ btn.textContent = "💾 Sauvegarder ma note"; }, 2000); }
+    } catch(e) { console.warn("Erreur sauvegarde CCN note:", e); }
+  }
+}
+window.saveCCNCustomNote = saveCCNCustomNote;
+
+// Charger les notes custom au démarrage
+async function loadCCNCustomNotes() {
+  if(!window._uid || !window._getDoc || !window._doc || !window._db) return;
+  try {
+    const snap = await window._getDoc(window._doc(window._db, "rh", window._uid, "ccn_notes", "custom"));
+    if(snap.exists()) window._ccnCustomNotes = snap.data() || {};
+  } catch(e) { /* ignore */ }
+}
 
 window.openModalNouvelEmploye = function() {
   _editId = null;
