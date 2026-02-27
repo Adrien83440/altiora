@@ -414,7 +414,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-  import { getFirestore, initializeFirestore, doc, getDoc, setDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getFirestore, initializeFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   const app = initializeApp({
     apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
     authDomain:"altiora-70599.firebaseapp.com",
@@ -427,6 +427,7 @@
   const db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
   window._auth=auth; window._db=db;
   window._doc=doc; window._getDoc=getDoc; window._setDoc=setDoc;
+  window._updateDoc=updateDoc;
   window._collection=collection; window._getDocs=getDocs;
   window._signOut=signOut;
   onAuthStateChanged(auth, user => {
@@ -1791,6 +1792,31 @@ function getCcnInfo(ccnId) {
 // ═══════════════════════════════════════════════════════
 // SALARIÉ CLIQUABLE → FICHE CONFORMITÉ
 // ═══════════════════════════════════════════════════════
+
+// ── TOGGLE DOC REÇU DEPUIS CONFORMITÉ ──
+async function toggleDocConformite(empId, field, currentVal) {
+  if (!window._uid || !window._updateDoc || !window._doc || !window._db) return;
+  const newVal = !currentVal;
+  try {
+    await window._updateDoc(
+      window._doc(window._db, 'rh', window._uid, 'employes', empId),
+      { [field]: newVal }
+    );
+    // Mettre à jour empList local + re-render la fiche
+    const emp = empList.find(e => (e.id||e.uid) === empId);
+    if (emp) {
+      emp[field] = newVal;
+      _employes[empId] = emp;
+      // Re-render la fiche ouverte
+      const body = document.getElementById('body-fiche-salarie');
+      if (body) body.innerHTML = renderFicheSalarie(emp);
+    }
+  } catch(e) {
+    console.error('toggleDocConformite error:', e);
+  }
+}
+window.toggleDocConformite = toggleDocConformite;
+
 function openFicheSalarie(uid, nom) {
   _selectedEmpId = uid;
 
@@ -1829,11 +1855,11 @@ function renderFicheSalarie(emp) {
   const nom = `${emp.prenom||''} ${emp.nom||''}`.trim();
 
   const checks = [
-    { id:'contrat', icon:'📝', label:'Contrat de travail', check: () => (emp.documents||[]).some(d=>d.type==='contrat') ? {ok:true,msg:'Contrat enregistré'} : {ok:false,msg:'Aucun contrat enregistré dans les documents RH'} },
-    { id:'cni', icon:'🪪', label:'Pièce d\'identité', check: () => (emp.documents||[]).some(d=>d.type==='cni') ? {ok:true,msg:'CNI / Titre de séjour enregistré'} : {ok:null,msg:'Non enregistré — vérifier manuellement'} },
-    { id:'rib', icon:'💳', label:'RIB', check: () => (emp.documents||[]).some(d=>d.type==='rib') ? {ok:true,msg:'RIB enregistré'} : {ok:null,msg:'RIB non enregistré'} },
-    { id:'vitale', icon:'💚', label:'Carte vitale', check: () => (emp.documents||[]).some(d=>d.type==='vitale') ? {ok:true,msg:'Copie enregistrée'} : {ok:null,msg:'Non enregistrée'} },
-    { id:'mutuelle', icon:'🏥', label:'Attestation mutuelle', check: () => emp.mutuelle ? {ok:true,msg:'Mutuelle : '+emp.mutuelle} : {ok:null,msg:'Mutuelle non renseignée'} },
+    { id:'contrat',  icon:'📝', label:'Contrat de travail', field:'docContratRecu', check: () => (emp.documents||[]).some(d=>d.type==='contrat') || emp.docContratRecu ? {ok:true,msg:'Contrat enregistré ✔'} : {ok:false,msg:'Aucun contrat enregistré dans les documents RH'} },
+    { id:'cni',      icon:'🪪', label:'Pièce d\'identité',  field:'docCniRecu',     check: () => (emp.documents||[]).some(d=>d.type==='cni') || emp.docCniRecu ? {ok:true,msg:'CNI / Titre de séjour enregistré ✔'} : {ok:null,msg:'Non enregistré — vérifier manuellement'} },
+    { id:'rib',      icon:'💳', label:'RIB',                 field:'docRibRecu',     check: () => (emp.documents||[]).some(d=>d.type==='rib') || emp.docRibRecu ? {ok:true,msg:'RIB enregistré ✔'} : {ok:null,msg:'RIB non enregistré'} },
+    { id:'vitale',   icon:'💚', label:'Carte vitale',        field:'docVitaleRecu',  check: () => (emp.documents||[]).some(d=>d.type==='vitale') || emp.docVitaleRecu ? {ok:true,msg:'Copie enregistrée ✔'} : {ok:null,msg:'Non enregistrée'} },
+    { id:'mutuelle', icon:'🏥', label:'Attestation mutuelle',field:null,             check: () => emp.mutuelle ? {ok:true,msg:'Mutuelle : '+emp.mutuelle} : {ok:null,msg:'Mutuelle non renseignée'} },
     { id:'visite_med', icon:'🩺', label:'Visite médicale', check: () => {
         if (emp.prochaineSuiviMedical) return {ok:true, msg:`Prochaine visite : ${new Date(emp.prochaineSuiviMedical).toLocaleDateString('fr-FR')}`};
         if (emp.dateVisiteMedicale) return {ok:null, msg:`Dernière visite : ${new Date(emp.dateVisiteMedicale).toLocaleDateString('fr-FR')} — Planifier la prochaine`};
@@ -1875,10 +1901,13 @@ function renderFicheSalarie(emp) {
           const color = res.ok === true ? '#059669' : res.ok === false ? '#ef4444' : '#f59e0b';
           const bg    = res.ok === true ? '#f0fdf4' : res.ok === false ? '#fef2f2' : '#fffbeb';
           const icon  = res.ok === true ? '✅' : res.ok === false ? '❌' : '⚠️';
-          return `<div style="padding:10px 12px;border-radius:8px;background:${bg};border:1px solid ${color}22;display:flex;align-items:flex-start;gap:8px">
+          const canToggle = c.field !== null;
+          const toggleAttr = canToggle ? `onclick="toggleDocConformite('${emp.id}','${c.field}',${res.ok===true})" title="${res.ok===true?'Cliquer pour marquer comme non reçu':'Cliquer pour marquer comme reçu'}"` : '';
+          const cursorStyle = canToggle ? 'cursor:pointer;' : '';
+          return `<div style="${cursorStyle}padding:10px 12px;border-radius:8px;background:${bg};border:1.5px solid ${color}44;display:flex;align-items:flex-start;gap:8px;transition:opacity .15s" ${toggleAttr} ${canToggle?`onmouseover="this.style.opacity='.8'" onmouseout="this.style.opacity='1'"`:''}>
             <span style="font-size:14px;flex-shrink:0">${icon}</span>
-            <div>
-              <div style="font-size:11px;font-weight:700;color:var(--text)">${c.icon} ${c.label}</div>
+            <div style="flex:1">
+              <div style="font-size:11px;font-weight:700;color:var(--text)">${c.icon} ${c.label}${canToggle?` <span style="font-size:9px;color:${color};font-weight:400">(cliquer pour modifier)</span>`:''}</div>
               <div style="font-size:10px;color:${color};margin-top:2px">${res.msg}</div>
             </div>
           </div>`;
