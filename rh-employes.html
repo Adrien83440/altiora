@@ -201,13 +201,41 @@
     @media(max-width:420px){
       .fiche-kpis{grid-template-columns:1fr!important;}
     }
+  
+    /* ── DRAG & DROP ORDRE EMPLOYÉS ── */
+    .emp-item { user-select:none; }
+    .emp-item .drag-handle {
+      width:18px; height:28px;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:3px; cursor:grab; flex-shrink:0; opacity:0; transition:opacity .15s;
+      padding:0 2px;
+    }
+    .emp-item:hover .drag-handle { opacity:1; }
+    .drag-handle span {
+      display:block; width:12px; height:2px;
+      background:#d1d5db; border-radius:2px;
+      pointer-events:none;
+    }
+    .emp-item.dragging {
+      opacity:.45; background:#f0fdf7;
+    }
+    .emp-item.drag-over {
+      border-top:2px solid var(--rh-main);
+      background:#f0fdf7;
+    }
+    .emp-item.drag-over-bottom {
+      border-bottom:2px solid var(--rh-main);
+    }
+    /* Indicateur mode réorganisation */
+    .reorder-hint {
+      display:flex; align-items:center; gap:6px;
+      padding:5px 14px;
+      font-size:10px; font-weight:600; color:var(--rh-main);
+      background:var(--rh-ghost); border-bottom:1px solid var(--rh-border);
+    }
+    .reorder-hint.hidden { display:none; }
 
-    /* ── AUTOCOMPLETE CCN ── */
-    #ccn-dropdown div:first-child { border-radius: 0; }
-    #ccn-dropdown div:last-child  { border-bottom: none; border-radius: 0 0 8px 8px; }
-    .ccn-badge-idcc { background:#e0edff;color:var(--blue-main);padding:2px 7px;border-radius:5px;font-size:10px;font-weight:800;margin-right:5px; }
-
-  </style>
+</style>
 </head>
 <body>
 
@@ -222,12 +250,6 @@
       <button class="btn btn-outline btn-sm" id="btn-show-archived" onclick="toggleArchived()">👁 Archivés</button>
       <button class="btn btn-rh btn-sm" onclick="openModalNouvelEmploye()">+ Nouvel employé</button>
     </div>
-  </div>
-  <!-- BANNER CCN -->
-  <div id="ccn-banner" style="display:none;background:#fffbeb;border-bottom:1px solid #fcd34d;padding:9px 28px;font-size:12px;color:#92400e;align-items:center;gap:8px">
-    ⚠️ <strong>Convention collective non configurée.</strong>
-    Indiquez votre IDCC dans <a href="rh-params.html" style="color:var(--blue-main);font-weight:700">Paramètres RH →</a>
-    <button onclick="this.parentElement.style.display='none'" style="margin-left:auto;background:none;border:none;cursor:pointer;font-size:14px;color:#b45309">✕</button>
   </div>
 
   <div class="workspace">
@@ -256,6 +278,7 @@
           </select>
         </div>
       </div>
+      <div class="reorder-hint hidden" id="reorder-hint">⠿ Glisser-déposer pour réorganiser · <span id="reorder-saved" style="color:#059669;display:none">✓ Ordre sauvegardé</span></div>
       <div class="emp-list" id="emp-list">
         <div class="loader"><div class="spin"></div></div>
       </div>
@@ -468,16 +491,10 @@
       <div class="mrow">
         <div class="mfield" style="grid-column:1/-1">
           <label>Convention collective applicable</label>
-          <div style="position:relative">
-            <input class="minput" id="f-ccn-input" placeholder="Code IDCC ou nom (ex: 0992, boucherie, syntec...)"
-              autocomplete="off"
-              oninput="onCCNInput(this.value)"
-              onfocus="onCCNInput(this.value)"
-              onblur="setTimeout(()=>{const d=document.getElementById('ccn-dropdown');if(d)d.style.display='none'},200)"/>
-            <div id="ccn-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid var(--blue-main);border-top:none;border-radius:0 0 8px 8px;z-index:999;max-height:220px;overflow-y:auto;box-shadow:0 6px 20px rgba(0,0,0,.12)"></div>
-            <input type="hidden" id="f-ccn" value=""/>
-          </div>
-          <div id="f-ccn-note" style="margin-top:4px"></div>
+          <select class="minput" id="f-ccn" onchange="onCCNChange()">
+            <option value="">— Défaut entreprise —</option>
+          </select>
+          <div id="f-ccn-note" style="display:none;font-size:11px;color:var(--muted);padding:5px 8px;background:#f8faff;border-radius:6px;margin-top:4px;line-height:1.5"></div>
         </div>
       </div>
 
@@ -653,6 +670,8 @@
 let _employes    = {};   // { id: {...data} }
 let _currentId   = null;
 let _editId      = null; // null = nouveau, sinon ID
+let _empOrder    = [];   // Ordre personnalisé des employés (drag & drop)
+let _dragSrcId   = null; // ID en cours de drag
 let _showArchived = false;
 let _photoDataURL = null;
 let _photoFile    = null;
@@ -665,13 +684,6 @@ const COLORS = ['#059669','#0891b2','#7c3aed','#db2777','#ea580c','#ca8a04'];
 window.initEmployes = async function() {
   await loadRHParams();
   await loadEmployes();
-  // Vérifier si CCN entreprise configurée
-  setTimeout(()=>{
-    if(!_ccnEntreprise && !_ccnDefaultEntreprise){
-      const b=document.getElementById('ccn-banner');
-      if(b)b.style.display='flex';
-    }
-  },500);
 };
 
 // Charger les paramètres RH entreprise (CCN défaut, etc.)
@@ -680,23 +692,23 @@ async function loadRHParams() {
     const snap = await window._getDoc(window._doc(window._db,'rh_params',window._uid));
     if(snap.exists()) {
       const d = snap.data();
-      if(d.ccnDefault) {
-        _ccnDefaultEntreprise = d.ccnDefault;
-        // Charger l'objet CCN complet
-        _ccnEntreprise = findCCN(d.ccnDefault) || null;
-        // Mettre à jour le label dans la nav si présent
-        const ccnBadge = document.getElementById('sidebar-ccn-badge');
-        if (ccnBadge && _ccnEntreprise) ccnBadge.textContent = 'CCN ' + _ccnEntreprise.idcc;
-      }
+      if(d.ccnDefault) _ccnDefaultEntreprise = d.ccnDefault;
     }
   } catch(e) { console.warn('Params RH non chargés', e); }
 }
 
 async function loadEmployes() {
   try {
-    const snap = await window._getDocs(window._collection(window._db,'rh',window._uid,'employes'));
+    const [snap, orderDoc] = await Promise.all([
+      window._getDocs(window._collection(window._db,'rh',window._uid,'employes')),
+      window._getDoc(window._doc(window._db,'rh',window._uid,'params','empOrder'))
+    ]);
     _employes = {};
     snap.forEach(d => { _employes[d.id] = { id:d.id, ...d.data() }; });
+    // Charger l'ordre sauvegardé
+    if(orderDoc.exists && orderDoc.exists()) {
+      _empOrder = orderDoc.data()?.order || [];
+    }
     buildDeptFilter();
     renderList();
   } catch(e) {
@@ -733,10 +745,16 @@ function renderList() {
     return matchSearch && matchContrat && matchDept && matchStatut;
   });
 
-  // Trier : actifs d'abord, puis alphabétique
+  // Trier : ordre personnalisé en priorité, puis actifs d'abord, puis alphabétique
   items.sort((a,b)=>{
     if (a.statut==='archive' && b.statut!=='archive') return 1;
     if (a.statut!=='archive' && b.statut==='archive') return -1;
+    const oa = _empOrder.indexOf(a.id), ob = _empOrder.indexOf(b.id);
+    // Les deux dans l'ordre sauvegardé
+    if (oa>=0 && ob>=0) return oa - ob;
+    // Un seul dans l'ordre : le positionner avant l'autre
+    if (oa>=0) return -1;
+    if (ob>=0) return 1;
     return `${a.prenom} ${a.nom}`.localeCompare(`${b.prenom} ${b.nom}`);
   });
 
@@ -768,7 +786,16 @@ function renderList() {
       if (j>=0 && j<=30) expireSoon = true;
     }
 
-    return `<div class="emp-item ${_currentId===e.id?'active':''} ${archived?'archived':''}" onclick="openFiche('${e.id}')">
+    return `<div class="emp-item ${_currentId===e.id?'active':''} ${archived?'archived':''}"
+      draggable="true"
+      data-id="${e.id}"
+      onclick="openFiche('${e.id}')"
+      ondragstart="onEmpDragStart(event,'${e.id}')"
+      ondragover="onEmpDragOver(event)"
+      ondragleave="onEmpDragLeave(event)"
+      ondrop="onEmpDrop(event,'${e.id}')"
+      ondragend="onEmpDragEnd(event)">
+      <div class="drag-handle" title="Déplacer" onclick="event.stopPropagation()"><span></span><span></span><span></span></div>
       <div class="emp-av" style="background:${color}">
         ${e.photoURL ? `<img src="${e.photoURL}" alt="${nom}" onerror="this.style.display='none'"/>` : ''}
         <div class="emp-av-fallback" style="background:${color}">${init}</div>
@@ -781,6 +808,110 @@ function renderList() {
     </div>`;
   }).join('');
 }
+
+
+// ══ DRAG & DROP — Ordre des employés ══════════════════════════════════════
+
+function onEmpDragStart(e, id) {
+  _dragSrcId = id;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', id);
+  setTimeout(() => {
+    const el = document.querySelector(`.emp-item[data-id="${id}"]`);
+    if(el) el.classList.add('dragging');
+  }, 0);
+  // Afficher l'indicateur
+  const hint = document.getElementById('reorder-hint');
+  if(hint) hint.classList.remove('hidden');
+}
+window.onEmpDragStart = onEmpDragStart;
+
+function onEmpDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const item = e.currentTarget;
+  if(item.dataset.id === _dragSrcId) return;
+  // Déterminer si on drop avant ou après
+  const rect = item.getBoundingClientRect();
+  const midY = rect.top + rect.height / 2;
+  document.querySelectorAll('.emp-item').forEach(el => {
+    el.classList.remove('drag-over','drag-over-bottom');
+  });
+  if(e.clientY < midY) item.classList.add('drag-over');
+  else item.classList.add('drag-over-bottom');
+}
+window.onEmpDragOver = onEmpDragOver;
+
+function onEmpDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over','drag-over-bottom');
+}
+window.onEmpDragLeave = onEmpDragLeave;
+
+function onEmpDrop(e, targetId) {
+  e.preventDefault();
+  e.stopPropagation();
+  const item = e.currentTarget;
+  item.classList.remove('drag-over','drag-over-bottom');
+  if(!_dragSrcId || _dragSrcId === targetId) return;
+
+  // Construire l'ordre actuel depuis le DOM
+  const domItems = [...document.querySelectorAll('.emp-item[data-id]')];
+  let order = domItems.map(el => el.dataset.id);
+
+  // Calculer position : avant ou après la cible
+  const rect = item.getBoundingClientRect();
+  const insertAfter = e.clientY >= rect.top + rect.height / 2;
+
+  // Retirer la source de l'ordre
+  order = order.filter(id => id !== _dragSrcId);
+
+  // Insérer à la bonne position
+  const targetIdx = order.indexOf(targetId);
+  if(insertAfter) order.splice(targetIdx + 1, 0, _dragSrcId);
+  else order.splice(targetIdx, 0, _dragSrcId);
+
+  _empOrder = order;
+  renderList();
+  saveEmpOrder();
+}
+window.onEmpDrop = onEmpDrop;
+
+function onEmpDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.emp-item').forEach(el => {
+    el.classList.remove('dragging','drag-over','drag-over-bottom');
+  });
+}
+window.onEmpDragEnd = onEmpDragEnd;
+
+let _saveOrderTimer = null;
+async function saveEmpOrder() {
+  // Debounce : attendre 800ms sans changement avant de sauvegarder
+  clearTimeout(_saveOrderTimer);
+  _saveOrderTimer = setTimeout(async () => {
+    try {
+      await window._setDoc(
+        window._doc(window._db,'rh',window._uid,'params','empOrder'),
+        { order: _empOrder, updatedAt: new Date().toISOString() }
+      );
+      // Flash de confirmation
+      const saved = document.getElementById('reorder-saved');
+      if(saved) {
+        saved.style.display = 'inline';
+        setTimeout(() => { saved.style.display = 'none'; }, 2000);
+      }
+    } catch(err) {
+      console.error('saveEmpOrder:', err);
+    }
+  }, 800);
+}
+
+function resetEmpOrder() {
+  _empOrder = [];
+  saveEmpOrder();
+  renderList();
+}
+window.resetEmpOrder = resetEmpOrder;
 
 function getBadgeCls(type) {
   return {CDI:'b-cdi',CDD:'b-cdd',Stage:'b-stage',Alternance:'b-alternance',Freelance:'b-freelance'}[type]||'b-cdi';
@@ -916,16 +1047,7 @@ function renderFiche(e) {
           ${infoField('Département',e.departement)}
           ${infoField('Date d\'entrée',fmtDate(e.dateEntree))}
           ${infoField('Date de fin',fmtDate(e.dateFinContrat))}
-          ${(() => {
-          const ccnObj = findCCN(e.ccn) || _ccnEntreprise;
-          if (ccnObj) {
-            return infoField('Convention collective',
-              '<span style="font-size:11px"><span style="background:#e0edff;color:var(--blue-main);padding:1px 6px;border-radius:4px;font-size:10px;margin-right:4px">IDCC ' + ccnObj.idcc + '</span>' + ccnObj.court + '</span>'
-              + (e.ccn ? '' : ' <span style="font-size:10px;color:var(--muted)">(défaut entreprise)</span>')
-            );
-          }
-          return infoField('Convention collective','<span style="color:var(--muted);font-size:11px">Non renseignée — <a href="rh-params.html" style="color:var(--blue-main)">Configurer →</a></span>');
-        })()}
+          ${e.ccn && CCN_RULES[e.ccn] ? infoField('Convention collective','<span style="font-size:11px">'+CCN_RULES[e.ccn].label+(CCN_RULES[e.ccn].idcc?' <span style=\'color:var(--muted);font-weight:400\'>(IDCC '+CCN_RULES[e.ccn].idcc+')</span>':'')+'</span>') : infoField('Convention collective','— Défaut entreprise —')}
         </div>
         <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
           <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">💶 Rémunération</div>
@@ -1055,1579 +1177,234 @@ function renderStars(note) {
 // Champs : jourMax (h), hebdoMax (h), hebdoMoyMax (h/12sem), reposMin (h),
 //          pauseApres (h → déclenchement pause), pauseMin (min), note (info clé)
 // ─────────────────────────────────────────────────────────────────────────────
-// ══════════════════════════════════════════════════════════════
-// BASE OFFICIELLE DES CONVENTIONS COLLECTIVES (IDCC DARES)
-// Source : Ministère du Travail / DARES — base officielle
-// ══════════════════════════════════════════════════════════════
-const CCN_DATABASE = [
-  {
-    "idcc": "0016",
-    "titre": "Transports routiers et activités auxiliaires du transport",
-    "court": "Transport routier",
-    "jourMax": 10,
-    "hebdoMax": 56,
-    "hebdoMoyMax": 48,
-    "reposMin": 11,
-    "pauseApres": 4.5,
-    "pauseMin": 45,
-    "note": "Règlement CE 561/2006 applicable aux conducteurs : pause 45 min après 4h30 · 56h/sem max"
-  },
-  {
-    "idcc": "0029",
-    "titre": "Établissements privés d'hospitalisation, de soins, de cure et de garde à but non lucratif",
-    "court": "Santé privée non lucratif (FEHAP)",
-    "jourMax": 12,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Gardes 12h autorisées · Cycles de travail · Repos compensateur obligatoire"
-  },
-  {
-    "idcc": "0044",
-    "titre": "Industries chimiques et connexes",
-    "court": "Industrie chimique",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Modulation possible · Travail posté fréquent"
-  },
-  {
-    "idcc": "0054",
-    "titre": "Industrie du cuir et du tannage",
-    "court": "Industrie du cuir",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0086",
-    "titre": "Activités du déchet",
-    "court": "Activités du déchet",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0112",
-    "titre": "Industrie du médicament",
-    "court": "Industrie pharmaceutique",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0158",
-    "titre": "Convention collective nationale du notariat",
-    "court": "Notariat",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Forfait jours cadres"
-  },
-  {
-    "idcc": "0176",
-    "titre": "Industries de carrières et matériaux",
-    "court": "Carrières et matériaux",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0184",
-    "titre": "Entreprises de propreté et services associés",
-    "court": "Nettoyage / Propreté",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Horaires décalés tôt matin / tard soir · Multi-sites fréquent · Temps partiel très courant"
-  },
-  {
-    "idcc": "0218",
-    "titre": "Industries textiles",
-    "court": "Industrie textile",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0275",
-    "titre": "Sociétés d'assurances",
-    "court": "Assurances",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Forfait jours cadres"
-  },
-  {
-    "idcc": "0292",
-    "titre": "Plasturgie",
-    "court": "Plasturgie",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0303",
-    "titre": "Bâtiment — Ouvriers entreprises jusqu'à 10 salariés",
-    "court": "Bâtiment ouvriers (petites entreprises)",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Intempéries · Grand déplacement"
-  },
-  {
-    "idcc": "0405",
-    "titre": "Industries de l'habillement",
-    "court": "Habillement",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0413",
-    "titre": "Établissements d'enseignement privé hors contrat",
-    "court": "Enseignement privé hors contrat",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0414",
-    "titre": "Entreprises de travail temporaire",
-    "court": "Travail temporaire",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Règles spécifiques missions"
-  },
-  {
-    "idcc": "0415",
-    "titre": "Travaux publics — Ouvriers",
-    "court": "Travaux publics ouvriers",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Intempéries · Déplacements"
-  },
-  {
-    "idcc": "0454",
-    "titre": "Boucherie, boucherie-charcuterie, boucherie hippophagique, triperie, commerce de volailles et gibiers",
-    "court": "Boucherie artisanale",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Horaires tôt le matin · Dimanche matin courant · Repos hebdomadaire souvent le lundi"
-  },
-  {
-    "idcc": "0458",
-    "titre": "Boulangerie-pâtisserie (entreprises artisanales)",
-    "court": "Boulangerie-Pâtisserie artisanale",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Travail de nuit courant (panification) · Majoration nuit +25% · Repos hebdo lundi fréquent"
-  },
-  {
-    "idcc": "0468",
-    "titre": "Banques",
-    "court": "Banques",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Forfait jours cadres · RTT"
-  },
-  {
-    "idcc": "0479",
-    "titre": "Commerce de détail et de gros à prédominance alimentaire",
-    "court": "Grande distribution alimentaire",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Travail dominical fréquent · Pause 20 min payée"
-  },
-  {
-    "idcc": "0489",
-    "titre": "Commerce de détail des fruits et légumes, épicerie et produits laitiers",
-    "court": "Épicerie / Fruits et légumes",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0504",
-    "titre": "Artisanat alimentaire (commerces)",
-    "court": "Artisanat alimentaire",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0512",
-    "titre": "Industrie laitière",
-    "court": "Industrie laitière",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0538",
-    "titre": "Industrie et commerce de la récupération",
-    "court": "Récupération",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0567",
-    "titre": "Commerce de détail de l'habillement et des articles textiles",
-    "court": "Commerce habillement textile",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0573",
-    "titre": "Manutention et nettoyage dans les aéroports",
-    "court": "Manutention aéroportuaire",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0700",
-    "titre": "Fleuristes, vente et services des animaux familiers",
-    "court": "Fleuristes",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0733",
-    "titre": "Boulangerie-pâtisserie industrielle",
-    "court": "Boulangerie industrielle",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Travail de nuit · Modulation"
-  },
-  {
-    "idcc": "0787",
-    "titre": "Coiffure",
-    "court": "Coiffure",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Repos dimanche + 1 autre jour · Samedi travaillé courant"
-  },
-  {
-    "idcc": "0803",
-    "titre": "Industries alimentaires diverses",
-    "court": "Industries alimentaires diverses",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0804",
-    "titre": "Voyageurs, représentants, placiers (VRP)",
-    "court": "VRP",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Statut spécifique VRP"
-  },
-  {
-    "idcc": "0843",
-    "titre": "Pâtisserie (entreprises artisanales)",
-    "court": "Pâtisserie artisanale",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Nuit possible · Dimanche travaillé majoré"
-  },
-  {
-    "idcc": "0883",
-    "titre": "Restauration de collectivités",
-    "court": "Restauration collective",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "0992",
-    "titre": "Boucherie, boucherie-charcuterie et boucherie hippophagique (artisanat)",
-    "court": "Boucherie-charcuterie artisanale",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "IDCC 0992 · Horaires tôt le matin · Dimanche matin courant · Repos lundi fréquent"
-  },
-  {
-    "idcc": "1000",
-    "titre": "Services de l'automobile (commerce et réparation)",
-    "court": "Services de l'automobile",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Modulation · Samedi travaillé courant"
-  },
-  {
-    "idcc": "1031",
-    "titre": "Presse quotidienne régionale",
-    "court": "Presse quotidienne régionale",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1043",
-    "titre": "Hospitalisation privée",
-    "court": "Cliniques privées",
-    "jourMax": 12,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Gardes 12h · Astreintes"
-  },
-  {
-    "idcc": "1044",
-    "titre": "Personnel des agences de voyages et de tourisme",
-    "court": "Agences de voyages",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1090",
-    "titre": "Commerce de détail non alimentaire",
-    "court": "Commerce détail non alimentaire",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Modulation · Dimanche exceptionnel possible"
-  },
-  {
-    "idcc": "1147",
-    "titre": "Industrie du pétrole",
-    "court": "Industrie pétrolière",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1266",
-    "titre": "Personnel des cabinets médicaux",
-    "court": "Cabinets médicaux",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Fermeture mercredi après-midi souvent · Pas de travail de nuit en général"
-  },
-  {
-    "idcc": "1267",
-    "titre": "Pharmacie d'officine",
-    "court": "Pharmacie d'officine",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Gardes dimanche/nuit obligatoires par roulement · Pause 20 min payée"
-  },
-  {
-    "idcc": "1351",
-    "titre": "Prévention et sécurité",
-    "court": "Sécurité privée",
-    "jourMax": 12,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Vacation max 12h · Repos entre vacations 12h minimum · Cycles modulation"
-  },
-  {
-    "idcc": "1369",
-    "titre": "Coiffure et professions connexes",
-    "court": "Coiffure et connexes",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1380",
-    "titre": "Conchyliculture",
-    "court": "Conchyliculture",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1404",
-    "titre": "Industrie de la chaussure et des articles chaussants",
-    "court": "Industrie chaussure",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1424",
-    "titre": "Transports urbains de voyageurs",
-    "court": "Transport urbain voyageurs",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Amplitude journalière max 13h · Coupures comptabilisées"
-  },
-  {
-    "idcc": "1453",
-    "titre": "Poissonneries (commerces de détail)",
-    "court": "Poissonnerie",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1468",
-    "titre": "Entreprises de courtage d'assurance et/ou de réassurance",
-    "court": "Courtage assurance",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1483",
-    "titre": "Établissements et services pour personnes inadaptées et handicapées",
-    "court": "Médico-social (ESSH)",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1486",
-    "titre": "Bureaux d'études techniques (Syntec)",
-    "court": "Bureaux d'études / Syntec / Informatique",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Forfait jours cadres · RTT · Télétravail fréquent"
-  },
-  {
-    "idcc": "1501",
-    "titre": "Restauration rapide",
-    "court": "Restauration rapide",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Modulation annuelle possible · Temps partiel fréquent"
-  },
-  {
-    "idcc": "1516",
-    "titre": "Nettoyage à sec et blanchisserie",
-    "court": "Pressing / Blanchisserie",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1517",
-    "titre": "Industries des jeux, jouets, articles de fêtes et ornements de Noël",
-    "court": "Jouets",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1527",
-    "titre": "Immobilier",
-    "court": "Immobilier / Agences",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Forfait jours pour négociateurs · Samedi travaillé"
-  },
-  {
-    "idcc": "1536",
-    "titre": "Formation professionnelle (organismes privés)",
-    "court": "Formation professionnelle",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1555",
-    "titre": "Gardiens, concierges et employés d'immeubles",
-    "court": "Gardiens d'immeubles",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Logement de fonction courant"
-  },
-  {
-    "idcc": "1557",
-    "titre": "Commerce succursaliste de la chaussure",
-    "court": "Chaussure succursaliste",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1596",
-    "titre": "Bâtiment — Ouvriers entreprises plus de 10 salariés",
-    "court": "Bâtiment ouvriers (grandes entreprises)",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Intempéries · Grand déplacement · Modulation"
-  },
-  {
-    "idcc": "1597",
-    "titre": "Bâtiment — ETAM",
-    "court": "BTP ETAM",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Forfait jours possible pour cadres · RTT"
-  },
-  {
-    "idcc": "1605",
-    "titre": "Bâtiment — Cadres",
-    "court": "BTP Cadres",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Forfait jours · RTT"
-  },
-  {
-    "idcc": "1606",
-    "titre": "Travaux publics — ETAM",
-    "court": "Travaux publics ETAM",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1607",
-    "titre": "Travaux publics — Cadres",
-    "court": "Travaux publics Cadres",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1619",
-    "titre": "Spectacle vivant — Entreprises artistiques et culturelles",
-    "court": "Spectacle vivant",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1672",
-    "titre": "Sociétés financières",
-    "court": "Sociétés financières",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "RTT · Forfait jours"
-  },
-  {
-    "idcc": "1679",
-    "titre": "Activités de production des eaux embouteillées",
-    "court": "Eaux embouteillées",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1702",
-    "titre": "Industries de l'imprimerie de labeur",
-    "court": "Imprimerie",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1710",
-    "titre": "Aide, accompagnement, soins et services à domicile",
-    "court": "Aide à domicile (associations)",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Astreintes · Déplacements indemnisés · Amplitude 13h possible"
-  },
-  {
-    "idcc": "1747",
-    "titre": "Esthétique-cosmétique et enseignement technique et professionnel des métiers de l'esthétique",
-    "court": "Esthétique / Cosmétique",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Temps partiel fréquent · Salons ouverts samedi/dimanche"
-  },
-  {
-    "idcc": "1760",
-    "titre": "Distribution directe",
-    "court": "Distribution directe",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1763",
-    "titre": "Sport (entreprises)",
-    "court": "Sport",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Horaires décalés soirées et week-ends"
-  },
-  {
-    "idcc": "1790",
-    "titre": "Hôtels, cafés, restaurants (HCR)",
-    "court": "Hôtels-Cafés-Restaurants (HCR)",
-    "jourMax": 11.5,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Amplitude 13h max · Repos hebdo 2j consécutifs possible · HS majorées 10% dès 36h"
-  },
-  {
-    "idcc": "1800",
-    "titre": "Édition",
-    "court": "Édition",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1821",
-    "titre": "Production audiovisuelle",
-    "court": "Production audiovisuelle",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1850",
-    "titre": "Entreprises de courtage d'assurance et/ou de réassurance (services)",
-    "court": "Services courtage assurance",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1862",
-    "titre": "Commerce de détail de l'optique-lunetterie de précision",
-    "court": "Optique-lunetterie",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1879",
-    "titre": "Avocats (cabinets d'avocats)",
-    "court": "Avocats",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Forfait jours fréquent"
-  },
-  {
-    "idcc": "1921",
-    "titre": "Industrie du béton",
-    "court": "Industrie du béton",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1930",
-    "titre": "Cabinets d'experts-comptables et de commissaires aux comptes",
-    "court": "Experts-comptables",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Forfait jours cadres · Heures sup fréquentes lors des clôtures"
-  },
-  {
-    "idcc": "1967",
-    "titre": "Aide, accompagnement, soins et services à domicile (BAD)",
-    "court": "BAD / Services à domicile",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "1979",
-    "titre": "Hôtels, cafés, restaurants",
-    "court": "HCR (ancienne)",
-    "jourMax": 11.5,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Amplitude 13h max"
-  },
-  {
-    "idcc": "1996",
-    "titre": "Pharmacie d'officine (officines)",
-    "court": "Pharmacie officine",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2002",
-    "titre": "Professions libérales (cabinets vétérinaires)",
-    "court": "Vétérinaires",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2098",
-    "titre": "Commerces de détail non alimentaire",
-    "court": "Commerce détail non alimentaire",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2148",
-    "titre": "Personnel des prestataires de services dans le secteur tertiaire",
-    "court": "Prestataires services tertiaire",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2168",
-    "titre": "Animation (secteur)",
-    "court": "Animation socioculturelle",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Horaires décalés soirées et week-ends"
-  },
-  {
-    "idcc": "2170",
-    "titre": "Industrie du papier-carton",
-    "court": "Papier-carton",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2190",
-    "titre": "Économie sociale (SIEG)",
-    "court": "Économie sociale",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2216",
-    "titre": "Commerce de détail et de gros à prédominance alimentaire",
-    "court": "Supermarchés / Grandes surfaces",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Travail dominical fréquent · Pause payée 20 min"
-  },
-  {
-    "idcc": "2270",
-    "titre": "Professions libérales : audioprothésistes",
-    "court": "Audioprothésistes",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2372",
-    "titre": "Hospitalisation, soins, cure et garde privés à but non lucratif",
-    "court": "ESPIC",
-    "jourMax": 12,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2378",
-    "titre": "Entreprises de travail temporaire",
-    "court": "Intérim (ETT)",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2396",
-    "titre": "Assistants maternels du particulier employeur",
-    "court": "Assistants maternels",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2408",
-    "titre": "Garderies d'enfants et crèches (privées)",
-    "court": "Crèches privées",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2412",
-    "titre": "Assainissement et maintenance industrielle",
-    "court": "Assainissement / Maintenance industrielle",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2420",
-    "titre": "Professions libérales : infirmiers libéraux",
-    "court": "Infirmiers libéraux",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2511",
-    "titre": "Restauration de collectivités (entreprises)",
-    "court": "Restauration collective",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2596",
-    "titre": "Coiffure",
-    "court": "Coiffure (2596)",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Repos dimanche + 1 autre jour · Samedi travaillé courant"
-  },
-  {
-    "idcc": "2609",
-    "titre": "Bâtiment et travaux publics — Ingénieurs et cadres",
-    "court": "BTP Ingénieurs et Cadres",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Forfait jours · RTT"
-  },
-  {
-    "idcc": "2614",
-    "titre": "Huissiers de justice",
-    "court": "Huissiers de justice",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2641",
-    "titre": "Entreprises de désinfection, désinsectisation, dératisation",
-    "court": "3D (Désinfection)",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2717",
-    "titre": "Commerce de gros",
-    "court": "Commerce de gros",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2728",
-    "titre": "Services à la personne",
-    "court": "Services à la personne",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Interventions courtes multiples · Déplacement comptabilisé"
-  },
-  {
-    "idcc": "2795",
-    "titre": "Industrie sucrière",
-    "court": "Industrie sucrière",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "2941",
-    "titre": "Aide, soins et services à domicile",
-    "court": "Aide à domicile",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Astreintes · Déplacements indemnisés"
-  },
-  {
-    "idcc": "3010",
-    "titre": "Commerce non alimentaire (bricolage, jardinage)",
-    "court": "Bricolage / Jardinage",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Dimanche travaillé courant"
-  },
-  {
-    "idcc": "3021",
-    "titre": "Conseil, ingénierie et numérique",
-    "court": "Numérique / ESN / Conseil",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Forfait jours · Télétravail · Astreintes"
-  },
-  {
-    "idcc": "3032",
-    "titre": "Esthétique-cosmétique",
-    "court": "Esthétique-cosmétique (3032)",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "3043",
-    "titre": "Entreprises de propreté",
-    "court": "Propreté / Nettoyage",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Horaires décalés · Temps partiel très courant"
-  },
-  {
-    "idcc": "3090",
-    "titre": "Garderies d'enfants et crèches (privées à but lucratif)",
-    "court": "Crèches privées lucratives",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "3127",
-    "titre": "Particuliers employeurs et emploi à domicile",
-    "court": "Particuliers employeurs",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "3201",
-    "titre": "Bâtiment (accord)",
-    "court": "Bâtiment",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": ""
-  },
-  {
-    "idcc": "3220",
-    "titre": "Architecture (cabinets)",
-    "court": "Cabinets d'architecture",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Forfait jours cadres"
-  },
-  {
-    "idcc": "3248",
-    "titre": "Métallurgie",
-    "court": "Métallurgie (nationale 2022)",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "CCN unifiée depuis jan 2024 · Forfait jours · RTT"
-  },
-  {
-    "idcc": "5001",
-    "titre": "Électricité et gaz (IEG)",
-    "court": "Électricité / Gaz (EDF-GDF)",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Statut spécifique IEG"
-  },
-  {
-    "idcc": "7024",
-    "titre": "Exploitations agricoles de polyculture et d'élevage",
-    "court": "Agriculture / Exploitations agricoles",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Modulation saisonnière · Périodes hautes jusqu'à 60h/sem en accord"
-  },
-  {
-    "idcc": "9999",
-    "titre": "Code du travail (aucune convention collective applicable)",
-    "court": "Code du travail uniquement",
-    "jourMax": 10,
-    "hebdoMax": 48,
-    "hebdoMoyMax": 44,
-    "reposMin": 11,
-    "pauseApres": 6,
-    "pauseMin": 20,
-    "note": "Art. L3121-18 : 10h/j max · Art. L3121-20 : 48h/sem · Art. L3121-33 : pause 20 min après 6h"
-  }
+const CCN_RULES = {
+
+  // ── CODE DU TRAVAIL (référence de base) ──────────────────────────────────
+  'droit_commun': {
+    label:'Code du travail', idcc:null,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'Art. L3121-18 : 10h/j max · Art. L3121-20 : 48h/sem · Art. L3121-33 : pause 20 min après 6h'
+  },
+
+  // ── HÉBERGEMENT / RESTAURATION ───────────────────────────────────────────
+  'chr': {
+    label:'Hôtels-Cafés-Restaurants (CHR)', idcc:1979,
+    jourMax:11.5, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    reposHebdo:35, // repos hebdo consécutif minimum
+    note:'IDCC 1979 · Amplitude 13h max · Repos hebdo 2j consécutifs possible · HS majorées 10% dès 36h'
+  },
+  'restauration_rapide': {
+    label:'Restauration rapide', idcc:1501,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1501 · Modulation annuelle possible · Temps partiel fréquent (plannings variables)'
+  },
+
+  // ── COMMERCE / DISTRIBUTION ──────────────────────────────────────────────
+  'commerce': {
+    label:'Commerce de détail non alimentaire', idcc:1517,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1517 · Modulation · Dimanche exceptionnel possible'
+  },
+  'commerce_alimentaire': {
+    label:'Commerce alimentaire (supermarchés)', idcc:2216,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 2216 · Travail dominical fréquent · Pause payée 20 min après 6h'
+  },
+  'grande_distribution': {
+    label:'Grande distribution', idcc:2216,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 2216 · Amplitude max 12h · Repos hebdo dimanche si possible'
+  },
+
+  // ── BOULANGERIE / ALIMENTATION ───────────────────────────────────────────
+  'boulangerie': {
+    label:'Boulangerie-Pâtisserie artisanale', idcc:843,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 843 · Travail de nuit courant (panification) · Majoration nuit +25% · Repos hebdo lundi fréquent'
+  },
+  'patisserie': {
+    label:'Pâtisserie (entreprises artisanales)', idcc:1267,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1267 · Nuit possible · Dimanche travaillé majoré'
+  },
+  'boucherie': {
+    label:'Boucherie-Charcuterie artisanale', idcc:953,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 953 · Horaires tôt le matin · Dimanche matin courant'
+  },
+
+  // ── BTP / ARTISANAT ──────────────────────────────────────────────────────
+  'btp': {
+    label:'Bâtiment (BTP ouvriers)', idcc:1597,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1597 · Modulation annuelle · Intempéries · Grand déplacement'
+  },
+  'btp_etam': {
+    label:'BTP — ETAM (techniciens/agents de maîtrise)', idcc:2609,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 2609 · Forfait jours possible pour cadres · RTT'
+  },
+
+  // ── COIFFURE / ESTHÉTIQUE ────────────────────────────────────────────────
+  'coiffure': {
+    label:'Coiffure', idcc:2596,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 2596 · Repos dimanche + 1 autre jour · Samedi travaillé courant'
+  },
+  'esthetique': {
+    label:'Esthétique-Cosmétique-Parfumerie', idcc:3032,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 3032 · Temps partiel fréquent · Salons ouverts samedi/dimanche'
+  },
+
+  // ── SANTÉ / MÉDICO-SOCIAL ────────────────────────────────────────────────
+  'sante': {
+    label:'Santé (FEHAP / EHPAD)', idcc:29,
+    jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 29 · Gardes 12h autorisées · Cycles de travail · Repos compensateur obligatoire'
+  },
+  'cabinet_medical': {
+    label:'Cabinet médical / Para-médical', idcc:1748,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1748 · Fermeture le mercredi après-midi souvent · Pas de travail de nuit en général'
+  },
+  'pharmacie': {
+    label:"Pharmacie d'officine", idcc:1996,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1996 · Gardes dimanche/nuit obligatoires par roulement · Pause 20 min payée'
+  },
+
+  // ── NETTOYAGE / PROPRETÉ ─────────────────────────────────────────────────
+  'nettoyage': {
+    label:'Nettoyage et services associés', idcc:3043,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 3043 · Horaires décalés (tôt matin / tard soir) · Multi-sites fréquent · Temps partiel très courant'
+  },
+
+  // ── TRANSPORT ────────────────────────────────────────────────────────────
+  'transport_routier': {
+    label:'Transport routier (conducteurs)', idcc:16,
+    jourMax:10, hebdoMax:56, hebdoMoyMax:48, reposMin:11, pauseApres:4.5, pauseMin:45,
+    note:'IDCC 16 · Règlement CE 561/2006 : 4h30 max sans pause 45 min · 56h/sem max · 90h/2 semaines'
+  },
+  'transport_voyageurs': {
+    label:'Transport en commun (conducteurs)', idcc:1424,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1424 · Amplitude journalière max 13h · Coupures comptabilisées'
+  },
+
+  // ── AUTOMOBILE ───────────────────────────────────────────────────────────
+  'automobile': {
+    label:"Services de l'automobile (réparation/vente)", idcc:1090,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1090 · Modulation · Samedi travaillé courant · Congé principal été"
+  },
+
+  // ── IMMOBILIER ───────────────────────────────────────────────────────────
+  'immobilier': {
+    label:'Immobilier / Agences', idcc:1527,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1527 · Forfait jours pour négociateurs non-salariés · Samedi travaillé'
+  },
+
+  // ── SÉCURITÉ ─────────────────────────────────────────────────────────────
+  'securite': {
+    label:'Prévention-Sécurité privée', idcc:1351,
+    jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 1351 · Vacation max 12h · Repos entre vacations 12h minimum · Cycles modulation'
+  },
+
+  // ── AGRICULTURE ──────────────────────────────────────────────────────────
+  'agriculture': {
+    label:'Agriculture / Exploitations agricoles', idcc:7024,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 7024 · Modulation saisonnière · Périodes hautes jusqu'à 60h/sem possibles en accord"
+  },
+  'viticulture': {
+    label:'Viticulture', idcc:9111,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 9111 · Vendanges : modulation spécifique · Saisonniers fréquents"
+  },
+
+  // ── SERVICES À LA PERSONNE ───────────────────────────────────────────────
+  'sap': {
+    label:'Services à la personne (SAP)', idcc:3127,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 3127 · Interventions courtes multiples · Temps de déplacement comptabilisé · Temps partiel dominant'
+  },
+  'aide_domicile': {
+    label:'Aide à domicile (associations)', idcc:2941,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:'IDCC 2941 · Astreintes · Déplacements indemnisés · Amplitude 13h possible'
+  },
+
+};
+
+// Groupes pour affichage dans les selects
+const CCN_GROUPS = [
+  { label: '📄 Droit commun', keys: ['droit_commun'] },
+  { label: '🍽️ Hôtellerie / Restauration', keys: ['chr','restauration_rapide'] },
+  { label: '🛒 Commerce / Distribution', keys: ['commerce','commerce_alimentaire','grande_distribution'] },
+  { label: '🥖 Alimentation artisanale', keys: ['boulangerie','patisserie','boucherie'] },
+  { label: '🏗️ BTP / Artisanat', keys: ['btp','btp_etam'] },
+  { label: '💇 Coiffure / Esthétique', keys: ['coiffure','esthetique'] },
+  { label: '🏥 Santé / Médico-social', keys: ['sante','cabinet_medical','pharmacie'] },
+  { label: '🧹 Nettoyage / Propreté', keys: ['nettoyage'] },
+  { label: '🚛 Transport', keys: ['transport_routier','transport_voyageurs'] },
+  { label: '🚗 Automobile', keys: ['automobile'] },
+  { label: '🏠 Immobilier', keys: ['immobilier'] },
+  { label: '🔒 Sécurité', keys: ['securite'] },
+  { label: '🌾 Agriculture', keys: ['agriculture','viticulture'] },
+  { label: '🤝 Services à la personne', keys: ['sap','aide_domicile'] },
 ];
 
-// Index rapide par IDCC
-const CCN_BY_IDCC = {};
-CCN_DATABASE.forEach(c => {
-  CCN_BY_IDCC[c.idcc] = c;
-  CCN_BY_IDCC[String(parseInt(c.idcc))] = c;
-});
+// Convention par défaut entreprise (chargée depuis Firestore)
+let _ccnDefaultEntreprise = '';
 
-// Convention par défaut entreprise
-let _ccnEntreprise = null;
-let _ccnDefaultEntreprise = ''; // compat ancienne valeur
-
-function normalizeIDCC(raw) {
-  const s = String(raw || '').trim();
-  const n = parseInt(s, 10);
-  if (!isNaN(n)) return String(n).padStart(4, '0');
-  return s;
-}
-function findCCN(idcc) {
-  if (!idcc) return null;
-  const norm = normalizeIDCC(idcc);
-  return CCN_BY_IDCC[norm] || CCN_BY_IDCC[String(parseInt(norm)||0)] || null;
-}
-function searchCCN(query) {
-  if (!query || query.length < 2) return [];
-  const q = query.toLowerCase();
-  const num = parseInt(query, 10);
-  return CCN_DATABASE.filter(c => {
-    if (!isNaN(num) && c.idcc.startsWith(String(num).padStart(Math.min(query.length,4),'0').slice(0,query.length))) return true;
-    return (c.titre.toLowerCase() + ' ' + c.court.toLowerCase()).includes(q);
-  }).slice(0, 10);
-}
-function renderCCNNote(ccn) {
-  if (!ccn) return '';
-  return '<div style="font-size:11px;color:var(--muted);padding:6px 10px;background:#f8faff;border-radius:6px;margin-top:4px;line-height:1.6">'
-    + '<strong style="color:var(--text)">IDCC ' + ccn.idcc + ' — ' + ccn.court + '</strong><br>'
-    + '<span style="font-size:10px;color:#6b7280">' + ccn.titre + '</span><br>'
-    + '⏱ Jour max : <b>' + ccn.jourMax + 'h</b> &nbsp;·&nbsp; 📅 Hebdo max : <b>' + ccn.hebdoMax + 'h</b> &nbsp;·&nbsp; '
-    + '☕ Pause : <b>' + ccn.pauseMin + ' min après ' + ccn.pauseApres + 'h</b> &nbsp;·&nbsp; 🌙 Repos : <b>' + ccn.reposMin + 'h</b>'
-    + (ccn.note ? '<br><span style="font-size:10px;color:#9ca3af">' + ccn.note + '</span>' : '')
-    + '</div>';
-}
-
-
-// ── AUTOCOMPLETE CCN ─────────────────────────────────────────────────────────
-
-// Remplir l'input CCN avec une valeur (depuis Firestore lors d'un openModalEdit)
-function setCCNInput(idcc) {
-  const input = document.getElementById('f-ccn-input');
-  const hidden = document.getElementById('f-ccn');
-  if (!input || !hidden) return;
-  if (!idcc) {
-    input.value = '';
-    hidden.value = '';
-    const note = document.getElementById('f-ccn-note');
-    if (note) note.innerHTML = '';
-    return;
-  }
-  const ccn = findCCN(idcc);
-  hidden.value = idcc;
-  if (ccn) {
-    input.value = 'IDCC ' + ccn.idcc + ' — ' + ccn.court;
-    const note = document.getElementById('f-ccn-note');
-    if (note) note.innerHTML = renderCCNNote(ccn);
-  } else {
-    input.value = 'IDCC ' + idcc + ' (non trouvé en base)';
-  }
-}
-
-// Saisie dans l'input CCN → affiche le dropdown de résultats
-function onCCNInput(val) {
-  const dropdown = document.getElementById('ccn-dropdown');
-  const hidden   = document.getElementById('f-ccn');
-  const note     = document.getElementById('f-ccn-note');
-  if (!dropdown) return;
-
-  // Si l'utilisateur efface, on remet à zéro
-  if (!val || val.trim().length < 1) {
-    dropdown.style.display = 'none';
-    if (hidden) hidden.value = '';
-    if (note)   note.innerHTML = '';
-    return;
-  }
-
-  const results = searchCCN(val);
-
-  // Ajouter l'option "Code du travail uniquement" si query vide ou courte
-  const items = results.length > 0 ? results : [];
-
-  if (items.length === 0) {
-    dropdown.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--muted)">Aucune CCN trouvée. Vérifiez le code IDCC.</div>';
-    dropdown.style.display = 'block';
-    return;
-  }
-
-  dropdown.innerHTML = items.map(c =>
-    `<div style="padding:9px 14px;cursor:pointer;border-bottom:1px solid #f1f5f9;transition:.1s" 
-       onmousedown="selectCCN('${c.idcc}')"
-       onmouseover="this.style.background='#f0f4ff'"
-       onmouseout="this.style.background=''">`
-    + `<div style="font-size:12px;font-weight:700;color:var(--text)"><span style="background:#e0edff;color:var(--blue-main);padding:1px 6px;border-radius:4px;font-size:11px;margin-right:6px">IDCC ${c.idcc}</span>${c.court}</div>`
-    + `<div style="font-size:10px;color:var(--muted);margin-top:1px">${c.titre.length > 80 ? c.titre.slice(0,80)+'…' : c.titre}</div>`
-    + '</div>'
-  ).join('');
-  dropdown.style.display = 'block';
-}
-
-// Sélectionner une CCN depuis le dropdown
-function selectCCN(idcc) {
-  const ccn    = findCCN(idcc);
-  const input  = document.getElementById('f-ccn-input');
-  const hidden = document.getElementById('f-ccn');
-  const note   = document.getElementById('f-ccn-note');
-  const drop   = document.getElementById('ccn-dropdown');
-  if (!ccn) return;
-  if (input)  input.value  = 'IDCC ' + ccn.idcc + ' — ' + ccn.court;
-  if (hidden) hidden.value = ccn.idcc;
-  if (note)   note.innerHTML = renderCCNNote(ccn);
-  if (drop)   drop.style.display = 'none';
-  // Mise à jour des contraintes horaires si on est dans le calc
-  refreshCCNConstraints(ccn);
-}
-
-// Mettre à jour les contraintes de la CCN (pour le calcul des heures)
-function refreshCCNConstraints(ccn) {
-  // Exposé globalement pour que le calculateur puisse l'utiliser
-  window._currentCCN = ccn;
-}
-
-// Compat: populateCCNSelect (appelé dans openModalNouvelEmploye / openModalEdit)
-// → remplacé par setCCNInput
+// Peupler le select CCN
 function populateCCNSelect(selId, currentVal) {
-  if (selId === 'f-ccn') {
-    setCCNInput(currentVal || '');
-  }
+  const el = document.getElementById(selId);
+  if(!el) return;
+  const firstOpt = el.querySelector('option[value=""]');
+  // Vider sauf option vide
+  el.innerHTML = '<option value="">— Défaut entreprise' + (_ccnDefaultEntreprise && CCN_RULES[_ccnDefaultEntreprise] ? ' (' + CCN_RULES[_ccnDefaultEntreprise].label + ')' : '') + ' —</option>';
+  CCN_GROUPS.forEach(g => {
+    const og = document.createElement('optgroup');
+    og.label = g.label;
+    g.keys.forEach(k => {
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = CCN_RULES[k]?.label || k;
+      if(k === currentVal) opt.selected = true;
+      og.appendChild(opt);
+    });
+    el.appendChild(og);
+  });
 }
 
-// Compat: onCCNChange (n'est plus nécessaire avec l'autocomplete)
-function onCCNChange() {}
-
-window.onCCNChange         = onCCNChange;
-window.onCCNInput          = onCCNInput;
-window.selectCCN           = selectCCN;
-window.setCCNInput         = setCCNInput;
-
+// Afficher la note de la CCN sélectionnée
+function onCCNChange() {
+  const sel = document.getElementById('f-ccn');
+  const note = document.getElementById('f-ccn-note');
+  if(!sel || !note) return;
+  const key = sel.value;
+  const rule = CCN_RULES[key];
+  if(rule && rule.note) {
+    note.style.display = '';
+    note.innerHTML = '<strong>' + rule.label + (rule.idcc ? ' <span style="color:#6b7280;font-weight:400">(IDCC '+rule.idcc+')</span>' : '') + '</strong><br>' +
+      '⏱ Jour max : <b>' + rule.jourMax + 'h</b> &nbsp;·&nbsp; 📅 Hebdo max : <b>' + rule.hebdoMax + 'h</b> &nbsp;·&nbsp; ☕ Pause : <b>' + rule.pauseMin + ' min après ' + rule.pauseApres + 'h</b> &nbsp;·&nbsp; 🌙 Repos : <b>' + rule.reposMin + 'h</b><br>' +
+      '<span style="color:#6b7280;font-size:10px">' + (rule.note||'') + '</span>';
+  } else {
+    note.style.display = 'none';
+  }
+}
+window.onCCNChange = onCCNChange;
 
 window.openModalNouvelEmploye = function() {
   _editId = null;
   _photoDataURL = null;
   document.getElementById('modal-emp-title').textContent = '👤 Nouvel employé';
-  setCCNInput('');
+  populateCCNSelect('f-ccn', '');
   ['prenom','nom','naissance','nationalite','adresse','tel','email','nss',
    'poste','dept','entree','fin','brut','net','heures','iban','note','superbrut'].forEach(k => {
     const el = document.getElementById('f-'+k);
@@ -2672,7 +1449,8 @@ window.openModalEdit = function(id) {
   document.getElementById('f-freq').value     = e.frequence||'mensuel';
   document.getElementById('f-couleur').value  = e.couleur||COLORS[0];
   // CCN
-  setCCNInput(e.ccn||'');
+  populateCCNSelect('f-ccn', e.ccn||'');
+  onCCNChange();
   // Période d'essai
   const pe = e.periodeEssai||{active:false};
   const peActive = document.getElementById('pe-active');
