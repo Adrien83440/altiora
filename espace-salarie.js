@@ -3,7 +3,7 @@
 ══════════════════════════════════════════ */
 var COLORS = {cp:'#059669',rtt:'#3b82f6',css:'#f59e0b',evenement:'#7c3aed',maladie:'#ef4444',recuperation:'#0891b2',formation:'#db2777'};
 var LABELS  = {cp:'Cong\u00e9s pay\u00e9s',rtt:'RTT',css:'Sans solde',evenement:'\u00c9v\u00e9nement familial',maladie:'Maladie / Arr\u00eat',recuperation:'R\u00e9cup\u00e9ration heures',formation:'Formation'};
-var ICONS   = {cp:'🏖️',rtt:'⏰',css:'💼',evenement:'🎉',maladie:'🤒',recuperation:'🔄',formation:'🎓'};
+var ICONS   = {cp:'\ud83c\udfd6\ufe0f',rtt:'\u23f0',css:'\ud83d\udcbc',evenement:'\ud83c\udf89',maladie:'\ud83e\udd12',recuperation:'\ud83d\udd04',formation:'\ud83c\udf93'};
 var SOLDE_K = {cp:'cpRestant',rtt:'rttRestant',recuperation:'recupRestant'};
 var DOW_KEY = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
 
@@ -185,7 +185,7 @@ function renderAll() {
   av.textContent = (_emp.prenom||'?').charAt(0).toUpperCase();
   av.style.background = col;
   document.getElementById('hero-name').textContent = ((_emp.prenom||'')+' '+(_emp.nom||'')).trim();
-  document.getElementById('hero-sub').textContent  = [_emp.poste,_emp.departement,_emp.typeContrat].filter(Boolean).join(' · ');
+  document.getElementById('hero-sub').textContent  = [_emp.poste,_emp.departement,_emp.typeContrat].filter(Boolean).join(' \u00b7 ');
   document.getElementById('year-lbl').textContent  = _year;
 
   // Chips hero
@@ -214,10 +214,10 @@ function renderSoldesFlottants() {
   var cpPct = s.cpAcquis>0 ? Math.min(s.cpPris/s.cpAcquis*100,100).toFixed(0) : 0;
   var rttPct = s.rttBase>0 ? Math.min(s.rttPris/s.rttBase*100,100).toFixed(0) : 0;
   document.getElementById('soldes-grid').innerHTML =
-    sc('🏖️', s.cpRestant.toFixed(1), 'j', 'CP restants', s.cpAcquis.toFixed(1)+'j acquis', s.cpRestant>10?'g':s.cpRestant>5?'o':'r', cpPct, 'var(--orange)')
-   +sc('⏰', s.rttRestant.toFixed(1), 'j', 'RTT restants', s.rttBase+'j alloués', s.rttRestant>0?'g':'r', rttPct, 'var(--blue)')
+    sc('\ud83c\udfd6\ufe0f', s.cpRestant.toFixed(1), 'j', 'CP restants', s.cpAcquis.toFixed(1)+'j acquis', s.cpRestant>10?'g':s.cpRestant>5?'o':'r', cpPct, 'var(--orange)')
+   +sc('\u23f0', s.rttRestant.toFixed(1), 'j', 'RTT restants', s.rttBase+'j allou\u00e9s', s.rttRestant>0?'g':'r', rttPct, 'var(--blue)')
    +sc('\ud83d\udd04', s.recupRestant.toFixed(1), 'h', 'R\u00e9cup\u00e9ration', 'Heures \u00e0 prendre', s.recupRestant>0?'g':'', 0, '')
-   +sc('⏳', s.pending, '', 'En attente', 'demande'+(s.pending>1?'s':'')+' à valider', s.pending>0?'o':'', 0, '');
+   +sc('\u23f3', s.pending, '', 'En attente', 'demande'+(s.pending>1?'s':'')+' \u00e0 valider', s.pending>0?'o':'', 0, '');
 }
 function sc(icon, val, unit, lbl, sub, cls, pct, fillColor) {
   return '<div class="sc">'
@@ -235,16 +235,16 @@ function sc(icon, val, unit, lbl, sub, cls, pct, fillColor) {
 function renderAccueil() {
   var now = new Date();
   var jours = ['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
-  document.getElementById('welcome-name').textContent = 'Bonjour '+(_emp.prenom||'') +' ! 👋';
+  document.getElementById('welcome-name').textContent = 'Bonjour '+(_emp.prenom||'') +' ! \ud83d\udc4b';
   document.getElementById('welcome-date').textContent = jours[now.getDay()]+' '+now.toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
-  document.getElementById('accueil-annee-lbl').textContent = '— '+_year;
-  document.getElementById('conges-annee-lbl').textContent = '— '+_year;
+  document.getElementById('accueil-annee-lbl').textContent = '\u2014 '+_year;
+  document.getElementById('conges-annee-lbl').textContent = '\u2014 '+_year;
 
   // Infos contrat
   var infos = [];
-  if(_emp.poste) infos.push({icon:'💼', label:'Poste', val:_emp.poste});
+  if(_emp.poste) infos.push({icon:'\ud83d\udcbc', label:'Poste', val:_emp.poste});
   if(_emp.dateEntree) infos.push({icon:'\ud83d\udcc5', label:'Entr\u00e9e', val:fmtDate(_emp.dateEntree)});
-  if(_emp.typeContrat) infos.push({icon:'📄', label:'Contrat', val:_emp.typeContrat});
+  if(_emp.typeContrat) infos.push({icon:'\ud83d\udcc4', label:'Contrat', val:_emp.typeContrat});
   if(_emp.departement) infos.push({icon:'\ud83c\udfe2', label:'\u00c9quipe', val:_emp.departement});
   document.getElementById('accueil-infos').innerHTML = infos.map(function(i){
     return '<div class="info-line"><span class="info-line-icon">'+i.icon+'</span><span class="info-line-label">'+i.label+'</span><span class="info-line-val">'+i.val+'</span></div>';
@@ -253,14 +253,14 @@ function renderAccueil() {
   // Soldes accueil
   var s = _soldes;
   document.getElementById('accueil-soldes').innerHTML =
-    soldeBar('🏖️ CP restants', s.cpRestant, s.cpAcquis, 'j', s.cpRestant>10?'var(--g3)':s.cpRestant>5?'var(--orange)':'var(--red)')
-   +soldeBar('⏰ RTT restants', s.rttRestant, s.rttBase, 'j', s.rttRestant>0?'var(--blue)':'var(--red)')
-   +(s.recupRestant>0?soldeBar('🔄 Récupération', s.recupRestant, s.recupRestant, 'h', 'var(--teal)'):'');
+    soldeBar('\ud83c\udfd6\ufe0f CP restants', s.cpRestant, s.cpAcquis, 'j', s.cpRestant>10?'var(--g3)':s.cpRestant>5?'var(--orange)':'var(--red)')
+   +soldeBar('\u23f0 RTT restants', s.rttRestant, s.rttBase, 'j', s.rttRestant>0?'var(--blue)':'var(--red)')
+   +(s.recupRestant>0?soldeBar('\ud83d\udd04 R\u00e9cup\u00e9ration', s.recupRestant, s.recupRestant, 'h', 'var(--teal)'):'');
 
   // 3 dernières demandes
   var recent = _demandes.slice(0,3);
   var el = document.getElementById('accueil-demandes');
-  if(!recent.length){ el.innerHTML='<div class="empty"><div class="empty-icon">📋</div>Aucune demande.</div>'; return; }
+  if(!recent.length){ el.innerHTML='<div class="empty"><div class="empty-icon">\ud83d\udccb</div>Aucune demande.</div>'; return; }
   el.innerHTML = recent.map(function(d){
     return demItemHtml(d);
   }).join('');
@@ -269,14 +269,14 @@ function renderAccueil() {
   var pendingCount = _soldes.pending;
   var tabBtn = document.getElementById('tab-conges-btn');
   if(pendingCount>0 && tabBtn){
-    tabBtn.innerHTML = '🏖️ Congés <span class="notif">'+pendingCount+'</span>';
+    tabBtn.innerHTML = '\ud83c\udfd6\ufe0f Cong\u00e9s <span class="notif">'+pendingCount+'</span>';
   }
 
   // Badge documents manquants
   var missingDocs = DOCS_REQUIRED.filter(function(d){ return !d.optional && !_docsEmployee[d.id]; }).length;
   var tabDocsBtn = document.getElementById('tab-docs-btn');
   if(missingDocs>0 && tabDocsBtn){
-    tabDocsBtn.innerHTML = '📎 Documents <span class="notif">'+missingDocs+'</span>';
+    tabDocsBtn.innerHTML = '\ud83d\udcce Documents <span class="notif">'+missingDocs+'</span>';
   }
 }
 
@@ -290,7 +290,7 @@ function soldeBar(label, val, max, unit, color) {
     +'<div style="height:6px;background:#f3f4f6;border-radius:99px;overflow:hidden">'
       +'<div style="height:100%;width:'+pct+'%;background:'+color+';border-radius:99px;transition:width .5s ease"></div>'
     +'</div>'
-    +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+val.toFixed(1)+' / '+max.toFixed(1)+' '+unit+' ('+pct+'% utilisés)</div>'
+    +'<div style="font-size:10px;color:var(--muted);margin-top:2px">'+val.toFixed(1)+' / '+max.toFixed(1)+' '+unit+' ('+pct+'% utilis\u00e9s)</div>'
   +'</div>';
 }
 
@@ -299,31 +299,31 @@ function soldeBar(label, val, max, unit, color) {
 ══════════════════════════════════════════ */
 function renderProfil() {
   // Contrat card
-  var dateEntree = _emp.dateEntree ? fmtDate(_emp.dateEntree) : '—';
+  var dateEntree = _emp.dateEntree ? fmtDate(_emp.dateEntree) : '\u2014';
   var anciennete = _emp.dateEntree ? calcAnciennete(_emp.dateEntree) : '';
   document.getElementById('contrat-card-wrap').innerHTML =
     '<div class="contrat-card">'
       +'<div class="contrat-left">'
-        +'<div class="contrat-type">'+((_emp.typeContrat||'Contrat'))+' · '+(_emp.poste||'—')+'</div>'
+        +'<div class="contrat-type">'+((_emp.typeContrat||'Contrat'))+' \u00b7 '+(_emp.poste||'\u2014')+'</div>'
         +'<div class="contrat-sub">'
-          +(_emp.departement?_emp.departement+' · ':'')
-          +(_emp.heuresHebdo?_emp.heuresHebdo+'h/semaine · ':'')
+          +(_emp.departement?_emp.departement+' \u00b7 ':'')
+          +(_emp.heuresHebdo?_emp.heuresHebdo+'h/semaine \u00b7 ':'')
           +(_emp.frequence?_emp.frequence.charAt(0).toUpperCase()+_emp.frequence.slice(1)+'':'')
         +'</div>'
-        +'<div class="contrat-sub" style="margin-top:4px">Entrée : '+dateEntree+'</div>'
+        +'<div class="contrat-sub" style="margin-top:4px">Entr\u00e9e : '+dateEntree+'</div>'
       +'</div>'
-      +(anciennete?'<div class="contrat-stat"><div class="cs-val">'+anciennete+'</div><div class="cs-lbl">Ancienneté</div></div>':'')
+      +(anciennete?'<div class="contrat-stat"><div class="cs-val">'+anciennete+'</div><div class="cs-lbl">Anciennet\u00e9</div></div>':'')
     +'</div>';
 
   // Infos personnelles
   var pf = _profilFields;
-  setVal('pf-prenom', _emp.prenom||'—');
-  setVal('pf-nom', _emp.nom||'—');
+  setVal('pf-prenom', _emp.prenom||'\u2014');
+  setVal('pf-nom', _emp.nom||'\u2014');
   setEditVal('pf-email-perso', pf.emailPerso, 'Ajouter email personnel');
-  setEditVal('pf-tel', pf.telephone, 'Ajouter téléphone');
+  setEditVal('pf-tel', pf.telephone, 'Ajouter t\u00e9l\u00e9phone');
   setEditVal('pf-adresse', pf.adresse, 'Ajouter adresse');
   setEditVal('pf-ddn', pf.dateNaissance, 'Ajouter date de naissance');
-  setEditVal('pf-nat', pf.nationalite, 'Ajouter nationalité');
+  setEditVal('pf-nat', pf.nationalite, 'Ajouter nationalit\u00e9');
   setEditVal('pf-iban', pf.iban ? maskIban(pf.iban) : '', 'Ajouter IBAN');
   setEditVal('pf-titulaire', pf.ibanTitulaire, 'Ajouter titulaire');
   setEditVal('pf-urgence-nom', pf.contactUrgenceNom, 'Ajouter contact urgence');
@@ -334,22 +334,22 @@ function renderProfil() {
   var uw = document.getElementById('urgence-wrap');
   if(pf.contactUrgenceNom && pf.contactUrgenceTel){
     uw.innerHTML = '<div class="urgence-card">'
-      +'<div class="urgence-ico">🚨</div>'
+      +'<div class="urgence-ico">\ud83d\udea8</div>'
       +'<div class="urgence-body">'
         +'<div class="urgence-name">'+pf.contactUrgenceNom+'</div>'
         +(pf.contactUrgenceLien?'<div class="urgence-lien">'+pf.contactUrgenceLien+'</div>':'')
-        +'<div class="urgence-tel">📞 '+pf.contactUrgenceTel+'</div>'
+        +'<div class="urgence-tel">\ud83d\udcde '+pf.contactUrgenceTel+'</div>'
       +'</div>'
     +'</div>';
   } else { uw.innerHTML = ''; }
 
   // Contrat RO
   var contratRows = [];
-  if(_emp.typeContrat) contratRows.push({icon:'📄', label:'Type', val:_emp.typeContrat});
-  if(_emp.dateEntree) contratRows.push({icon:'📅', label:'Date entrée', val:fmtDate(_emp.dateEntree)});
-  if(_emp.heuresHebdo) contratRows.push({icon:'⏰', label:'Horaire', val:_emp.heuresHebdo+'h / semaine'});
+  if(_emp.typeContrat) contratRows.push({icon:'\ud83d\udcc4', label:'Type', val:_emp.typeContrat});
+  if(_emp.dateEntree) contratRows.push({icon:'\ud83d\udcc5', label:'Date entr\u00e9e', val:fmtDate(_emp.dateEntree)});
+  if(_emp.heuresHebdo) contratRows.push({icon:'\u23f0', label:'Horaire', val:_emp.heuresHebdo+'h / semaine'});
   if(_emp.categoriePoste) contratRows.push({icon:'\ud83d\udcbc', label:'Cat\u00e9gorie', val:capitalize(_emp.categoriePoste)});
-  if(_emp.ccn) contratRows.push({icon:'📋', label:'Convention', val:_emp.ccn});
+  if(_emp.ccn) contratRows.push({icon:'\ud83d\udccb', label:'Convention', val:_emp.ccn});
   if(_emp.periodeEssai && _emp.periodeEssai.active) contratRows.push({icon:'\u26a0\ufe0f', label:'P\u00e9riode essai', val:'En cours'});
   var cb = document.getElementById('contrat-body');
   if(contratRows.length){
@@ -357,7 +357,7 @@ function renderProfil() {
       return '<div class="info-line"><span class="info-line-icon">'+r.icon+'</span><span class="info-line-label">'+r.label+'</span><span class="info-line-val">'+r.val+'</span></div>';
     }).join('');
   } else {
-    cb.innerHTML = '<div class="empty"><div class="empty-icon">📋</div><span>Infos de contrat à renseigner par votre employeur.</span></div>';
+    cb.innerHTML = '<div class="empty"><div class="empty-icon">\ud83d\udccb</div><span>Infos de contrat \u00e0 renseigner par votre employeur.</span></div>';
   }
 }
 
@@ -369,7 +369,7 @@ function setEditVal(id, val, placeholder) {
     el.textContent = val;
     el.style.color = 'var(--text)';
   } else {
-    el.textContent = placeholder||'—';
+    el.textContent = placeholder||'\u2014';
     el.style.color = 'var(--muted)';
   }
 }
@@ -395,7 +395,7 @@ function editField(el, fieldKey) {
     div.setAttribute('title', el.getAttribute('title'));
     div.style.color = newVal ? 'var(--text)' : 'var(--muted)';
     if(fieldKey==='iban' && newVal) div.textContent = maskIban(newVal);
-    else div.textContent = newVal || (el.getAttribute('title')||'—');
+    else div.textContent = newVal || (el.getAttribute('title')||'\u2014');
     input.replaceWith(div);
     // Réattacher le event onclick
     div.addEventListener('click', function(){ editField(div, fieldKey); });
@@ -412,7 +412,7 @@ window.editField = editField;
 async function saveProfil() {
   if(!Object.keys(_profilEdits).length) return;
   var btn = document.getElementById('btn-save-profil');
-  btn.textContent = '⏳ Enregistrement...';
+  btn.textContent = '\u23f3 Enregistrement...';
   btn.disabled = true;
   try {
     // Fusionner avec données existantes
@@ -433,14 +433,14 @@ async function saveProfil() {
     }
     _profilEdits = {};
     btn.classList.remove('show');
-    btn.textContent = '💾 Enregistrer les modifications';
+    btn.textContent = '\ud83d\udcbe Enregistrer les modifications';
     btn.disabled = false;
-    showToast('✅ Profil enregistré','ok');
+    showToast('\u2705 Profil enregistr\u00e9','ok');
     renderProfil(); // re-render urgence card
   } catch(e) {
     console.error(e);
     showToast('Erreur : '+e.message,'err');
-    btn.textContent = '💾 Enregistrer les modifications';
+    btn.textContent = '\ud83d\udcbe Enregistrer les modifications';
     btn.disabled = false;
   }
 }
@@ -466,7 +466,7 @@ function renderDocuments() {
     var uploaded  = _docsEmployee[doc.id];
     var cls       = uploaded ? 'doc-item uploaded' : (doc.optional ? 'doc-item' : 'doc-item required');
     var icoClass  = uploaded ? 'g' : (doc.optional ? 'o' : 'r');
-    var dateStr   = uploaded && uploaded.uploadedAt ? ' · ' + fmtDate(uploaded.uploadedAt.split('T')[0]) : '';
+    var dateStr   = uploaded && uploaded.uploadedAt ? ' \u00b7 ' + fmtDate(uploaded.uploadedAt.split('T')[0]) : '';
 
     // Conteneur
     var item = document.createElement('div');
@@ -495,7 +495,7 @@ function renderDocuments() {
 
     var metaDiv = document.createElement('div');
     metaDiv.className = 'doc-meta';
-    metaDiv.textContent = uploaded ? ('✅ ' + uploaded.name + dateStr) : doc.desc;
+    metaDiv.textContent = uploaded ? ('\u2705 ' + uploaded.name + dateStr) : doc.desc;
     info.appendChild(metaDiv);
 
     item.appendChild(info);
@@ -507,11 +507,11 @@ function renderDocuments() {
     btn.setAttribute('data-idx', idx);
     if (uploaded) {
       btn.className = 'btn-view';
-      btn.textContent = '👁 Voir';
+      btn.textContent = '\ud83d\udc41 Voir';
       btn.onclick = function() { viewDocIdx(this); };
     } else {
       btn.className = 'btn-upload';
-      btn.textContent = '📤 Déposer';
+      btn.textContent = '\ud83d\udce4 D\u00e9poser';
       btn.onclick = function() { openUploadIdx(this); };
     }
     action.appendChild(btn);
@@ -528,9 +528,9 @@ function renderDocuments() {
   if (!_docsEmployer.length) {
     var empty = document.createElement('div');
     empty.className = 'empty';
-    empty.innerHTML = '<div class="empty-icon">📥</div>';
+    empty.innerHTML = '<div class="empty-icon">\ud83d\udce5</div>';
     var emptyTxt = document.createElement('span');
-    emptyTxt.textContent = 'Aucun document transmis par votre employeur pour l’instant.';
+    emptyTxt.textContent = 'Aucun document transmis par votre employeur pour l\u2019instant.';
     empty.appendChild(emptyTxt);
     empList.appendChild(empty);
   } else {
@@ -542,7 +542,7 @@ function renderDocuments() {
 
       var ico = document.createElement('div');
       ico.className = 'doc-ico b';
-      ico.textContent = '📄';
+      ico.textContent = '\ud83d\udcc4';
       item.appendChild(ico);
 
       var info = document.createElement('div');
@@ -555,7 +555,7 @@ function renderDocuments() {
 
       var metaDiv = document.createElement('div');
       metaDiv.className = 'doc-meta';
-      metaDiv.textContent = (doc.name || '') + (dateStr ? ' · ' + dateStr : '');
+      metaDiv.textContent = (doc.name || '') + (dateStr ? ' \u00b7 ' + dateStr : '');
       info.appendChild(metaDiv);
 
       item.appendChild(info);
@@ -565,7 +565,7 @@ function renderDocuments() {
         action.className = 'doc-action';
         var btn = document.createElement('button');
         btn.className = 'btn-view';
-        btn.textContent = '👁 Voir';
+        btn.textContent = '\ud83d\udc41 Voir';
         (function(idx){ btn.onclick = function() { viewEmployerDoc(idx); }; })(i);
         action.appendChild(btn);
         item.appendChild(action);
@@ -630,7 +630,7 @@ window.clearUpload = clearUpload;
 async function submitUpload() {
   if(!_uploadB64 || !_uploadDocId) return;
   var btn = document.getElementById('upload-submit-btn');
-  btn.disabled = true; btn.textContent = '⏳ Envoi...';
+  btn.disabled = true; btn.textContent = '\u23f3 Envoi...';
   try {
     var docData = {
       name: _uploadMeta.name,
@@ -646,11 +646,11 @@ async function submitUpload() {
     await window._setDocPath(['rh', _uid, 'employes', _empId], docsUpdate, {merge:true});
     closeUploadModal();
     renderDocuments();
-    showToast('✅ Document déposé avec succès','ok');
+    showToast('\u2705 Document d\u00e9pos\u00e9 avec succ\u00e8s','ok');
   } catch(e) {
     console.error(e);
     showToast('Erreur : '+e.message,'err');
-    btn.disabled = false; btn.textContent = '📤 Envoyer';
+    btn.disabled = false; btn.textContent = '\ud83d\udce4 Envoyer';
   }
 }
 window.submitUpload = submitUpload;
@@ -693,7 +693,7 @@ function renderSoldesDetail() {
   var s = _soldes;
   var items = [
     {icon:'\ud83c\udfd6\ufe0f', label:'Cong\u00e9s pay\u00e9s', acquis:s.cpAcquis, pris:s.cpPris, restant:s.cpRestant, unit:'j', color:'var(--g3)'},
-    {icon:'⏰', label:'RTT', acquis:s.rttBase, pris:s.rttPris, restant:s.rttRestant, unit:'j', color:'var(--blue)'},
+    {icon:'\u23f0', label:'RTT', acquis:s.rttBase, pris:s.rttPris, restant:s.rttRestant, unit:'j', color:'var(--blue)'},
     {icon:'\ud83d\udd04', label:'R\u00e9cup\u00e9ration', acquis:s.recupRestant, pris:0, restant:s.recupRestant, unit:'h', color:'var(--teal)'},
   ];
   document.getElementById('soldes-detail').innerHTML = items.map(function(it){
@@ -708,7 +708,7 @@ function renderSoldesDetail() {
       +'</div>'
       +'<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)">'
         +'<span>'+it.pris.toFixed(1)+' '+it.unit+' pris</span>'
-        +'<span>'+it.acquis.toFixed(1)+' '+it.unit+' alloués</span>'
+        +'<span>'+it.acquis.toFixed(1)+' '+it.unit+' allou\u00e9s</span>'
       +'</div>'
     +'</div>';
   }).join('');
@@ -722,7 +722,7 @@ function renderTypeGrid() {
     {k:'cp',          sub: _soldes.cpRestant.toFixed(1)+'j disponibles'},
     {k:'rtt',         sub: _soldes.rttRestant.toFixed(1)+'j disponibles'},
     {k:'recuperation',sub:(_soldes.recupRestant||0)+'h disponibles'},
-    {k:'css',         sub:'Non décompté du solde'},
+    {k:'css',         sub:'Non d\u00e9compt\u00e9 du solde'},
     {k:'evenement',   sub:'Dur\u00e9es l\u00e9gales'},
     {k:'maladie',     sub:'Arr\u00eat m\u00e9dical'},
     {k:'formation',   sub:'Formation professionnelle'},
@@ -749,16 +749,16 @@ function renderDemandes() {
   var cnt = document.getElementById('dem-count');
   var list = _demFilter === 'all' ? _demandes : _demandes.filter(function(d) { return d.statut === _demFilter; });
   cnt.textContent = _demandes.length+' demande'+(_demandes.length>1?'s':'');
-  if (!list.length) { el.innerHTML='<div class="empty"><div class="empty-icon">📋</div>Aucune demande.</div>'; return; }
+  if (!list.length) { el.innerHTML='<div class="empty"><div class="empty-icon">\ud83d\udccb</div>Aucune demande.</div>'; return; }
   el.innerHTML = list.map(function(d){ return demItemHtml(d); }).join('');
 }
 
 function demItemHtml(d) {
   var db = d.dateDebut ? new Date(d.dateDebut+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'}) : '?';
-  var de = (d.dateFin && d.dateFin!==d.dateDebut) ? ' → '+new Date(d.dateFin+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short'}) : '';
-  var bTxt = {pending:'⏳ En attente',approved:'✅ Approuvée',refused:'❌ Refusée',cancelled:'🚫 Annulée'}[d.statut] || d.statut;
+  var de = (d.dateFin && d.dateFin!==d.dateDebut) ? ' \u2192 '+new Date(d.dateFin+'T12:00:00').toLocaleDateString('fr-FR',{day:'numeric',month:'short'}) : '';
+  var bTxt = {pending:'\u23f3 En attente',approved:'\u2705 Approuv\u00e9e',refused:'\u274c Refus\u00e9e',cancelled:'\ud83d\udeab Annul\u00e9e'}[d.statut] || d.statut;
   return '<div class="dem-item">'
-    +'<div class="dem-ico" style="background:'+(COLORS[d.type]||'#6b7280')+'22">'+(ICONS[d.type]||'📋')+'</div>'
+    +'<div class="dem-ico" style="background:'+(COLORS[d.type]||'#6b7280')+'22">'+(ICONS[d.type]||'\ud83d\udccb')+'</div>'
     +'<div class="dem-body">'
       +'<div class="dem-name">'+(LABELS[d.type]||d.type)+' <strong style="color:'+(COLORS[d.type]||'var(--g3)')+'">'+(d.nbJours||0)+'j</strong></div>'
       +'<div class="dem-dates">'+db+de+'</div>'
@@ -824,7 +824,7 @@ function renderCal() {
     } else if (horaires[jourKey] && horaires[jourKey].actif) {
       bg = 'rgba(5,150,105,0.06)'; col = '#6ee7b7'; cls += ' work work-generic';
       var h = horaires[jourKey];
-      ttl = 'Horaire habituel'+(h.deb&&h.fin?' · '+h.deb+' – '+h.fin:'');
+      ttl = 'Horaire habituel'+(h.deb&&h.fin?' \u00b7 '+h.deb+' \u2013 '+h.fin:'');
     } else {
       bg = 'transparent'; col = '#d1d5db'; cls += ' off';
     }
@@ -835,7 +835,7 @@ function renderCal() {
   document.getElementById('cal-grid').innerHTML = calHtml;
   var legHtml = '';
   if (Object.keys(_planningCache).length > 0)
-    legHtml += '<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)"><div style="width:9px;height:9px;border-radius:2px;background:rgba(5,150,105,0.4)"></div>Planifié</div>';
+    legHtml += '<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)"><div style="width:9px;height:9px;border-radius:2px;background:rgba(5,150,105,0.4)"></div>Planifi\u00e9</div>';
   else
     legHtml += '<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--muted)"><div style="width:9px;height:9px;border-radius:2px;background:rgba(5,150,105,0.15)"></div>Horaire habituel</div>';
   legHtml += Object.keys(usedTypes).filter(function(t){ return t!=='__travail'; }).map(function(t) {
@@ -854,9 +854,9 @@ function renderHoraires() {
   document.getElementById('horaires-body').innerHTML = joursActifs.map(function(j){
     var h = horaires[j];
     return '<div class="info-line">'
-      +'<span class="info-line-icon">📆</span>'
+      +'<span class="info-line-icon">\ud83d\udcc6</span>'
       +'<span class="info-line-label">'+jLabels[j]+'</span>'
-      +'<span class="info-line-val" style="font-size:12px">'+(h.deb&&h.fin?h.deb+' – '+h.fin:'Actif')+'</span>'
+      +'<span class="info-line-val" style="font-size:12px">'+(h.deb&&h.fin?h.deb+' \u2013 '+h.fin:'Actif')+'</span>'
     +'</div>';
   }).join('');
 }
@@ -943,14 +943,14 @@ function onDateChg() {
   var sa = document.getElementById('solde-alert');
   if (!deb) { ja.className='alert alert-green'; sa.className='alert alert-orange'; document.getElementById('next2').disabled=true; return; }
   var jours = joursOuvres(deb, fin||deb);
-  ja.textContent = '📅 '+jours+' jour'+(jours>1?'s':'')+' ouvré'+(jours>1?'s':'');
+  ja.textContent = '\ud83d\udcc5 '+jours+' jour'+(jours>1?'s':'')+' ouvr\u00e9'+(jours>1?'s':'');
   ja.className = 'alert alert-green show';
   document.getElementById('next2').disabled = false;
   var sk = SOLDE_K[_selType];
   if (sk && _soldes[sk] !== undefined) {
     var solde = parseFloat(_soldes[sk]) || 0;
     if (jours > solde) {
-      sa.textContent = '⚠️ Solde insuffisant : '+solde.toFixed(1)+(_selType==='recuperation'?'h':'j')+' disponibles, '+jours+'j demandés';
+      sa.textContent = '\u26a0\ufe0f Solde insuffisant : '+solde.toFixed(1)+(_selType==='recuperation'?'h':'j')+' disponibles, '+jours+'j demand\u00e9s';
       sa.className = 'alert alert-orange show';
     } else sa.className = 'alert alert-orange';
   } else sa.className = 'alert alert-orange';
@@ -969,7 +969,7 @@ function buildRecap() {
   var apres  = solde !== null ? Math.max(0, solde-jours) : null;
   var rw     = document.getElementById('recap-warn');
   if (solde !== null && jours > solde) {
-    rw.textContent = '⚠️ Solde insuffisant ('+solde.toFixed(1)+'j dispo). Votre employeur en sera informé.';
+    rw.textContent = '\u26a0\ufe0f Solde insuffisant ('+solde.toFixed(1)+'j dispo). Votre employeur en sera inform\u00e9.';
     rw.className = 'alert alert-orange show';
   } else rw.className = 'alert alert-orange';
   document.getElementById('recap').innerHTML =
@@ -977,9 +977,9 @@ function buildRecap() {
     +'<div class="resume-row"><span>Du</span><span>'+debFmt+'</span></div>'
     +'<div class="resume-row"><span>Au</span><span>'+finFmt+'</span></div>'
     +(motif?'<div class="resume-row"><span>Motif</span><span>'+motif+'</span></div>':'')
-    +'<div class="resume-row"><span>Total</span><span style="color:var(--g3)">'+jours+' jour'+(jours>1?'s':'')+' ouvré'+(jours>1?'s':'')+'</span></div>'
-    +(apres!==null?'<div class="resume-row"><span>Solde après</span><span style="color:'+(apres>5?'var(--g3)':'var(--orange)')+'">'+apres.toFixed(1)+'j</span></div>':'')
-    +(_justifB64?'<div class="resume-row"><span>Justificatif</span><span style="color:var(--g3)">📎 '+(_justifMeta?_justifMeta.name:'Fichier joint')+'</span></div>':'');
+    +'<div class="resume-row"><span>Total</span><span style="color:var(--g3)">'+jours+' jour'+(jours>1?'s':'')+' ouvr\u00e9'+(jours>1?'s':'')+'</span></div>'
+    +(apres!==null?'<div class="resume-row"><span>Solde apr\u00e8s</span><span style="color:'+(apres>5?'var(--g3)':'var(--orange)')+'">'+apres.toFixed(1)+'j</span></div>':'')
+    +(_justifB64?'<div class="resume-row"><span>Justificatif</span><span style="color:var(--g3)">\ud83d\udcce '+(_justifMeta?_justifMeta.name:'Fichier joint')+'</span></div>':'');
 }
 
 async function submitDemande() {
@@ -988,7 +988,7 @@ async function submitDemande() {
   var motif = document.getElementById('f-motif').value.trim();
   var jours = joursOuvres(deb, fin);
   var btn = document.getElementById('btn-submit');
-  btn.disabled = true; btn.textContent = 'Envoi…';
+  btn.disabled = true; btn.textContent = 'Envoi\u2026';
   var demandeData = {
     empId:_empId, uid:_uid, type:_selType, dateDebut:deb, dateFin:fin, nbJours:jours,
     statut:'pending', motif:motif||null,
@@ -1004,10 +1004,10 @@ async function submitDemande() {
     document.getElementById('st3').classList.remove('active');
     var sw = document.getElementById('success-wrap');
     sw.style.display = 'flex'; sw.classList.add('show');
-    document.getElementById('success-sub').textContent = 'Votre demande de '+jours+'j ('+LABELS[_selType]+') a été transmise. Votre employeur la traitera prochainement.';
+    document.getElementById('success-sub').textContent = 'Votre demande de '+jours+'j ('+LABELS[_selType]+') a \u00e9t\u00e9 transmise. Votre employeur la traitera prochainement.';
   } catch(e) {
     console.error(e); showToast('Erreur : '+e.message, 'err');
-    btn.disabled = false; btn.textContent = '✉️ Envoyer la demande';
+    btn.disabled = false; btn.textContent = '\u2709\ufe0f Envoyer la demande';
   }
 }
 window.submitDemande = submitDemande;
@@ -1059,8 +1059,8 @@ function changeYear() {
   if (n>=2020 && n<=2030) {
     _year = n;
     document.getElementById('year-lbl').textContent = _year;
-    document.getElementById('accueil-annee-lbl').textContent = '— '+_year;
-    document.getElementById('conges-annee-lbl').textContent = '— '+_year;
+    document.getElementById('accueil-annee-lbl').textContent = '\u2014 '+_year;
+    document.getElementById('conges-annee-lbl').textContent = '\u2014 '+_year;
     calcSoldes(); renderSoldesFlottants(); renderAccueil(); renderSoldesDetail(); renderDemandes();
   }
 }
@@ -1077,7 +1077,7 @@ function nextM() {
 window.prevM = prevM; window.nextM = nextM;
 
 function fmtDate(s) {
-  if(!s) return '—';
+  if(!s) return '\u2014';
   try { return new Date(s+'T12:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'}); } catch(e){ return s; }
 }
 
@@ -1102,8 +1102,8 @@ function capitalize(s) { return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
 
 function getPlagesStr(it) {
   if (!it) return '';
-  if (it.plages && it.plages.length > 0) return it.plages.map(function(p){ return p.deb+'–'+p.fin; }).join(' | ');
-  return (it.deb||'') + (it.fin ? '–'+it.fin : '');
+  if (it.plages && it.plages.length > 0) return it.plages.map(function(p){ return p.deb+'\u2013'+p.fin; }).join(' | ');
+  return (it.deb||'') + (it.fin ? '\u2013'+it.fin : '');
 }
 
 function itemH(it) {
