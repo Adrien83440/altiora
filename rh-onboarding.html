@@ -1444,9 +1444,10 @@ async function createEmployeFromOnboarding(dossier, dossierId){
   try{
     await window._setDoc(window._doc(window._db,'rh',window._uid,'employes',empId), empData);
     await window._setDoc(window._doc(window._db,'rh_employes_public',publicId), publicData);
-    // Stocker l'empId dans le dossier pour lien retour
+    // Stocker empId ET publicId dans le dossier pour accès direct au lien portail
     _dossiers[dossierId].empId = empId;
-    await window._setDoc(window._doc(window._db,'rh_onboarding',window._uid,'dossiers',dossierId), {empId: empId},{merge:true});
+    _dossiers[dossierId].publicId = publicId;
+    await window._setDoc(window._doc(window._db,'rh_onboarding',window._uid,'dossiers',dossierId), {empId: empId, publicId: publicId},{merge:true});
     showToast('👤 Fiche employé créée automatiquement','ok');
   }catch(e){
     console.error('Erreur création employé:',e);
@@ -1545,10 +1546,20 @@ function showToast(msg,type){
 }
 
 // ── PORTAIL SALARIÉ ──
-var _portailLinks = {}; // cache publicId → url
+var _portailLinks = {}; // cache dossierId → publicId
 
 async function loadPortailLink(d){
   if(!d.empId) return;
+
+  // 1. Cache local du dossier (le plus rapide)
+  if(d.publicId){
+    _portailLinks[d.id] = d.publicId;
+    // Vérifier que rh_employes_public existe vraiment, sinon recréer
+    _verifyAndShowPortail(d.id, d.publicId, d);
+    return;
+  }
+
+  // 2. Lire la fiche employé privée → chercher publicId
   try{
     var snap = await window._getDoc(window._doc(window._db,'rh',window._uid,'employes',d.empId));
     if(snap.exists()){
@@ -1556,18 +1567,110 @@ async function loadPortailLink(d){
       var publicId = empData.publicId;
       if(publicId){
         _portailLinks[d.id] = publicId;
-        var url = window.location.origin+'/portail-salarie.html?id='+publicId;
-        var el = document.getElementById('portail-url-'+d.id);
-        if(el) el.textContent = url;
+        _dossiers[d.id].publicId = publicId;
+        _verifyAndShowPortail(d.id, publicId, d);
+      } else {
+        // 3. Fiche existante sans publicId → générer et injecter
+        _repairPublicId(d);
       }
+    } else {
+      _showPortailErreur(d.id, 'Fiche employé introuvable');
     }
-  }catch(e){console.warn('loadPortailLink:',e);}
+  }catch(e){
+    console.warn('loadPortailLink:',e);
+    _showPortailErreur(d.id, 'Erreur réseau');
+  }
+}
+
+// Vérifie que le document rh_employes_public existe, le recrée si besoin
+async function _verifyAndShowPortail(dossierId, publicId, d){
+  try{
+    var pubSnap = await window._getDoc(window._doc(window._db,'rh_employes_public',publicId));
+    if(pubSnap.exists()){
+      _updatePortailUI(dossierId, publicId);
+    } else {
+      // Le publicId est enregistré mais le doc public est absent → recréer
+      await _createPublicDoc(publicId, d);
+      _updatePortailUI(dossierId, publicId);
+    }
+  }catch(e){
+    // Si erreur lecture, afficher quand même l'URL (le doc existe probablement)
+    _updatePortailUI(dossierId, publicId);
+  }
+}
+
+// Génère un nouveau publicId pour une fiche sans portail
+async function _repairPublicId(d){
+  var dossierId = d.id;
+  var el = document.getElementById('portail-url-'+dossierId);
+
+  // Lire la fiche employé complète pour reconstruire publicData
+  try{
+    var empSnap = await window._getDoc(window._doc(window._db,'rh',window._uid,'employes',d.empId));
+    var empData = empSnap.exists() ? empSnap.data() : {};
+
+    var publicId = 'pub_'+Math.random().toString(36).slice(2,10)+Date.now().toString(36);
+    await _createPublicDoc(publicId, d, empData);
+
+    // Écrire publicId dans la fiche employé et dans le dossier
+    await window._setDoc(window._doc(window._db,'rh',window._uid,'employes',d.empId),{publicId:publicId},{merge:true});
+    await window._setDoc(window._doc(window._db,'rh_onboarding',window._uid,'dossiers',dossierId),{publicId:publicId},{merge:true});
+    _dossiers[dossierId].publicId = publicId;
+    _portailLinks[dossierId] = publicId;
+    _updatePortailUI(dossierId, publicId);
+    showToast('✅ Lien portail généré et sauvegardé','ok');
+  }catch(e){
+    console.error('_repairPublicId:',e);
+    _showPortailErreur(dossierId, 'Impossible de générer le lien : '+e.message);
+  }
+}
+
+// Crée le document rh_employes_public
+async function _createPublicDoc(publicId, d, empData){
+  empData = empData||{};
+  var publicData = {
+    uid: window._uid,
+    empId: d.empId,
+    prenom: d.prenom||empData.prenom||'',
+    nom: d.nom||empData.nom||'',
+    poste: d.poste||empData.poste||'',
+    departement: d.departement||empData.departement||'',
+    typeContrat: d.contrat||empData.typeContrat||'CDI',
+    couleur: empData.couleur||'#059669',
+    dateEntree: d.dateJ||empData.dateEntree||'',
+    cpAjustAcquis: parseFloat(empData.cpAjustAcquis)||0,
+    rttAjust: parseFloat(empData.rttAjust)||0,
+    recupHeures: parseFloat(empData.recupHeures)||0
+  };
+  await window._setDoc(window._doc(window._db,'rh_employes_public',publicId), publicData);
+}
+
+function _showPortailErreur(dossierId, msg){
+  var el = document.getElementById('portail-url-'+dossierId);
+  if(!el) return;
+  el.innerHTML = '<span style="color:#fca5a5;font-size:11px">⚠️ '+msg+'</span>'
+    +' <button onclick="repairPortailLink(\''+dossierId+'\')" style="margin-left:8px;background:#f59e0b;color:white;border:none;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:700;cursor:pointer">🔧 Réparer</button>';
+}
+
+function _updatePortailUI(dossierId, publicId){
+  var url = window.location.origin+'/espace-salarie.html?id='+publicId;
+  var el = document.getElementById('portail-url-'+dossierId);
+  if(el) el.textContent = url;
 }
 
 function getPortailUrl(id){
   var pid = _portailLinks[id];
   if(!pid) return null;
-  return window.location.origin+'/portail-salarie.html?id='+pid;
+  return window.location.origin+'/espace-salarie.html?id='+pid;
+}
+
+// Bouton de réparation manuel
+async function repairPortailLink(id){
+  var d = _dossiers[id];
+  if(!d) return;
+  var el = document.getElementById('portail-url-'+id);
+  if(el) el.textContent = '⏳ Réparation en cours...';
+  await _repairPublicId(d);
 }
 
 function copyPortailLink(id){
@@ -1843,7 +1946,7 @@ window.createDossier=createDossier;window.openDossier=openDossier;
 window.togglePhase=togglePhase;window.toggleTask=toggleTask;window.toggleDoc=toggleDoc;
 window.saveProgress=saveProgress;window.saveAudit=saveAudit;window.archiveDossier=archiveDossier;window.deleteDossier=deleteDossier;
 window.setRating=setRating;window.updateStcTotal=updateStcTotal;
-window.copyPortailLink=copyPortailLink;window.openPortailLink=openPortailLink;window.sendPortailEmail=sendPortailEmail;
+window.copyPortailLink=copyPortailLink;window.openPortailLink=openPortailLink;window.sendPortailEmail=sendPortailEmail;window.repairPortailLink=repairPortailLink;
 window.addJournalEntry=addJournalEntry;window.saveObjectifs=saveObjectifs;
 window.setPeNote=setPeNote;window.saveEvaluation=saveEvaluation;
 window.showEmailTpl=showEmailTpl;window.sendEmailTpl=sendEmailTpl;window.copyEmailTpl=copyEmailTpl;
