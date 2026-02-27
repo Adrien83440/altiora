@@ -338,7 +338,7 @@
     <div class="card">
       <div class="card-head">
         <div class="card-title">📋 Dernières demandes</div>
-        <button class="btn-ghost btn" style="font-size:11px;padding:4px 10px" onclick="showTab('conges',document.querySelector('.tnav:nth-child(4))'))">Voir tout</button>
+        <button class="btn-ghost btn" style="font-size:11px;padding:4px 10px" data-tab="conges" onclick="goTab(this)">Voir tout</button>
       </div>
       <div class="card-body" style="padding-top:8px" id="accueil-demandes"></div>
     </div>
@@ -347,10 +347,10 @@
     <div class="card">
       <div class="card-head"><div class="card-title">⚡ Actions rapides</div></div>
       <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <button class="btn btn-green" onclick="showTab('conges',document.querySelectorAll('.tnav')[3])">✉️ Demander un congé</button>
-        <button class="btn btn-ghost" onclick="showTab('documents',document.querySelectorAll('.tnav')[2])">📤 Déposer un document</button>
-        <button class="btn btn-ghost" onclick="showTab('profil',document.querySelectorAll('.tnav')[1])">✏️ Modifier mon profil</button>
-        <button class="btn btn-ghost" onclick="showTab('planning',document.querySelectorAll('.tnav')[4])">📅 Voir mon planning</button>
+        <button class="btn btn-green" data-tab="conges" onclick="goTab(this)">✉️ Demander un congé</button>
+        <button class="btn btn-ghost" data-tab="documents" onclick="goTab(this)">📤 Déposer un document</button>
+        <button class="btn btn-ghost" data-tab="profil" onclick="goTab(this)">✏️ Modifier mon profil</button>
+        <button class="btn btn-ghost" data-tab="planning" onclick="goTab(this)">📅 Voir mon planning</button>
       </div>
     </div>
 
@@ -1124,54 +1124,128 @@ window.saveProfil = saveProfil;
 ══════════════════════════════════════════ */
 function renderDocuments() {
   var total = DOCS_REQUIRED.filter(function(d){ return !d.optional; }).length;
-  var done = DOCS_REQUIRED.filter(function(d){ return !d.optional && _docsEmployee[d.id]; }).length;
-  var pct = total>0 ? Math.round(done/total*100) : 0;
+  var done  = DOCS_REQUIRED.filter(function(d){ return !d.optional && _docsEmployee[d.id]; }).length;
+  var pct   = total > 0 ? Math.round(done / total * 100) : 0;
 
-  document.getElementById('docs-progress-lbl').textContent = done+' / '+total+' documents fournis';
-  document.getElementById('docs-progress-fill').style.width = pct+'%';
-  document.getElementById('docs-required-count').textContent = done+'/'+total;
+  document.getElementById('docs-progress-lbl').textContent   = done + ' / ' + total + ' documents fournis';
+  document.getElementById('docs-progress-fill').style.width  = pct + '%';
+  document.getElementById('docs-required-count').textContent = done + '/' + total;
 
-  // Liste docs à fournir — data-idx pour éviter apostrophes dans onclick
+  // ── Construction DOM pure — zéro innerHTML avec accents ──
   var reqList = document.getElementById('docs-required-list');
-  reqList.innerHTML = DOCS_REQUIRED.map(function(doc, idx) {
-    var uploaded = _docsEmployee[doc.id];
-    var cls = uploaded ? 'doc-item uploaded' : (doc.optional ? 'doc-item' : 'doc-item required');
-    var icoClass = uploaded ? 'g' : (doc.optional ? 'o' : 'r');
-    var dateStr = uploaded && uploaded.uploadedAt ? ' \u00b7 ' + fmtDate(uploaded.uploadedAt.split('T')[0]) : '';
-    var labelSafe = escHtml(doc.label);
-    var descSafe  = escHtml(uploaded ? ('\u2705 '+uploaded.name+dateStr) : doc.desc);
-    var btn = uploaded
-      ? '<button class="btn-view" data-idx="'+idx+'" onclick="viewDocIdx(this)">\ud83d\udc41 Voir</button>'
-      : '<button class="btn-upload" data-idx="'+idx+'" onclick="openUploadIdx(this)">\ud83d\udce4 D\u00e9poser</button>';
-    return '<div class="'+cls+'">'
-      +'<div class="doc-ico '+icoClass+'">'+doc.icon+'</div>'
-      +'<div class="doc-info">'
-        +'<div class="doc-name">'+labelSafe+(doc.optional?' <span style="font-size:9px;font-weight:400;color:var(--muted)">(facultatif)</span>':'')+'</div>'
-        +'<div class="doc-meta">'+descSafe+'</div>'
-      +'</div>'
-      +'<div class="doc-action">'+btn+'</div>'
-    +'</div>';
-  }).join('');
+  reqList.innerHTML = '';
 
-  // Docs reçus de l'employeur
+  DOCS_REQUIRED.forEach(function(doc, idx) {
+    var uploaded  = _docsEmployee[doc.id];
+    var cls       = uploaded ? 'doc-item uploaded' : (doc.optional ? 'doc-item' : 'doc-item required');
+    var icoClass  = uploaded ? 'g' : (doc.optional ? 'o' : 'r');
+    var dateStr   = uploaded && uploaded.uploadedAt ? ' · ' + fmtDate(uploaded.uploadedAt.split('T')[0]) : '';
+
+    // Conteneur
+    var item = document.createElement('div');
+    item.className = cls;
+
+    // Icône
+    var ico = document.createElement('div');
+    ico.className = 'doc-ico ' + icoClass;
+    ico.textContent = doc.icon;
+    item.appendChild(ico);
+
+    // Infos
+    var info = document.createElement('div');
+    info.className = 'doc-info';
+
+    var nameDiv = document.createElement('div');
+    nameDiv.className = 'doc-name';
+    nameDiv.textContent = doc.label;
+    if (doc.optional) {
+      var optSpan = document.createElement('span');
+      optSpan.style.cssText = 'font-size:9px;font-weight:400;color:var(--muted);margin-left:4px';
+      optSpan.textContent = '(facultatif)';
+      nameDiv.appendChild(optSpan);
+    }
+    info.appendChild(nameDiv);
+
+    var metaDiv = document.createElement('div');
+    metaDiv.className = 'doc-meta';
+    metaDiv.textContent = uploaded ? ('✅ ' + uploaded.name + dateStr) : doc.desc;
+    info.appendChild(metaDiv);
+
+    item.appendChild(info);
+
+    // Bouton action
+    var action = document.createElement('div');
+    action.className = 'doc-action';
+    var btn = document.createElement('button');
+    btn.setAttribute('data-idx', idx);
+    if (uploaded) {
+      btn.className = 'btn-view';
+      btn.textContent = '👁 Voir';
+      btn.onclick = function() { viewDocIdx(this); };
+    } else {
+      btn.className = 'btn-upload';
+      btn.textContent = '📤 Déposer';
+      btn.onclick = function() { openUploadIdx(this); };
+    }
+    action.appendChild(btn);
+    item.appendChild(action);
+
+    reqList.appendChild(item);
+  });
+
+  // ── Docs reçus de l'employeur ──
   var empList = document.getElementById('docs-employer-list');
   document.getElementById('docs-employer-count').textContent = _docsEmployer.length || '0';
-  if(!_docsEmployer.length){
-    empList.innerHTML = '<div class="empty"><div class="empty-icon">📥</div>Aucun document transmis par votre employeur pour l\'instant.</div>';
+  empList.innerHTML = '';
+
+  if (!_docsEmployer.length) {
+    var empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.innerHTML = '<div class="empty-icon">📥</div>';
+    var emptyTxt = document.createElement('span');
+    emptyTxt.textContent = 'Aucun document transmis par votre employeur pour l’instant.';
+    empty.appendChild(emptyTxt);
+    empList.appendChild(empty);
   } else {
-    empList.innerHTML = _docsEmployer.map(function(doc, i) {
+    _docsEmployer.forEach(function(doc, i) {
       var dateStr = doc.uploadedAt ? fmtDate(doc.uploadedAt.split('T')[0]) : '';
-      return '<div class="doc-item employer">'
-        +'<div class="doc-ico b">📄</div>'
-        +'<div class="doc-info">'
-          +'<div class="doc-name">'+doc.label+'</div>'
-          +'<div class="doc-meta">'+doc.name+(dateStr?' · '+dateStr:'')+'</div>'
-        +'</div>'
-        +'<div class="doc-action">'
-          +(doc.data ? '<button class="btn-view" onclick="viewEmployerDoc('+i+')">👁 Voir</button>' : '')
-        +'</div>'
-      +'</div>';
-    }).join('');
+
+      var item = document.createElement('div');
+      item.className = 'doc-item employer';
+
+      var ico = document.createElement('div');
+      ico.className = 'doc-ico b';
+      ico.textContent = '📄';
+      item.appendChild(ico);
+
+      var info = document.createElement('div');
+      info.className = 'doc-info';
+
+      var nameDiv = document.createElement('div');
+      nameDiv.className = 'doc-name';
+      nameDiv.textContent = doc.label || 'Document';
+      info.appendChild(nameDiv);
+
+      var metaDiv = document.createElement('div');
+      metaDiv.className = 'doc-meta';
+      metaDiv.textContent = (doc.name || '') + (dateStr ? ' · ' + dateStr : '');
+      info.appendChild(metaDiv);
+
+      item.appendChild(info);
+
+      if (doc.data) {
+        var action = document.createElement('div');
+        action.className = 'doc-action';
+        var btn = document.createElement('button');
+        btn.className = 'btn-view';
+        btn.textContent = '👁 Voir';
+        (function(idx){ btn.onclick = function() { viewEmployerDoc(idx); }; })(i);
+        action.appendChild(btn);
+        item.appendChild(action);
+      }
+
+      empList.appendChild(item);
+    });
   }
 }
 
@@ -1640,6 +1714,14 @@ function showTab(id, btn) {
   if(btn) btn.classList.add('active');
 }
 window.showTab = showTab;
+
+function goTab(btn) {
+  var tab = btn.getAttribute('data-tab');
+  var el = document.querySelector('.tnav[onclick*="' + tab + '"]');
+  showTab(tab, el);
+}
+window.goTab = goTab;
+
 
 /* ══════════════════════════════════════════
    UTILS
