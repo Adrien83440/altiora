@@ -230,7 +230,7 @@
   <div class="topbar">
     <div class="topbar-left">
       <h1>🎯 Recrutement</h1>
-      <p>Pipeline candidats · Offres d'emploi · Entretiens · Décisions</p>
+      <p>Pipeline candidats · Offres d\'emploi · Entretiens · Décisions</p>
     </div>
     <div class="topbar-right">
       <button class="btn btn-outline btn-sm" onclick="openModal('modal-offre')">📋 Nouvelle offre</button>
@@ -452,7 +452,7 @@
 <div class="modal-overlay" id="modal-offre">
   <div class="modal">
     <div class="modal-head">
-      <h3 id="modal-offre-title">📋 Nouvelle offre d'emploi</h3>
+      <h3 id="modal-offre-title">📋 Nouvelle offre d\'emploi</h3>
       <button class="modal-close" onclick="closeModal('modal-offre')">&#x2715;</button>
     </div>
     <div class="modal-body">
@@ -639,22 +639,32 @@ function renderPipeline(){
   var cands=Object.values(_candidats).filter(function(c){return c.statut!=='embauche'&&(!filterOff||c.offreId===filterOff);});
   board.innerHTML=PIPE_COLS.map(function(col){
     var items=cands.filter(function(c){return c.statut===col.key;});
-    return '<div class="pipeline-col" id="pcol-'+col.key+'" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropOnCol(event,''+col.key+'')">'
+    var cardsHtml=items.map(function(c){
+      var sc=parseInt(c.score)||0,scCls=sc>=7?'score-high':sc>=4?'score-mid':sc>0?'score-low':'';
+      var offre=_offres[c.offreId];
+      return '<div class="pipeline-card" draggable="true" data-id="'+c.id+'">'
+        +'<div class="pipeline-card-name">'+c.prenom+' '+c.nom+'</div>'
+        +'<div class="pipeline-card-poste">'+(offre?offre.titre:'Poste non lié')+'</div>'
+        +'<div class="pipeline-card-foot"><div class="pipeline-card-date">'+formatDate(c.dateCreation)+'</div>'
+        +(sc>0?'<div class="pipeline-card-score '+scCls+'">'+sc+'/10</div>':'')
+        +'</div></div>';
+    }).join('');
+    return '<div class="pipeline-col" id="pcol-'+col.key+'" data-col="'+col.key+'">'
       +'<div class="pipeline-col-head"><div class="pipeline-col-title" style="color:'+col.color+'">'+col.label+'</div>'
       +'<div class="pipeline-badge" style="background:'+col.bb+';color:'+col.bc+'">'+items.length+'</div></div>'
       +(items.length===0?'<div class="empty-col"><div class="empty-col-icon">○</div><div class="empty-col-text">Aucun</div></div>':'')
-      +items.map(function(c){
-        var sc=parseInt(c.score)||0,scCls=sc>=7?'score-high':sc>=4?'score-mid':sc>0?'score-low':'';
-        var offre=_offres[c.offreId];
-        return '<div class="pipeline-card" draggable="true" ondragstart="dragStart(event,''+c.id+'')" onclick="openDetail(''+c.id+'')">'
-          +'<div class="pipeline-card-name">'+c.prenom+' '+c.nom+'</div>'
-          +'<div class="pipeline-card-poste">'+(offre?offre.titre:'Poste non lié')+'</div>'
-          +'<div class="pipeline-card-foot"><div class="pipeline-card-date">'+formatDate(c.dateCreation)+'</div>'
-          +(sc>0?'<div class="pipeline-card-score '+scCls+'">'+sc+'/10</div>':'')
-          +'</div></div>';
-      }).join('')
+      +cardsHtml
       +'</div>';
   }).join('');
+  board.querySelectorAll('.pipeline-card').forEach(function(card){
+    card.addEventListener('dragstart',function(e){dragStart(e,card.dataset.id);});
+    card.addEventListener('click',function(){openDetail(card.dataset.id);});
+  });
+  board.querySelectorAll('.pipeline-col').forEach(function(col){
+    col.addEventListener('dragover',function(e){e.preventDefault();col.classList.add('drag-over');});
+    col.addEventListener('dragleave',function(){col.classList.remove('drag-over');});
+    col.addEventListener('drop',function(e){dropOnCol(e,col.dataset.col);});
+  });
 }
 
 var _dragId=null;
@@ -669,7 +679,7 @@ async function dropOnCol(e,ns){
 }
 
 function renderCandidatTable(){
-  var tbody=document.getElementById('candidat-tbody');if(!tbody)return;
+  var body=document.getElementById('candidat-tbody');if(!body)return;
   var search=(document.getElementById('search-candidat')?document.getElementById('search-candidat').value:'').toLowerCase();
   var filterSt=document.getElementById('filter-statut')?document.getElementById('filter-statut').value:'';
   var filterOff=document.getElementById('filter-offre')?document.getElementById('filter-offre').value:'';
@@ -680,66 +690,76 @@ function renderCandidatTable(){
     if(filterOff&&c.offreId!==filterOff)return false;
     return true;
   }).sort(function(a,b){return(b.dateCreation||'')>(a.dateCreation||'')?1:-1;});
-  if(items.length===0){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--muted)"><div style="font-size:32px;margin-bottom:8px">🔍</div>Aucun candidat trouvé</td></tr>';return;}
-  var srcMap={linkedin:'src-linkedin',indeed:'src-indeed',cooptation:'src-cooptation',spontanee:'src-spontanee'};
-  var prioIcon={haute:'🔴',normale:'🟡',basse:'⚫'};
-  tbody.innerHTML=items.map(function(c){
+  var prioIcon={haute:'🔴',normale:'🟡',basse:'⚪'};
+  var srcMap={linkedin:'src-linkedin',indeed:'src-indeed',cooptation:'src-cooptation',spontanee:'src-spontanee','pole-emploi':'src-pole',autre:'src-autre'};
+  if(items.length===0){body.innerHTML='<tr><td colspan="9" style="text-align:center;padding:30px;color:var(--muted)">Aucun candidat</td></tr>';return;}
+  body.innerHTML=items.map(function(c){
     var sc=parseInt(c.score)||0,scCls=sc>=7?'score-high':sc>=4?'score-mid':sc>0?'score-low':'';
-    var offre=_offres[c.offreId],prio=c.priorite||'normale';
-    return '<tr>'
-      +'<td><div style="display:flex;align-items:center;gap:8px"><div class="c-av">'+((c.prenom||'?')[0].toUpperCase())+'</div>'
-      +'<div><div class="c-name">'+c.prenom+' '+c.nom+'</div><div class="c-sub">'+(c.email||'—')+'</div></div></div></td>'
-      +'<td style="font-size:12px;font-weight:600">'+(offre?offre.titre:'—')+'</td>'
+    var prio=c.priorite||'normale';
+    return '<tr data-id="'+c.id+'">'
+      +'<td><div class="cand-name-cell">'+c.prenom+' '+c.nom+'</div><div class="cand-email">'+( c.email||'')+'</div></td>'
       +'<td><span class="status-badge st-'+(c.statut||'nouveau')+'">'+statutLabel(c.statut)+'</span></td>'
       +'<td><span class="status-badge '+(srcMap[c.source]||'src-autre')+'">'+sourceLabel(c.source)+'</span></td>'
       +'<td>'+(sc>0?'<span class="pipeline-card-score '+scCls+'">'+sc+'/10</span>':'<span style="color:var(--muted);font-size:11px">—</span>')+'</td>'
       +'<td style="font-size:11px;color:var(--muted)">'+formatDate(c.dateCreation)+'</td>'
       +'<td>'+(prioIcon[prio]||'')+'</td>'
-      +'<td><div style="display:flex;gap:4px"><button class="btn btn-outline btn-xs" onclick="openDetail(''+c.id+'')">&#x1f441; Voir</button>'
-      +'<button class="btn btn-xs" style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca" onclick="deleteCandidat(''+c.id+'')">&#x1f5d1;</button></div></td>'
+      +'<td><div style="display:flex;gap:4px">'
+        +'<button class="btn btn-outline btn-xs btn-voir" data-id="'+c.id+'">👁 Voir</button>'
+        +'<button class="btn btn-xs btn-del" data-id="'+c.id+'" style="background:#fee2e2;color:#991b1b;border:1px solid #fecaca">🗑</button>'
+      +'</div></td>'
       +'</tr>';
   }).join('');
+  body.querySelectorAll('.btn-voir').forEach(function(btn){
+    btn.addEventListener('click',function(){openDetail(btn.dataset.id);});
+  });
+  body.querySelectorAll('.btn-del').forEach(function(btn){
+    btn.addEventListener('click',function(){deleteCandidat(btn.dataset.id);});
+  });
 }
 
 function renderOffres(){
   var list=document.getElementById('offres-list');if(!list)return;
   var items=Object.values(_offres).sort(function(a,b){return(b.dateOuv||'')>(a.dateOuv||'')?1:-1;});
+  var stMap={active:'offre-active',pause:'offre-pause',closed:'offre-closed'};
+  var stLabel={active:'🟢 Active',pause:'⏸ En pause',closed:'🔴 Fermée'};
   if(items.length===0){
     list.innerHTML='<div style="text-align:center;padding:60px;background:white;border:1px solid var(--border);border-radius:var(--radius);color:var(--muted)">'
       +'<div style="font-size:48px;margin-bottom:12px">📋</div>'
       +'<h3 style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:8px">Aucune offre créée</h3>'
-      +'<p style="font-size:13px">Créez votre première offre d'emploi pour commencer.</p>'
-      +'<button class="btn btn-rh" style="margin-top:16px" onclick="openModal('modal-offre')">+ Créer une offre</button></div>';
+      +'<p style="font-size:13px">Créez votre première offre d\'emploi pour commencer.</p>'
+      +'<button class="btn btn-rh open-modal-offre" style="margin-top:16px">+ Créer une offre</button></div>';
+    list.querySelector('.open-modal-offre').addEventListener('click',function(){openModal('modal-offre');});
     return;
   }
-  var stMap={active:'offre-active',pause:'offre-pause',closed:'offre-closed'};
-  var stLabel={active:'🟢 Active',pause:'⏸ En pause',closed:'🔴 Fermée'};
   list.innerHTML=items.map(function(o){
-    var cands=Object.values(_candidats).filter(function(c){return c.offreId===o.id;});
-    var active=cands.filter(function(c){return!['embauche','rejete'].includes(c.statut);}).length;
-    var tags=(o.competences||'').split(',').filter(Boolean).slice(0,4);
-    return '<div class="offre-card">'
-      +'<div class="offre-icon">'+(o.emoji||'💼')+'</div>'
-      +'<div class="offre-body">'
-      +'<div class="offre-title">'+o.titre+'</div>'
-      +'<div class="offre-tags">'
-      +'<span class="offre-tag green">'+(o.contrat||'CDI')+'</span>'
-      +(o.lieu?'<span class="offre-tag blue">📍 '+o.lieu+'</span>':'')
-      +(o.salaire?'<span class="offre-tag">💰 '+o.salaire+' €/an</span>':'')
-      +tags.map(function(t){return'<span class="offre-tag">'+t.trim()+'</span>';}).join('')
+    var tags=(o.competences||'').split(',').filter(Boolean);
+    return '<div class="offre-card" data-id="'+o.id+'">'
+      +'<div class="offre-card-head">'
+        +'<div>'
+          +'<div class="offre-titre">'+o.titre+'</div>'
+          +'<div class="offre-meta">'+o.dept+(o.lieu?' · '+o.lieu:'')+'</div>'
+        +'</div>'
+        +'<span class="offre-status '+(stMap[o.statut]||'offre-active')+'">'+(stLabel[o.statut]||'🟢 Active')+'</span>'
       +'</div>'
-      +'<div class="offre-stats">'
-      +'<div class="offre-stat">👤 <span>'+cands.length+'</span> candidature(s)</div>'
-      +'<div class="offre-stat">⚡ <span>'+active+'</span> actif(s)</div>'
-      +(o.dateOuv?'<div class="offre-stat">📅 Ouvert le <span>'+formatDate(o.dateOuv)+'</span></div>':'')
-      +(o.dateClo?'<div class="offre-stat">⏰ Clôture <span>'+formatDate(o.dateClo)+'</span></div>':'')
-      +'</div></div>'
+      +'<div class="offre-tags">'
+        +(o.contrat?'<span class="offre-tag">'+o.contrat+'</span>':'')
+        +(o.lieu?'<span class="offre-tag blue">📍 '+o.lieu+'</span>':'')
+        +(o.salaire?'<span class="offre-tag green">💰 '+o.salaire+' €/an</span>':'')
+        +tags.map(function(t){return'<span class="offre-tag">'+t.trim()+'</span>';}).join('')
+      +'</div>'
+      +(o.dateOuv?'<div class="offre-date">Ouverture : '+formatDate(o.dateOuv)+'</div>':'')
+      +(o.dateClo?'<div class="offre-date" style="color:var(--red)">Clôture : '+formatDate(o.dateClo)+'</div>':'')
       +'<div class="offre-actions">'
-      +'<span class="offre-status '+(stMap[o.statut]||'offre-active')+'">'+(stLabel[o.statut]||'🟢 Active')+'</span>'
-      +'<button class="btn btn-outline btn-xs" onclick="editOffre(''+o.id+'')">✏️ Modifier</button>'
-      +'<button class="btn btn-rh btn-xs" onclick="openModal('modal-candidat');prefillOffre(''+o.id+'')">+ Candidat</button>'
+        +'<button class="btn btn-outline btn-xs btn-edit-offre" data-id="'+o.id+'">✏️ Modifier</button>'
+        +'<button class="btn btn-rh btn-xs btn-add-cand" data-id="'+o.id+'">+ Candidat</button>'
       +'</div></div>';
   }).join('');
+  list.querySelectorAll('.btn-edit-offre').forEach(function(btn){
+    btn.addEventListener('click',function(){editOffre(btn.dataset.id);});
+  });
+  list.querySelectorAll('.btn-add-cand').forEach(function(btn){
+    btn.addEventListener('click',function(){openModal('modal-candidat');prefillOffre(btn.dataset.id);});
+  });
 }
 
 function prefillOffre(id){var sel=document.getElementById('mc-offre');if(sel)sel.value=id;}
@@ -779,18 +799,20 @@ function renderEntretiens(){
 }
 
 function renderEntretienRow(e,mode){
-  var c=_candidats[e.candidatId],offre=c?_offres[c.offreId]:null;
-  var typeIco={telephone:'📞',visio:'💻',presentiel:'🏢',technique:'🧪',rh:'👥',direction:'⭐'};
-  var op=mode==='passe'?'opacity:.55':'';
-  return'<div class="entretien-row" style="'+op+'">'
-    +'<div class="entretien-time"><div class="entretien-time-h">'+(e.heure||'—')+'</div><div class="entretien-time-d">'+formatDate(e.date)+'</div></div>'
-    +'<div class="entretien-info"><div class="entretien-name">'+(c?c.prenom+' '+c.nom:'Candidat inconnu')+'</div>'
-    +'<div class="entretien-poste">'+(offre?offre.titre:'—')+'</div></div>'
-    +'<div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">'
-    +'<span class="entretien-type">'+(typeIco[e.type]||'📋')+' '+typeLabel(e.type)+'</span>'
+  var past=mode==='passe';
+  var st=past?'opacity:.55':'';
+  var row=document.createElement('div');
+  row.className='entretien-row';row.dataset.id=e.id;row.style.cssText=st;
+  row.innerHTML='<div class="entretien-info">'
+    +'<div class="entretien-titre">'+e.type+(e.offre?' · '+e.offre:'')+'</div>'
+    +'<div style="font-size:10px;color:var(--muted)">'+e.date+' '+(e.heure||'')+'</div>'
     +(e.interviewer?'<div style="font-size:10px;color:var(--muted)">👤 '+e.interviewer+'</div>':'')
     +'</div>'
-    +'<button class="btn btn-danger btn-xs" style="margin-left:8px" onclick="deleteEntretien(''+e.id+'')">&#x1f5d1;</button></div>';
+    +'<button class="btn btn-danger btn-xs btn-del-entretien" data-id="'+e.id+'" style="margin-left:8px">🗑</button></div>';
+  row.querySelector('.btn-del-entretien').addEventListener('click',function(ev){
+    ev.stopPropagation();deleteEntretien(e.id);
+  });
+  return row.outerHTML;
 }
 
 function renderAnalytics(){
@@ -816,7 +838,7 @@ function renderAnalytics(){
   var fw=document.getElementById('funnel-wrap');
   if(fw)fw.innerHTML='<div class="funnel-wrap">'+stages.map(function(s){var pct=total>0?s.count/total*100:0;return'<div class="funnel-row"><div class="funnel-label">'+s.label+'</div><div class="funnel-bar-bg"><div class="funnel-bar-fill" style="width:'+pct+'%;background:'+s.color+'">'+(pct>12?'<span class="funnel-bar-text">'+s.count+'</span>':'')+'</div></div><div class="funnel-count">'+s.count+'</div><div class="funnel-pct">'+pct.toFixed(0)+'%</div></div>';}).join('')+'</div>';
   var srcCount={};cands.forEach(function(c){var s=c.source||'autre';srcCount[s]=(srcCount[s]||0)+1;});
-  var srcColors={linkedin:'#3b82f6',indeed:'#f59e0b',cooptation:'#10b981',spontanee:'#8b5cf6','pole-emploi':'#0ea5e9',autre:'#94a3b8'};
+  var srcColors={linkedin:'#3b82f6',indeed:'#f59e0b',cooptation:'#10b981',spontanee:'#8b5cf6',"pole-emploi":"#0ea5e9",autre:'#94a3b8'};
   var srcSorted=Object.entries(srcCount).sort(function(a,b){return b[1]-a[1];});
   var maxSrc=srcSorted[0]?srcSorted[0][1]:1;
   var sw=document.getElementById('sources-wrap');
@@ -830,66 +852,97 @@ function openDetail(id){
   var c=_candidats[id];if(!c)return;
   _detailCurrentId=id;
   var offre=_offres[c.offreId];
-  var sc=parseInt(c.score)||0;
-  document.getElementById('detail-title').textContent='📋 '+c.prenom+' '+c.nom;
-  var compTags=(c.competences||'').split(',').filter(Boolean).map(function(t){return'<span class="competence-tag">'+t.trim()+'</span>';}).join('');
-  var entretiensCand=Object.values(_entretiens).filter(function(e){return e.candidatId===id;}).sort(function(a,b){return a.date>b.date?-1:1;});
-  document.getElementById('detail-body').innerHTML=
-    '<div class="cand-hero">'
-    +'<div class="cand-av">'+((c.prenom||'?')[0].toUpperCase())+'</div>'
-    +'<div style="flex:1;min-width:0"><div class="cand-hero-name">'+c.prenom+' '+c.nom+'</div>'
-    +'<div class="cand-hero-poste">'+(offre?offre.titre:'Poste non défini')+'</div>'
-    +'<div class="cand-hero-tags"><span class="cand-hero-tag">'+statutLabel(c.statut)+'</span>'
-    +'<span class="cand-hero-tag">'+sourceLabel(c.source)+'</span>'
-    +(offre?'<span class="cand-hero-tag">'+(offre.contrat||'CDI')+'</span>':'')
-    +(c.exp?'<span class="cand-hero-tag">'+c.exp+' ans</span>':'')
+  var compTags=(c.competences||'').split(',').filter(Boolean).map(function(t){return'<span class="comp-tag">'+t.trim()+'</span>';}).join('');
+  var entretiensCand=Object.values(_entretiens).filter(function(e){return e.candidatId===id;}).sort(function(a,b){return(a.date||'')>(b.date||'')?1:-1;});
+  var pct=_scoreSelected>0?(_scoreSelected*10)+'%':((parseInt(c.score)||0)*10)+'%';
+  _scoreSelected=parseInt(c.score)||0;
+  document.getElementById('modal-detail-content').innerHTML=
+    '<div class="detail-hero">'
+    +'<div class="detail-avatar">'+(c.prenom||'').charAt(0)+(c.nom||'').charAt(0)+'</div>'
+    +'<div><div class="detail-name">'+c.prenom+' '+c.nom+'</div>'
+    +(c.email?'<div class="detail-contact">'+c.email+'</div>':'')
+    +(c.tel?'<div class="detail-contact">'+c.tel+'</div>':'')
+    +'<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">'
+      +(offre?'<span class="status-badge st-'+(c.statut||'nouveau')+'">'+offre.titre+(offre.contrat?' · '+offre.contrat:'')+'</span>':''
+      )
+      +(c.exp?'<span class="comp-tag">'+c.exp+' ans</span>':'')
     +'</div></div>'
-    +(sc>0?'<div class="cand-score-display"><div class="cand-score-num" style="color:'+(sc>=7?'#34d399':sc>=4?'#fbbf24':'#f87171')+'">'+sc+'</div><div class="cand-score-lbl">Score /10</div></div>':'')
+    +(c.pv>0||c.score>0?'<div style="text-align:right">'
+      +(c.score>0?'<div class="score-circle"><div class="score-fill" style="width:'+pct+';height:'+pct+'"></div><div class="score-lbl">'+c.score+'/10</div></div>':'')
+    +'</div>':'')
     +'</div>'
-    +'<div class="cand-tabs">'
-    +'<button class="cand-tab on" onclick="switchCandTab('info',this)">&#x2139;&#xfe0f; Infos</button>'
-    +'<button class="cand-tab" onclick="switchCandTab('parcours',this)">📋 Parcours</button>'
-    +'<button class="cand-tab" onclick="switchCandTab('entretiens',this)">🗓 Entretiens</button>'
-    +'<button class="cand-tab" onclick="switchCandTab('notes',this)">📝 Notes</button>'
-    +'<button class="cand-tab" onclick="switchCandTab('decision',this)">⚖️ Décision</button>'
+    // Score interactif
+    +'<div style="margin-bottom:16px"><div class="section-head" style="padding:0;background:none;border:none;margin-bottom:8px"><span style="font-size:12px;font-weight:700">⭐ Score</span></div>'
+    +'<div id="score-stars" class="score-stars">'
+    +[1,2,3,4,5,6,7,8,9,10].map(function(n){return'<div class="star-btn'+(n<=(parseInt(c.score)||0)?' active':'')+'" data-score="'+n+'">'+n+'</div>';}).join('')
+    +'</div></div>'
+    // Tabs
+    +'<div class="cand-tabs" id="cand-tabs">'
+    +'<button class="cand-tab on" data-tab="info">ℹ️ Infos</button>'
+    +'<button class="cand-tab" data-tab="parcours">📋 Parcours</button>'
+    +'<button class="cand-tab" data-tab="entretiens">🗓 Entretiens</button>'
+    +'<button class="cand-tab" data-tab="notes">📝 Notes</button>'
+    +'<button class="cand-tab" data-tab="decision">⚖️ Décision</button>'
     +'</div>'
-    +'<div id="cand-panel-info" class="cand-panel on">'
-    +'<div class="info-grid">'
-    +'<div class="info-item"><div class="info-item-lbl">Email</div><div class="info-item-val">'+(c.email||'—')+'</div></div>'
-    +'<div class="info-item"><div class="info-item-lbl">Téléphone</div><div class="info-item-val">'+(c.tel||'—')+'</div></div>'
-    +'<div class="info-item"><div class="info-item-lbl">Expérience</div><div class="info-item-val">'+(c.exp?c.exp+' ans':'—')+'</div></div>'
-    +'<div class="info-item"><div class="info-item-lbl">Prétentions salariales</div><div class="info-item-val">'+(c.salaire?Number(c.salaire).toLocaleString('fr-FR')+' €/an':'—')+'</div></div>'
-    +'<div class="info-item"><div class="info-item-lbl">Priorité</div><div class="info-item-val">'+prioLabel(c.priorite)+'</div></div>'
-    +'<div class="info-item"><div class="info-item-lbl">Candidature le</div><div class="info-item-val">'+formatDate(c.dateCreation)+'</div></div>'
-    +'</div>'
-    +(compTags?'<div style="font-size:12px;font-weight:700;margin-bottom:8px">Compétences</div><div class="competence-wrap">'+compTags+'</div>':'')
+    // Panel info
+    +'<div class="cand-panel" id="panel-info">'
+    +(compTags?'<div class="competence-wrap">'+compTags+'</div>':'')
     +(c.cv?'<a href="'+c.cv+'" target="_blank" class="btn btn-outline btn-sm">📎 Voir le CV</a>':'')
     +'</div>'
-    +'<div id="cand-panel-parcours" class="cand-panel">'
-    +'<div class="timeline-wrap">'+buildTimeline(c)+'</div></div>'
-    +'<div id="cand-panel-entretiens" class="cand-panel">'
-    +(entretiensCand.length===0?'<div style="text-align:center;padding:30px;color:var(--muted)"><div style="font-size:28px;margin-bottom:8px">🗓</div>Aucun entretien planifié<br><button class="btn btn-rh btn-sm" style="margin-top:12px" onclick="closeModal('modal-detail');openEntretienFor(''+id+'')">+ Planifier un entretien</button></div>'
-    :entretiensCand.map(function(e){return'<div style="padding:12px;background:#f8fffe;border-radius:8px;border:1px solid var(--rh-border);margin-bottom:8px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="font-size:12px;font-weight:700">'+typeLabel(e.type)+'</div><div style="font-size:11px;color:var(--muted)">'+e.date+' '+(e.heure||'')+'</div></div>'+(e.interviewer?'<div style="font-size:11px;color:var(--muted)">👤 '+e.interviewer+'</div>':'')+(e.lieu?'<div style="font-size:11px;color:var(--muted)">📍 '+e.lieu+'</div>':'')+(e.notes?'<div style="margin-top:6px;font-size:12px;padding:6px;background:#f0fdf4;border-radius:6px;border-left:3px solid var(--rh-main)">'+e.notes+'</div>':'')+'</div>';}).join(''))
+    // Panel parcours
+    +'<div class="cand-panel hidden" id="panel-parcours">'+buildTimeline(c)+'</div>'
+    // Panel entretiens
+    +'<div class="cand-panel hidden" id="panel-entretiens">'
+    +(entretiensCand.length===0?'<div style="text-align:center;padding:30px;color:var(--muted)"><div style="font-size:28px;margin-bottom:8px">🗓</div>Aucun entretien planifié<br><button class="btn btn-rh btn-sm open-entretien-for" data-id="'+id+'" style="margin-top:12px">+ Planifier un entretien</button></div>'
+    :'<div>'+entretiensCand.map(function(e){
+      return '<div style="padding:12px;background:#f8fffe;border-radius:8px;border:1px solid var(--rh-border);margin-bottom:8px">'
+        +'<div style="font-weight:700;font-size:13px">'+e.type+'</div>'
+        +'<div style="color:var(--muted);font-size:11px">'+e.date+' '+(e.heure||'')+'</div>'
+        +(e.interviewer?'<div style="font-size:11px">👤 '+e.interviewer+'</div>':'')
+        +(e.lieu?'<div style="font-size:11px">📍 '+e.lieu+'</div>':'')
+        +(e.notes?'<div style="margin-top:6px;font-size:12px;color:var(--text)">'+e.notes+'</div>':'')
+        +'</div>';
+    }).join('')+'</div>')
     +'</div>'
-    +'<div id="cand-panel-notes" class="cand-panel">'
+    // Panel notes
+    +'<div class="cand-panel hidden" id="panel-notes">'
     +'<div style="margin-bottom:12px"><textarea id="detail-note-input" class="modal-input" rows="3" placeholder="Ajouter une note..."></textarea>'
-    +'<button class="btn btn-rh btn-sm" style="margin-top:8px" onclick="addNote(''+id+'')">&#x1f4ac; Ajouter la note</button></div>'
-    +'<div id="notes-list-'+id+'">'
-    +((c.notes_list||[]).map(function(n){return'<div class="note-item"><div class="note-head"><span class="note-author">'+(n.auteur||'Vous')+'</span><span class="note-date">'+formatDate(n.date)+'</span></div><div class="note-text">'+n.texte+'</div></div>';}).join('')||'<div style="color:var(--muted);font-size:12px;text-align:center;padding:20px">Aucune note</div>')
+    +'<button class="btn btn-rh btn-sm add-note-btn" data-id="'+id+'" style="margin-top:8px">💬 Ajouter la note</button></div>'
+    +'<div id="notes-list">'+(c.notesLog&&c.notesLog.length?c.notesLog.map(function(n){return'<div style="padding:10px;background:#f8fffe;border-radius:8px;border:1px solid var(--rh-border);margin-bottom:8px"><div style="font-size:11px;color:var(--muted)">'+n.date+' · '+n.auteur+'</div><div style="font-size:13px;margin-top:4px">'+n.texte+'</div></div>';}).join(''):'<div style="color:var(--muted);font-size:12px;text-align:center;padding:20px">Aucune note</div>')+'</div>'
     +'</div>'
-    +(c.notes?'<div class="note-item" style="background:#f0fdf4;border-color:var(--rh-border)"><div class="note-head"><span class="note-author">Note initiale</span></div><div class="note-text">'+c.notes+'</div></div>':'')
+    // Panel décision
+    +'<div class="cand-panel hidden" id="panel-decision">'
+    +'<div>'+buildDecisionHelp(c,offre)+'</div>'
+    +'<div style="margin-top:12px"><label class="modal-label">Commentaire de décision</label><textarea id="decision-comment-'+id+'" class="modal-input" rows="3" placeholder="Justification de la décision...">'+(c.decisionComment||'')+'</textarea></div>'
+    +'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'
+    +'<button class="btn btn-rh btn-sm dec-btn" data-dec="embauche">✅ Embaucher</button>'
+    +'<button class="btn btn-outline btn-sm dec-btn" data-dec="offre">📨 Envoyer une offre</button>'
+    +'<button class="btn btn-danger btn-sm dec-btn" data-dec="rejete">❌ Rejeter</button>'
     +'</div>'
-    +'<div id="cand-panel-decision" class="cand-panel">'
-    +'<div style="background:#f8fffe;border:1px solid var(--rh-border);border-radius:10px;padding:16px;margin-bottom:16px">'
-    +'<div style="font-size:13px;font-weight:700;margin-bottom:12px">⚖️ Aide à la décision</div>'
-    +buildDecisionHelp(c,offre)+'</div>'
-    +'<div style="font-size:12px;font-weight:700;margin-bottom:8px">📝 Commentaire final</div>'
-    +'<textarea id="decision-comment-'+id+'" class="modal-input" rows="3" placeholder="Justification de la décision...">'+(c.decisionComment||'')+'</textarea>'
-    +'<div style="display:flex;gap:8px;margin-top:12px">'
-    +'<button class="btn btn-rh btn-sm" onclick="setDecision(''+id+'','embauche')">✅ Embaucher</button>'
-    +'<button class="btn btn-outline btn-sm" onclick="setDecision(''+id+'','offre')">📨 Envoyer une offre</button>'
-    +'<button class="btn btn-danger btn-sm" onclick="setDecision(''+id+'','rejete')">❌ Rejeter</button>'
-    +'</div></div>';
+    +'</div>';
+
+  // Event listeners
+  var modal_content = document.getElementById('modal-detail-content');
+  
+  // Tabs
+  modal_content.querySelectorAll('.cand-tab').forEach(function(btn){
+    btn.addEventListener('click',function(){switchCandTab(btn.dataset.tab,btn);});
+  });
+  // Score stars
+  modal_content.querySelectorAll('.star-btn').forEach(function(btn){
+    btn.addEventListener('click',function(){setScore(parseInt(btn.dataset.score));});
+  });
+  // Planifier entretien
+  var openEntBtn = modal_content.querySelector('.open-entretien-for');
+  if(openEntBtn) openEntBtn.addEventListener('click',function(){closeModal('modal-detail');openEntretienFor(openEntBtn.dataset.id);});
+  // Ajouter note
+  var addNoteBtn = modal_content.querySelector('.add-note-btn');
+  if(addNoteBtn) addNoteBtn.addEventListener('click',function(){addNote(addNoteBtn.dataset.id);});
+  // Décisions
+  modal_content.querySelectorAll('.dec-btn').forEach(function(btn){
+    btn.addEventListener('click',function(){setDecision(id,btn.dataset.dec);});
+  });
+
   openModal('modal-detail');
 }
 
@@ -909,7 +962,7 @@ function buildDecisionHelp(c,offre){
   else if(sc>0)pts.push({ok:false,txt:'Score modéré : '+sc+'/10'});
   if(exp>=3)pts.push({ok:true,txt:'Expérience suffisante : '+exp+' ans'});
   else if(exp>0)pts.push({ok:null,txt:'Expérience limitée : '+exp+' ans'});
-  if(offreSal>0&&salaire>0){if(salaire<=offreSal)pts.push({ok:true,txt:'Prétentions compatibles avec l'offre'});else pts.push({ok:false,txt:'Prétentions supérieures au budget'});}
+  if(offreSal>0&&salaire>0){if(salaire<=offreSal)pts.push({ok:true,txt:'Prétentions compatibles avec l\'offre'});else pts.push({ok:false,txt:'Prétentions supérieures au budget'});}
   var entrDone=Object.values(_entretiens).filter(function(e){return e.candidatId===c.id&&new Date(e.date)<new Date();}).length;
   if(entrDone>0)pts.push({ok:true,txt:entrDone+' entretien(s) réalisé(s)'});
   else pts.push({ok:null,txt:'Aucun entretien réalisé'});
@@ -1005,7 +1058,7 @@ async function saveOffre(){
 
 function editOffre(id){
   var o=_offres[id];if(!o)return;
-  document.getElementById('modal-offre-title').textContent='✏️ Modifier l'offre';
+  document.getElementById('modal-offre-title').textContent='✏️ Modifier l\'offre';
   document.getElementById('mo-id').value=id;document.getElementById('mo-titre').value=o.titre||'';
   document.getElementById('mo-dept').value=o.dept||'';document.getElementById('mo-contrat').value=o.contrat||'CDI';
   document.getElementById('mo-lieu').value=o.lieu||'';document.getElementById('mo-salaire').value=o.salaire||'';
@@ -1047,7 +1100,7 @@ window.setScore=setScore;
 
 function formatDate(d){if(!d)return'—';try{return new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'});}catch(e){return d;}}
 function statutLabel(s){return{nouveau:'Nouveau',screening:'Screening',entretien:'Entretien',test:'Test tech.',offre:'Offre envoyée',embauche:'Embauché',rejete:'Rejeté'}[s]||s||'—';}
-function sourceLabel(s){return{linkedin:'LinkedIn',indeed:'Indeed',cooptation:'Cooptation',spontanee:'Spontanée','pole-emploi':'France Travail',autre:'Autre'}[s]||s||'—';}
+function sourceLabel(s){return{linkedin:'LinkedIn',indeed:'Indeed',cooptation:'Cooptation',spontanee:'Spontanée',"pole-emploi":"France Travail",autre:'Autre'}[s]||s||'—';}
 function typeLabel(t){return{telephone:'Téléphonique',visio:'Visioconférence',presentiel:'Présentiel',technique:'Technique',rh:'RH',direction:'Direction'}[t]||t||'—';}
 function prioLabel(p){return{haute:'🔴 Haute',normale:'🟡 Normale',basse:'⚫ Basse'}[p]||'—';}
 
