@@ -125,7 +125,27 @@
       .form-grid{grid-template-columns:1fr!important;}
       .generate-bar{flex-direction:column!important;align-items:flex-start!important;}
     }
-  </style>
+  
+    /* AUTOFILL BARS */
+    .autofill-bar{
+      display:flex;align-items:center;gap:12px;padding:12px 16px;
+      background:linear-gradient(135deg,#eff6ff,#dbeafe);
+      border:1.5px solid #93c5fd;border-radius:10px;
+      margin:0 24px 0;margin-top:16px;
+    }
+    .autofill-select{
+      padding:8px 12px;border:1.5px solid #93c5fd;border-radius:8px;
+      font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;
+      color:#1e40af;background:white;outline:none;cursor:pointer;
+      min-width:220px;max-width:280px;
+    }
+    .autofill-select:focus{border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,0.15);}
+    @media(max-width:768px){
+      .autofill-bar{flex-direction:column;align-items:flex-start;gap:8px;}
+      .autofill-select{min-width:100%;max-width:100%;}
+    }
+
+    </style>
 </head>
 <body>
 
@@ -581,11 +601,26 @@ var DOCS_CATALOGUE=[
 var _currentDoc=null;
 var _generatedContent=null;
 var _history=[];
+var _employes={};
+var _paramsRH={};
 
 window.startApp=function(){
   renderCatalogue();
   loadHistory();
+  loadRhData();
 };
+
+async function loadRhData(){
+  if(!window._uid)return;
+  try{
+    var snap=await window._getDoc(window._doc(window._db,'rh_params',window._uid));
+    if(snap.exists())_paramsRH=snap.data()||{};
+  }catch(e){}
+  try{
+    var snap2=await window._getDocs(window._collection(window._db,'rh',window._uid,'employes'));
+    snap2.forEach(function(d){_employes[d.id]=Object.assign({id:d.id},d.data());});
+  }catch(e){}
+}
 
 function renderCatalogue(filter){
   var list=document.getElementById('doc-list');
@@ -664,6 +699,66 @@ function renderForm(doc){
         '<div class="legal-banner-text"><strong>Reference legale :</strong> '+doc.legal+'<br><span style="color:#92400e;font-size:11px;margin-top:4px;display:block"><strong>Rappel :</strong> ALTEORE n\'est pas un logiciel juridique. Ces modeles sont fournis a titre indicatif et ne remplacent pas l\'avis d\'un juriste ou d\'un avocat specialise en droit du travail.</span></div>'+
       '</div>'+
     '</div>'+
+    // Sélecteur salarié (uniquement si le doc concerne un employé)
+    (function(){
+      var hasEmp = doc.fields.some(function(f){return f.id==='emp_nom'||f.id==='candidat_nom';});
+      var emps = Object.values(_employes).sort(function(a,b){return ((a.prenom||'')+(a.nom||'')).localeCompare((b.prenom||'')+(b.nom||''));});
+      var selectorHtml = '';
+      if(hasEmp && emps.length>0){
+        var opts = emps.map(function(e){
+          var label = (e.prenom||'')+' '+(e.nom||'');
+          return '<option value="'+e.id+'">'+label.trim()+(e.poste?' — '+e.poste:'')+'</option>';
+        }).join('');
+        selectorHtml =
+          '<div class="autofill-bar">'+
+            '<div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">'+
+              '<span style="font-size:16px">👤</span>'+
+              '<div>'+
+                '<div style="font-size:12px;font-weight:700;color:#1e40af">Importer depuis une fiche salarie</div>'+
+                '<div style="font-size:11px;color:#3b82f6">Les champs personnels seront pre-remplis automatiquement</div>'+
+              '</div>'+
+            '</div>'+
+            '<select class="autofill-select" id="emp-selector" onchange="prefillEmployee(this.value)">'+
+              '<option value="">-- Choisir un salarie --</option>'+opts+
+            '</select>'+
+          '</div>';
+      }
+      var hasCo = doc.fields.some(function(f){return f.id==='entreprise_nom';});
+      var companyHtml = '';
+      if(hasCo){
+        var hasParams=_paramsRH.raisonSociale||_paramsRH.siret;
+        var missingParams=[];
+        if(!_paramsRH.adresseEntreprise) missingParams.push('adresse');
+        if(!_paramsRH.signataire) missingParams.push('signataire');
+        if(!_paramsRH.qualiteSignataire) missingParams.push('qualité signataire');
+        var missingHtml=missingParams.length>0
+          ? '<div style="font-size:10px;color:#dc2626;margin-top:2px">⚠️ Manquants dans Params RH : '+missingParams.join(', ')+' · <a href="rh-params.html" style="color:#dc2626;font-weight:700">Compléter →</a></div>'
+          : '<div style="font-size:10px;color:#16a34a;margin-top:2px">✅ Tous les champs disponibles</div>';
+        if(hasParams){
+          companyHtml =
+            '<div class="autofill-bar" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border-color:#86efac;margin-top:8px">'+
+              '<div style="display:flex;align-items:center;gap:8px;flex:1;min-width:0">'+
+                '<span style="font-size:18px">🏢</span>'+
+                '<div style="min-width:0">'+
+                  '<div style="font-size:12px;font-weight:700;color:#166534">'+(_paramsRH.raisonSociale||'Entreprise')+(_paramsRH.siret?' <span style=\'font-weight:400;color:#16a34a\'>· SIRET '+_paramsRH.siret+'</span>':'')+'</div>'+
+                  missingHtml+
+                '</div>'+
+              '</div>'+
+              '<button class="btn btn-sm" style="background:#16a34a;color:white;border:none;white-space:nowrap;flex-shrink:0" onclick="prefillCompany()">🏢 Appliquer</button>'+
+            '</div>';
+        } else {
+          companyHtml =
+            '<div class="autofill-bar" style="background:#fff7ed;border-color:#fed7aa;margin-top:8px">'+
+              '<span style="font-size:16px">🏢</span>'+
+              '<div style="flex:1;font-size:12px;color:#92400e">'+
+                '<strong>Infos entreprise non configurées</strong><br>'+
+                '<span style="font-size:11px">Renseignez votre raison sociale, SIRET, adresse et signataire dans <a href="rh-params.html" style="color:#b45309;font-weight:700">Paramètres RH →</a></span>'+
+              '</div>'+
+            '</div>';
+        }
+      }
+      return selectorHtml + companyHtml;
+    })()+
     '<div class="form-section">'+
       '<div class="form-section-head"><span>📝</span><div class="form-section-title">Informations necessaires a la generation</div></div>'+
       '<div class="form-body"><div class="form-grid">'+fieldsHtml+'</div></div>'+
@@ -680,6 +775,62 @@ function renderForm(doc){
     '</div>'+
     '<div id="generated-area"></div>';
 }
+
+// ── PREFILL DEPUIS FICHE SALARIE ──
+window.prefillEmployee=function(empId){
+  if(!empId||!_employes[empId])return;
+  var e=_employes[empId];
+  var nom=((e.prenom||'')+' '+(e.nom||'')).trim();
+  // setF : remplit un input ou select
+  var setF=function(id,val){
+    if(!val&&val!==0)return;
+    var el=document.getElementById('f-'+id);
+    if(!el)return;
+    el.value=val;
+    // Déclencher un change pour les selects
+    if(el.tagName==='SELECT') el.dispatchEvent(new Event('change'));
+  };
+  setF('emp_nom', nom);
+  setF('candidat_nom', nom);
+  setF('emp_poste', e.poste);
+  setF('emp_adresse', e.adresse);
+  setF('emp_anciennete', e.dateEntree);
+  setF('emp_date_contrat', e.dateEntree);
+  setF('date_contrat_initial', e.dateEntree);
+  setF('type_contrat', e.typeContrat);
+  setF('salaire_brut', e.salaireBrut);
+  setF('salaire', e.salaireBrut);
+  // Compter les champs remplis pour feedback
+  var filled=['emp_nom','emp_poste','emp_adresse','emp_anciennete','type_contrat','salaire_brut']
+    .filter(function(id){var el=document.getElementById('f-'+id);return el&&el.value;}).length;
+  showToast('👤 '+nom+' importé — '+filled+' champ(s) pré-rempli(s)','success');
+};
+
+// ── PREFILL DEPUIS PARAMS ENTREPRISE ──
+window.prefillCompany=function(){
+  var setF=function(id,val){
+    if(!val)return;
+    var el=document.getElementById('f-'+id);
+    if(el) el.value=val;
+  };
+  setF('entreprise_nom',    _paramsRH.raisonSociale||'');
+  setF('entreprise_adresse',_paramsRH.adresseEntreprise||'');
+  setF('entreprise_siret',  _paramsRH.siret||'');
+  setF('signataire',        _paramsRH.signataire||'');
+  setF('qualite_signataire',_paramsRH.qualiteSignataire||'');
+  var filled=0;
+  ['entreprise_nom','entreprise_adresse','entreprise_siret','signataire','qualite_signataire']
+    .forEach(function(id){var el=document.getElementById('f-'+id);if(el&&el.value)filled++;});
+  // Si adresse/signataire manquent dans params → inviter à compléter
+  var missing=[];
+  if(!_paramsRH.adresseEntreprise) missing.push('adresse');
+  if(!_paramsRH.signataire) missing.push('signataire');
+  if(missing.length>0){
+    showToast('🏢 Appliqué · Champs manquants dans Params RH : '+missing.join(', '),'warning');
+  } else {
+    showToast('🏢 Infos entreprise appliquées — '+filled+' champ(s) rempli(s)','success');
+  }
+};
 
 window.fillExample=function(){
   if(!_currentDoc)return;
