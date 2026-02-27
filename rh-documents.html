@@ -702,25 +702,22 @@ window.generateDocument=function(){
   var fieldsDesc=_currentDoc.fields.map(function(f){return f.label+' : '+(data[f.id]||'[non renseigne]');}).join('\n');
   var prompt='Tu es un expert en droit du travail francais. Genere un document RH professionnel et complet du type : "'+_currentDoc.name+'".\n\nInformations fournies :\n'+fieldsDesc+'\n\nReference legale : '+_currentDoc.legal+'\n\nINSTRUCTIONS :\n- Redige en francais juridique professionnel mais accessible\n- Conforme au droit du travail francais en vigueur (2024-2025)\n- Inclure toutes les mentions legales obligatoires\n- Utilise ## pour les titres de section\n- Inclure les formules de politesse et blocs de signatures\n- Pour les infos manquantes critiques utiliser [A COMPLETER]\n- Si delais legaux applicables les mentionner explicitement\n- Pour documents disciplinaires respecter scrupuleusement la procedure legale\n- Genere uniquement le corps du document sans commentaire ni explication\n- Commence directement par l\'en-tete du document';
 
-  fetch('https://api.anthropic.com/v1/messages',{
+  // Appel via proxy Vercel (evite les erreurs CORS de l'API Anthropic)
+  fetch('/api/generate-rh-doc',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      model:'claude-sonnet-4-20250514',
-      max_tokens:2500,
-      system:'Tu es un expert juridique RH specialise dans le droit du travail francais. Tu generes des documents RH professionnels, conformes et adaptes a la situation specifique.',
-      messages:[{role:'user',content:prompt}]
-    })
-  }).then(function(r){return r.json();}).then(function(resp){
-    var text='';
-    if(resp.content&&resp.content[0]&&resp.content[0].text){text=resp.content[0].text;}
-    else{throw new Error('Reponse inattendue');}
-    _generatedContent=text;
-    renderGeneratedDoc(text);
+    body:JSON.stringify({prompt:prompt, docName:_currentDoc.name})
+  }).then(function(r){
+    if(!r.ok){return r.json().then(function(e){throw new Error(e.error||('HTTP '+r.status));});}
+    return r.json();
+  }).then(function(resp){
+    if(!resp.content){throw new Error('Reponse vide du serveur');}
+    _generatedContent=resp.content;
+    renderGeneratedDoc(resp.content);
     autoSave();
   }).catch(function(err){
-    console.error(err);
-    area.innerHTML='<div class="generated-doc"><div style="padding:30px;text-align:center;color:var(--red)"><div style="font-size:32px;margin-bottom:10px">⚠️</div><div style="font-weight:700">Erreur de generation</div><div style="font-size:12px;color:var(--muted);margin-top:8px">Verifiez votre connexion et reessayez.</div><button class="btn btn-primary" style="margin-top:16px" onclick="generateDocument()">Reessayer</button></div></div>';
+    console.error('generate-rh-doc error:',err);
+    area.innerHTML='<div class="generated-doc"><div style="padding:30px;text-align:center;color:var(--red)"><div style="font-size:32px;margin-bottom:10px">⚠️</div><div style="font-weight:700">Erreur de generation</div><div style="font-size:12px;color:var(--muted);margin-top:8px">'+err.message+'</div><button class="btn btn-primary" style="margin-top:16px" onclick="generateDocument()">Reessayer</button></div></div>';
   });
 };
 
