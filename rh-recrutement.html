@@ -856,7 +856,7 @@ function openDetail(id){
   var entretiensCand=Object.values(_entretiens).filter(function(e){return e.candidatId===id;}).sort(function(a,b){return(a.date||'')>(b.date||'')?1:-1;});
   var pct=_scoreSelected>0?(_scoreSelected*10)+'%':((parseInt(c.score)||0)*10)+'%';
   _scoreSelected=parseInt(c.score)||0;
-  document.getElementById('modal-detail-content').innerHTML=
+  document.getElementById('detail-body').innerHTML=
     '<div class="detail-hero">'
     +'<div class="detail-avatar">'+(c.prenom||'').charAt(0)+(c.nom||'').charAt(0)+'</div>'
     +'<div><div class="detail-name">'+c.prenom+' '+c.nom+'</div>'
@@ -885,14 +885,14 @@ function openDetail(id){
     +'<button class="cand-tab" data-tab="decision">⚖️ Décision</button>'
     +'</div>'
     // Panel info
-    +'<div class="cand-panel" id="panel-info">'
+    +'<div class="cand-panel on" id="panel-info">'
     +(compTags?'<div class="competence-wrap">'+compTags+'</div>':'')
     +(c.cv?'<a href="'+c.cv+'" target="_blank" class="btn btn-outline btn-sm">📎 Voir le CV</a>':'')
     +'</div>'
     // Panel parcours
-    +'<div class="cand-panel hidden" id="panel-parcours">'+buildTimeline(c)+'</div>'
+    +'<div class="cand-panel" id="panel-parcours">'+buildTimeline(c)+'</div>'
     // Panel entretiens
-    +'<div class="cand-panel hidden" id="panel-entretiens">'
+    +'<div class="cand-panel" id="panel-entretiens">'
     +(entretiensCand.length===0?'<div style="text-align:center;padding:30px;color:var(--muted)"><div style="font-size:28px;margin-bottom:8px">🗓</div>Aucun entretien planifié<br><button class="btn btn-rh btn-sm open-entretien-for" data-id="'+id+'" style="margin-top:12px">+ Planifier un entretien</button></div>'
     :'<div>'+entretiensCand.map(function(e){
       return '<div style="padding:12px;background:#f8fffe;border-radius:8px;border:1px solid var(--rh-border);margin-bottom:8px">'
@@ -905,13 +905,13 @@ function openDetail(id){
     }).join('')+'</div>')
     +'</div>'
     // Panel notes
-    +'<div class="cand-panel hidden" id="panel-notes">'
+    +'<div class="cand-panel" id="panel-notes">'
     +'<div style="margin-bottom:12px"><textarea id="detail-note-input" class="modal-input" rows="3" placeholder="Ajouter une note..."></textarea>'
     +'<button class="btn btn-rh btn-sm add-note-btn" data-id="'+id+'" style="margin-top:8px">💬 Ajouter la note</button></div>'
     +'<div id="notes-list">'+(c.notesLog&&c.notesLog.length?c.notesLog.map(function(n){return'<div style="padding:10px;background:#f8fffe;border-radius:8px;border:1px solid var(--rh-border);margin-bottom:8px"><div style="font-size:11px;color:var(--muted)">'+n.date+' · '+n.auteur+'</div><div style="font-size:13px;margin-top:4px">'+n.texte+'</div></div>';}).join(''):'<div style="color:var(--muted);font-size:12px;text-align:center;padding:20px">Aucune note</div>')+'</div>'
     +'</div>'
     // Panel décision
-    +'<div class="cand-panel hidden" id="panel-decision">'
+    +'<div class="cand-panel" id="panel-decision">'
     +'<div>'+buildDecisionHelp(c,offre)+'</div>'
     +'<div style="margin-top:12px"><label class="modal-label">Commentaire de décision</label><textarea id="decision-comment-'+id+'" class="modal-input" rows="3" placeholder="Justification de la décision...">'+(c.decisionComment||'')+'</textarea></div>'
     +'<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">'
@@ -922,7 +922,7 @@ function openDetail(id){
     +'</div>';
 
   // Event listeners
-  var modal_content = document.getElementById('modal-detail-content');
+  var modal_content = document.getElementById('detail-body');
   
   // Tabs
   modal_content.querySelectorAll('.cand-tab').forEach(function(btn){
@@ -970,17 +970,17 @@ function buildDecisionHelp(c,offre){
   return pts.map(function(p){return'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:14px">'+(p.ok===true?'✅':p.ok===false?'⚠️':'ℹ️')+'</span><span style="font-size:12px;color:'+(p.ok===true?'var(--rh-main)':p.ok===false?'var(--orange)':'var(--text)')+'">'+p.txt+'</span></div>';}).join('');
 }
 
-function switchCandTab(panel,btn){document.querySelectorAll('.cand-tab').forEach(function(b){b.classList.remove('on');});document.querySelectorAll('.cand-panel').forEach(function(p){p.classList.remove('on');});btn.classList.add('on');var el=document.getElementById('cand-panel-'+panel);if(el)el.classList.add('on');}
+function switchCandTab(panel,btn){document.querySelectorAll('.cand-tab').forEach(function(b){b.classList.remove('on');});document.querySelectorAll('.cand-panel').forEach(function(p){p.classList.remove('on');});btn.classList.add('on');var el=document.getElementById('panel-'+panel);if(el)el.classList.add('on');}
 
 async function addNote(candId){
   var inp=document.getElementById('detail-note-input');if(!inp||!inp.value.trim())return;
   var c=_candidats[candId];if(!c)return;
-  if(!c.notes_list)c.notes_list=[];
-  c.notes_list.unshift({texte:inp.value.trim(),date:new Date().toISOString().slice(0,10),auteur:'Vous'});
+  if(!c.notesLog)c.notesLog=[];
+  c.notesLog.unshift({texte:inp.value.trim(),date:new Date().toISOString().slice(0,10),auteur:'Vous'});
   inp.value='';
   await saveRecord('candidats',candId,c);
-  var nl=document.getElementById('notes-list-'+candId);
-  if(nl)nl.innerHTML=c.notes_list.map(function(n){return'<div class="note-item"><div class="note-head"><span class="note-author">'+(n.auteur||'Vous')+'</span><span class="note-date">'+formatDate(n.date)+'</span></div><div class="note-text">'+n.texte+'</div></div>';}).join('');
+  var nl=document.getElementById('notes-list');
+  if(nl)nl.innerHTML=c.notesLog.map(function(n){return'<div style="padding:10px;background:#f8fffe;border-radius:8px;border:1px solid var(--rh-border);margin-bottom:8px"><div style="font-size:11px;color:var(--muted)">'+n.date+' · '+n.auteur+'</div><div style="font-size:13px;margin-top:4px">'+n.texte+'</div></div>';}).join('');
   showToast('Note ajoutée','ok');
 }
 
