@@ -45,7 +45,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 2500,
-        system: 'Tu es un expert juridique RH specialise dans le droit du travail francais. Tu generes des documents RH professionnels, conformes et adaptes a la situation specifique. Tu rediges uniquement le document demande, sans commentaire ni introduction.',
+        system: 'Tu es un expert juridique RH specialise dans le droit du travail francais. Tu generes des documents RH professionnels prets a signer. REGLE ABSOLUE : tu n\'utilises JAMAIS de placeholders comme [A COMPLETER], [NOM], [ADRESSE], [...] ou tout espace reserve. Si une information manque, tu rediges la clause de maniere generale. Le document doit etre pret a imprimer et signer immediatement.',
         messages: [
           { role: 'user', content: prompt }
         ]
