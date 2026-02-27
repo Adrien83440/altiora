@@ -683,13 +683,15 @@ var DOW_KEY = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'
 
 // Documents que le salarié doit fournir
 var DOCS_REQUIRED = [
-  {id:'cni',        label:'Pièce d\'identité',       desc:'CNI ou passeport en cours de validité', icon:'🪪'},
-  {id:'rib',        label:'RIB',                      desc:'Relevé d\'identité bancaire au nom du salarié', icon:'🏦'},
-  {id:'justif_dom', label:'Justificatif de domicile', desc:'Facture de moins de 3 mois', icon:'🏠'},
-  {id:'vitale',     label:'Carte vitale',             desc:'Carte d\'assurance maladie', icon:'💚'},
-  {id:'titre_sejour',label:'Titre de séjour',         desc:'Si ressortissant non-UE · facultatif', icon:'📋', optional:true},
-  {id:'diplome',    label:'Justificatif de diplôme',  desc:'Copie du diplôme le plus élevé · facultatif', icon:'🎓', optional:true},
+  {id:'cni',         label:"Pièce d’identité",       desc:"CNI ou passeport en cours de validité", icon:'🪪'},
+  {id:'rib',         label:"RIB",                                    desc:"Relevé d’identité bancaire au nom du salarié", icon:'🏦'},
+  {id:'justif_dom',  label:"Justificatif de domicile",               desc:"Facture de moins de 3 mois", icon:'🏠'},
+  {id:'vitale',      label:"Carte vitale",                           desc:"Carte d’assurance maladie", icon:'💚'},
+  {id:'titre_sejour',label:"Titre de séjour",                   desc:"Si ressortissant non-UE · facultatif", icon:'📋', optional:true},
+  {id:'diplome',     label:"Justificatif de diplôme",           desc:"Copie du diplôme le plus élevé · facultatif", icon:'🎓', optional:true},
 ];
+// Echapper les labels pour usage dans onclick HTML
+function escHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
 /* ══════════════════════════════════════════
    ÉTAT GLOBAL
@@ -1129,25 +1131,25 @@ function renderDocuments() {
   document.getElementById('docs-progress-fill').style.width = pct+'%';
   document.getElementById('docs-required-count').textContent = done+'/'+total;
 
-  // Liste docs à fournir
+  // Liste docs à fournir — data-idx pour éviter apostrophes dans onclick
   var reqList = document.getElementById('docs-required-list');
-  reqList.innerHTML = DOCS_REQUIRED.map(function(doc) {
+  reqList.innerHTML = DOCS_REQUIRED.map(function(doc, idx) {
     var uploaded = _docsEmployee[doc.id];
     var cls = uploaded ? 'doc-item uploaded' : (doc.optional ? 'doc-item' : 'doc-item required');
     var icoClass = uploaded ? 'g' : (doc.optional ? 'o' : 'r');
-    var dateStr = uploaded && uploaded.uploadedAt ? ' · ' + fmtDate(uploaded.uploadedAt.split('T')[0]) : '';
+    var dateStr = uploaded && uploaded.uploadedAt ? ' \u00b7 ' + fmtDate(uploaded.uploadedAt.split('T')[0]) : '';
+    var labelSafe = escHtml(doc.label);
+    var descSafe  = escHtml(uploaded ? ('\u2705 '+uploaded.name+dateStr) : doc.desc);
+    var btn = uploaded
+      ? '<button class="btn-view" data-idx="'+idx+'" onclick="viewDocIdx(this)">\ud83d\udc41 Voir</button>'
+      : '<button class="btn-upload" data-idx="'+idx+'" onclick="openUploadIdx(this)">\ud83d\udce4 D\u00e9poser</button>';
     return '<div class="'+cls+'">'
       +'<div class="doc-ico '+icoClass+'">'+doc.icon+'</div>'
       +'<div class="doc-info">'
-        +'<div class="doc-name">'+doc.label+(doc.optional?' <span style="font-size:9px;font-weight:400;color:var(--muted)">(facultatif)</span>':'')+'</div>'
-        +'<div class="doc-meta">'+(uploaded ? '✅ '+uploaded.name+dateStr : doc.desc)+'</div>'
+        +'<div class="doc-name">'+labelSafe+(doc.optional?' <span style="font-size:9px;font-weight:400;color:var(--muted)">(facultatif)</span>':'')+'</div>'
+        +'<div class="doc-meta">'+descSafe+'</div>'
       +'</div>'
-      +'<div class="doc-action">'
-        +(uploaded
-          ? '<button class="btn-view" onclick="viewDoc(\''+doc.id+'\')">👁 Voir</button>'
-          : '<button class="btn-upload" onclick="openUploadModal(\''+doc.id+'\')">📤 Déposer</button>'
-        )
-      +'</div>'
+      +'<div class="doc-action">'+btn+'</div>'
     +'</div>';
   }).join('');
 
@@ -1173,13 +1175,19 @@ function renderDocuments() {
   }
 }
 
-function openUploadModal(docId) {
+// Ouvre la modal via index (pas de string dans onclick)
+function openUploadIdx(btn) {
+  var idx = parseInt(btn.getAttribute('data-idx'));
+  var docDef = DOCS_REQUIRED[idx] || {};
+  openUploadModal(docDef.id, docDef.label, docDef.desc);
+}
+window.openUploadIdx = openUploadIdx;
+
+function openUploadModal(docId, label, desc) {
   _uploadDocId = docId;
   _uploadB64 = null; _uploadMeta = null;
-  // Retrouver label/desc depuis DOCS_REQUIRED
-  var docDef = DOCS_REQUIRED.filter(function(d){ return d.id === docId; })[0] || {};
-  document.getElementById('upload-modal-title').textContent = '📤 '+(docDef.label||docId);
-  document.getElementById('upload-modal-desc').textContent = docDef.desc||'';
+  document.getElementById('upload-modal-title').textContent = '\ud83d\udce4 '+(label||docId);
+  document.getElementById('upload-modal-desc').textContent = desc||'';
   document.getElementById('upload-input').value = '';
   document.getElementById('upload-preview').style.display = 'none';
   document.getElementById('upload-submit-btn').disabled = true;
@@ -1245,6 +1253,13 @@ async function submitUpload() {
   }
 }
 window.submitUpload = submitUpload;
+
+function viewDocIdx(btn) {
+  var idx = parseInt(btn.getAttribute('data-idx'));
+  var docDef = DOCS_REQUIRED[idx] || {};
+  viewDoc(docDef.id);
+}
+window.viewDocIdx = viewDocIdx;
 
 function viewDoc(docId) {
   var doc = _docsEmployee[docId];
