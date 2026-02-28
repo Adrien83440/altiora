@@ -337,55 +337,46 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 .poly-highlight{box-shadow:0 0 0 2px #f59e0b!important;border-color:#f59e0b!important;}
 
 /* ══════════════════════════════════════════
-   DRAG & DROP
+   DRAG & DROP — pointer events (mouse + touch)
    ══════════════════════════════════════════ */
-.cr-pill[draggable="true"]{cursor:grab;}
-.cr-pill[draggable="true"]:active{cursor:grabbing;}
-.cr-pill.dnd-dragging{opacity:.35;pointer-events:none;}
 
-/* Poignée drag visible au hover */
-.cr-pill::before{
-  content:'⠿';
-  font-size:10px;
-  color:rgba(0,0,0,.2);
-  margin-right:3px;
-  display:inline-block;
-  vertical-align:middle;
-  line-height:1;
-  transition:color .15s;
-}
-.cr-pill:hover::before{color:rgba(0,0,0,.45);}
+/* Pills Gantt */
+.cr-pill{cursor:grab;user-select:none;}
+.cr-pill:active{cursor:grabbing;}
+.cr-pill.pm-dragging{opacity:.3;pointer-events:none;}
 
-/* Drop target */
-.gd-cell.dnd-over{
-  background:rgba(5,150,105,.12)!important;
-  box-shadow:inset 0 0 0 2px var(--rh-main);
-  border-radius:4px;
-}
-.gd-cell.dnd-over-emp{
-  background:rgba(99,102,241,.1)!important;
-  box-shadow:inset 0 0 0 2px #6366f1;
-}
-/* Drop zone timeline */
-.tl-row.dnd-over{background:rgba(5,150,105,.08)!important;box-shadow:inset 0 0 0 2px var(--rh-main);}
-.tl-row.dnd-over-emp{background:rgba(99,102,241,.08)!important;box-shadow:inset 0 0 0 2px #6366f1;}
-.tl-shift-bar{cursor:grab;}
-.tl-shift-bar:active{cursor:grabbing;}
-.tl-shift-bar.dnd-dragging{opacity:.3;pointer-events:none;}
+/* Barres Timeline */
+.tl-shift-bar{cursor:grab;user-select:none;touch-action:none;}
+.tl-shift-bar.pm-dragging{opacity:.25;pointer-events:none;}
 
-/* Ghost visuel pendant le drag */
+/* Drop targets Gantt */
+.gd-cell.pm-over{background:rgba(5,150,105,.14)!important;box-shadow:inset 0 0 0 2px var(--rh-main);border-radius:4px;}
+.gd-cell.pm-over-emp{background:rgba(99,102,241,.12)!important;box-shadow:inset 0 0 0 2px #6366f1;border-radius:4px;}
+
+/* Drop targets Timeline (changement d'employé) */
+.tl-row.pm-over{background:rgba(5,150,105,.08)!important;box-shadow:inset 0 0 0 2px var(--rh-main);}
+.tl-row.pm-over-emp{background:rgba(99,102,241,.08)!important;box-shadow:inset 0 0 0 2px #6366f1;}
+
+/* Ghost flottant */
 #dnd-ghost{
   position:fixed;z-index:9999;pointer-events:none;
-  padding:5px 10px;border-radius:7px;font-size:11px;font-weight:700;
+  padding:6px 12px;border-radius:8px;font-size:11px;font-weight:700;
   font-family:'Plus Jakarta Sans',sans-serif;
-  box-shadow:0 8px 24px rgba(0,0,0,.2);
+  box-shadow:0 8px 28px rgba(0,0,0,.28);
   display:none;white-space:nowrap;
-  transform:rotate(-2deg);
-  transition:transform .1s;
-  border:2px solid rgba(255,255,255,.4);
+  transform:rotate(-2deg) scale(1.05);
+  border:2px solid rgba(255,255,255,.5);
 }
 
-/* Toast drag confirmé */
+/* Tooltip heure en cours de drag timeline */
+#tl-drag-tip{
+  position:fixed;z-index:9999;pointer-events:none;
+  background:#1e293b;color:white;padding:4px 9px;border-radius:6px;
+  font-size:11px;font-weight:700;font-family:'Plus Jakarta Sans',sans-serif;
+  display:none;white-space:nowrap;
+}
+
+/* Toast confirmation */
 .dnd-toast{
   position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(16px);
   background:#1e293b;color:white;padding:9px 18px;border-radius:10px;
@@ -468,6 +459,7 @@ body[data-zoom="large"]      { --emp-col-w: 220px; }
 <body>
 
 <div id="dnd-ghost"></div>
+<div id="tl-drag-tip"></div>
 <div class="dnd-toast" id="dnd-toast"></div>
 
 <button class="hamburger" id="hamburger" onclick="toggleMobileNav()"><span></span><span></span><span></span></button>
@@ -1063,10 +1055,9 @@ function pillGantt(it,k){
   const plages=it.plages&&it.plages.length>0?it.plages:(it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
   const totalH=plages.reduce((s,p)=>s+diffH(p.deb,p.fin),0);
   const timeTxt=plages.length>1?plages.map(p=>`${p.deb}–${p.fin}`).join('|'):plages[0]?`${plages[0].deb}–${plages[0].fin}`:'';
-  return `<div class="cr-pill t-${it.type}" draggable="true"
+  return `<div class="cr-pill t-${it.type}"
     data-dnd-k="${k}" data-dnd-id="${it.id}"
-    ondragstart="dndStart(event,'${k}','${it.id}')"
-    ondragend="dndEnd(event)"
+    onpointerdown="pmGanttDown(event,'${k}','${it.id}')"
     onclick="event.stopPropagation();editCr('${k}','${it.id}')">
     <div class="cr-time">${timeTxt}${totalH>0?' ('+fmtDur(totalH)+')':''}</div>
     <div class="cr-lbl">${TYPE_ICO[it.type]||'📋'} ${it.note||TYPE_LBL[it.type]||it.type}</div>
@@ -1157,14 +1148,13 @@ function renderTimeline(){
         if(left>100||left+width<0)return '';
         return `<div class="tl-shift-bar t-${it.type}"
           style="left:${left}%;width:${width}%;min-width:28px;z-index:3"
-          draggable="true"
           data-dnd-k="${k}" data-dnd-id="${it.id}"
-          ondragstart="dndStart(event,'${k}','${it.id}')"
-          ondragend="dndEnd(event)"
+          data-deb="${p.deb}" data-fin="${p.fin}"
+          onpointerdown="pmTlDown(event,'${k}','${it.id}','${p.deb}','${p.fin}')"
           onclick="event.stopPropagation();editCr('${k}','${it.id}')"
           title="${p.deb}→${p.fin} (${fmtDur(dur)})">
-          ${dur>=0.75?`<span style="font-size:9px;font-weight:700">${p.deb}–${p.fin}</span>`:''}
-          ${it.note&&dur>=1?`<span style="opacity:.75;font-size:9px"> ${it.note}</span>`:''}
+          ${dur>=0.75?`<span style="font-size:9px;font-weight:700;pointer-events:none">${p.deb}–${p.fin}</span>`:''}
+          ${it.note&&dur>=1?`<span style="opacity:.75;font-size:9px;pointer-events:none"> ${it.note}</span>`:''}
         </div>`;
       }).join('');
     }).join('');
@@ -1204,24 +1194,7 @@ function renderTimeline(){
   </div>`;
 }
 
-// DnD over/leave spécifiques à la timeline (sur tl-row)
-function dndTlOver(ev, k, row){
-  ev.preventDefault();
-  ev.dataTransfer.dropEffect='move';
-  if(_dnd.over===k) return;
-  document.querySelectorAll('.tl-row.dnd-over,.tl-row.dnd-over-emp').forEach(el=>el.classList.remove('dnd-over','dnd-over-emp'));
-  _dnd.over=k;
-  const srcEmpId=(_dnd.srcK||'_').split('_')[1];
-  const tgtEmpId=k.split('_')[1];
-  row.classList.add(srcEmpId===tgtEmpId?'dnd-over':'dnd-over-emp');
-}
-function dndTlLeave(ev, row){
-  if(ev.currentTarget.contains(ev.relatedTarget))return;
-  row.classList.remove('dnd-over','dnd-over-emp');
-  if(_dnd.over===row.dataset.dndTargetK)_dnd.over=null;
-}
-window.dndTlOver=dndTlOver;
-window.dndTlLeave=dndTlLeave;
+// dndTlOver/dndTlLeave supprimés (pointer-events engine)
 
 // ── VUE MOIS ──
 function renderMois(){
@@ -1771,117 +1744,152 @@ async function saveKey(k,date){
 }
 
 // ══════════════════════════════════════════════════════════════
-// DRAG & DROP ENGINE — fonctionne sur Gantt ET Timeline
+// POINTER-MOVE ENGINE — mouse + touch, sans HTML5 drag API
+// Deux modes :
+//   A) Gantt  : déplacer une pill vers une autre cellule (changement date/employé)
+//   B) Timeline : glisser une barre horizontalement (décaler horaire au ¼h)
+//                 ou verticalement (changer d'employé)
 // ══════════════════════════════════════════════════════════════
-// Utilise l'API HTML5 Drag (draggable=true).
-// Le ghost natif est masqué ; on gère notre propre ghost CSS.
-// Sur Gantt  : drop sur .gd-cell  via dndOver/dndLeave/dndDrop
-// Sur Timeline : drop sur .tl-row via dndTlOver/dndTlLeave/dndDrop
-// ──────────────────────────────────────────────────────────────
 
-let _dnd = {
-  srcK: null, srcId: null, srcItem: null,
-  over: null,
+const TYPE_COLORS={
+  travail:'#bbf7d0|#14532d',repos:'#f3f4f6|#6b7280',conge:'#bfdbfe|#1e3a8a',
+  maladie:'#fecaca|#7f1d1d',formation:'#fde68a|#78350f',
+  astreinte:'#ddd6fe|#3b0764',partiel:'#fed7aa|#7c2d12'
 };
 
-function dndStart(ev, k, id){
-  const item=(_cr[k]?.items||[]).find(i=>i.id===id);
-  if(!item){ev.preventDefault();return;}
+// ── État global du drag ──
+const _pm = {
+  active:   false,
+  mode:     null,   // 'gantt' | 'tl-move' | 'tl-emp'
+  srcEl:    null,
+  srcK:     null,
+  srcId:    null,
+  srcItem:  null,
+  // Timeline move
+  tlBwrap:  null,   // élément .tl-bar-wrap conteneur
+  tlSpan:   0,      // durée du créneau en minutes (fixe)
+  tlOrigMin:0,      // début original en minutes depuis START_H
+  tlOrigX:  0,      // clientX au pointerdown
+  tlStartH: 6,
+  tlEndH:   23,
+  // Gantt drop
+  overEl:   null,
+  overK:    null,
+  // clic vs drag
+  downX:    0,
+  downY:    0,
+  moved:    false,
+};
+const DRAG_THRESHOLD = 6; // px avant de considérer un drag
 
-  _dnd.srcK    = k;
-  _dnd.srcId   = id;
-  _dnd.srcItem = JSON.parse(JSON.stringify(item));
+function _ghost(){ return document.getElementById('dnd-ghost'); }
+function _tip(){ return document.getElementById('tl-drag-tip'); }
 
-  ev.dataTransfer.effectAllowed='move';
-  ev.dataTransfer.setData('text/plain','dnd'); // obligatoire Firefox
-
-  // Image drag invisible (on dessine notre propre ghost)
-  const px=document.createElement('div');
-  px.style.cssText='position:fixed;top:-999px;left:-999px;width:1px;height:1px;opacity:0';
-  document.body.appendChild(px);
-  ev.dataTransfer.setDragImage(px,0,0);
-  setTimeout(()=>px.remove(),0);
-
-  // Ghost visuel
-  const ghost=document.getElementById('dnd-ghost');
-  const plages=item.plages?.length>0?item.plages:(item.deb?[{deb:item.deb,fin:item.fin}]:[]);
-  const timeTxt=plages[0]?`${plages[0].deb}–${plages[0].fin}`:'';
-  const emp=_emps.find(e=>e.id===k.split('_')[1]);
-  const typeColors={
-    travail:'#dcfce7|#166534',repos:'#f3f4f6|#6b7280',conge:'#dbeafe|#1e40af',
-    maladie:'#fee2e2|#991b1b',formation:'#fef3c7|#92400e',
-    astreinte:'#ede9fe|#5b21b6',partiel:'#fff7ed|#c2410c'
-  };
-  const [bg,fg]=(typeColors[item.type]||'#f1f5f9|#374151').split('|');
-  ghost.style.cssText=`display:block;position:fixed;top:-200px;left:-200px;z-index:9999;pointer-events:none;
+function _showGhost(x,y,label,bg,fg){
+  const g=_ghost();
+  g.style.cssText=`display:block;position:fixed;top:${y-16}px;left:${x+14}px;z-index:9999;pointer-events:none;
     padding:6px 12px;border-radius:8px;font-size:11px;font-weight:700;
-    font-family:'Plus Jakarta Sans',sans-serif;
-    background:${bg};color:${fg};
-    box-shadow:0 8px 24px rgba(0,0,0,.25);
-    white-space:nowrap;transform:rotate(-2deg);
-    border:2px solid rgba(255,255,255,.5);`;
-  ghost.textContent=`${TYPE_ICO[item.type]||'📋'} ${emp?.prenom||'?'} · ${timeTxt}`;
-
-  ev.currentTarget.classList.add('dnd-dragging');
-  document.addEventListener('dragover',_dndMovGhost,{passive:true});
+    font-family:'Plus Jakarta Sans',sans-serif;background:${bg};color:${fg};
+    box-shadow:0 8px 28px rgba(0,0,0,.28);white-space:nowrap;
+    transform:rotate(-2deg) scale(1.05);border:2px solid rgba(255,255,255,.5);`;
+  g.textContent=label;
+}
+function _moveGhost(x,y){
+  const g=_ghost();
+  g.style.left=(x+14)+'px';
+  g.style.top=(y-16)+'px';
+}
+function _hideGhost(){
+  _ghost().style.display='none';
+  _tip().style.display='none';
 }
 
-function _dndMovGhost(ev){
-  const g=document.getElementById('dnd-ghost');
-  if(g&&g.style.display!=='none'){
-    g.style.left=(ev.clientX+16)+'px';
-    g.style.top =(ev.clientY-16)+'px';
+function _snapQ(minutes){ return Math.round(minutes/15)*15; } // arrondi ¼h
+function _minToStr(m){
+  m=Math.max(0,Math.min(23*60+59,m));
+  return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+}
+
+// ─────────────────────────────────────────
+// A) GANTT — pointerdown sur une pill
+// ─────────────────────────────────────────
+function pmGanttDown(ev, k, id){
+  if(ev.button!==undefined && ev.button!==0) return;
+  ev.stopPropagation();
+  const item=(_cr[k]?.items||[]).find(i=>i.id===id);
+  if(!item) return;
+
+  _pm.mode   ='gantt';
+  _pm.srcEl  = ev.currentTarget;
+  _pm.srcK   = k;
+  _pm.srcId  = id;
+  _pm.srcItem= JSON.parse(JSON.stringify(item));
+  _pm.downX  = ev.clientX;
+  _pm.downY  = ev.clientY;
+  _pm.moved  = false;
+  _pm.active = false;
+
+  ev.currentTarget.setPointerCapture(ev.pointerId);
+  ev.currentTarget.addEventListener('pointermove', _pmGanttMove);
+  ev.currentTarget.addEventListener('pointerup',   _pmGanttUp);
+  ev.currentTarget.addEventListener('pointercancel',_pmGanttUp);
+}
+
+function _pmGanttMove(ev){
+  const dx=Math.abs(ev.clientX-_pm.downX), dy=Math.abs(ev.clientY-_pm.downY);
+  if(!_pm.active && dx*dx+dy*dy < DRAG_THRESHOLD*DRAG_THRESHOLD) return;
+
+  if(!_pm.active){
+    _pm.active=true;
+    _pm.srcEl.classList.add('pm-dragging');
+    const item=_pm.srcItem;
+    const emp=_emps.find(e=>e.id===(_pm.srcK||'').split('_')[1]);
+    const plages=item.plages?.length>0?item.plages:(item.deb?[{deb:item.deb,fin:item.fin}]:[]);
+    const timeTxt=plages[0]?`${plages[0].deb}–${plages[0].fin}`:'';
+    const [bg,fg]=(TYPE_COLORS[item.type]||'#f1f5f9|#374151').split('|');
+    _showGhost(ev.clientX,ev.clientY,`${TYPE_ICO[item.type]||'📋'} ${emp?.prenom||'?'} · ${timeTxt}`,bg,fg);
+  }
+
+  _moveGhost(ev.clientX, ev.clientY);
+
+  // Trouver la cellule cible sous le pointeur
+  const els=document.elementsFromPoint(ev.clientX,ev.clientY);
+  const cell=els.find(el=>el.classList.contains('gd-cell')&&el.dataset.dndTargetK);
+  const targetK=cell?.dataset.dndTargetK||null;
+
+  if(targetK!==_pm.overK){
+    if(_pm.overEl){_pm.overEl.classList.remove('pm-over','pm-over-emp');}
+    _pm.overK=targetK;
+    _pm.overEl=cell||null;
+    if(cell && targetK!==_pm.srcK){
+      const srcEmpId=(_pm.srcK||'').split('_')[1];
+      const tgtEmpId=targetK.split('_')[1];
+      cell.classList.add(srcEmpId===tgtEmpId?'pm-over':'pm-over-emp');
+    }
   }
 }
 
-function dndEnd(ev){
-  document.querySelectorAll('.dnd-dragging').forEach(el=>el.classList.remove('dnd-dragging'));
-  const g=document.getElementById('dnd-ghost');
-  if(g)g.style.display='none';
-  document.querySelectorAll('.dnd-over,.dnd-over-emp').forEach(el=>el.classList.remove('dnd-over','dnd-over-emp'));
-  document.removeEventListener('dragover',_dndMovGhost);
-  _dnd.over=null;
-}
+async function _pmGanttUp(ev){
+  ev.currentTarget.removeEventListener('pointermove',_pmGanttMove);
+  ev.currentTarget.removeEventListener('pointerup',_pmGanttUp);
+  ev.currentTarget.removeEventListener('pointercancel',_pmGanttUp);
 
-// ── Gantt : over/leave sur .gd-cell ──
-function dndOver(ev, targetK){
-  ev.preventDefault();
-  ev.dataTransfer.dropEffect='move';
-  if(_dnd.over===targetK)return;
-  document.querySelectorAll('.dnd-over,.dnd-over-emp').forEach(el=>el.classList.remove('dnd-over','dnd-over-emp'));
-  _dnd.over=targetK;
-  const srcEmpId=(_dnd.srcK||'_').split('_')[1];
-  const tgtEmpId=targetK.split('_')[1];
-  ev.currentTarget.classList.add(srcEmpId===tgtEmpId?'dnd-over':'dnd-over-emp');
-}
+  if(_pm.overEl){_pm.overEl.classList.remove('pm-over','pm-over-emp');}
+  _pm.srcEl.classList.remove('pm-dragging');
+  _hideGhost();
 
-function dndLeave(ev){
-  if(ev.currentTarget.contains(ev.relatedTarget))return;
-  ev.currentTarget.classList.remove('dnd-over','dnd-over-emp');
-  if(_dnd.over===ev.currentTarget.dataset.dndTargetK)_dnd.over=null;
-}
+  if(!_pm.active){ _pm.active=false; return; } // c'était un clic simple
+  _pm.active=false;
 
-// ── Drop commun Gantt + Timeline ──
-async function dndDrop(ev, targetK){
-  ev.preventDefault();
-  ev.stopPropagation();
+  const targetK=_pm.overK;
+  if(!targetK||targetK===_pm.srcK){_pm.overK=null;_pm.overEl=null;return;}
 
-  const srcK  =_dnd.srcK;
-  const srcId =_dnd.srcId;
-  const item  =_dnd.srcItem;
-  dndEnd(ev);
+  const srcK=_pm.srcK, item=_pm.srcItem, id=_pm.srcId;
+  const srcDate=srcK.split('_')[0], tgtDate=targetK.split('_')[0];
+  const srcEmpId=srcK.split('_')[1], tgtEmpId=targetK.split('_')[1];
 
-  if(!srcK||!srcId||!item)return;
-  if(srcK===targetK)return;
-
-  const srcDate=srcK.split('_')[0];
-  const tgtDate=targetK.split('_')[0];
-  const srcEmpId=srcK.split('_')[1];
-  const tgtEmpId=targetK.split('_')[1];
-
-  // Optimistic update
   if(!_cr[srcK])_cr[srcK]={items:[]};
-  _cr[srcK].items=(_cr[srcK].items||[]).filter(i=>i.id!==srcId);
+  _cr[srcK].items=(_cr[srcK].items||[]).filter(i=>i.id!==id);
   if(!_cr[targetK])_cr[targetK]={items:[]};
   _cr[targetK].items.push({...item});
   render();
@@ -1889,29 +1897,216 @@ async function dndDrop(ev, targetK){
   try{
     await Promise.all([saveKey(srcK,srcDate),saveKey(targetK,tgtDate)]);
     checkLegal();updStats();
-    const srcEmp=_emps.find(e=>e.id===srcEmpId);
-    const tgtEmp=_emps.find(e=>e.id===tgtEmpId);
+    const srcEmp=_emps.find(e=>e.id===srcEmpId), tgtEmp=_emps.find(e=>e.id===tgtEmpId);
     const tgtFmt=new Date(tgtDate+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
-    showDndToast(srcEmpId===tgtEmpId?`✅ Déplacé → ${tgtFmt}`:`✅ ${srcEmp?.prenom||'?'} → ${tgtEmp?.prenom||'?'} (${tgtFmt})`);
+    _showDndToast(srcEmpId===tgtEmpId?`✅ Déplacé → ${tgtFmt}`:`✅ ${srcEmp?.prenom||'?'} → ${tgtEmp?.prenom||'?'} (${tgtFmt})`);
   }catch(e){
-    console.error(e);
-    await loadCr();render();
-    showDndToast('❌ Erreur sauvegarde');
+    console.error(e);await loadCr();render();
+    _showDndToast('❌ Erreur sauvegarde');
+  }
+  _pm.overK=null;_pm.overEl=null;
+}
+
+// ─────────────────────────────────────────
+// B) TIMELINE — pointerdown sur une barre
+// Déplacement horizontal → décale l'heure (¼h)
+// Déplacement vertical >30px → change d'employé
+// ─────────────────────────────────────────
+function pmTlDown(ev, k, id, deb, fin){
+  if(ev.button!==undefined && ev.button!==0) return;
+  ev.stopPropagation();
+  ev.preventDefault();
+
+  const item=(_cr[k]?.items||[]).find(i=>i.id===id);
+  if(!item) return;
+
+  const bwrap=ev.currentTarget.closest('.tl-bar-wrap');
+  if(!bwrap) return;
+
+  const debMin=(parseInt(deb)||0)*60+(parseInt(deb.split(':')[1])||0);
+  const finMin=(parseInt(fin)||0)*60+(parseInt(fin.split(':')[1])||0);
+
+  _pm.mode     ='tl-move';
+  _pm.srcEl    = ev.currentTarget;
+  _pm.srcK     = k;
+  _pm.srcId    = id;
+  _pm.srcItem  = JSON.parse(JSON.stringify(item));
+  _pm.tlBwrap  = bwrap;
+  _pm.tlSpan   = finMin-debMin;          // durée fixe
+  _pm.tlOrigMin= debMin;                 // début original
+  _pm.tlOrigX  = ev.clientX;
+  _pm.tlStartH = 6;
+  _pm.tlEndH   = 23;
+  _pm.downX    = ev.clientX;
+  _pm.downY    = ev.clientY;
+  _pm.moved    = false;
+  _pm.active   = false;
+  _pm.overEl   = null;
+  _pm.overK    = null;
+
+  ev.currentTarget.setPointerCapture(ev.pointerId);
+  ev.currentTarget.addEventListener('pointermove',_pmTlMove);
+  ev.currentTarget.addEventListener('pointerup',  _pmTlUp);
+  ev.currentTarget.addEventListener('pointercancel',_pmTlUp);
+}
+
+function _pmTlMove(ev){
+  const dx=ev.clientX-_pm.downX, dy=ev.clientY-_pm.downY;
+  const dist=Math.sqrt(dx*dx+dy*dy);
+  if(!_pm.active && dist < DRAG_THRESHOLD) return;
+
+  if(!_pm.active){
+    _pm.active=true;
+    _pm.srcEl.classList.add('pm-dragging');
+    const item=_pm.srcItem;
+    const [bg,fg]=(TYPE_COLORS[item.type]||'#f1f5f9|#374151').split('|');
+    const emp=_emps.find(e=>e.id===(_pm.srcK||'').split('_')[1]);
+    _showGhost(ev.clientX,ev.clientY,`${TYPE_ICO[item.type]||'📋'} ${emp?.prenom||'?'}`,bg,fg);
+  }
+
+  // ── Calcul déplacement horizontal → nouvelle heure ──
+  const bwrap=_pm.tlBwrap;
+  const rect=bwrap.getBoundingClientRect();
+  const spanTot=(_pm.tlEndH-_pm.tlStartH)*60; // minutes total affiché
+  const pxToMin=(ev.clientX-_pm.tlOrigX)/rect.width*spanTot;
+  let newDebMin=_snapQ(_pm.tlOrigMin+pxToMin);
+  // Bornes
+  newDebMin=Math.max(_pm.tlStartH*60, Math.min((_pm.tlEndH*60)-_pm.tlSpan, newDebMin));
+  const newFinMin=newDebMin+_pm.tlSpan;
+  const newDeb=_minToStr(newDebMin);
+  const newFin=_minToStr(newFinMin);
+
+  // Mettre à jour visuellement la barre en live
+  const pct=(m)=>Math.max(0,Math.min(100,(m-_pm.tlStartH*60)/spanTot*100));
+  _pm.srcEl.style.left=pct(newDebMin)+'%';
+  _pm.srcEl.style.width=Math.max(pct(newFinMin)-pct(newDebMin),1.5)+'%';
+  const span=_pm.srcEl.querySelector('span');
+  if(span)span.textContent=`${newDeb}–${newFin}`;
+
+  // Tooltip heure
+  const tip=_tip();
+  tip.style.cssText=`display:block;position:fixed;top:${ev.clientY-34}px;left:${ev.clientX}px;z-index:9999;pointer-events:none;
+    background:#1e293b;color:white;padding:3px 8px;border-radius:5px;
+    font-size:11px;font-weight:700;font-family:'Plus Jakarta Sans',sans-serif;transform:translateX(-50%)`;
+  tip.textContent=`${newDeb} – ${newFin}`;
+
+  _moveGhost(ev.clientX, ev.clientY);
+
+  // ── Déplacement vertical → changer d'employé ──
+  const absDy=Math.abs(dy);
+  if(absDy>28){
+    const els=document.elementsFromPoint(ev.clientX,ev.clientY);
+    const row=els.find(el=>el.classList.contains('tl-row')&&el.dataset.dndTargetK);
+    const targetK=row?.dataset.dndTargetK||null;
+    if(targetK!==_pm.overK){
+      if(_pm.overEl){_pm.overEl.classList.remove('pm-over','pm-over-emp');}
+      _pm.overK=targetK;
+      _pm.overEl=row||null;
+      if(row && targetK!==_pm.srcK){
+        const srcEmpId=(_pm.srcK||'').split('_')[1];
+        const tgtEmpId=targetK.split('_')[1];
+        row.classList.add(srcEmpId===tgtEmpId?'pm-over':'pm-over-emp');
+      }
+    }
   }
 }
 
-function showDndToast(msg){
+async function _pmTlUp(ev){
+  ev.currentTarget.removeEventListener('pointermove',_pmTlMove);
+  ev.currentTarget.removeEventListener('pointerup',_pmTlUp);
+  ev.currentTarget.removeEventListener('pointercancel',_pmTlUp);
+
+  if(_pm.overEl){_pm.overEl.classList.remove('pm-over','pm-over-emp');}
+  _pm.srcEl.classList.remove('pm-dragging');
+  _hideGhost();
+
+  if(!_pm.active){ _pm.active=false; return; } // clic simple → editCr
+  _pm.active=false;
+
+  // ── Calculer la nouvelle heure ──
+  const bwrap=_pm.tlBwrap;
+  const rect=bwrap.getBoundingClientRect();
+  const spanTot=(_pm.tlEndH-_pm.tlStartH)*60;
+  const pxToMin=(ev.clientX-_pm.tlOrigX)/rect.width*spanTot;
+  let newDebMin=_snapQ(_pm.tlOrigMin+pxToMin);
+  newDebMin=Math.max(_pm.tlStartH*60, Math.min((_pm.tlEndH*60)-_pm.tlSpan, newDebMin));
+  const newFinMin=newDebMin+_pm.tlSpan;
+  const newDeb=_minToStr(newDebMin);
+  const newFin=_minToStr(newFinMin);
+
+  const srcK=_pm.srcK, srcId=_pm.srcId;
+  const targetK=_pm.overK; // null = même ligne, juste décalage horaire
+  const finalK = targetK||srcK;
+  const srcDate=srcK.split('_')[0];
+  const finalDate=finalK.split('_')[0];
+
+  // Mise à jour de l'item dans _cr
+  const destK=finalK;
+  if(!_cr[destK])_cr[destK]={items:[]};
+
+  // Trouver et modifier l'item
+  const modItem = JSON.parse(JSON.stringify(_pm.srcItem));
+  // Mettre à jour toutes les plages en décalant
+  const origDebMin=_pm.tlOrigMin;
+  const delta=newDebMin-origDebMin;
+  if(modItem.plages&&modItem.plages.length>0){
+    modItem.plages=modItem.plages.map(p=>{
+      const [ph,pm2]=p.deb.split(':').map(Number);
+      const [fh2,fm2]=p.fin.split(':').map(Number);
+      const pDebMin=ph*60+pm2+delta;
+      const pFinMin=fh2*60+fm2+delta;
+      return {deb:_minToStr(pDebMin),fin:_minToStr(pFinMin)};
+    });
+    modItem.deb=modItem.plages[0].deb;
+    modItem.fin=modItem.plages[modItem.plages.length-1].fin;
+  } else {
+    modItem.deb=newDeb;
+    modItem.fin=newFin;
+  }
+
+  if(destK!==srcK){
+    // Changement d'employé : retirer de srcK
+    _cr[srcK].items=(_cr[srcK].items||[]).filter(i=>i.id!==srcId);
+    _cr[destK].items.push(modItem);
+  } else {
+    // Même ligne : juste modifier
+    const idx=(_cr[srcK].items||[]).findIndex(i=>i.id===srcId);
+    if(idx>=0)_cr[srcK].items[idx]=modItem;
+  }
+
+  render();
+
+  try{
+    const saves=[saveKey(srcK,srcDate)];
+    if(destK!==srcK) saves.push(saveKey(destK,finalDate));
+    await Promise.all(saves);
+    checkLegal();updStats();
+    const srcEmpId=srcK.split('_')[1], tgtEmpId=finalK.split('_')[1];
+    if(srcEmpId!==tgtEmpId){
+      const srcEmp=_emps.find(e=>e.id===srcEmpId),tgtEmp=_emps.find(e=>e.id===tgtEmpId);
+      _showDndToast(`✅ ${srcEmp?.prenom||'?'} → ${tgtEmp?.prenom||'?'}`);
+    } else {
+      _showDndToast(`✅ Déplacé : ${newDeb}–${newFin}`);
+    }
+  }catch(e){
+    console.error(e);await loadCr();render();
+    _showDndToast('❌ Erreur sauvegarde');
+  }
+  _pm.overK=null;_pm.overEl=null;
+}
+
+function _showDndToast(msg){
   const el=document.getElementById('dnd-toast');
   if(!el)return;
   el.textContent=msg;el.classList.add('show');
   clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2800);
 }
 
-window.dndStart=dndStart;
-window.dndEnd=dndEnd;
-window.dndOver=dndOver;
-window.dndLeave=dndLeave;
-window.dndDrop=dndDrop;
+window.pmGanttDown=pmGanttDown;
+window.pmTlDown=pmTlDown;
+// Compatibilité anciens appels (ne font plus rien de dangereux)
+function dndStart(){}function dndEnd(){}function dndOver(){}function dndLeave(){}function dndDrop(){}
+window.dndStart=dndStart;window.dndEnd=dndEnd;window.dndOver=dndOver;window.dndLeave=dndLeave;window.dndDrop=dndDrop;
 
 // ── EDIT / DEL ──
 function editCr(k,itemId){
