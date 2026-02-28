@@ -463,13 +463,21 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
   }
 
   function checkPageAccess(plan) {
+    // ── Plan free / past_due → redirection pricing (pas de plan gratuit) ──
+    const BLOCKED_PLANS = ['free', 'past_due'];
+    const ALLOWED_PAGES_FREE = ['profil.html', 'aide.html'];
+    if (BLOCKED_PLANS.includes(plan) && !ALLOWED_PAGES_FREE.includes(PAGE)) {
+      location.href = 'profil.html?tab=abonnement&upgrade=core';
+      return false;
+    }
+
     if (PAGE === 'gestion-stock.html'  && !CAN_STOCK.includes(plan))        { showUpgradeModal('stock');        return false; }
     if (PAGE === 'fidelisation.html'   && !CAN_FIDELISATION.includes(plan)) { showUpgradeModal('fidelisation'); return false; }
     if (PAGE === 'import.html'         && !CAN_IMPORT.includes(plan))       { showUpgradeModal('import');       return false; }
     if (PAGE === 'bilan.html'          && !CAN_BILAN.includes(plan))        { showUpgradeModal('bilan');        return false; }
     if (PAGE === 'rapport-annuel.html' && !CAN_RAPPORT.includes(plan))      { showUpgradeModal('rapport');      return false; }
     if (RH_PAGES.includes(PAGE)        && !CAN_RH.includes(plan))           { showUpgradeModal('rh');           return false; }
-    const corePages = ['pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','cashflow.html'];
+    const corePages = ['dashboard.html','pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','cashflow.html'];
     if (corePages.includes(PAGE) && !CAN_CORE.includes(plan)) { showUpgradeModal('core'); return false; }
     return true;
   }
