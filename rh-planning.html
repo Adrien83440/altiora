@@ -366,6 +366,12 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
   background:rgba(99,102,241,.1)!important;
   box-shadow:inset 0 0 0 2px #6366f1;
 }
+/* Drop zone timeline */
+.tl-row.dnd-over{background:rgba(5,150,105,.08)!important;box-shadow:inset 0 0 0 2px var(--rh-main);}
+.tl-row.dnd-over-emp{background:rgba(99,102,241,.08)!important;box-shadow:inset 0 0 0 2px #6366f1;}
+.tl-shift-bar{cursor:grab;}
+.tl-shift-bar:active{cursor:grabbing;}
+.tl-shift-bar.dnd-dragging{opacity:.3;pointer-events:none;}
 
 /* Ghost visuel pendant le drag */
 #dnd-ghost{
@@ -918,7 +924,7 @@ function setView(v){
   _view=v;
   ['mois','semaine','jour'].forEach(k=>document.getElementById('vtab-'+k)?.classList.toggle('active',k===v));
   const dt=document.getElementById('disp-tabs');
-  if(dt)dt.style.display=(v==='semaine')?'flex':'none';
+  if(dt)dt.style.display=(v==='mois')?'none':'flex';
   refresh();
 }
 window.setView=setView;
@@ -966,7 +972,7 @@ function render(){
   updStats();
   if(_view==='mois')renderMois();
   else if(_view==='jour')renderJour();
-  else if(_disp==='timeline')renderTimeline();
+  else if(_disp==='timeline'||((_view==='jour')&&_disp==='timeline'))renderTimeline();
   else renderGantt();
 }
 
@@ -1069,73 +1075,153 @@ function pillGantt(it,k){
 }
 
 // ── TIMELINE SEMAINE ──
-function renderTimeline(){
-  const days=weekDays(_cur);
-  const vis=visibleEmps();
-  const pc=document.getElementById('plan-content');
-  const HOURS=Array.from({length:24},(_,i)=>i);
-  const START_H=6,END_H=24;
-  const totalH=END_H-START_H;
-  const pct=(h,m=0)=>((h-START_H)*60+m)/(totalH*60)*100;
-  const now=new Date();
-  const nowPct=isToday(days[0])||true?pct(now.getHours(),now.getMinutes()):null;
+// ── TIMELINE (vue par jour unique) ──
+// Affiche une seule journée. Navigation par boutons jours quand vue=semaine.
+// DnD : glisser une barre sur la ligne d'un autre employé → réaffectation.
+let _tlDay = null; // jour affiché en timeline quand vue=semaine
 
-  days.forEach(d=>{
-    let h=`<div style="margin-bottom:20px">
-      <div style="font-size:12px;font-weight:700;color:${isToday(d)?'var(--rh-main)':'var(--text)'};padding:8px 12px;background:${isToday(d)?'var(--rh-ghost)':'white'};border-radius:8px 8px 0 0;border:1px solid var(--border);border-bottom:none">
-        ${d.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'})}
-      </div>
-      <div style="border:1px solid var(--border);border-radius:0 0 8px 8px;overflow:hidden;background:white">
-        <div style="display:flex;border-bottom:1px solid var(--border);background:#f8faff">
-          <div style="width:140px;flex-shrink:0;padding:6px 12px;font-size:9px;font-weight:700;color:var(--muted)">EMPLOYÉ</div>
-          <div style="flex:1;display:flex;position:relative">
-            ${[6,8,10,12,14,16,18,20,22].map(hh=>`
-              <div style="position:absolute;left:${pct(hh)}%;font-size:8px;font-weight:600;color:var(--muted);padding:6px 0">${hh}h</div>
-              <div style="position:absolute;left:${pct(hh)}%;top:0;bottom:0;width:1px;background:var(--border)"></div>
-            `).join('')}
-          </div>
-        </div>`;
-
-    vis.forEach((e,i)=>{
-      const cc=COLS[i%COLS.length];
-      const k=`${fmt(d)}_${e.id}`;
-      const items=(_cr[k]?.items||[]);
-      h+=`<div class="tl-row">
-        <div class="tl-emp" style="width:140px">
-          <div class="${cc} ge-av" style="width:26px;height:26px;font-size:10px">${(e.prenom||'?')[0]}${(e.nom||'')[0]||''}</div>
-          <div style="min-width:0"><div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.prenom||''} ${(e.nom||'')[0]||''}.</div>
-          ${items.length?`<div style="font-size:9px;color:var(--rh-main);font-weight:700">${fmtDur(items.reduce((s,it)=>it.type==='travail'||it.type==='partiel'?s+itemH(it):s,0))}</div>`:''}
-          </div>
-        </div>
-        <div class="tl-bar-wrap">
-          ${isToday(d)&&nowPct?`<div class="tl-now" style="left:${nowPct}%"></div>`:''}
-          ${[6,8,10,12,14,16,18,20,22].map(hh=>`<div class="tl-grid-line" style="left:${pct(hh)}%"></div>`).join('')}
-          ${items.map(it=>{
-            const plages=it.plages&&it.plages.length>0?it.plages:(it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
-            return plages.map(p=>{
-              const [dh,dm]=p.deb.split(':').map(Number);
-              const [fh,fm]=p.fin.split(':').map(Number);
-              const left=pct(dh,dm);
-              const width=pct(fh,fm)-pct(dh,dm);
-              const dur=diffH(p.deb,p.fin);
-              if(left<0||left>100)return '';
-              return `<div class="tl-shift-bar t-${it.type}" style="left:${left}%;width:${Math.max(width,2)}%;min-width:24px"
-                onclick="editCr('${k}','${it.id}')" title="${p.deb}→${p.fin} (${fmtDur(dur)})">
-                ${dur>1?`<span>${p.deb}–${p.fin}</span>`:''}
-                ${it.note?`<span style="opacity:.7">${it.note}</span>`:''}
-              </div>`;
-            }).join('');
-          }).join('')}
-          ${!items.length?`<div style="width:100%;height:100%;display:flex;align-items:center;padding-left:12px;cursor:pointer;color:var(--muted);font-size:11px" onclick="openCreneauModal('${e.id}','${fmt(d)}')">+ Ajouter</div>`:''}
-        </div>
-      </div>`;
-    });
-    h+='</div></div>';
-    pc.innerHTML=(pc.innerHTML||'')+h;
-  });
-
-  if(!vis.length){pc.innerHTML=`<div class="empty-plan"><div style="font-size:42px">👥</div><h3>Aucun employé</h3></div>`;}
+function tl_setDay(dateStr){
+  _tlDay = new Date(dateStr + 'T12:00:00');
+  render();
 }
+window.tl_setDay = tl_setDay;
+
+function renderTimeline(){
+  // Jour à afficher
+  const d = (_view==='semaine') ? (_tlDay || weekDays(_cur)[0]) : _cur;
+  if(_view==='semaine') _tlDay = d;
+
+  const vis = visibleEmps();
+  const pc  = document.getElementById('plan-content');
+  if(!vis.length){
+    pc.innerHTML=`<div class="empty-plan"><div style="font-size:42px">👥</div><h3>Aucun employé visible</h3></div>`;
+    return;
+  }
+
+  const START_H=6, END_H=23, SPAN=END_H-START_H;
+  const pct=(h,m=0)=>Math.max(0,Math.min(100,((h-START_H)*60+m)/(SPAN*60)*100));
+  const now=new Date();
+  const nowPct=isToday(d)?pct(now.getHours(),now.getMinutes()):null;
+  const TICKS=[6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22];
+  const empW=({compact:120,normal:155,comfortable:185,large:210})[_zoom]||155;
+
+  // ── Barre de sélection du jour (vue semaine) ──
+  let dayNav='';
+  if(_view==='semaine'){
+    const days=weekDays(_cur);
+    dayNav=`<div style="display:flex;align-items:center;gap:4px;padding:7px 16px;background:white;border-bottom:1px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;flex-shrink:0">
+      <span style="font-size:10px;font-weight:700;color:var(--muted);white-space:nowrap;margin-right:4px">Jour :</span>
+      ${days.map(dd=>{
+        const active=fmt(dd)===fmt(d);
+        const we=isWE(dd);
+        return `<button onclick="tl_setDay('${fmt(dd)}')" style="padding:4px 10px;border-radius:6px;border:1.5px solid ${active?'var(--rh-main)':'var(--border)'};background:${active?'var(--rh-ghost)':we?'#f9fafb':'white'};color:${active?'var(--rh-main)':we?'#9ca3af':'var(--text)'};font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:${active?700:500};cursor:pointer;white-space:nowrap;flex-shrink:0;transition:all .15s">${dd.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric'})}</button>`;
+      }).join('')}
+    </div>`;
+  }
+
+  // ── En-tête jour ──
+  const dayHdr=`<div style="padding:9px 16px;background:white;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-shrink:0">
+    <span style="font-size:14px;font-weight:800;color:${isToday(d)?'var(--rh-main)':'var(--text)'}">${d.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'})}</span>
+    ${isToday(d)?`<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:var(--rh-ghost);color:var(--rh-main)">Aujourd'hui</span>`:''}
+    <span style="font-size:11px;color:var(--muted);margin-left:auto">↔ Glisser une barre pour changer l'employé</span>
+  </div>`;
+
+  // ── Règle horaire ──
+  const ruler=`<div style="display:flex;position:sticky;top:0;z-index:10;background:white;border-bottom:2px solid var(--border);box-shadow:0 2px 4px rgba(0,0,0,.04)">
+    <div style="width:${empW}px;flex-shrink:0;padding:7px 12px;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase">Employé</div>
+    <div style="flex:1;position:relative;height:30px;min-width:0">
+      ${TICKS.map(hh=>`
+        <div style="position:absolute;left:${pct(hh)}%;top:0;bottom:0;width:1px;background:#f1f5f9;pointer-events:none"></div>
+        <span style="position:absolute;left:${pct(hh)}%;top:7px;font-size:9px;font-weight:700;color:#94a3b8;transform:translateX(-50%)">${hh}h</span>
+      `).join('')}
+      ${nowPct!==null?`<div style="position:absolute;left:${nowPct}%;top:0;bottom:0;width:2px;background:#ef4444;z-index:3;pointer-events:none"><div style="position:absolute;top:-3px;left:-4px;width:10px;height:10px;background:#ef4444;border-radius:50%"></div></div>`:''}
+    </div>
+  </div>`;
+
+  // ── Lignes employés ──
+  const rows=vis.map((e,i)=>{
+    const cc=COLS[i%COLS.length];
+    const k=`${fmt(d)}_${e.id}`;
+    const items=(_cr[k]?.items||[]);
+    const totalH=items.filter(it=>it.type==='travail'||it.type==='partiel').reduce((s,it)=>s+itemH(it),0);
+    const infraCnt=(_infractions[k]||[]).length;
+
+    const bars=items.map(it=>{
+      const plages=it.plages&&it.plages.length>0?it.plages:(it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
+      return plages.map(p=>{
+        const [dh,dm]=(p.deb||'00:00').split(':').map(Number);
+        const [fh,fm]=(p.fin||'00:00').split(':').map(Number);
+        const left=pct(dh,dm);
+        const width=Math.max(pct(fh,fm)-left, 1.5);
+        const dur=diffH(p.deb,p.fin);
+        if(left>100||left+width<0)return '';
+        return `<div class="tl-shift-bar t-${it.type}"
+          style="left:${left}%;width:${width}%;min-width:28px;z-index:3"
+          draggable="true"
+          data-dnd-k="${k}" data-dnd-id="${it.id}"
+          ondragstart="dndStart(event,'${k}','${it.id}')"
+          ondragend="dndEnd(event)"
+          onclick="event.stopPropagation();editCr('${k}','${it.id}')"
+          title="${p.deb}→${p.fin} (${fmtDur(dur)})">
+          ${dur>=0.75?`<span style="font-size:9px;font-weight:700">${p.deb}–${p.fin}</span>`:''}
+          ${it.note&&dur>=1?`<span style="opacity:.75;font-size:9px"> ${it.note}</span>`:''}
+        </div>`;
+      }).join('');
+    }).join('');
+
+    return `<div class="tl-row" style="height:52px"
+      data-dnd-target-k="${k}"
+      ondragover="dndTlOver(event,'${k}',this)"
+      ondragleave="dndTlLeave(event,this)"
+      ondrop="dndDrop(event,'${k}')">
+      <!-- Colonne employé (sticky) -->
+      <div class="tl-emp" style="width:${empW}px;position:sticky;left:0;background:inherit;z-index:4">
+        <div class="${cc} ge-av" style="width:28px;height:28px;font-size:10px;flex-shrink:0">${(e.prenom||'?')[0]}${(e.nom||'')[0]||''}</div>
+        <div style="min-width:0">
+          <div style="font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.prenom||''} ${e.nom||''}</div>
+          <div style="display:flex;gap:4px;align-items:center">
+            ${totalH>0?`<span style="font-size:9px;font-weight:700;color:var(--rh-main)">${fmtDur(totalH)}</span>`:''}
+            ${infraCnt>0?`<span style="font-size:9px;font-weight:700;color:#dc2626">⚠️</span>`:''}
+          </div>
+        </div>
+      </div>
+      <!-- Zone barres -->
+      <div class="tl-bar-wrap" style="position:relative;flex:1;min-width:0">
+        ${TICKS.map(hh=>`<div class="tl-grid-line" style="left:${pct(hh)}%"></div>`).join('')}
+        ${bars}
+        ${!items.length?`<div style="position:absolute;inset:0;display:flex;align-items:center;padding-left:14px;cursor:pointer;color:#d1d5db;font-size:11px;font-weight:500" onclick="openCreneauModal('${e.id}','${fmt(d)}')">+ Ajouter un créneau</div>`:''}
+      </div>
+    </div>`;
+  }).join('');
+
+  pc.innerHTML=`<div style="display:flex;flex-direction:column;height:100%">
+    ${dayNav}${dayHdr}
+    <div style="flex:1;overflow:auto;-webkit-overflow-scrolling:touch">
+      <div style="min-width:${empW+500}px;height:100%">
+        ${ruler}${rows}
+      </div>
+    </div>
+  </div>`;
+}
+
+// DnD over/leave spécifiques à la timeline (sur tl-row)
+function dndTlOver(ev, k, row){
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect='move';
+  if(_dnd.over===k) return;
+  document.querySelectorAll('.tl-row.dnd-over,.tl-row.dnd-over-emp').forEach(el=>el.classList.remove('dnd-over','dnd-over-emp'));
+  _dnd.over=k;
+  const srcEmpId=(_dnd.srcK||'_').split('_')[1];
+  const tgtEmpId=k.split('_')[1];
+  row.classList.add(srcEmpId===tgtEmpId?'dnd-over':'dnd-over-emp');
+}
+function dndTlLeave(ev, row){
+  if(ev.currentTarget.contains(ev.relatedTarget))return;
+  row.classList.remove('dnd-over','dnd-over-emp');
+  if(_dnd.over===row.dataset.dndTargetK)_dnd.over=null;
+}
+window.dndTlOver=dndTlOver;
+window.dndTlLeave=dndTlLeave;
 
 // ── VUE MOIS ──
 function renderMois(){
@@ -1685,162 +1771,140 @@ async function saveKey(k,date){
 }
 
 // ══════════════════════════════════════════════════════════════
-// DRAG & DROP ENGINE
+// DRAG & DROP ENGINE — fonctionne sur Gantt ET Timeline
 // ══════════════════════════════════════════════════════════════
+// Utilise l'API HTML5 Drag (draggable=true).
+// Le ghost natif est masqué ; on gère notre propre ghost CSS.
+// Sur Gantt  : drop sur .gd-cell  via dndOver/dndLeave/dndDrop
+// Sur Timeline : drop sur .tl-row via dndTlOver/dndTlLeave/dndDrop
+// ──────────────────────────────────────────────────────────────
 
 let _dnd = {
-  srcK:    null,   // clé source  "2026-02-24_empId"
-  srcId:   null,   // item.id
-  srcItem: null,   // copie de l'objet item
-  ghost:   null,
-  over:    null,   // cellule cible en cours
+  srcK: null, srcId: null, srcItem: null,
+  over: null,
 };
 
 function dndStart(ev, k, id){
-  const item = (_cr[k]?.items||[]).find(i=>i.id===id);
-  if(!item){ ev.preventDefault(); return; }
+  const item=(_cr[k]?.items||[]).find(i=>i.id===id);
+  if(!item){ev.preventDefault();return;}
 
   _dnd.srcK    = k;
   _dnd.srcId   = id;
   _dnd.srcItem = JSON.parse(JSON.stringify(item));
 
-  // Données transfert
-  ev.dataTransfer.effectAllowed = 'move';
-  ev.dataTransfer.setData('text/plain', JSON.stringify({k, id}));
+  ev.dataTransfer.effectAllowed='move';
+  ev.dataTransfer.setData('text/plain','dnd'); // obligatoire Firefox
 
-  // Ghost personnalisé invisible (on gère le nôtre)
-  const blank = document.createElement('div');
-  blank.style.cssText = 'position:fixed;top:-200px;left:-200px;opacity:0;';
-  document.body.appendChild(blank);
-  ev.dataTransfer.setDragImage(blank, 0, 0);
-  setTimeout(()=> blank.remove(), 0);
+  // Image drag invisible (on dessine notre propre ghost)
+  const px=document.createElement('div');
+  px.style.cssText='position:fixed;top:-999px;left:-999px;width:1px;height:1px;opacity:0';
+  document.body.appendChild(px);
+  ev.dataTransfer.setDragImage(px,0,0);
+  setTimeout(()=>px.remove(),0);
 
-  // Notre ghost visuel
-  const ghost = document.getElementById('dnd-ghost');
-  const plages = item.plages&&item.plages.length>0 ? item.plages : (item.deb?[{deb:item.deb,fin:item.fin}]:[]);
-  const timeTxt = plages[0] ? `${plages[0].deb}–${plages[0].fin}` : '';
-  const [srcDate, srcEmpId] = k.split('_');
-  const emp = _emps.find(e=>e.id===srcEmpId);
-  ghost.className = `t-${item.type}`;
-  ghost.style.cssText = `display:block;position:fixed;top:-100px;left:-100px;z-index:9999;pointer-events:none;
-    padding:5px 10px;border-radius:7px;font-size:11px;font-weight:700;
-    font-family:'Plus Jakarta Sans',sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.2);
-    white-space:nowrap;transform:rotate(-2deg);`;
-  ghost.innerHTML = `${TYPE_ICO[item.type]||'📋'} ${emp?emp.prenom:'?'} · ${timeTxt}`;
-  _dnd.ghost = ghost;
+  // Ghost visuel
+  const ghost=document.getElementById('dnd-ghost');
+  const plages=item.plages?.length>0?item.plages:(item.deb?[{deb:item.deb,fin:item.fin}]:[]);
+  const timeTxt=plages[0]?`${plages[0].deb}–${plages[0].fin}`:'';
+  const emp=_emps.find(e=>e.id===k.split('_')[1]);
+  const typeColors={
+    travail:'#dcfce7|#166534',repos:'#f3f4f6|#6b7280',conge:'#dbeafe|#1e40af',
+    maladie:'#fee2e2|#991b1b',formation:'#fef3c7|#92400e',
+    astreinte:'#ede9fe|#5b21b6',partiel:'#fff7ed|#c2410c'
+  };
+  const [bg,fg]=(typeColors[item.type]||'#f1f5f9|#374151').split('|');
+  ghost.style.cssText=`display:block;position:fixed;top:-200px;left:-200px;z-index:9999;pointer-events:none;
+    padding:6px 12px;border-radius:8px;font-size:11px;font-weight:700;
+    font-family:'Plus Jakarta Sans',sans-serif;
+    background:${bg};color:${fg};
+    box-shadow:0 8px 24px rgba(0,0,0,.25);
+    white-space:nowrap;transform:rotate(-2deg);
+    border:2px solid rgba(255,255,255,.5);`;
+  ghost.textContent=`${TYPE_ICO[item.type]||'📋'} ${emp?.prenom||'?'} · ${timeTxt}`;
 
-  // Marquer la pill source
   ev.currentTarget.classList.add('dnd-dragging');
-
-  document.addEventListener('dragover', _dndTrackMouse, {passive:true});
+  document.addEventListener('dragover',_dndMovGhost,{passive:true});
 }
 
-function _dndTrackMouse(ev){
-  if(_dnd.ghost){
-    _dnd.ghost.style.left = (ev.clientX + 14) + 'px';
-    _dnd.ghost.style.top  = (ev.clientY - 16) + 'px';
+function _dndMovGhost(ev){
+  const g=document.getElementById('dnd-ghost');
+  if(g&&g.style.display!=='none'){
+    g.style.left=(ev.clientX+16)+'px';
+    g.style.top =(ev.clientY-16)+'px';
   }
 }
 
 function dndEnd(ev){
-  // Nettoyer pill source (si pas déjà re-rendu)
   document.querySelectorAll('.dnd-dragging').forEach(el=>el.classList.remove('dnd-dragging'));
-  // Cacher ghost
-  if(_dnd.ghost){ _dnd.ghost.style.display='none'; }
-  // Nettoyer highlights
-  document.querySelectorAll('.dnd-over,.dnd-over-emp').forEach(el=>{
-    el.classList.remove('dnd-over','dnd-over-emp');
-  });
-  document.removeEventListener('dragover', _dndTrackMouse);
-  _dnd.over = null;
+  const g=document.getElementById('dnd-ghost');
+  if(g)g.style.display='none';
+  document.querySelectorAll('.dnd-over,.dnd-over-emp').forEach(el=>el.classList.remove('dnd-over','dnd-over-emp'));
+  document.removeEventListener('dragover',_dndMovGhost);
+  _dnd.over=null;
 }
 
+// ── Gantt : over/leave sur .gd-cell ──
 function dndOver(ev, targetK){
   ev.preventDefault();
-  ev.dataTransfer.dropEffect = 'move';
-  if(_dnd.over === targetK) return;
-  // Enlever ancien highlight
-  document.querySelectorAll('.dnd-over,.dnd-over-emp').forEach(el=>{
-    el.classList.remove('dnd-over','dnd-over-emp');
-  });
-  _dnd.over = targetK;
-  // Highlight selon même employé ou autre
-  const [srcDate, srcEmpId] = (_dnd.srcK||'_').split('_');
-  const [tgtDate, tgtEmpId] = targetK.split('_');
-  ev.currentTarget.classList.add(srcEmpId===tgtEmpId ? 'dnd-over' : 'dnd-over-emp');
+  ev.dataTransfer.dropEffect='move';
+  if(_dnd.over===targetK)return;
+  document.querySelectorAll('.dnd-over,.dnd-over-emp').forEach(el=>el.classList.remove('dnd-over','dnd-over-emp'));
+  _dnd.over=targetK;
+  const srcEmpId=(_dnd.srcK||'_').split('_')[1];
+  const tgtEmpId=targetK.split('_')[1];
+  ev.currentTarget.classList.add(srcEmpId===tgtEmpId?'dnd-over':'dnd-over-emp');
 }
 
 function dndLeave(ev){
-  // Ne pas déclencher si on entre dans un enfant
-  if(ev.currentTarget.contains(ev.relatedTarget)) return;
+  if(ev.currentTarget.contains(ev.relatedTarget))return;
   ev.currentTarget.classList.remove('dnd-over','dnd-over-emp');
-  if(_dnd.over === ev.currentTarget.dataset.dndTargetK) _dnd.over = null;
+  if(_dnd.over===ev.currentTarget.dataset.dndTargetK)_dnd.over=null;
 }
 
+// ── Drop commun Gantt + Timeline ──
 async function dndDrop(ev, targetK){
   ev.preventDefault();
   ev.stopPropagation();
 
-  const srcK   = _dnd.srcK;
-  const srcId  = _dnd.srcId;
-  const item   = _dnd.srcItem;
-
-  // Nettoyage visuel immédiat
+  const srcK  =_dnd.srcK;
+  const srcId =_dnd.srcId;
+  const item  =_dnd.srcItem;
   dndEnd(ev);
 
-  if(!srcK || !srcId || !item) return;
-  if(srcK === targetK) return; // même cellule — rien à faire
+  if(!srcK||!srcId||!item)return;
+  if(srcK===targetK)return;
 
-  const [srcDate, srcEmpId] = srcK.split('_');
-  const [tgtDate, tgtEmpId] = targetK.split('_');
+  const srcDate=srcK.split('_')[0];
+  const tgtDate=targetK.split('_')[0];
+  const srcEmpId=srcK.split('_')[1];
+  const tgtEmpId=targetK.split('_')[1];
 
-  // 1. Retirer de la source
-  if(!_cr[srcK]) _cr[srcK] = {items:[]};
-  _cr[srcK].items = (_cr[srcK].items||[]).filter(i=>i.id!==srcId);
-
-  // 2. Copier dans la cible (même id, nouvelle clé)
-  if(!_cr[targetK]) _cr[targetK] = {items:[]};
+  // Optimistic update
+  if(!_cr[srcK])_cr[srcK]={items:[]};
+  _cr[srcK].items=(_cr[srcK].items||[]).filter(i=>i.id!==srcId);
+  if(!_cr[targetK])_cr[targetK]={items:[]};
   _cr[targetK].items.push({...item});
-
-  // 3. Re-render immédiat (optimistic)
   render();
 
-  // 4. Sauvegarder les deux clés en parallèle
   try{
-    await Promise.all([
-      saveKey(srcK, srcDate),
-      saveKey(targetK, tgtDate),
-    ]);
-    checkLegal();
-    updStats();
-
-    // Toast selon le type de déplacement
-    const tgtEmp = _emps.find(e=>e.id===tgtEmpId);
-    const srcEmp = _emps.find(e=>e.id===srcEmpId);
-    const tgtDateFmt = new Date(tgtDate+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
-    let msg = '';
-    if(srcEmpId === tgtEmpId){
-      msg = `✅ Déplacé → ${tgtDateFmt}`;
-    } else {
-      msg = `✅ ${srcEmp?.prenom||'?'} → ${tgtEmp?.prenom||'?'} (${tgtDateFmt})`;
-    }
-    showDndToast(msg);
-  } catch(e){
-    console.error('DnD save error:', e);
-    // Rollback
-    await loadCr();
-    render();
-    showDndToast('❌ Erreur lors du déplacement');
+    await Promise.all([saveKey(srcK,srcDate),saveKey(targetK,tgtDate)]);
+    checkLegal();updStats();
+    const srcEmp=_emps.find(e=>e.id===srcEmpId);
+    const tgtEmp=_emps.find(e=>e.id===tgtEmpId);
+    const tgtFmt=new Date(tgtDate+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+    showDndToast(srcEmpId===tgtEmpId?`✅ Déplacé → ${tgtFmt}`:`✅ ${srcEmp?.prenom||'?'} → ${tgtEmp?.prenom||'?'} (${tgtFmt})`);
+  }catch(e){
+    console.error(e);
+    await loadCr();render();
+    showDndToast('❌ Erreur sauvegarde');
   }
 }
 
 function showDndToast(msg){
-  const el = document.getElementById('dnd-toast');
-  if(!el) return;
-  el.textContent = msg;
-  el.classList.add('show');
-  clearTimeout(el._t);
-  el._t = setTimeout(()=>el.classList.remove('show'), 2800);
+  const el=document.getElementById('dnd-toast');
+  if(!el)return;
+  el.textContent=msg;el.classList.add('show');
+  clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2800);
 }
 
 window.dndStart=dndStart;
