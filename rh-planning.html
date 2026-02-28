@@ -871,6 +871,48 @@ async function initPlanning(){
   await loadEmps();
   await loadCr();
   render();
+  // Migration one-shot : copier les données existantes vers rh_planning_public
+  migrateToPublicIfNeeded();
+}
+
+// ── MIGRATION rh_planning_public ──
+// Copie les 3 derniers mois de planning vers rh_planning_public au 1er chargement.
+// Silencieuse, non bloquante. Ne s'exécute qu'une fois (flag dans localStorage).
+async function migrateToPublicIfNeeded(){
+  const flag='rh_pub_migrated_v1_'+window._uid;
+  if(localStorage.getItem(flag)) return;
+  console.log('[migration] Début sync rh_planning_public...');
+  try{
+    // Collecter les semaines des 3 derniers mois + mois courant + mois prochain
+    const weeks=new Set();
+    const now=new Date();
+    for(let mo=-3;mo<=2;mo++){
+      const base=new Date(now.getFullYear(),now.getMonth()+mo,1);
+      const nb=new Date(base.getFullYear(),base.getMonth()+1,0).getDate();
+      for(let d=1;d<=nb;d++){
+        const dt=new Date(base.getFullYear(),base.getMonth(),d);
+        const mon=new Date(dt);
+        const dow=mon.getDay(),diff=(dow===0)?-6:1-dow;
+        mon.setDate(mon.getDate()+diff);mon.setHours(0,0,0,0);
+        weeks.add(mon.toISOString().slice(0,10).replace(/-/g,''));
+      }
+    }
+    let total=0;
+    for(const wk of weeks){
+      try{
+        const snap=await window._getDocs(window._col(window._db,'rh',window._uid,'plan_'+wk));
+        for(const docSnap of snap.docs){
+          const data=docSnap.data();
+          await window._setDoc(window._doc(window._db,'rh_planning_public',window._uid,'plan_'+wk,docSnap.id),data);
+          total++;
+        }
+      }catch(e){}
+    }
+    localStorage.setItem(flag,'1');
+    console.log('[migration] Sync terminée :', total, 'créneaux copiés vers rh_planning_public');
+  }catch(e){
+    console.warn('[migration] Erreur:', e.message);
+  }
 }
 window.initPlanning=initPlanning;
 
