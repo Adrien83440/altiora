@@ -336,6 +336,59 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 /* Highlight pole polyvalence */
 .poly-highlight{box-shadow:0 0 0 2px #f59e0b!important;border-color:#f59e0b!important;}
 
+/* ══════════════════════════════════════════
+   DRAG & DROP
+   ══════════════════════════════════════════ */
+.cr-pill[draggable="true"]{cursor:grab;}
+.cr-pill[draggable="true"]:active{cursor:grabbing;}
+.cr-pill.dnd-dragging{opacity:.35;pointer-events:none;}
+
+/* Poignée drag visible au hover */
+.cr-pill::before{
+  content:'⠿';
+  font-size:10px;
+  color:rgba(0,0,0,.2);
+  margin-right:3px;
+  display:inline-block;
+  vertical-align:middle;
+  line-height:1;
+  transition:color .15s;
+}
+.cr-pill:hover::before{color:rgba(0,0,0,.45);}
+
+/* Drop target */
+.gd-cell.dnd-over{
+  background:rgba(5,150,105,.12)!important;
+  box-shadow:inset 0 0 0 2px var(--rh-main);
+  border-radius:4px;
+}
+.gd-cell.dnd-over-emp{
+  background:rgba(99,102,241,.1)!important;
+  box-shadow:inset 0 0 0 2px #6366f1;
+}
+
+/* Ghost visuel pendant le drag */
+#dnd-ghost{
+  position:fixed;z-index:9999;pointer-events:none;
+  padding:5px 10px;border-radius:7px;font-size:11px;font-weight:700;
+  font-family:'Plus Jakarta Sans',sans-serif;
+  box-shadow:0 8px 24px rgba(0,0,0,.2);
+  display:none;white-space:nowrap;
+  transform:rotate(-2deg);
+  transition:transform .1s;
+  border:2px solid rgba(255,255,255,.4);
+}
+
+/* Toast drag confirmé */
+.dnd-toast{
+  position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(16px);
+  background:#1e293b;color:white;padding:9px 18px;border-radius:10px;
+  font-size:12px;font-weight:600;z-index:9998;opacity:0;
+  transition:all .25s;pointer-events:none;white-space:nowrap;
+}
+.dnd-toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+
 /* ══════════════════════════════════════════════════════
    ZOOM / DENSITÉ — piloté par data-zoom sur body
    ══════════════════════════════════════════════════════ */
@@ -407,6 +460,9 @@ body[data-zoom="large"]      { --emp-col-w: 220px; }
 </style>
 </head>
 <body>
+
+<div id="dnd-ghost"></div>
+<div class="dnd-toast" id="dnd-toast"></div>
 
 <button class="hamburger" id="hamburger" onclick="toggleMobileNav()"><span></span><span></span><span></span></button>
 <div class="nav-overlay" id="navOverlay" onclick="toggleMobileNav()"></div>
@@ -979,7 +1035,12 @@ function renderGantt(){
           const items=(_cr[k]?.items||[]);
           const off=isWE(d)&&!items.length;
           const infrs=_infractions[k]||[];
-          return `<div class="gd-cell ${isToday(d)?'today':''} ${off?'we':''}" onclick="openCreneauModal('${e.id}','${fmt(d)}')">
+          return `<div class="gd-cell ${isToday(d)?'today':''} ${off?'we':''}"
+            data-dnd-target-k="${k}"
+            ondragover="dndOver(event,'${k}')"
+            ondragleave="dndLeave(event)"
+            ondrop="dndDrop(event,'${k}')"
+            onclick="openCreneauModal('${e.id}','${fmt(d)}')">
             ${items.map(it=>pillGantt(it,k)).join('')}
             ${infrs.length?`<div style="font-size:8px;font-weight:700;color:#dc2626;padding:1px 3px;background:#fee2e2;border-radius:3px;margin-top:2px">⚠️</div>`:''}
             ${items.length?'':'<div class="add-hint">+</div>'}
@@ -996,7 +1057,11 @@ function pillGantt(it,k){
   const plages=it.plages&&it.plages.length>0?it.plages:(it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
   const totalH=plages.reduce((s,p)=>s+diffH(p.deb,p.fin),0);
   const timeTxt=plages.length>1?plages.map(p=>`${p.deb}–${p.fin}`).join('|'):plages[0]?`${plages[0].deb}–${plages[0].fin}`:'';
-  return `<div class="cr-pill t-${it.type}" onclick="event.stopPropagation();editCr('${k}','${it.id}')">
+  return `<div class="cr-pill t-${it.type}" draggable="true"
+    data-dnd-k="${k}" data-dnd-id="${it.id}"
+    ondragstart="dndStart(event,'${k}','${it.id}')"
+    ondragend="dndEnd(event)"
+    onclick="event.stopPropagation();editCr('${k}','${it.id}')">
     <div class="cr-time">${timeTxt}${totalH>0?' ('+fmtDur(totalH)+')':''}</div>
     <div class="cr-lbl">${TYPE_ICO[it.type]||'📋'} ${it.note||TYPE_LBL[it.type]||it.type}</div>
     <span class="cr-x" onclick="event.stopPropagation();qDel('${k}','${it.id}')">✕</span>
@@ -1618,6 +1683,171 @@ async function saveKey(k,date){
     await window._setDoc(window._doc(window._db,'rh',window._uid,wk,k),_cr[k]||{items:[]});
   }catch(e){console.error(e);showToast('Erreur Firebase');}
 }
+
+// ══════════════════════════════════════════════════════════════
+// DRAG & DROP ENGINE
+// ══════════════════════════════════════════════════════════════
+
+let _dnd = {
+  srcK:    null,   // clé source  "2026-02-24_empId"
+  srcId:   null,   // item.id
+  srcItem: null,   // copie de l'objet item
+  ghost:   null,
+  over:    null,   // cellule cible en cours
+};
+
+function dndStart(ev, k, id){
+  const item = (_cr[k]?.items||[]).find(i=>i.id===id);
+  if(!item){ ev.preventDefault(); return; }
+
+  _dnd.srcK    = k;
+  _dnd.srcId   = id;
+  _dnd.srcItem = JSON.parse(JSON.stringify(item));
+
+  // Données transfert
+  ev.dataTransfer.effectAllowed = 'move';
+  ev.dataTransfer.setData('text/plain', JSON.stringify({k, id}));
+
+  // Ghost personnalisé invisible (on gère le nôtre)
+  const blank = document.createElement('div');
+  blank.style.cssText = 'position:fixed;top:-200px;left:-200px;opacity:0;';
+  document.body.appendChild(blank);
+  ev.dataTransfer.setDragImage(blank, 0, 0);
+  setTimeout(()=> blank.remove(), 0);
+
+  // Notre ghost visuel
+  const ghost = document.getElementById('dnd-ghost');
+  const plages = item.plages&&item.plages.length>0 ? item.plages : (item.deb?[{deb:item.deb,fin:item.fin}]:[]);
+  const timeTxt = plages[0] ? `${plages[0].deb}–${plages[0].fin}` : '';
+  const [srcDate, srcEmpId] = k.split('_');
+  const emp = _emps.find(e=>e.id===srcEmpId);
+  ghost.className = `t-${item.type}`;
+  ghost.style.cssText = `display:block;position:fixed;top:-100px;left:-100px;z-index:9999;pointer-events:none;
+    padding:5px 10px;border-radius:7px;font-size:11px;font-weight:700;
+    font-family:'Plus Jakarta Sans',sans-serif;box-shadow:0 8px 24px rgba(0,0,0,.2);
+    white-space:nowrap;transform:rotate(-2deg);`;
+  ghost.innerHTML = `${TYPE_ICO[item.type]||'📋'} ${emp?emp.prenom:'?'} · ${timeTxt}`;
+  _dnd.ghost = ghost;
+
+  // Marquer la pill source
+  ev.currentTarget.classList.add('dnd-dragging');
+
+  document.addEventListener('dragover', _dndTrackMouse, {passive:true});
+}
+
+function _dndTrackMouse(ev){
+  if(_dnd.ghost){
+    _dnd.ghost.style.left = (ev.clientX + 14) + 'px';
+    _dnd.ghost.style.top  = (ev.clientY - 16) + 'px';
+  }
+}
+
+function dndEnd(ev){
+  // Nettoyer pill source (si pas déjà re-rendu)
+  document.querySelectorAll('.dnd-dragging').forEach(el=>el.classList.remove('dnd-dragging'));
+  // Cacher ghost
+  if(_dnd.ghost){ _dnd.ghost.style.display='none'; }
+  // Nettoyer highlights
+  document.querySelectorAll('.dnd-over,.dnd-over-emp').forEach(el=>{
+    el.classList.remove('dnd-over','dnd-over-emp');
+  });
+  document.removeEventListener('dragover', _dndTrackMouse);
+  _dnd.over = null;
+}
+
+function dndOver(ev, targetK){
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+  if(_dnd.over === targetK) return;
+  // Enlever ancien highlight
+  document.querySelectorAll('.dnd-over,.dnd-over-emp').forEach(el=>{
+    el.classList.remove('dnd-over','dnd-over-emp');
+  });
+  _dnd.over = targetK;
+  // Highlight selon même employé ou autre
+  const [srcDate, srcEmpId] = (_dnd.srcK||'_').split('_');
+  const [tgtDate, tgtEmpId] = targetK.split('_');
+  ev.currentTarget.classList.add(srcEmpId===tgtEmpId ? 'dnd-over' : 'dnd-over-emp');
+}
+
+function dndLeave(ev){
+  // Ne pas déclencher si on entre dans un enfant
+  if(ev.currentTarget.contains(ev.relatedTarget)) return;
+  ev.currentTarget.classList.remove('dnd-over','dnd-over-emp');
+  if(_dnd.over === ev.currentTarget.dataset.dndTargetK) _dnd.over = null;
+}
+
+async function dndDrop(ev, targetK){
+  ev.preventDefault();
+  ev.stopPropagation();
+
+  const srcK   = _dnd.srcK;
+  const srcId  = _dnd.srcId;
+  const item   = _dnd.srcItem;
+
+  // Nettoyage visuel immédiat
+  dndEnd(ev);
+
+  if(!srcK || !srcId || !item) return;
+  if(srcK === targetK) return; // même cellule — rien à faire
+
+  const [srcDate, srcEmpId] = srcK.split('_');
+  const [tgtDate, tgtEmpId] = targetK.split('_');
+
+  // 1. Retirer de la source
+  if(!_cr[srcK]) _cr[srcK] = {items:[]};
+  _cr[srcK].items = (_cr[srcK].items||[]).filter(i=>i.id!==srcId);
+
+  // 2. Copier dans la cible (même id, nouvelle clé)
+  if(!_cr[targetK]) _cr[targetK] = {items:[]};
+  _cr[targetK].items.push({...item});
+
+  // 3. Re-render immédiat (optimistic)
+  render();
+
+  // 4. Sauvegarder les deux clés en parallèle
+  try{
+    await Promise.all([
+      saveKey(srcK, srcDate),
+      saveKey(targetK, tgtDate),
+    ]);
+    checkLegal();
+    updStats();
+
+    // Toast selon le type de déplacement
+    const tgtEmp = _emps.find(e=>e.id===tgtEmpId);
+    const srcEmp = _emps.find(e=>e.id===srcEmpId);
+    const tgtDateFmt = new Date(tgtDate+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+    let msg = '';
+    if(srcEmpId === tgtEmpId){
+      msg = `✅ Déplacé → ${tgtDateFmt}`;
+    } else {
+      msg = `✅ ${srcEmp?.prenom||'?'} → ${tgtEmp?.prenom||'?'} (${tgtDateFmt})`;
+    }
+    showDndToast(msg);
+  } catch(e){
+    console.error('DnD save error:', e);
+    // Rollback
+    await loadCr();
+    render();
+    showDndToast('❌ Erreur lors du déplacement');
+  }
+}
+
+function showDndToast(msg){
+  const el = document.getElementById('dnd-toast');
+  if(!el) return;
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._t);
+  el._t = setTimeout(()=>el.classList.remove('show'), 2800);
+}
+
+window.dndStart=dndStart;
+window.dndEnd=dndEnd;
+window.dndOver=dndOver;
+window.dndLeave=dndLeave;
+window.dndDrop=dndDrop;
 
 // ── EDIT / DEL ──
 function editCr(k,itemId){
