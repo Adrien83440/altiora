@@ -742,106 +742,218 @@ window._timelineWeek = null; // Date du lundi de la semaine affichée
 // Injecter CSS Timeline
 var styleEl = document.createElement('style');
 styleEl.textContent = `
+
+  /* ════════════════════════════════════════
+     TOGGLE CALENDRIER / TIMELINE
+  ════════════════════════════════════════ */
   .plan-view-toggle {
-    display: flex; gap: 4px; background: #f3f4f6;
-    border-radius: 8px; padding: 3px;
+    display: flex; gap: 4px; background: #f0fdf4;
+    border-radius: 10px; padding: 3px;
+    border: 1px solid #d1fae5;
   }
   .pvt-btn {
-    padding: 5px 12px; border: none; border-radius: 6px;
+    padding: 6px 14px; border: none; border-radius: 7px;
     font-family: 'Plus Jakarta Sans', sans-serif;
-    font-size: 11px; font-weight: 700; cursor: pointer;
-    color: var(--muted); background: transparent;
-    transition: all .15s;
+    font-size: 12px; font-weight: 700; cursor: pointer;
+    color: #6b7280; background: transparent;
+    transition: all .18s;
   }
   .pvt-btn.active {
-    background: white; color: var(--g3);
-    box-shadow: 0 1px 4px rgba(0,0,0,.1);
+    background: white; color: #047857;
+    box-shadow: 0 2px 8px rgba(5,150,105,.15);
   }
 
-  /* Timeline */
+  /* ════════════════════════════════════════
+     CALENDRIER — REDESIGN COMPLET
+  ════════════════════════════════════════ */
+
+  /* Écrase aspect-ratio:1 du code encodé */
+  #cal-grid .cal-day {
+    aspect-ratio: unset !important;
+    min-height: 78px !important;
+    height: auto !important;
+    border-radius: 10px !important;
+    padding: 8px 6px 6px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    font-size: 13px !important;
+    transition: transform .15s, box-shadow .18s !important;
+    cursor: default !important;
+    position: relative !important;
+    overflow: hidden !important;
+  }
+  #cal-grid .cal-day:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 6px 18px rgba(5,150,105,.18) !important;
+    z-index: 2 !important;
+  }
+  #cal-grid .cal-day.today {
+    outline: 2px solid #059669 !important;
+    outline-offset: -2px !important;
+  }
+
+  /* Numéro du jour */
+  .cal-day-num {
+    font-size: 15px !important;
+    font-weight: 800 !important;
+    line-height: 1 !important;
+    margin-bottom: 6px !important;
+    flex-shrink: 0 !important;
+    letter-spacing: -.3px !important;
+  }
+
+  /* Conteneur pills */
+  .cal-shifts {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 3px !important;
+    width: 100% !important;
+    flex: 1 !important;
+    min-height: 0 !important;
+  }
+
+  /* Pills créneaux */
+  .cal-shift-pill {
+    display: flex !important;
+    align-items: center !important;
+    padding: 3px 6px !important;
+    border-radius: 6px !important;
+    background: rgba(5,150,105,.1) !important;
+    border-left: 3px solid #059669 !important;
+    font-size: 9px !important;
+    font-weight: 700 !important;
+    color: #047857 !important;
+    line-height: 1.4 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    gap: 3px !important;
+  }
+  .cal-shift-pill .shift-note {
+    opacity: .6 !important;
+    font-weight: 500 !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+  .cal-shift-pill.repos    { background:rgba(107,114,128,.1) !important; border-left-color:#9ca3af !important; color:#374151 !important; }
+  .cal-shift-pill.conge    { background:rgba(59,130,246,.1)  !important; border-left-color:#3b82f6 !important; color:#1e3a8a !important; }
+  .cal-shift-pill.maladie  { background:rgba(239,68,68,.1)   !important; border-left-color:#ef4444 !important; color:#7f1d1d !important; }
+  .cal-shift-pill.partiel  { background:rgba(245,158,11,.1)  !important; border-left-color:#f59e0b !important; color:#78350f !important; }
+  .cal-shift-pill.formation{ background:rgba(219,39,119,.1)  !important; border-left-color:#db2777 !important; color:#831843 !important; }
+
+  /* Badge total */
+  .cal-total-badge {
+    margin-top: 4px !important;
+    font-size: 8px !important;
+    font-weight: 700 !important;
+    color: #9ca3af !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 3px !important;
+    flex-shrink: 0 !important;
+    letter-spacing: .2px !important;
+  }
+
+  /* ── Cellules off/generique sans data : taille mini ── */
+  #cal-grid .cal-day.off,
+  #cal-grid .cal-day.work-generic {
+    min-height: 48px !important;
+    opacity: .35 !important;
+  }
+  #cal-grid .cal-day.off:hover,
+  #cal-grid .cal-day.work-generic:hover {
+    opacity: .55 !important;
+    transform: none !important;
+    box-shadow: none !important;
+  }
+
+  /* En-têtes jours */
+  .cal-hdr {
+    font-size: 11px !important;
+    font-weight: 800 !important;
+    color: #9ca3af !important;
+    padding: 4px 0 8px !important;
+    letter-spacing: .5px !important;
+  }
+
+  /* Gap plus grand entre cellules */
+  #cal-grid {
+    gap: 5px !important;
+  }
+
+  /* ════════════════════════════════════════
+     TIMELINE
+  ════════════════════════════════════════ */
   .timeline-wrap { padding: 0; }
   .tl-week-nav {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    padding: 10px 14px; border-bottom: 1px solid #f0fdf4;
   }
-  .tl-week-label {
-    font-size: 12px; font-weight: 700; color: var(--text);
-  }
+  .tl-week-label { font-size: 12px; font-weight: 700; color: #1a1f36; }
   .tl-nav-btn {
-    border: 1px solid var(--border); background: white;
-    border-radius: 6px; width: 28px; height: 28px;
+    border: 1px solid #e5e7eb; background: white;
+    border-radius: 7px; width: 30px; height: 30px;
     cursor: pointer; font-size: 14px; display: flex;
     align-items: center; justify-content: center;
-    color: var(--muted); transition: all .15s;
+    color: #6b7280; transition: all .15s;
   }
-  .tl-nav-btn:hover { border-color: var(--g3); color: var(--g3); }
-
-  .tl-day {
-    border-bottom: 1px solid #f3f4f6;
-    overflow: hidden;
-  }
+  .tl-nav-btn:hover { border-color: #059669; color: #059669; }
+  .tl-day { border-bottom: 1px solid #f9fafb; overflow: hidden; }
   .tl-day:last-child { border-bottom: none; }
   .tl-day-head {
     display: flex; align-items: center;
-    padding: 8px 14px 6px;
-    gap: 8px;
+    padding: 8px 14px 6px; gap: 8px;
   }
   .tl-day-num {
-    width: 28px; height: 28px; border-radius: 50%;
+    width: 30px; height: 30px; border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     font-size: 13px; font-weight: 800; flex-shrink: 0;
-    color: var(--muted); background: #f9fafb;
+    color: #6b7280; background: #f9fafb;
   }
-  .tl-day-num.today {
-    background: var(--g3); color: white;
-  }
+  .tl-day-num.today { background: #059669; color: white; }
   .tl-day-name {
-    font-size: 11px; font-weight: 700; color: var(--muted);
+    font-size: 11px; font-weight: 700; color: #6b7280;
     text-transform: uppercase; letter-spacing: .5px; flex: 1;
   }
-  .tl-day-total {
-    font-size: 11px; font-weight: 700; color: var(--g3);
-  }
-  .tl-day.off .tl-day-head { opacity: .45; }
-
-  .tl-items { padding: 0 14px 8px 50px; display: flex; flex-direction: column; gap: 5px; }
+  .tl-day-total { font-size: 11px; font-weight: 700; color: #059669; }
+  .tl-day.off .tl-day-head { opacity: .4; }
+  .tl-items { padding: 0 14px 8px 52px; display: flex; flex-direction: column; gap: 5px; }
   .tl-item {
-    display: flex; align-items: center; gap: 8px;
-    padding: 7px 10px; border-radius: 8px;
-    border-left: 3px solid;
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-radius: 9px; border-left: 3px solid;
   }
   .tl-item-icon { font-size: 14px; flex-shrink: 0; }
   .tl-item-body { flex: 1; min-width: 0; }
-  .tl-item-label {
-    font-size: 12px; font-weight: 700; color: var(--text);
-  }
-  .tl-item-hours {
-    font-size: 10px; color: var(--muted); margin-top: 1px;
-  }
-  .tl-item-dur {
-    font-size: 11px; font-weight: 800; flex-shrink: 0;
-  }
-
-  .tl-empty {
-    padding: 4px 14px 8px 50px;
-    font-size: 11px; color: #d1d5db; font-style: italic;
-  }
-
+  .tl-item-label { font-size: 12px; font-weight: 700; color: #1a1f36; }
+  .tl-item-hours { font-size: 10px; color: #6b7280; margin-top: 1px; }
+  .tl-item-dur { font-size: 12px; font-weight: 800; flex-shrink: 0; }
+  .tl-empty { padding: 4px 14px 8px 52px; font-size: 11px; color: #d1d5db; font-style: italic; }
   .tl-week-summary {
-    margin: 10px 14px 0; padding: 10px 12px;
-    background: var(--green-ghost); border-radius: 10px;
-    border: 1px solid #a7f3d0;
-    display: flex; gap: 16px; flex-wrap: wrap;
+    margin: 10px 14px 0; padding: 10px 14px;
+    background: #f0fdf4; border-radius: 10px;
+    border: 1px solid #d1fae5;
+    display: flex; gap: 20px; flex-wrap: wrap;
   }
-  .tl-sum-item {
-    display: flex; flex-direction: column; gap: 1px;
-  }
-  .tl-sum-val {
-    font-size: 15px; font-weight: 800; color: var(--g3);
-  }
+  .tl-sum-item { display: flex; flex-direction: column; gap: 1px; }
+  .tl-sum-val { font-size: 16px; font-weight: 800; color: #059669; }
   .tl-sum-lbl {
-    font-size: 9px; font-weight: 700; color: var(--muted);
+    font-size: 9px; font-weight: 700; color: #9ca3af;
     text-transform: uppercase; letter-spacing: .4px;
+  }
+
+  /* ════════════════════════════════════════
+     RESPONSIVE MOBILE
+  ════════════════════════════════════════ */
+  @media (max-width: 480px) {
+    #cal-grid .cal-day { min-height: 64px !important; padding: 5px 4px 4px !important; }
+    .cal-day-num { font-size: 13px !important; }
+    .cal-shift-pill { font-size: 8px !important; padding: 2px 4px !important; }
+    .cal-total-badge { font-size: 7px !important; }
+    #cal-grid { gap: 3px !important; }
+    #cal-grid .cal-day.off,
+    #cal-grid .cal-day.work-generic { min-height: 40px !important; }
   }
 `;
 document.head.appendChild(styleEl);
@@ -1119,31 +1231,42 @@ function patchCalDays() {
     if (!items || items.length === 0) return;
     if (cell.classList.contains('abs')) return;
 
-    // Calculer total heures
+    // Total heures
     var totalH = items.reduce(function(s, it) { return s + itemDuration(it); }, 0);
     var hLabel = totalH > 0 ? fmtH(totalH) : '';
 
-    // Construire le contenu extra : tous les créneaux
-    var linesHtml = items.map(function(it) {
-      var hrs = getItemHours(it);
-      var col = PLAN_COLORS[it.type] || '#047857';
-      var note = it.note ? ' · ' + it.note : '';
-      return '<div style="font-size:7px;font-weight:700;line-height:1.4;color:' + col + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
-        + (hrs || PLAN_ICONS[it.type] || '') + note
-        + '</div>';
-    }).join('');
+    // Vider et reconstruire la cellule
+    cell.innerHTML = '';
 
-    // Mettre à jour : remplacer l'extra existant
-    var existing = cell.querySelector('div');
-    if (existing) {
-      existing.innerHTML = linesHtml + (hLabel ? '<div style="font-size:7px;color:#6b7280;margin-top:1px">⏱ ' + hLabel + '</div>' : '');
-    } else {
-      var extra = document.createElement('div');
-      extra.innerHTML = linesHtml + (hLabel ? '<div style="font-size:7px;color:#6b7280;margin-top:1px">⏱ ' + hLabel + '</div>' : '');
-      cell.appendChild(extra);
+    // Numéro du jour
+    var numEl = document.createElement('div');
+    numEl.className = 'cal-day-num';
+    numEl.textContent = String(d);
+    cell.appendChild(numEl);
+
+    // Conteneur des pills
+    var shiftsEl = document.createElement('div');
+    shiftsEl.className = 'cal-shifts';
+
+    items.forEach(function(it) {
+      var pill = document.createElement('div');
+      pill.className = 'cal-shift-pill ' + (it.type || 'travail');
+      var hrs = getItemHours(it);
+      var noteHtml = it.note ? '<span class="shift-note">· ' + it.note + '</span>' : '';
+      pill.innerHTML = (hrs || (PLAN_ICONS[it.type] || it.type)) + noteHtml;
+      shiftsEl.appendChild(pill);
+    });
+    cell.appendChild(shiftsEl);
+
+    // Badge total heures
+    if (hLabel) {
+      var badge = document.createElement('div');
+      badge.className = 'cal-total-badge';
+      badge.innerHTML = '<svg width="8" height="8" viewBox="0 0 16 16" fill="none" style="flex-shrink:0"><circle cx="8" cy="8" r="7" stroke="#6b7280" stroke-width="1.5"/><path d="M8 4.5v4l2.5 2.5" stroke="#6b7280" stroke-width="1.5" stroke-linecap="round"/></svg> ' + hLabel;
+      cell.appendChild(badge);
     }
 
-    // Tooltip avec tous les créneaux
+    // Tooltip
     cell.title = items.map(function(it) {
       return (PLAN_LABELS[it.type] || it.type) + (getItemHours(it) ? ' ' + getItemHours(it) : '') + (it.note ? ' · ' + it.note : '');
     }).join('\n') + (hLabel ? '\nTotal : ' + hLabel : '');
