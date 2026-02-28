@@ -872,15 +872,18 @@ html, body { overflow-x: hidden; max-width: 100vw; }
           <span id="rh-save-hint" style="font-size:11px;color:var(--muted)">✅ À jour</span>
         </div>
         <div class="card-body">
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#e0f2fe;border:1px solid #bae6fd;border-radius:8px;margin-bottom:14px;font-size:11px;color:#0369a1">
+            🔗 <span>Les champs marqués <b>🔗 Profil</b> sont synchronisés automatiquement avec votre profil entreprise — modifiez-les depuis n'importe quel onglet.</span>
+          </div>
           <div class="g2">
             <div class="field">
-              <label>Raison sociale RH</label>
-              <div class="field-wrap"><input class="field-in" id="rh-raison" placeholder="Ma Boutique SAS" oninput="rhMarkModified()"/></div>
+              <label>Raison sociale RH <span style="font-size:9px;font-weight:700;background:#e0f2fe;color:#0369a1;padding:1px 6px;border-radius:4px;margin-left:4px">🔗 Profil</span></label>
+              <div class="field-wrap"><input class="field-in" id="rh-raison" placeholder="Ma Boutique SAS" oninput="rhMarkModified();syncRHToProfl()"/></div>
               <div style="font-size:10px;color:var(--muted);margin-top:3px">Affiché dans les exports PDF et documents RH</div>
             </div>
             <div class="field">
-              <label>SIRET</label>
-              <div class="field-wrap"><input class="field-in" id="rh-siret" placeholder="123 456 789 00012" oninput="rhMarkModified()"/></div>
+              <label>SIRET <span style="font-size:9px;font-weight:700;background:#e0f2fe;color:#0369a1;padding:1px 6px;border-radius:4px;margin-left:4px">🔗 Profil</span></label>
+              <div class="field-wrap"><input class="field-in" id="rh-siret" placeholder="123 456 789 00012" oninput="rhMarkModified();syncRHToProfl()"/></div>
             </div>
           </div>
           <div class="g2" style="margin-top:12px">
@@ -900,7 +903,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
             </div>
           </div>
           <div class="field" style="margin-top:12px">
-            <label>Adresse de l'établissement</label>
+            <label>Adresse de l'établissement <span style="font-size:9px;font-weight:700;background:#e0f2fe;color:#0369a1;padding:1px 6px;border-radius:4px;margin-left:4px">🔗 Profil</span></label>
             <div class="field-wrap"><input class="field-in" id="rh-adresse" placeholder="12 rue de la Paix, 75001 Paris" oninput="rhMarkModified()"/></div>
             <div style="font-size:10px;color:var(--muted);margin-top:3px">Pré-remplie dans tous les contrats et documents RH générés</div>
           </div>
@@ -1259,10 +1262,44 @@ function scheduleAutosave() {
   clearTimeout(_autosaveTimer);
   const lbl = document.getElementById('lastSaved');
   if (lbl) lbl.textContent = '✏️ Modifications en cours…';
+  syncProfilToRH(); // Sync immédiate des champs partagés vers le panel RH
   _autosaveTimer = setTimeout(function() {
     saveProfile();
     showToastMsg('✅ Profil enregistré automatiquement', 'ok');
   }, 1500);
+}
+
+// ── SYNC BIDIRECTIONNELLE profil ↔ paramètres RH ──
+// Champs partagés : raison sociale, SIRET, adresse complète
+function syncProfilToRH() {
+  const nom    = document.getElementById('p-nom')?.value || '';
+  const siret  = document.getElementById('p-siret')?.value || '';
+  const adr    = document.getElementById('p-adresse')?.value || '';
+  const cp     = document.getElementById('p-cp')?.value || '';
+  const ville  = document.getElementById('p-ville')?.value || '';
+  const adrFull = [adr, cp && ville ? cp + ' ' + ville : (cp || ville)].filter(Boolean).join(', ');
+
+  // → vers panel RH (sans déclencher rhMarkModified si la valeur est identique)
+  const setIfDiff = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && el.value !== val) { el.value = val; rhMarkModified(); }
+  };
+  if (nom)     setIfDiff('rh-raison', nom);
+  if (siret)   setIfDiff('rh-siret', siret);
+  if (adrFull) setIfDiff('rh-adresse', adrFull);
+}
+
+function syncRHToProfl() {
+  const raison = document.getElementById('rh-raison')?.value || '';
+  const siret  = document.getElementById('rh-siret')?.value || '';
+  // → vers panel Profil (sans déclencher scheduleAutosave si identique)
+  const setIfDiff = (id, val) => {
+    const el = document.getElementById(id);
+    if (el && val && el.value !== val) el.value = val;
+  };
+  if (raison) setIfDiff('p-nom', raison);
+  if (siret)  setIfDiff('p-siret', siret);
+  // Note : on ne sync pas l'adresse RH → profil car le format est différent (agrégé vs 3 champs)
 }
 
 function initAutosave() {
@@ -1628,13 +1665,20 @@ function renderRhPanel() {
     rhOnCCNChange();
   }
 
-  // Pré-remplir identité
+  // Pré-remplir identité (champs RH d'abord, puis fallback sur profil si vide)
   const setVal = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
-  setVal("rh-raison",    _rhParams.raisonSociale);
-  setVal("rh-siret",     _rhParams.siret);
+  const pNom   = document.getElementById('p-nom')?.value   || '';
+  const pSiret = document.getElementById('p-siret')?.value || '';
+  const pAdr   = document.getElementById('p-adresse')?.value || '';
+  const pCp    = document.getElementById('p-cp')?.value || '';
+  const pVille = document.getElementById('p-ville')?.value || '';
+  const pAdrFull = [pAdr, pCp && pVille ? pCp + ' ' + pVille : (pCp || pVille)].filter(Boolean).join(', ');
+
+  setVal("rh-raison",    _rhParams.raisonSociale || pNom);
+  setVal("rh-siret",     _rhParams.siret         || pSiret);
   setVal("rh-ape",       _rhParams.codeAPE);
   setVal("rh-effectif",  _rhParams.effectif);
-  setVal("rh-adresse",       _rhParams.adresseEntreprise);
+  setVal("rh-adresse",       _rhParams.adresseEntreprise || pAdrFull);
   setVal("rh-signataire",    _rhParams.signataire);
   setVal("rh-qualite-sign",  _rhParams.qualiteSignataire);
   setVal("rh-cpan",      _rhParams.cpAnnuels || 25);
@@ -1719,10 +1763,16 @@ function renderRhAlertes() {
 }
 
 // ── Actions ──
+var _rhAutosaveTimer = null;
 function rhMarkModified() {
   _rhModified = true;
   const hint = document.getElementById("rh-save-hint");
-  if (hint) { hint.textContent = "⚠️ Modifications non sauvegardées"; hint.style.color = "#f59e0b"; }
+  if (hint) { hint.textContent = "✏️ Enregistrement auto…"; hint.style.color = "#f59e0b"; }
+  // Autosave debounce 1,5s (identique au profil)
+  clearTimeout(_rhAutosaveTimer);
+  _rhAutosaveTimer = setTimeout(async function() {
+    await saveRhParams();
+  }, 1500);
 }
 
 function rhOnCCNChange() {
