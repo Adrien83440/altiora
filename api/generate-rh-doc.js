@@ -43,7 +43,7 @@ export default async function handler(req, res) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-haiku-4-5-20251001',
         max_tokens: 2500,
         system: 'Tu es un expert juridique RH specialise dans le droit du travail francais. Tu generes des documents RH professionnels prets a signer. REGLE ABSOLUE : tu n\'utilises JAMAIS de placeholders comme [A COMPLETER], [NOM], [ADRESSE], [...] ou tout espace reserve. Si une information manque, tu rediges la clause de maniere generale. Le document doit etre pret a imprimer et signer immediatement.',
         messages: [
