@@ -12,16 +12,16 @@
   const CAN_IMPORT       = ['pro', 'max', 'master', 'dev'];
   const CAN_CORE         = ['trial', 'pro', 'max', 'master', 'dev'];
   const CAN_STOCK        = ['max', 'master', 'trial', 'dev'];
-  const CAN_BILAN        = ['master', 'trial', 'dev'];
-  const CAN_RAPPORT      = ['pro', 'max', 'master', 'dev'];
-  const CAN_RH           = ['master', 'trial', 'dev'];
+  const CAN_BILAN        = ['master', 'dev'];
+  const CAN_RAPPORT      = ['max', 'master', 'dev'];
+  const CAN_RH           = ['master', 'dev'];
 
   // Pages RH (contrôle d'accès + détection page active)
   const RH_PAGES = [
     'rh-dashboard.html', 'rh-employes.html', 'rh-planning.html', 'rh-conges.html',
     'rh-temps.html', 'rh-paie.html', 'rh-dirigeant.html', 'rh-recrutement.html',
     'rh-onboarding.html', 'rh-entretiens.html',
-    'rh-conformite.html', 'rh-modeles.html', 'rh-rapport.html'
+    'rh-conformite.html', 'rh-modeles.html', 'rh-documents.html', 'rh-rapport.html'
   ];
 
   // ════════════════════════════════════════════════
@@ -399,7 +399,7 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
       fidelisation: { icon: '💎', title: 'Fidélisation — Plan Max requis',       desc: 'La gestion des clients, cartes de fidélité, coupons et campagnes SMS est disponible dès le plan <strong>Max (99€/mois)</strong> ou <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
       stock:        { icon: '📦', title: 'Gestion des stocks — Plan Max requis',  desc: 'La gestion des stocks est disponible dès le plan <strong>Max (99€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
       bilan:        { icon: '🤖', title: 'Analyse de Bilan — Plan Master requis', desc: 'L\'analyse de bilan comptable par intelligence artificielle est disponible avec le plan <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Master' },
-      rapport:      { icon: '📄', title: 'Rapport annuel PDF — Plan Pro requis',  desc: 'La génération de rapports annuels PDF est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Passer au plan Pro' },
+      rapport:      { icon: '📄', title: 'Rapport annuel PDF — Plan Max requis',  desc: 'La génération de rapports annuels PDF est disponible dès le plan <strong>Max (99€/mois)</strong> ou <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
       import:       { icon: '📥', title: 'Import/Export — Plan Pro requis',        desc: "L'import et l'export de données est disponible dès le plan <strong>Pro (69€/mois)</strong>.", cta: '⭐ Passer au plan Pro' },
       rh:           { icon: '👥', title: 'Module RH — Plan Master requis',         desc: 'La gestion complète des ressources humaines (employés, planning, congés, paie, rémunération dirigeant…) est disponible avec le plan <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Master' },
       core:         { icon: '📊', title: 'Fonctionnalité Premium',                 desc: 'Cette fonctionnalité est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Voir les plans' }
@@ -455,7 +455,7 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     if (!CAN_STOCK.includes(plan))        lockNavItem('nav-stock',  'Max+',   'stock');
     if (!CAN_IMPORT.includes(plan))       lockNavItem('nav-import', 'Pro+',   'import');
     if (!CAN_BILAN.includes(plan))        lockNavItem('nav-bilan',  'Master', 'bilan');
-    if (!CAN_RAPPORT.includes(plan))      lockNavItem('nav-rapport','Pro+',   'rapport');
+    if (!CAN_RAPPORT.includes(plan))      lockNavItem('nav-rapport','Max+',   'rapport');
     if (!CAN_RH.includes(plan))           lockNavItem('nav-rh',     'Master', 'rh');
 
     const mainEl = document.querySelector('main, .main');
