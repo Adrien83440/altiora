@@ -1096,6 +1096,12 @@ window.renderCal = function() {
   }
 };
 
+function getItemHours(it) {
+  if (it.plages && it.plages.length > 0) return it.plages.map(function(p){ return p.deb+'–'+p.fin; }).join(' | ');
+  if (it.deb && it.fin) return it.deb+'–'+it.fin;
+  return '';
+}
+
 function patchCalDays() {
   var cache = window._planningCache || {};
   var calGrid = document.getElementById('cal-grid');
@@ -1103,56 +1109,44 @@ function patchCalDays() {
   var days = calGrid.querySelectorAll('.cal-day');
   if (!days.length) return;
 
-  // On reconstruit juste les indicateurs visuels des types spéciaux
   var y = window._calMonth ? window._calMonth.getFullYear() : new Date().getFullYear();
   var m = window._calMonth ? window._calMonth.getMonth() : new Date().getMonth();
-
-  var firstDow = (new Date(y, m, 1).getDay() + 6) % 7;
-  var domOffset = 0; // jours vides au début
-
-  // Compter les cellules vides
-  var allCells = calGrid.children;
-  var emptyCount = 0;
-  for (var i = 0; i < allCells.length; i++) {
-    if (!allCells[i].className || !allCells[i].className.includes('cal-day')) emptyCount++;
-    else break;
-  }
 
   days.forEach(function(cell, idx) {
     var d = idx + 1;
     var ds = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
     var items = cache[ds];
     if (!items || items.length === 0) return;
+    if (cell.classList.contains('abs')) return;
 
-    // Chercher les types spéciaux (non-travail, non-formation, non-astreinte)
-    var hasSpecial = items.some(function(it) {
-      return it.type === 'repos' || it.type === 'partiel' || it.type === 'conge';
-    });
-    if (!hasSpecial) return;
+    // Calculer total heures
+    var totalH = items.reduce(function(s, it) { return s + itemDuration(it); }, 0);
+    var hLabel = totalH > 0 ? fmtH(totalH) : '';
 
-    // Trouver le type dominant
-    var dominant = items[0];
-    var col = PLAN_COLORS[dominant.type] || '#6b7280';
-    var lbl = PLAN_LABELS[dominant.type] || dominant.type;
+    // Construire le contenu extra : tous les créneaux
+    var linesHtml = items.map(function(it) {
+      var hrs = getItemHours(it);
+      var col = PLAN_COLORS[it.type] || '#047857';
+      var note = it.note ? ' · ' + it.note : '';
+      return '<div style="font-size:7px;font-weight:700;line-height:1.4;color:' + col + ';white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'
+        + (hrs || PLAN_ICONS[it.type] || '') + note
+        + '</div>';
+    }).join('');
 
-    // Mettre à jour la cellule si pas déjà colorée par une absence
-    if (!cell.classList.contains('abs')) {
-      cell.style.background = col + '22';
-      cell.style.color = col;
-      cell.title = lbl + (items.length > 1 ? ' (+' + (items.length - 1) + ')' : '');
-      // Ajouter micro-label
-      var extra = cell.querySelector('.tl-micro');
-      if (!extra) {
-        extra = document.createElement('div');
-        extra.className = 'tl-micro';
-        extra.style.cssText = 'font-size:7px;font-weight:700;line-height:1;margin-top:2px;opacity:0.85;overflow:hidden;white-space:nowrap';
-        cell.appendChild(extra);
-      }
-      var hrs = '';
-      if (dominant.deb && dominant.fin) hrs = dominant.deb + '–' + dominant.fin;
-      else if (dominant.plages && dominant.plages[0]) hrs = dominant.plages[0].deb + '–' + dominant.plages[0].fin;
-      extra.textContent = hrs || PLAN_ICONS[dominant.type] || '';
+    // Mettre à jour : remplacer l'extra existant
+    var existing = cell.querySelector('div');
+    if (existing) {
+      existing.innerHTML = linesHtml + (hLabel ? '<div style="font-size:7px;color:#6b7280;margin-top:1px">⏱ ' + hLabel + '</div>' : '');
+    } else {
+      var extra = document.createElement('div');
+      extra.innerHTML = linesHtml + (hLabel ? '<div style="font-size:7px;color:#6b7280;margin-top:1px">⏱ ' + hLabel + '</div>' : '');
+      cell.appendChild(extra);
     }
+
+    // Tooltip avec tous les créneaux
+    cell.title = items.map(function(it) {
+      return (PLAN_LABELS[it.type] || it.type) + (getItemHours(it) ? ' ' + getItemHours(it) : '') + (it.note ? ' · ' + it.note : '');
+    }).join('\n') + (hLabel ? '\nTotal : ' + hLabel : '');
   });
 }
 
