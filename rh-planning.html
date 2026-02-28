@@ -346,8 +346,28 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 .cr-pill.pm-dragging{opacity:.3;pointer-events:none;}
 
 /* Barres Timeline */
-.tl-shift-bar{cursor:grab;user-select:none;touch-action:none;}
-.tl-bar-wrap .tl-shift-bar{cursor:grab;}  /* barre = grab, fond = crosshair */
+.tl-shift-bar{cursor:grab;user-select:none;touch-action:none;overflow:visible!important;}
+/* Poignées resize aux extrémités */
+.tl-resize-l,.tl-resize-r{
+  position:absolute;top:0;bottom:0;width:10px;
+  cursor:ew-resize;z-index:6;touch-action:none;
+  display:flex;align-items:center;justify-content:center;
+  opacity:0;transition:opacity .15s;
+}
+.tl-shift-bar:hover .tl-resize-l,
+.tl-shift-bar:hover .tl-resize-r{opacity:1;}
+.tl-resize-l{left:-2px;border-radius:4px 0 0 4px;}
+.tl-resize-r{right:-2px;border-radius:0 4px 4px 0;}
+.tl-resize-l::after,.tl-resize-r::after{
+  content:'';display:block;width:3px;height:16px;
+  border-radius:2px;background:rgba(255,255,255,.9);
+  box-shadow:0 0 3px rgba(0,0,0,.3);
+}
+/* Pendant resize : curseur global */
+body.tl-resizing{cursor:ew-resize!important;}
+body.tl-resizing *{pointer-events:none!important;}
+body.tl-resizing .tl-resize-l,
+body.tl-resizing .tl-resize-r{pointer-events:auto!important;}
 .tl-shift-bar.pm-dragging{opacity:.25;pointer-events:none;}
 
 /* Drop targets Gantt */
@@ -1148,14 +1168,16 @@ function renderTimeline(){
         const dur=diffH(p.deb,p.fin);
         if(left>100||left+width<0)return '';
         return `<div class="tl-shift-bar t-${it.type}"
-          style="left:${left}%;width:${width}%;min-width:28px;z-index:3"
+          style="left:${left}%;width:${Math.max(width,2)}%;min-width:28px;z-index:3;position:absolute"
           data-dnd-k="${k}" data-dnd-id="${it.id}"
           data-deb="${p.deb}" data-fin="${p.fin}"
           onpointerdown="pmTlDown(event,'${k}','${it.id}','${p.deb}','${p.fin}')"
           onclick="event.stopPropagation();editCr('${k}','${it.id}')"
           title="${p.deb}→${p.fin} (${fmtDur(dur)})">
-          ${dur>=0.75?`<span style="font-size:9px;font-weight:700;pointer-events:none">${p.deb}–${p.fin}</span>`:''}
-          ${it.note&&dur>=1?`<span style="opacity:.75;font-size:9px;pointer-events:none"> ${it.note}</span>`:''}
+          <div class="tl-resize-l" onpointerdown="event.stopPropagation();pmResizeDown(event,'${k}','${it.id}','${p.deb}','${p.fin}','left')"></div>
+          ${dur>=0.75?`<span style="font-size:9px;font-weight:700;pointer-events:none;user-select:none">${p.deb}–${p.fin}</span>`:''}
+          ${it.note&&dur>=1?`<span style="opacity:.75;font-size:9px;pointer-events:none;user-select:none"> ${it.note}</span>`:''}
+          <div class="tl-resize-r" onpointerdown="event.stopPropagation();pmResizeDown(event,'${k}','${it.id}','${p.deb}','${p.fin}','right')"></div>
         </div>`;
       }).join('');
     }).join('');
@@ -1197,31 +1219,47 @@ function renderTimeline(){
   </div>`;
 }
 
-// ── Clic sur la zone horaire timeline → ouvre modal pré-rempli ──
-function tlBwrapClick(ev, empId, date){
-  // Ignorer si c'est la fin d'un drag ou un clic sur une barre existante
-  if(_pm.active) return;
+// ── Clic sur la zone horaire timeline → crée directement un créneau 1h ──
+async function tlBwrapClick(ev, empId, date){
+  if(_pm.active || _pm._justDragged) return;
+  // Ignorer si clic sur une barre ou ses enfants
   if(ev.target.classList.contains('tl-shift-bar') || ev.target.closest('.tl-shift-bar')) return;
+  if(ev.target.classList.contains('tl-resize-l') || ev.target.classList.contains('tl-resize-r')) return;
 
   const bwrap = ev.currentTarget;
   const rect  = bwrap.getBoundingClientRect();
   const START_H = 6, END_H = 23, SPAN = (END_H - START_H) * 60;
 
-  // Calcul de l'heure cliquée
   const ratio  = (ev.clientX - rect.left) / rect.width;
   const rawMin = ratio * SPAN + START_H * 60;
   const debMin = _snapQ(Math.max(START_H * 60, Math.min(END_H * 60 - 60, rawMin)));
-  const finMin = Math.min(debMin + 60, END_H * 60); // durée par défaut 1h
+  const finMin = Math.min(debMin + 60, END_H * 60);
   const debStr = _minToStr(debMin);
   const finStr = _minToStr(finMin);
 
-  // Ouvrir le modal avec l'heure pré-remplie
-  openCreneauModal(empId, date);
-  // Forcer la plage calculée (après que renderPlages() ait tourné)
-  setTimeout(() => {
-    _plages = [{deb: debStr, fin: finStr}];
-    renderPlages();
-  }, 20);
+  // Création directe sans modal — type travail par défaut
+  const k = `${date}_${empId}`;
+  if(!_cr[k]) _cr[k] = {items:[]};
+  const newItem = {
+    id: 'c'+Date.now(),
+    type: 'travail',
+    deb: debStr,
+    fin: finStr,
+    plages: [{deb: debStr, fin: finStr}],
+    note: ''
+  };
+  _cr[k].items.push(newItem);
+  render(); // affichage immédiat optimiste
+  try{
+    await saveKey(k, date);
+    checkLegal(); updStats();
+    _showDndToast(`✅ ${debStr}–${finStr} ajouté`);
+  }catch(e){
+    console.error(e);
+    _cr[k].items = _cr[k].items.filter(i=>i.id!==newItem.id);
+    render();
+    _showDndToast('❌ Erreur sauvegarde');
+  }
 }
 window.tlBwrapClick = tlBwrapClick;
 
@@ -2053,6 +2091,7 @@ async function _pmTlUp(ev){
 
   if(!_pm.active){ _pm.active=false; return; } // clic simple → editCr
   _pm.active=false;
+  _pm._justDragged=true; setTimeout(()=>_pm._justDragged=false,50);
 
   // ── Calculer la nouvelle heure ──
   const bwrap=_pm.tlBwrap;
@@ -2125,6 +2164,142 @@ async function _pmTlUp(ev){
   }
   _pm.overK=null;_pm.overEl=null;
 }
+
+// ── RESIZE ENGINE — étirer/réduire les barres timeline au ¼h ──
+const _rs = {
+  active: false,
+  el: null,         // la barre DOM
+  k: null,
+  id: null,
+  side: null,       // 'left' | 'right'
+  bwrap: null,
+  origDeb: 0,       // minutes
+  origFin: 0,
+  origX: 0,
+  startH: 6,
+  endH: 23,
+};
+
+function pmResizeDown(ev, k, id, deb, fin, side){
+  if(ev.button !== undefined && ev.button !== 0) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+
+  const bar = ev.currentTarget.closest('.tl-shift-bar');
+  if(!bar) return;
+  const bwrap = bar.closest('.tl-bar-wrap');
+  if(!bwrap) return;
+
+  const [dh,dm] = (deb||'00:00').split(':').map(Number);
+  const [fh,fm] = (fin||'00:00').split(':').map(Number);
+
+  _rs.active  = false;
+  _rs.el      = bar;
+  _rs.k       = k;
+  _rs.id      = id;
+  _rs.side    = side;
+  _rs.bwrap   = bwrap;
+  _rs.origDeb = dh*60+dm;
+  _rs.origFin = fh*60+fm;
+  _rs.origX   = ev.clientX;
+  _rs.startH  = 6;
+  _rs.endH    = 23;
+
+  ev.currentTarget.setPointerCapture(ev.pointerId);
+  ev.currentTarget.addEventListener('pointermove', _rsMove);
+  ev.currentTarget.addEventListener('pointerup',   _rsUp);
+  ev.currentTarget.addEventListener('pointercancel',_rsUp);
+  document.body.classList.add('tl-resizing');
+}
+
+function _rsMove(ev){
+  const rect = _rs.bwrap.getBoundingClientRect();
+  const spanTot = (_rs.endH - _rs.startH) * 60;
+  const pxToMin = (ev.clientX - _rs.origX) / rect.width * spanTot;
+  const MIN_DUR = 15; // minimum 15 min
+
+  let newDeb = _rs.origDeb;
+  let newFin = _rs.origFin;
+
+  if(_rs.side === 'left'){
+    newDeb = _snapQ(Math.max(_rs.startH*60, Math.min(_rs.origFin - MIN_DUR, _rs.origDeb + pxToMin)));
+  } else {
+    newFin = _snapQ(Math.max(_rs.origDeb + MIN_DUR, Math.min(_rs.endH*60, _rs.origFin + pxToMin)));
+  }
+
+  // Mise à jour visuelle live
+  const pct = (m) => Math.max(0, Math.min(100, (m - _rs.startH*60) / spanTot * 100));
+  _rs.el.style.left  = pct(newDeb) + '%';
+  _rs.el.style.width = Math.max(pct(newFin) - pct(newDeb), 1.5) + '%';
+  const span = _rs.el.querySelector('span');
+  if(span) span.textContent = `${_minToStr(newDeb)}–${_minToStr(newFin)}`;
+
+  // Tooltip
+  const tip = _tip();
+  tip.style.cssText = `display:block;position:fixed;top:${ev.clientY-34}px;left:${ev.clientX}px;z-index:9999;pointer-events:none;
+    background:#1e293b;color:white;padding:3px 8px;border-radius:5px;
+    font-size:11px;font-weight:700;font-family:'Plus Jakarta Sans',sans-serif;transform:translateX(-50%)`;
+  tip.textContent = `${_minToStr(newDeb)} – ${_minToStr(newFin)}`;
+
+  _rs.active = true;
+  _rs._newDeb = newDeb;
+  _rs._newFin = newFin;
+}
+
+async function _rsUp(ev){
+  ev.currentTarget.removeEventListener('pointermove', _rsMove);
+  ev.currentTarget.removeEventListener('pointerup',   _rsUp);
+  ev.currentTarget.removeEventListener('pointercancel',_rsUp);
+  document.body.classList.remove('tl-resizing');
+  _tip().style.display = 'none';
+
+  if(!_rs.active){ _rs.active = false; return; }
+  _rs.active = false;
+
+  const newDeb = _rs._newDeb;
+  const newFin = _rs._newFin;
+  const newDebStr = _minToStr(newDeb);
+  const newFinStr = _minToStr(newFin);
+
+  const k = _rs.k, id = _rs.id;
+  const date = k.split('_')[0];
+
+  // Modifier l'item dans _cr
+  const items = _cr[k]?.items || [];
+  const idx = items.findIndex(i => i.id === id);
+  if(idx < 0){ render(); return; }
+
+  const item = JSON.parse(JSON.stringify(items[idx]));
+  if(item.plages && item.plages.length > 0){
+    // Resize la plage correspondante (deb/fin match)
+    const origDebStr = _minToStr(_rs.origDeb);
+    const origFinStr = _minToStr(_rs.origFin);
+    const pi = item.plages.findIndex(p => p.deb === origDebStr && p.fin === origFinStr);
+    if(pi >= 0){
+      item.plages[pi].deb = newDebStr;
+      item.plages[pi].fin = newFinStr;
+    }
+    // Recalcul deb/fin globaux
+    item.deb = item.plages[0].deb;
+    item.fin = item.plages[item.plages.length-1].fin;
+  } else {
+    item.deb = newDebStr;
+    item.fin = newFinStr;
+  }
+  _cr[k].items[idx] = item;
+  render();
+
+  try{
+    await saveKey(k, date);
+    checkLegal(); updStats();
+    _showDndToast(`✅ ${newDebStr}–${newFinStr}`);
+  }catch(e){
+    console.error(e); await loadCr(); render();
+    _showDndToast('❌ Erreur sauvegarde');
+  }
+}
+
+window.pmResizeDown = pmResizeDown;
 
 function _showDndToast(msg){
   const el=document.getElementById('dnd-toast');
