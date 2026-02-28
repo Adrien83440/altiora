@@ -21,7 +21,7 @@
     'rh-dashboard.html', 'rh-employes.html', 'rh-planning.html', 'rh-conges.html',
     'rh-temps.html', 'rh-paie.html', 'rh-dirigeant.html', 'rh-recrutement.html',
     'rh-onboarding.html', 'rh-documents.html', 'rh-entretiens.html',
-    'rh-conformite.html', 'rh-formations.html', 'rh-modeles.html', 'rh-rapport.html'
+    'rh-conformite.html', 'rh-modeles.html', 'rh-rapport.html'
   ];
 
   // ════════════════════════════════════════════════
@@ -166,7 +166,6 @@
       <div class="si rh-si${a('rh-documents.html')}"   onclick="location.href='rh-documents.html'"><span class="dot rh-dot"></span>Documents RH</div>
       <div class="si rh-si${a('rh-entretiens.html')}"  onclick="location.href='rh-entretiens.html'"><span class="dot rh-dot"></span>Entretiens annuels</div>
       <div class="si rh-si${a('rh-conformite.html')}"  onclick="location.href='rh-conformite.html'"><span class="dot rh-dot"></span>Conformité &amp; Légal</div>
-      <div class="si rh-si${a('rh-formations.html')}"  onclick="location.href='rh-formations.html'"><span class="dot rh-dot"></span>Plan de formation</div>
       <div class="si rh-si${a('rh-modeles.html')}"     onclick="location.href='rh-modeles.html'"><span class="dot rh-dot"></span>Modèles de documents</div>
 
     </div><!-- /rh-nav-sub -->
