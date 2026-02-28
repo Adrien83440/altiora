@@ -624,5 +624,552 @@ var js=new TextDecoder('utf-8').decode(by);
 var s=document.createElement('script');s.textContent=js;document.head.appendChild(s);
 })();
 </script>
+
+<!-- ══ PATCH v2 : Fix filtre planning + Timeline ══ -->
+<script>
+(function() {
+'use strict';
+
+/* ══════════════════════════════════════════════════════
+   PATCH 1 : Override loadPlanningMonth
+   Fix 1 - dateStr : utilise lastIndexOf pour éviter la
+           collision si empId contient des chiffres de date
+   Fix 2 - filtre : inclut TOUS les types de planning
+   ══════════════════════════════════════════════════════ */
+window.loadPlanningMonth = async function(y, m) {
+  window._planningCache = {};
+  var uid    = window._uid   || '';
+  var empId  = window._empId || '';
+  if (!uid || !empId) return;
+
+  // Calculer toutes les semaines du mois
+  var weekKeys = {};
+  var nb = new Date(y, m + 1, 0).getDate();
+  for (var d = 1; d <= nb; d++) {
+    var dt  = new Date(y, m, d);
+    var mon = new Date(dt);
+    var day = mon.getDay();
+    var diff = (day === 0) ? -6 : 1 - day;
+    mon.setDate(mon.getDate() + diff);
+    mon.setHours(0, 0, 0, 0);
+    var wk = mon.toISOString().slice(0, 10).replace(/-/g, '');
+    weekKeys[wk] = true;
+  }
+
+  for (var wk in weekKeys) {
+    try {
+      var snap = await window._getDocs('rh', uid, 'plan_' + wk);
+      snap.forEach(function(docSnap) {
+        var suffix = '_' + empId;
+        if (docSnap.id.endsWith(suffix)) {
+          // FIX dateStr : lastIndexOf évite collision chiffres
+          var idx = docSnap.id.lastIndexOf(suffix);
+          var dateStr = docSnap.id.slice(0, idx);
+          var data = docSnap.data();
+          // FIX filtre : TOUS les types (plus aucun filtre)
+          window._planningCache[dateStr] = (data.items || []);
+        }
+      });
+    } catch(e) {
+      console.warn('[PATCH] loadPlanningMonth wk=' + wk, e);
+    }
+  }
+  console.log('[PATCH] planningCache chargé :', Object.keys(window._planningCache).length, 'jours');
+};
+
+
+/* ══════════════════════════════════════════════════════
+   PATCH 3 : Vue Timeline
+   Remplace le contenu de l'onglet planning par
+   Calendrier + Timeline (vue semaine détaillée)
+   ══════════════════════════════════════════════════════ */
+
+// Couleurs pour les types de planning (alignées avec le code encodé)
+var PLAN_COLORS = {
+  travail:    '#059669',
+  repos:      '#6b7280',
+  conge:      '#3b82f6',
+  maladie:    '#ef4444',
+  partiel:    '#f59e0b',
+  formation:  '#db2777',
+  astreinte:  '#7c3aed'
+};
+var PLAN_LABELS = {
+  travail:   'Travail',
+  repos:     'Repos',
+  conge:     'Congé',
+  maladie:   'Maladie',
+  partiel:   'Temps partiel',
+  formation: 'Formation',
+  astreinte: 'Astreinte'
+};
+var PLAN_ICONS = {
+  travail:   '💼',
+  repos:     '😴',
+  conge:     '🏖️',
+  maladie:   '🤒',
+  partiel:   '⏱️',
+  formation: '🎓',
+  astreinte: '📟'
+};
+
+// Variable pour l'onglet actif timeline/calendrier
+window._planView = 'cal'; // 'cal' | 'timeline'
+window._timelineWeek = null; // Date du lundi de la semaine affichée
+
+// Injecter CSS Timeline
+var styleEl = document.createElement('style');
+styleEl.textContent = `
+  .plan-view-toggle {
+    display: flex; gap: 4px; background: #f3f4f6;
+    border-radius: 8px; padding: 3px;
+  }
+  .pvt-btn {
+    padding: 5px 12px; border: none; border-radius: 6px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-size: 11px; font-weight: 700; cursor: pointer;
+    color: var(--muted); background: transparent;
+    transition: all .15s;
+  }
+  .pvt-btn.active {
+    background: white; color: var(--g3);
+    box-shadow: 0 1px 4px rgba(0,0,0,.1);
+  }
+
+  /* Timeline */
+  .timeline-wrap { padding: 0; }
+  .tl-week-nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+  }
+  .tl-week-label {
+    font-size: 12px; font-weight: 700; color: var(--text);
+  }
+  .tl-nav-btn {
+    border: 1px solid var(--border); background: white;
+    border-radius: 6px; width: 28px; height: 28px;
+    cursor: pointer; font-size: 14px; display: flex;
+    align-items: center; justify-content: center;
+    color: var(--muted); transition: all .15s;
+  }
+  .tl-nav-btn:hover { border-color: var(--g3); color: var(--g3); }
+
+  .tl-day {
+    border-bottom: 1px solid #f3f4f6;
+    overflow: hidden;
+  }
+  .tl-day:last-child { border-bottom: none; }
+  .tl-day-head {
+    display: flex; align-items: center;
+    padding: 8px 14px 6px;
+    gap: 8px;
+  }
+  .tl-day-num {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 800; flex-shrink: 0;
+    color: var(--muted); background: #f9fafb;
+  }
+  .tl-day-num.today {
+    background: var(--g3); color: white;
+  }
+  .tl-day-name {
+    font-size: 11px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .5px; flex: 1;
+  }
+  .tl-day-total {
+    font-size: 11px; font-weight: 700; color: var(--g3);
+  }
+  .tl-day.off .tl-day-head { opacity: .45; }
+
+  .tl-items { padding: 0 14px 8px 50px; display: flex; flex-direction: column; gap: 5px; }
+  .tl-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px; border-radius: 8px;
+    border-left: 3px solid;
+  }
+  .tl-item-icon { font-size: 14px; flex-shrink: 0; }
+  .tl-item-body { flex: 1; min-width: 0; }
+  .tl-item-label {
+    font-size: 12px; font-weight: 700; color: var(--text);
+  }
+  .tl-item-hours {
+    font-size: 10px; color: var(--muted); margin-top: 1px;
+  }
+  .tl-item-dur {
+    font-size: 11px; font-weight: 800; flex-shrink: 0;
+  }
+
+  .tl-empty {
+    padding: 4px 14px 8px 50px;
+    font-size: 11px; color: #d1d5db; font-style: italic;
+  }
+
+  .tl-week-summary {
+    margin: 10px 14px 0; padding: 10px 12px;
+    background: var(--green-ghost); border-radius: 10px;
+    border: 1px solid #a7f3d0;
+    display: flex; gap: 16px; flex-wrap: wrap;
+  }
+  .tl-sum-item {
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .tl-sum-val {
+    font-size: 15px; font-weight: 800; color: var(--g3);
+  }
+  .tl-sum-lbl {
+    font-size: 9px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .4px;
+  }
+`;
+document.head.appendChild(styleEl);
+
+/* Injecter les boutons Calendrier / Timeline dans le card-head du planning */
+function injectPlanHeader() {
+  var calTitle = document.getElementById('cal-title');
+  if (!calTitle) return;
+  var head = calTitle.closest('.card-head');
+  if (!head || head.dataset.patched) return;
+  head.dataset.patched = '1';
+
+  // Remplacer les boutons prev/next + ajouter toggle
+  head.innerHTML =
+    '<div class="card-title">📅 <span id="cal-title">Mon planning</span></div>' +
+    '<div style="display:flex;align-items:center;gap:8px">' +
+      '<div class="plan-view-toggle">' +
+        '<button class="pvt-btn active" id="pvt-cal" onclick="setPlanView(\'cal\')">📆 Calendrier</button>' +
+        '<button class="pvt-btn" id="pvt-tl" onclick="setPlanView(\'timeline\')">📋 Timeline</button>' +
+      '</div>' +
+      '<div id="cal-nav-btns" style="display:flex;gap:5px">' +
+        '<button class="btn btn-ghost" style="padding:4px 9px;font-size:12px" onclick="prevM()">‹</button>' +
+        '<button class="btn btn-ghost" style="padding:4px 9px;font-size:12px" onclick="nextM()">›</button>' +
+      '</div>' +
+    '</div>';
+}
+
+/* Changer de vue */
+window.setPlanView = function(v) {
+  window._planView = v;
+  document.querySelectorAll('.pvt-btn').forEach(function(b) { b.classList.remove('active'); });
+  var btn = document.getElementById('pvt-' + v);
+  if (btn) btn.classList.add('active');
+
+  var calNav = document.getElementById('cal-nav-btns');
+  var calGrid = document.getElementById('cal-grid');
+  var calLeg  = document.getElementById('cal-legend');
+  var tlWrap  = document.getElementById('tl-wrap');
+
+  if (v === 'cal') {
+    if (calNav)  calNav.style.display = 'flex';
+    if (calGrid) calGrid.style.display = '';
+    if (calLeg)  calLeg.style.display = '';
+    if (tlWrap)  tlWrap.style.display = 'none';
+  } else {
+    if (calNav)  calNav.style.display = 'none';
+    if (calGrid) calGrid.style.display = 'none';
+    if (calLeg)  calLeg.style.display = 'none';
+    // Créer ou afficher le wrapper timeline
+    if (!tlWrap) {
+      var wrap = document.createElement('div');
+      wrap.id = 'tl-wrap';
+      wrap.className = 'timeline-wrap';
+      var parent = calGrid ? calGrid.parentNode : null;
+      if (parent) parent.appendChild(wrap);
+    } else {
+      tlWrap.style.display = '';
+    }
+    // Initialiser la semaine sur la semaine courante
+    if (!window._timelineWeek) {
+      window._timelineWeek = getMondayOf(new Date());
+    }
+    renderTimeline();
+  }
+};
+
+/* Obtenir le lundi d'une semaine */
+function getMondayOf(date) {
+  var d = new Date(date);
+  var day = d.getDay();
+  var diff = (day === 0) ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/* Formater une durée en heures */
+function fmtH(h) {
+  if (h <= 0) return '—';
+  var hh = Math.floor(h);
+  var mm = Math.round((h - hh) * 60);
+  if (mm === 0) return hh + 'h';
+  return hh + 'h' + String(mm).padStart(2, '0');
+}
+
+/* Calculer la durée d'un item planning */
+function itemDuration(it) {
+  if (it.plages && it.plages.length > 0) {
+    return it.plages.reduce(function(s, p) {
+      if (!p.deb || !p.fin) return s;
+      var a = p.deb.split(':').map(Number);
+      var b = p.fin.split(':').map(Number);
+      return s + Math.max(0, ((b[0] * 60 + b[1]) - (a[0] * 60 + a[1])) / 60);
+    }, 0);
+  }
+  if (!it.deb || !it.fin) return 0;
+  var a = it.deb.split(':').map(Number);
+  var b = it.fin.split(':').map(Number);
+  return Math.max(0, ((b[0] * 60 + b[1]) - (a[0] * 60 + a[1])) / 60);
+}
+
+/* Obtenir les plages horaires d'un item */
+function itemHours(it) {
+  if (it.plages && it.plages.length > 0) {
+    return it.plages.map(function(p) { return (p.deb || '') + '–' + (p.fin || ''); }).join(' | ');
+  }
+  if (it.deb && it.fin) return it.deb + '–' + it.fin;
+  return '';
+}
+
+/* Navigation Timeline */
+window.tlPrev = function() {
+  if (!window._timelineWeek) window._timelineWeek = getMondayOf(new Date());
+  var d = new Date(window._timelineWeek);
+  d.setDate(d.getDate() - 7);
+  window._timelineWeek = d;
+  // Charger les données si pas en cache
+  ensureWeekLoaded(d).then(renderTimeline);
+};
+window.tlNext = function() {
+  if (!window._timelineWeek) window._timelineWeek = getMondayOf(new Date());
+  var d = new Date(window._timelineWeek);
+  d.setDate(d.getDate() + 7);
+  window._timelineWeek = d;
+  ensureWeekLoaded(d).then(renderTimeline);
+};
+
+/* Charger les données planning pour une semaine si pas encore chargé */
+async function ensureWeekLoaded(mondayDate) {
+  var wk = mondayDate.toISOString().slice(0, 10).replace(/-/g, '');
+  var uid = window._uid || '';
+  var empId = window._empId || '';
+  if (!uid || !empId) return;
+
+  // Vérifier si on a déjà des données pour cette semaine
+  var hasSome = false;
+  for (var i = 0; i < 7; i++) {
+    var d = new Date(mondayDate);
+    d.setDate(d.getDate() + i);
+    var ds = d.toISOString().slice(0, 10);
+    if (window._planningCache[ds] !== undefined) { hasSome = true; break; }
+  }
+  if (hasSome) return;
+
+  try {
+    var snap = await window._getDocs('rh', uid, 'plan_' + wk);
+    snap.forEach(function(docSnap) {
+      var suffix = '_' + empId;
+      if (docSnap.id.endsWith(suffix)) {
+        var idx = docSnap.id.lastIndexOf(suffix);
+        var dateStr = docSnap.id.slice(0, idx);
+        var data = docSnap.data();
+        window._planningCache[dateStr] = (data.items || []);
+      }
+    });
+  } catch(e) {
+    console.warn('[PATCH] ensureWeekLoaded wk=' + wk, e);
+  }
+}
+
+/* Rendre la vue Timeline */
+function renderTimeline() {
+  var wrap = document.getElementById('tl-wrap');
+  if (!wrap) return;
+  if (!window._timelineWeek) window._timelineWeek = getMondayOf(new Date());
+
+  var monday = window._timelineWeek;
+  var today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Label de semaine
+  var sundayDate = new Date(monday);
+  sundayDate.setDate(sundayDate.getDate() + 6);
+  var opts = { day: 'numeric', month: 'short' };
+  var wLabel = monday.toLocaleDateString('fr-FR', opts) +
+               ' — ' + sundayDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  var jours = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'];
+  var totalH = 0, nbJoursTravail = 0;
+
+  var daysHtml = '';
+  for (var i = 0; i < 7; i++) {
+    var cur = new Date(monday);
+    cur.setDate(monday.getDate() + i);
+    var ds = cur.getFullYear() + '-' +
+             String(cur.getMonth() + 1).padStart(2, '0') + '-' +
+             String(cur.getDate()).padStart(2, '0');
+    var items = window._planningCache[ds] || [];
+    var isToday = (cur.getTime() === today.getTime());
+    var isOff = (i >= 5 && items.length === 0); // Sam/Dim sans planning = off
+
+    var dayH = items.reduce(function(s, it) { return s + itemDuration(it); }, 0);
+    if (dayH > 0) { totalH += dayH; nbJoursTravail++; }
+
+    var numCls = 'tl-day-num' + (isToday ? ' today' : '');
+    var dayCls = 'tl-day' + (isOff ? ' off' : '');
+
+    var itemsHtml = '';
+    if (items.length > 0) {
+      items.forEach(function(it) {
+        var type = it.type || 'travail';
+        var col  = PLAN_COLORS[type] || '#6b7280';
+        var lbl  = PLAN_LABELS[type] || type;
+        var ico  = PLAN_ICONS[type]  || '📋';
+        var hrs  = itemHours(it);
+        var dur  = itemDuration(it);
+        var note = it.note || '';
+        itemsHtml +=
+          '<div class="tl-item" style="background:' + col + '11;border-left-color:' + col + '">' +
+            '<span class="tl-item-icon">' + ico + '</span>' +
+            '<div class="tl-item-body">' +
+              '<div class="tl-item-label">' + lbl + (note ? ' · ' + note : '') + '</div>' +
+              (hrs ? '<div class="tl-item-hours">⏰ ' + hrs + '</div>' : '') +
+            '</div>' +
+            (dur > 0 ? '<span class="tl-item-dur" style="color:' + col + '">' + fmtH(dur) + '</span>' : '') +
+          '</div>';
+      });
+    } else if (!isOff) {
+      // Jour ouvré sans planning : vérifier horaires habituels
+      var horaires = (window._params && window._params.horaires) || {};
+      var dowKeys = ['lundi','mardi','mercredi','jeudi','vendredi','samedi','dimanche'];
+      var jourKey = dowKeys[i];
+      var h = horaires[jourKey];
+      if (h && h.actif) {
+        itemsHtml =
+          '<div class="tl-item" style="background:rgba(5,150,105,0.06);border-left-color:#a7f3d0">' +
+            '<span class="tl-item-icon">💼</span>' +
+            '<div class="tl-item-body">' +
+              '<div class="tl-item-label" style="color:#047857">Horaire habituel</div>' +
+              (h.deb && h.fin ? '<div class="tl-item-hours">⏰ ' + h.deb + '–' + h.fin + '</div>' : '') +
+            '</div>' +
+          '</div>';
+      } else {
+        itemsHtml = '<div class="tl-empty">Aucun planning saisi</div>';
+      }
+    }
+
+    daysHtml +=
+      '<div class="' + dayCls + '">' +
+        '<div class="tl-day-head">' +
+          '<div class="' + numCls + '">' + cur.getDate() + '</div>' +
+          '<div class="tl-day-name">' + jours[i] + ' ' + cur.toLocaleDateString('fr-FR', {month:'short'}) + '</div>' +
+          (dayH > 0 ? '<div class="tl-day-total">' + fmtH(dayH) + '</div>' : '') +
+        '</div>' +
+        (itemsHtml ? '<div class="tl-items">' + itemsHtml + '</div>' : '') +
+      '</div>';
+  }
+
+  wrap.innerHTML =
+    '<div class="tl-week-nav">' +
+      '<button class="tl-nav-btn" onclick="tlPrev()">‹</button>' +
+      '<span class="tl-week-label">📅 ' + wLabel + '</span>' +
+      '<button class="tl-nav-btn" onclick="tlNext()">›</button>' +
+    '</div>' +
+    (totalH > 0 ?
+      '<div class="tl-week-summary">' +
+        '<div class="tl-sum-item"><div class="tl-sum-val">' + fmtH(totalH) + '</div><div class="tl-sum-lbl">Total semaine</div></div>' +
+        '<div class="tl-sum-item"><div class="tl-sum-val">' + nbJoursTravail + 'j</div><div class="tl-sum-lbl">Jours planifiés</div></div>' +
+        (nbJoursTravail > 0 ? '<div class="tl-sum-item"><div class="tl-sum-val">' + fmtH(totalH / nbJoursTravail) + '</div><div class="tl-sum-lbl">Moy. / jour</div></div>' : '') +
+      '</div>' : '') +
+    daysHtml;
+}
+
+/* ══════════════════════════════════════════════════════
+   PATCH 4+5 : Hook renderCal (fusionné)
+   - Injecte le toggle Calendrier/Timeline
+   - Corrige l’affichage des types spéciaux (repos, partiel…)
+   - Synchronise la vue Timeline si active
+   ══════════════════════════════════════════════════════ */
+var _origRenderCal = window.renderCal;
+window.renderCal = function() {
+  if (typeof _origRenderCal === 'function') _origRenderCal();
+  setTimeout(injectPlanHeader, 50);
+  setTimeout(patchCalDays, 80);
+  if (window._planView === 'timeline') {
+    setTimeout(renderTimeline, 100);
+  }
+};
+
+function patchCalDays() {
+  var cache = window._planningCache || {};
+  var calGrid = document.getElementById('cal-grid');
+  if (!calGrid) return;
+  var days = calGrid.querySelectorAll('.cal-day');
+  if (!days.length) return;
+
+  // On reconstruit juste les indicateurs visuels des types spéciaux
+  var y = window._calMonth ? window._calMonth.getFullYear() : new Date().getFullYear();
+  var m = window._calMonth ? window._calMonth.getMonth() : new Date().getMonth();
+
+  var firstDow = (new Date(y, m, 1).getDay() + 6) % 7;
+  var domOffset = 0; // jours vides au début
+
+  // Compter les cellules vides
+  var allCells = calGrid.children;
+  var emptyCount = 0;
+  for (var i = 0; i < allCells.length; i++) {
+    if (!allCells[i].className || !allCells[i].className.includes('cal-day')) emptyCount++;
+    else break;
+  }
+
+  days.forEach(function(cell, idx) {
+    var d = idx + 1;
+    var ds = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    var items = cache[ds];
+    if (!items || items.length === 0) return;
+
+    // Chercher les types spéciaux (non-travail, non-formation, non-astreinte)
+    var hasSpecial = items.some(function(it) {
+      return it.type === 'repos' || it.type === 'partiel' || it.type === 'conge';
+    });
+    if (!hasSpecial) return;
+
+    // Trouver le type dominant
+    var dominant = items[0];
+    var col = PLAN_COLORS[dominant.type] || '#6b7280';
+    var lbl = PLAN_LABELS[dominant.type] || dominant.type;
+
+    // Mettre à jour la cellule si pas déjà colorée par une absence
+    if (!cell.classList.contains('abs')) {
+      cell.style.background = col + '22';
+      cell.style.color = col;
+      cell.title = lbl + (items.length > 1 ? ' (+' + (items.length - 1) + ')' : '');
+      // Ajouter micro-label
+      var extra = cell.querySelector('.tl-micro');
+      if (!extra) {
+        extra = document.createElement('div');
+        extra.className = 'tl-micro';
+        extra.style.cssText = 'font-size:7px;font-weight:700;line-height:1;margin-top:2px;opacity:0.85;overflow:hidden;white-space:nowrap';
+        cell.appendChild(extra);
+      }
+      var hrs = '';
+      if (dominant.deb && dominant.fin) hrs = dominant.deb + '–' + dominant.fin;
+      else if (dominant.plages && dominant.plages[0]) hrs = dominant.plages[0].deb + '–' + dominant.plages[0].fin;
+      extra.textContent = hrs || PLAN_ICONS[dominant.type] || '';
+    }
+  });
+}
+
+/* ══════════════════════════════════════════════════════
+   INIT : attendre que renderAll soit appelé
+   ══════════════════════════════════════════════════════ */
+var _origRenderAll = window.renderAll;
+window.renderAll = function() {
+  if (typeof _origRenderAll === 'function') _origRenderAll();
+  setTimeout(injectPlanHeader, 100);
+};
+
+console.log('[PATCH v2] Planning fixes + Timeline chargés ✓');
+})();
+</script>
 </body>
 </html>
