@@ -75,34 +75,34 @@ export default async function handler(req, res) {
     // dont l'ID se termine par _{empId}
     const planningCache = {};
 
+    console.log('[rh-planning-salarie] uid:', uid, 'empId:', empId, 'weekKeys:', Object.keys(weekKeys));
+
     for (const wk of Object.keys(weekKeys)) {
       const collPath = `rh/${uid}/plan_${wk}`;
+      const url = `${fsBase}/${collPath}?pageSize=100`;
+      console.log('[rh-planning-salarie] listing:', url);
 
-      // Utiliser runQuery avec un filtre sur le champ __name__ n'est pas dispo en REST simple.
-      // On liste tous les docs de la collection et on filtre côté serveur.
-      // C'est OK car le module admin fait la même chose — et on a le token admin.
-      const listRes = await fetch(
-        `${fsBase}/${collPath}?pageSize=50`,
-        { headers }
-      );
+      const listRes = await fetch(url, { headers });
+      const listText = await listRes.text();
+      console.log('[rh-planning-salarie] response status:', listRes.status, 'body preview:', listText.slice(0, 300));
 
       if (!listRes.ok) continue;
 
-      const listData = await listRes.json();
+      let listData;
+      try { listData = JSON.parse(listText); } catch(e) { continue; }
       const documents = listData.documents || [];
+      console.log('[rh-planning-salarie] wk', wk, '→', documents.length, 'docs');
 
       for (const doc of documents) {
-        // doc.name = "projects/.../documents/rh/{uid}/plan_{wk}/{docId}"
         const docId = doc.name.split('/').pop();
         const suffix = '_' + empId;
+        console.log('[rh-planning-salarie] docId:', docId, 'endsWith', suffix, '?', docId.endsWith(suffix));
         if (!docId.endsWith(suffix)) continue;
 
-        // dateStr = docId sans le suffixe _empId (lastIndexOf pour éviter collision)
         const idx = docId.lastIndexOf(suffix);
         const dateStr = docId.slice(0, idx);
-
-        // Convertir les fields Firestore → objets JS simples
         const items = parseFirestoreArray(doc.fields?.items);
+        console.log('[rh-planning-salarie] → dateStr:', dateStr, 'items:', items.length);
         planningCache[dateStr] = items;
       }
     }
