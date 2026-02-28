@@ -632,69 +632,70 @@ var s=document.createElement('script');s.textContent=js;document.head.appendChil
 
 /* ══════════════════════════════════════════════════════
    PATCH 1 : Override loadPlanningMonth
-   Utilise l’API Vercel /api/rh-planning-salarie (proxy admin)
-   pour contourner les règles Firestore qui refusent getDocs
-   à un utilisateur non authentifié (espace salarié public)
+   Lit depuis rh_planning_public/{uid}/plan_{wk}/{docId}
+   Collection publique (allow read: true) alimentée par
+   le module admin rh-planning.html via saveKey()
    ══════════════════════════════════════════════════════ */
 window.loadPlanningMonth = async function(y, m) {
   window._planningCache = {};
-  // Récupérer le publicId depuis l’URL (?pid=xxx ou hash)
-  var publicId = window._publicId || new URLSearchParams(window.location.search).get('id') || '';
-  if (!publicId) {
-    console.warn('[PATCH] publicId introuvable');
-    return;
+  var uid   = window._uid   || '';
+  var empId = window._empId || '';
+  if (!uid || !empId) return;
+
+  var weekKeys = {};
+  var nb = new Date(y, m + 1, 0).getDate();
+  for (var d = 1; d <= nb; d++) {
+    var dt = new Date(y, m, d);
+    var mon = new Date(dt);
+    var dow = mon.getDay();
+    var diff = (dow === 0) ? -6 : 1 - dow;
+    mon.setDate(mon.getDate() + diff);
+    mon.setHours(0, 0, 0, 0);
+    var wk = mon.toISOString().slice(0, 10).replace(/-/g, '');
+    weekKeys[wk] = true;
   }
-  try {
-    var resp = await fetch('/api/rh-planning-salarie', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ publicId: publicId, year: y, month: m })
-    });
-    if (!resp.ok) {
-      var err = await resp.json().catch(function(){ return {}; });
-      console.warn('[PATCH] rh-planning-salarie error:', err.error || resp.status);
-      return;
+
+  var suffix = '_' + empId;
+  for (var wk in weekKeys) {
+    try {
+      var snap = await window._getDocs('rh_planning_public', uid, 'plan_' + wk);
+      snap.forEach(function(docSnap) {
+        if (!docSnap.id.endsWith(suffix)) return;
+        var idx = docSnap.id.lastIndexOf(suffix);
+        var dateStr = docSnap.id.slice(0, idx);
+        window._planningCache[dateStr] = docSnap.data().items || [];
+      });
+    } catch(e) {
+      console.warn('[PATCH] loadPlanningMonth wk=' + wk, e.message);
     }
-    var data = await resp.json();
-    window._planningCache = data.planningCache || {};
-    // Synchroniser uid/empId si pas encore définis
-    if (!window._uid   && data.uid)   window._uid   = data.uid;
-    if (!window._empId && data.empId) window._empId = data.empId;
-    console.log('[PATCH] planningCache chargé via API :', Object.keys(window._planningCache).length, 'jours');
-  } catch(e) {
-    console.warn('[PATCH] loadPlanningMonth fetch error:', e);
   }
+  console.log('[PATCH] planningCache chargé :', Object.keys(window._planningCache).length, 'jours');
 };
 
-// Aussi patcher ensureWeekLoaded pour la timeline
+// Patcher ensureWeekLoaded pour la vue Timeline
 window._ensureWeekLoadedViaAPI = async function(mondayDate) {
-  var publicId = window._publicId || new URLSearchParams(window.location.search).get('id') || '';
-  if (!publicId) return;
-  // Vérifier si déjà en cache pour cette semaine
-  var hasSome = false;
+  var uid   = window._uid   || '';
+  var empId = window._empId || '';
+  if (!uid || !empId) return;
   for (var i = 0; i < 7; i++) {
     var d = new Date(mondayDate);
     d.setDate(d.getDate() + i);
     var ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-    if (window._planningCache[ds] !== undefined) { hasSome = true; break; }
+    if (window._planningCache[ds] !== undefined) return;
   }
-  if (hasSome) return;
-  // Charger le mois correspondant au lundi de cette semaine
-  var y = mondayDate.getFullYear();
-  var month = mondayDate.getMonth();
+  var wk = mondayDate.toISOString().slice(0, 10).replace(/-/g, '');
+  var suffix = '_' + empId;
   try {
-    var resp = await fetch('/api/rh-planning-salarie', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ publicId: publicId, year: y, month: month })
+    var snap = await window._getDocs('rh_planning_public', uid, 'plan_' + wk);
+    snap.forEach(function(docSnap) {
+      if (!docSnap.id.endsWith(suffix)) return;
+      var idx = docSnap.id.lastIndexOf(suffix);
+      var dateStr = docSnap.id.slice(0, idx);
+      window._planningCache[dateStr] = docSnap.data().items || [];
     });
-    if (!resp.ok) return;
-    var data = await resp.json();
-    // Merger dans le cache existant
-    Object.assign(window._planningCache, data.planningCache || {});
     console.log('[PATCH] timeline week chargée, cache total:', Object.keys(window._planningCache).length);
   } catch(e) {
-    console.warn('[PATCH] ensureWeekLoaded API error:', e);
+    console.warn('[PATCH] ensureWeekLoaded error:', e.message);
   }
 };
 
