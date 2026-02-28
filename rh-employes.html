@@ -506,10 +506,28 @@
       <div class="mrow">
         <div class="mfield" style="grid-column:1/-1">
           <label>Convention collective applicable</label>
-          <select class="minput" id="f-ccn" onchange="onCCNChange()">
+          <!-- Recherche par code IDCC ou nom -->
+          <div style="display:flex;gap:8px;margin-bottom:6px">
+            <div style="position:relative;flex:1">
+              <input type="text" class="minput" id="f-ccn-search" placeholder="🔍 Rechercher par nom ou code IDCC… (ex: 1979, CHR, restauration)" 
+                oninput="searchCCN(this.value)" autocomplete="off"
+                style="padding-right:32px"/>
+              <span id="f-ccn-search-clear" onclick="clearCCNSearch()" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--muted);font-size:14px">✕</span>
+            </div>
+            <div style="display:flex;flex-direction:column;justify-content:center;font-size:10px;color:var(--muted);text-align:center;flex-shrink:0">
+              <div>Code IDCC</div>
+              <input type="text" class="minput" id="f-ccn-idcc-direct" placeholder="Ex: 1979" 
+                oninput="searchCCNByIDCC(this.value)"
+                style="width:80px;font-size:12px;font-weight:700;text-align:center;padding:6px 8px"/>
+            </div>
+          </div>
+          <!-- Résultats de recherche (dropdown) -->
+          <div id="f-ccn-search-results" style="display:none;background:white;border:1.5px solid var(--border);border-radius:8px;max-height:220px;overflow-y:auto;margin-bottom:6px;box-shadow:0 4px 16px rgba(0,0,0,0.1)"></div>
+          <!-- Select complet (fallback / navigation manuelle) -->
+          <select class="minput" id="f-ccn" onchange="onCCNChange()" style="font-size:12px">
             <option value="">— Défaut entreprise —</option>
           </select>
-          <div id="f-ccn-note" style="display:none;font-size:11px;color:var(--muted);padding:5px 8px;background:#f8faff;border-radius:6px;margin-top:4px;line-height:1.5"></div>
+          <div id="f-ccn-note" style="display:none;font-size:11px;color:var(--muted);padding:8px 10px;background:#f8faff;border:1px solid var(--border);border-radius:6px;margin-top:6px;line-height:1.6"></div>
         </div>
       </div>
 
@@ -1249,12 +1267,14 @@ function renderStars(note) {
 //          pauseApres (h → déclenchement pause), pauseMin (min), note (info clé)
 // ─────────────────────────────────────────────────────────────────────────────
 const CCN_RULES = {
+  // ─── CODE DU TRAVAIL ───
   "droit_commun": {
-    label:"Code du travail", idcc:null,
+    label:"Code du travail (droit commun)", idcc:null,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
     note:"Art. L3121-18 : 10h/j max · Art. L3121-20 : 48h/sem · Art. L3121-33 : pause 20 min après 6h",
     primes:[], anciennete:[], treizieme:false, mutuelle:"Selon accord", congesPayes:25, rtts:0
   },
+  // ─── HÔTELLERIE / RESTAURATION ───
   "chr": {
     label:"Hôtels-Cafés-Restaurants (CHR)", idcc:1979,
     jourMax:11.5, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
@@ -1280,6 +1300,19 @@ const CCN_RULES = {
     anciennete:[{annees:3,pct:1},{annees:5,pct:2},{annees:8,pct:3},{annees:12,pct:4}],
     treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
+  "traiteurs": {
+    label:"Traiteurs et organisateurs de réceptions", idcc:1266,
+    jourMax:11.5, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1266 · Travail le week-end et jours fériés courant · Heures supplémentaires fréquentes",
+    primes:[
+      {nom:"Majoration dimanche et jours fériés", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche/férié travaillé"},
+      {nom:"Indemnité repas", montant:"Selon barème", obligatoire:true, note:"Repas fourni ou compensatoire"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"Progression par paliers"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── COMMERCE / DISTRIBUTION ───
   "commerce": {
     label:"Commerce de détail non alimentaire", idcc:1517,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
@@ -1293,20 +1326,19 @@ const CCN_RULES = {
     treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
   "commerce_alimentaire": {
-    label:"Commerce alimentaire (supermarchés)", idcc:2216,
+    label:"Commerce alimentaire (épicerie, supérette)", idcc:2216,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
     note:"IDCC 2216 · Travail dominical fréquent · Pause payée 20 min après 6h",
     primes:[
       {nom:"Prime de dimanche", montant:"+25% ou +30%", obligatoire:true, note:"Selon avenant ou accord d'entreprise"},
       {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
       {nom:"Prime de vacances", montant:"1/10e des congés", obligatoire:true, note:"Versée avec le salaire de juin"},
-      {nom:"Indemnité repas", montant:"Selon accord", obligatoire:false, note:"Pour temps de travail supérieur à 6h"}
     ],
     anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8},{annees:15,pct:10}],
     treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
   "grande_distribution": {
-    label:"Grande distribution", idcc:2216,
+    label:"Grande distribution (hypermarchés, supermarchés)", idcc:2216,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
     note:"IDCC 2216 · Amplitude max 12h · Repos hebdo dimanche si possible",
     primes:[
@@ -1318,6 +1350,28 @@ const CCN_RULES = {
     anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8},{annees:15,pct:10}],
     treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
+  "textile_habillement": {
+    label:"Textile — Habillement", idcc:1483,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1483 · Chômage partiel fréquent (saisonnalité) · Classifications A à G",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+3% dès 3 ans", obligatoire:true, note:"3% à 3 ans · 6% à 6 ans · 9% à 9 ans"},
+    ],
+    anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "sport": {
+    label:"Sport — Activités physiques et sportives", idcc:2511,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2511 · Spécificités animateurs sportifs · Contrats courts fréquents (CDD, saisons)",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2% dès 5 ans", obligatoire:false, note:"Selon accord d'entreprise"},
+      {nom:"Indemnité spécifique", montant:"Variable", obligatoire:false, note:"Frais kilométriques, matériel"}
+    ],
+    anciennete:[{annees:5,pct:2},{annees:10,pct:4}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── ALIMENTATION ARTISANALE ───
   "boulangerie": {
     label:"Boulangerie-Pâtisserie artisanale", idcc:843,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
@@ -1355,8 +1409,43 @@ const CCN_RULES = {
     anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
     treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
+  "poissonnerie": {
+    label:"Poissonnerie artisanale", idcc:1504,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1504 · Travail tôt le matin · Dimanche matin fréquent",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression conventionnelle"},
+      {nom:"Prime dimanche", montant:"+25%", obligatoire:true, note:"Si travail le dimanche"},
+      {nom:"Indemnité froid/humidité", montant:"Selon accord", obligatoire:false, note:"Conditions de travail particulières"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "charcuterie": {
+    label:"Charcuterie de détail (industrielle)", idcc:1586,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1586 · Modulation possible · Conditions frigorifiques",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans"},
+      {nom:"Prime froid", montant:"Variable", obligatoire:false, note:"Selon conditions de travail réfrigéré"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "epicerie_fine": {
+    label:"Épicerie fine — Chocolaterie artisanale", idcc:1518,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1518 · CCN du négoce et distribution de combustibles applicable en l'absence d'accord sectoriel spécifique",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:false, note:"Selon accord d'entreprise"},
+      {nom:"Prime de fin d'année", montant:"Selon accord", obligatoire:false, note:"Variable selon entreprise"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4}],
+    treizieme:false, mutuelle:"Selon accord", congesPayes:25, rtts:0
+  },
+  // ─── BTP ───
   "btp": {
-    label:"Bâtiment (BTP ouvriers)", idcc:1597,
+    label:"Bâtiment — Ouvriers", idcc:1597,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
     note:"IDCC 1597 · Modulation annuelle · Intempéries · Grand déplacement",
     primes:[
@@ -1370,83 +1459,324 @@ const CCN_RULES = {
     treizieme:false, mutuelle:"Obligatoire (PRO BTP)", congesPayes:30, rtts:0
   },
   "btp_etam": {
-    label:"BTP — ETAM (techniciens/agents de maîtrise)", idcc:2609,
+    label:"BTP — ETAM (techniciens, agents de maîtrise)", idcc:2609,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
     note:"IDCC 2609 · Forfait jours possible pour cadres · RTT",
     primes:[
-      {nom:"Prime ancienneté", montant:"+1%/an jusqu'à 15%", obligatoire:true, note:"1% par an, plafonnée à 15%"},
-      {nom:"Indemnité de déplacement", montant:"Grille zonale BTP", obligatoire:true, note:"Selon distance domicile-chantier"},
-      {nom:"Prime de 13e mois", montant:"1 mois de salaire", obligatoire:true, note:"Versée en décembre dans la majorité des accords"},
-      {nom:"Prime de vacances", montant:"1/10e congés payés", obligatoire:true, note:"Versée avec le départ en congé principal"}
+      {nom:"Prime ancienneté", montant:"+3% à +12%", obligatoire:true, note:"3% à 5 ans · 6% à 10 ans · 9% à 15 ans · 12% à 20 ans"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:true, note:"Versé en fin d'année"},
+      {nom:"Prime de vacances", montant:"30% masse CP", obligatoire:true, note:"Obligation conventionnelle ETAM BTP"}
     ],
-    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:5},{annees:10,pct:10},{annees:15,pct:15}],
-    treizieme:true, mutuelle:"Obligatoire (PRO BTP)", congesPayes:25, rtts:12
+    anciennete:[{annees:5,pct:3},{annees:10,pct:6},{annees:15,pct:9},{annees:20,pct:12}],
+    treizieme:true, mutuelle:"Obligatoire (PRO BTP)", congesPayes:25, rtts:10
   },
+  "electricite_batiment": {
+    label:"Électricité — installateurs du bâtiment", idcc:5035,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 5035 · Convention nationale des ouvriers électriciens",
+    primes:[
+      {nom:"Indemnités de déplacement", montant:"Grille zonale", obligatoire:true, note:"Selon éloignement chantier"},
+      {nom:"Prime ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"Progression par paliers de 5 ans"},
+      {nom:"Prime de panier", montant:"Selon accord", obligatoire:false, note:"Si repas sur chantier"}
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:6},{annees:15,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:30, rtts:0
+  },
+  "travaux_publics": {
+    label:"Travaux publics — Ouvriers", idcc:1702,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1702 · Conditions de chantier · Déplacements fréquents",
+    primes:[
+      {nom:"Indemnité de grand déplacement", montant:"Variable", obligatoire:true, note:"Si nuit hors domicile"},
+      {nom:"Prime de panier", montant:"10,30 € min/jour", obligatoire:true, note:"Repas sur chantier"},
+      {nom:"Prime ancienneté", montant:"+3% dès 3 ans", obligatoire:true, note:"3% à 3 ans · 6% à 6 ans · 9% à 9 ans"}
+    ],
+    anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire (BTP PRÉVOYANCE)", congesPayes:30, rtts:0
+  },
+  // ─── COIFFURE / ESTHÉTIQUE ───
   "coiffure": {
     label:"Coiffure", idcc:2596,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:"IDCC 2596 · Repos dimanche + 1 autre jour · Samedi travaillé courant",
+    note:"IDCC 2596 · Travail le samedi courant · Repos hebdo lundi ou mardi",
     primes:[
-      {nom:"Prime ancienneté", montant:"+3% dès 3 ans", obligatoire:true, note:"3% à 3 ans · 6% à 6 ans · 9% à 9 ans"},
-      {nom:"Prime service/pourboires", montant:"Variable", obligatoire:false, note:"Redistribution possible via prime mensuelle"},
-      {nom:"Indemnité repas", montant:"Selon accord", obligatoire:false, note:"Si travail en coupure sans retour domicile"}
+      {nom:"Prime d'ancienneté", montant:"3% dès 3 ans", obligatoire:true, note:"3% à 3 ans · 6% à 6 ans · 9% à 9 ans"},
+      {nom:"Prime de qualité/résultat", montant:"Variable", obligatoire:false, note:"Selon CA réalisé ou objectifs"},
+      {nom:"Indemnité entretien tenue", montant:"Selon accord", obligatoire:false, note:"Si tenue professionnelle imposée"}
     ],
     anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9}],
     treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
   "esthetique": {
-    label:"Esthétique-Cosmétique-Parfumerie", idcc:3032,
+    label:"Esthétique-Cosmétique et Enseignement technique", idcc:5045,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:"IDCC 3032 · Temps partiel fréquent · Salons ouverts samedi/dimanche",
+    note:"IDCC 5045 · Samedi travaillé courant · Formations continues fréquentes",
     primes:[
-      {nom:"Prime ancienneté", montant:"+1% dès 3 ans", obligatoire:true, note:"1% à 3 ans · 2% à 6 ans · 3% à 9 ans"},
-      {nom:"Prime commission/résultats", montant:"Variable", obligatoire:false, note:"Souvent intégrée dans la rémunération variable produits"}
+      {nom:"Prime d'ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de commission", montant:"Variable", obligatoire:false, note:"Sur vente de produits/soins"}
     ],
-    anciennete:[{annees:3,pct:1},{annees:6,pct:2},{annees:9,pct:3}],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
     treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
+  // ─── SANTÉ / MÉDICO-SOCIAL ───
   "sante": {
-    label:"Santé (FEHAP / EHPAD)", idcc:29,
+    label:"Établissements privés non lucratifs (FEHAP/UNIFED)", idcc:51,
     jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:"IDCC 29 · Gardes 12h autorisées · Cycles de 4 semaines",
+    note:"IDCC 51 · Travail en 3×8 · Week-end et jours fériés courants",
     primes:[
-      {nom:"Prime ancienneté", montant:"+1% dès 1 an", obligatoire:true, note:"1% à 1 an · 2% à 2 ans · … · 15% à 15 ans"},
-      {nom:"Prime de nuit", montant:"+9,15 € min/nuit", obligatoire:true, note:"Pour chaque nuit travaillée (21h-6h)"},
-      {nom:"Prime dimanche/jours fériés", montant:"+16,85 €/jour", obligatoire:true, note:"Pour chaque dimanche et jour férié travaillé"},
-      {nom:"Sujétions spéciales handicap", montant:"+3,03 €/h", obligatoire:true, note:"Structures accueillant des personnes handicapées"},
-      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:true, note:"Versé en décembre"}
+      {nom:"Prime d'ancienneté", montant:"+1%/an jusqu'à 30%", obligatoire:true, note:"1% par an, plafond 30%"},
+      {nom:"Prime de dimanche", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche travaillé"},
+      {nom:"Prime de nuit", montant:"+8% à +15%", obligatoire:true, note:"Pour travail entre 21h et 6h"},
+      {nom:"Congés trimestriels", montant:"6 jours/an", obligatoire:true, note:"En plus des 25 jours légaux"},
+      {nom:"Prime de sujétion spéciale", montant:"7,5% du salaire", obligatoire:true, note:"Liée aux conditions de travail spécifiques"}
     ],
-    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:5},{annees:10,pct:10},{annees:15,pct:15}],
-    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:18
+    anciennete:(()=>{let a=[];for(let i=1;i<=30;i++)a.push({annees:i,pct:i});return a;})(),
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:31, rtts:0
   },
-  "transport": {
-    label:"Transports routiers", idcc:16,
-    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:"IDCC 16 · Modulation · Temps de service réglementé CE 561/2006",
+  "sante_prive_lucratif": {
+    label:"Cliniques et hôpitaux privés à but lucratif", idcc:2264,
+    jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2264 · 3×8 · Week-end · Nuit courant",
     primes:[
-      {nom:"Prime de fin d'année", montant:"1 mois de salaire", obligatoire:true, note:"Équivalent 13e mois (accord de branche)"},
-      {nom:"Indemnité de repas", montant:"16,20 € min (grand déplacement)", obligatoire:true, note:"Petite restauration : 8,10 € · Déjeuner : 16,20 €"},
-      {nom:"Prime ancienneté", montant:"+2% dès 2 ans", obligatoire:true, note:"2% à 2 ans · 4% à 5 ans · 6% à 8 ans · 8% à 12 ans"},
-      {nom:"Prime de nuit", montant:"+20%", obligatoire:true, note:"Conduite entre 22h et 5h"}
+      {nom:"Prime d'ancienneté", montant:"+1%/an jusqu'à 20%", obligatoire:true, note:"1% par an, plafond 20%"},
+      {nom:"Prime de dimanche", montant:"+25%", obligatoire:true, note:"Pour dimanche travaillé"},
+      {nom:"Prime de nuit", montant:"+10%", obligatoire:true, note:"Entre 21h et 6h"},
+      {nom:"Prime de sujétion", montant:"~7% du salaire", obligatoire:true, note:"Pour les postes à contraintes spécifiques"}
     ],
-    anciennete:[{annees:2,pct:2},{annees:5,pct:4},{annees:8,pct:6},{annees:12,pct:8}],
+    anciennete:(()=>{let a=[];for(let i=1;i<=20;i++)a.push({annees:i,pct:i});return a;})(),
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "cabinet_medical": {
+    label:"Cabinets médicaux, paramédicaux et vétérinaires", idcc:1948,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1948 · Travail le samedi courant · Consultations urgences",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:false, note:"Selon accord d'entreprise ou usage"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "pharmacie": {
+    label:"Pharmacies d'officine", idcc:1996,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1996 · Garde semaine et week-end · Amplitude variable",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+3% dès 3 ans", obligatoire:true, note:"3% à 3 ans · 6% à 6 ans · 9% à 9 ans"},
+      {nom:"Indemnité de garde", montant:"Selon accord", obligatoire:false, note:"Garde du dimanche et jours fériés"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon accord d'entreprise ou d'établissement"}
+    ],
+    anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "aide_domicile": {
+    label:"Aide à domicile (SSIAD, services d'aide)", idcc:2941,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2941 · Éléments complémentaires de rémunération (ECR) · Modulation annuelle",
+    primes:[
+      {nom:"ECR — Ancienneté", montant:"Variables selon filière", obligatoire:true, note:"Éléments Complémentaires de Rémunération selon la BAD"},
+      {nom:"Remboursement frais kilométriques", montant:"0,38 €/km", obligatoire:true, note:"Déplacements entre bénéficiaires"},
+      {nom:"Prime de dimanche", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche travaillé"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:5},{annees:8,pct:8},{annees:10,pct:10}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "sap": {
+    label:"Services à la personne (mandataire/prestataire)", idcc:3127,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 3127 · Temps partiel courant · Modulation · Frais kilométriques",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"Remboursement km", montant:"0,38 €/km", obligatoire:true, note:"Entre chaque bénéficiaire"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "crèche_privée": {
+    label:"Crèches et structures d'accueil petite enfance (privé)", idcc:2691,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2691 · Amplitude en fonction des horaires d'accueil",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de fin d'année", montant:"Selon accord", obligatoire:false, note:"Variable selon établissement"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── NETTOYAGE / PROPRETÉ ───
+  "proprete": {
+    label:"Propreté et services associés", idcc:3043,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 3043 · Amplitude 13h possible · Horaires décalés (matin/soir)",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans · 8% à 12 ans"},
+      {nom:"Prime de salissure", montant:"~15-20 €/mois", obligatoire:false, note:"Si travaux particulièrement salissants"},
+      {nom:"Prime de nuit", montant:"+20%", obligatoire:true, note:"Entre 21h et 6h"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "nettoyage": {
+    label:"Entreprises de nettoyage industriel", idcc:3043,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 3043 · Même convention que Propreté · Temps partiel imposé fréquent",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"Prime de nuit", montant:"+20%", obligatoire:true, note:"Travail entre 21h et 6h"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── TRANSPORT ───
+  "transport_routier": {
+    label:"Transports routiers (marchandises et voyageurs)", idcc:16,
+    jourMax:10, hebdoMax:56, hebdoMoyMax:48, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 16 · Règlement CE 561/2006 · Dérogations hebdomadaires · Repos compensateurs",
+    primes:[
+      {nom:"Indemnité de repas", montant:"15,20 €/repas", obligatoire:true, note:"Barème national transport routier"},
+      {nom:"Indemnité de découcher (nuit)", montant:"40,50 €/nuit", obligatoire:true, note:"Si nuitée en dehors du domicile"},
+      {nom:"Prime de bilan/sécurité", montant:"Variable", obligatoire:false, note:"Selon accord d'entreprise"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "transport_voyageurs": {
+    label:"Transports routiers de voyageurs (autocars)", idcc:16,
+    jourMax:10, hebdoMax:56, hebdoMoyMax:48, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 16 · Conducteurs de tourisme · Horaires irréguliers · Jours fériés courants",
+    primes:[
+      {nom:"Indemnité de repas", montant:"15,20 €/repas", obligatoire:true, note:"Barème national"},
+      {nom:"Indemnité de découcher", montant:"40,50 €/nuit", obligatoire:true, note:"Nuitée hors domicile"},
+      {nom:"Prime dimanche et jours fériés", montant:"+20%", obligatoire:true, note:"Pour chaque dimanche/férié travaillé"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "transport_aerien": {
+    label:"Transport aérien (personnel au sol)", idcc:275,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 275 · Horaires atypiques · Week-end et jours fériés fréquents",
+    primes:[
+      {nom:"Prime de nuit", montant:"+25%", obligatoire:true, note:"Travail de nuit entre 22h et 5h"},
+      {nom:"Prime de dimanche et jours fériés", montant:"+100%", obligatoire:true, note:"Doublement du salaire légal"},
+      {nom:"Prime d'ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"3% à 5 ans · 6% à 10 ans"},
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:6},{annees:15,pct:9}],
     treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-  "metallurgie": {
-    label:"Métallurgie (nouvelle CCN 2024)", idcc:1672,
+  "logistique_entreposage": {
+    label:"Logistique — Entreposage et magasinage", idcc:1564,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:"IDCC 1672 · Nouvelle CCN 2024 (fusion) · Forfait-jours · Classifications A à H",
+    note:"IDCC 1564 · 3×8 possible · Travail de nuit · Modulation annuelle",
     primes:[
-      {nom:"Prime ancienneté", montant:"+3% à 5 ans", obligatoire:true, note:"3% à 5 ans · 5% à 10 ans · 8% à 15 ans · 12% à 20 ans"},
-      {nom:"13e mois", montant:"1 mois brut", obligatoire:true, note:"Maintenu depuis les anciens accords métallurgie"},
-      {nom:"Prime panier de nuit", montant:"7,10 € min", obligatoire:true, note:"Pour tout travail de nuit (21h-6h)"},
-      {nom:"Majoration heures de nuit", montant:"+25% à +50%", obligatoire:true, note:"+25% avant 22h/après 5h · +50% entre 22h et 5h"}
+      {nom:"Prime d'ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de nuit", montant:"+15% à +25%", obligatoire:true, note:"Selon plages horaires et accord"},
+      {nom:"Prime de panier", montant:"~7 €/jour", obligatoire:false, note:"Selon accord d'entreprise"}
     ],
-    anciennete:[{annees:5,pct:3},{annees:10,pct:5},{annees:15,pct:8},{annees:20,pct:12}],
-    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
+  // ─── AUTOMOBILE ───
+  "automobile": {
+    label:"Services de l'automobile (garages, VN, VO)", idcc:1090,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1090 · Heures réelles : pointage souvent requis · Samedi courant",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"3% à 5 ans · 5% à 10 ans · 7% à 15 ans"},
+      {nom:"Prime de rendement / résultat", montant:"Variable", obligatoire:false, note:"Atteinte des objectifs de vente ou d'atelier"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Prévu dans de nombreux accords d'entreprise"}
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:5},{annees:15,pct:7},{annees:20,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "deux_roues": {
+    label:"Commerce réparation cycle et motocycle", idcc:1090,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1090 · Même CCN que l'automobile · Petites structures fréquentes",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"Même grille que automobile"},
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:5},{annees:15,pct:7}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── IMMOBILIER ───
+  "immobilier": {
+    label:"Immobilier (agents, gestionnaires de biens)", idcc:1527,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1527 · Forfait-jours cadres · Commissions variables · RTT",
+    primes:[
+      {nom:"Commission sur transactions", montant:"Variable (% CA)", obligatoire:false, note:"Prévue dans le contrat — réglementée par la CCN"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans · 8% à 12 ans"},
+      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:true, note:"Prévu dans de nombreux accords d'entreprise du secteur"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:12
+  },
+  "copropriete": {
+    label:"Gardiens d'immeubles et employés d'immeubles", idcc:1043,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1043 · Astreintes · Logement de fonction souvent fourni",
+    primes:[
+      {nom:"Avantage en nature logement", montant:"Selon valeur locative", obligatoire:false, note:"Si logement fourni par l'employeur"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── SÉCURITÉ ───
+  "securite": {
+    label:"Entreprises de sécurité privée (gardiennage)", idcc:1351,
+    jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:12, pauseApres:6, pauseMin:20,
+    note:"IDCC 1351 · Amplitude 12h · Cycles de garde · Vacation longue",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+1%/an jusqu'à 7%", obligatoire:true, note:"1% par an, plafond 7% à 7 ans"},
+      {nom:"Prime de nuit", montant:"+10% min", obligatoire:true, note:"Travail entre 21h et 6h"},
+      {nom:"Prime dimanches et jours fériés", montant:"+10% min", obligatoire:true, note:"Pour chaque dimanche/férié travaillé"},
+      {nom:"Prime de tenue", montant:"~20 €/mois", obligatoire:false, note:"Entretien de la tenue obligatoire"},
+      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:false, note:"Prévu dans certains accords d'entreprise"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:4,pct:4},{annees:5,pct:5},{annees:6,pct:6},{annees:7,pct:7}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── AGRICULTURE ───
+  "agriculture": {
+    label:"Production agricole (grandes cultures, élevage)", idcc:7252,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 7252 · Saisons · Modulation annuelle · Travail saisonnier courant",
+    primes:[
+      {nom:"Prime de fin de saison", montant:"Selon accord", obligatoire:false, note:"Variable selon culture et région"},
+      {nom:"Indemnité repas", montant:"4,40 € min", obligatoire:true, note:"Si repas non fourni sur le lieu de travail"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:false, note:"2% à 3 ans · 4% à 6 ans (accord de branche)"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4}],
+    treizieme:false, mutuelle:"Obligatoire (CCMSA)", congesPayes:25, rtts:0
+  },
+  "viticulture": {
+    label:"Viticulture et vinification", idcc:7363,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 7363 · Vendanges · Modulation forte · Saisonniers fréquents",
+    primes:[
+      {nom:"Prime de vendanges", montant:"Selon accord territorial", obligatoire:false, note:"Versée en fin de campagne"},
+      {nom:"Indemnité repas", montant:"4,40 € min", obligatoire:true, note:"Si repas non fourni"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:5,pct:4}],
+    treizieme:false, mutuelle:"Obligatoire (CCMSA)", congesPayes:25, rtts:0
+  },
+  "fleurs_plants": {
+    label:"Jardineries et graineteries", idcc:1760,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1760 · Travail le samedi et dimanche fréquent · Saisonnalité forte (printemps)",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"Prime de dimanche", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche travaillé"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── CONSEIL / BUREAUX / TECH ───
   "syntec": {
-    label:"Syntec (Ingénieurs et Cadres)", idcc:1486,
+    label:"Syntec (ingénieurs, informatique, conseil)", idcc:1486,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
     note:"IDCC 1486 · Forfait-jours cadres · 218j/an max · RTT nombreux",
     primes:[
@@ -1459,7 +1789,7 @@ const CCN_RULES = {
     treizieme:false, mutuelle:"Obligatoire (50% employeur)", congesPayes:25, rtts:15
   },
   "bureaux_entreprise": {
-    label:"Bureaux d'études techniques (BET)", idcc:1486,
+    label:"Bureaux d'études techniques (BET/INERIS)", idcc:1486,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
     note:"IDCC 1486 · Identique Syntec pour les BET · 218 jours forfait cadres",
     primes:[
@@ -1469,75 +1799,327 @@ const CCN_RULES = {
     anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:5},{annees:7,pct:7}],
     treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:15
   },
-  "immobilier": {
-    label:"Immobilier (agents et gestionnaires)", idcc:1527,
+  "banque": {
+    label:"Banque (AFB — banques et établissements financiers)", idcc:2120,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:"IDCC 1527 · Forfait-jours cadres · Commissions variables · RTT",
+    note:"IDCC 2120 · Forfait-jours cadres · RTT nombreux · Congés bonifiés selon ancienneté",
     primes:[
-      {nom:"Commission sur transactions", montant:"Variable (% CA)", obligatoire:false, note:"Prévue dans le contrat — réglementée par la CCN"},
-      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans · 8% à 12 ans"},
-      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:true, note:"Prévu dans de nombreux accords d'entreprise du secteur"}
+      {nom:"Prime d'ancienneté", montant:"+1%/an jusqu'à 15%", obligatoire:true, note:"1% par an, plafond 15%"},
+      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:true, note:"Versé en fin d'année"},
+      {nom:"Intéressement/participation", montant:"Variable", obligatoire:false, note:"Selon résultats et accord d'entreprise"}
     ],
-    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
-    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:12
+    anciennete:(()=>{let a=[];for(let i=1;i<=15;i++)a.push({annees:i,pct:i});return a;})(),
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:20
   },
-  "agriculture": {
-    label:"Production agricole", idcc:7252,
+  "assurance": {
+    label:"Assurance (agents généraux et salariés)", idcc:1672,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:"IDCC 7252 · Saisons · Modulation annuelle · Travail saisonnier courant",
+    note:"IDCC 1672 · Forfait-jours possible · RTT · Commissions commerciales",
     primes:[
-      {nom:"Prime de fin de saison", montant:"Selon accord", obligatoire:false, note:"Variable selon culture et région"},
-      {nom:"Indemnité repas", montant:"4,40 € min", obligatoire:true, note:"Si repas non fourni sur le lieu de travail"},
-      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:false, note:"2% à 3 ans · 4% à 6 ans (accord de branche)"}
+      {nom:"Prime d'ancienneté", montant:"Variable selon classification", obligatoire:true, note:"Grille conventionnelle"},
+      {nom:"Commission sur primes d'assurance", montant:"Variable", obligatoire:false, note:"Sur production commerciale"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:true, note:"Versé en décembre"},
     ],
-    anciennete:[{annees:3,pct:2},{annees:6,pct:4}],
-    treizieme:false, mutuelle:"Obligatoire (CCMSA)", congesPayes:25, rtts:0
+    anciennete:[{annees:5,pct:3},{annees:10,pct:5},{annees:15,pct:8},{annees:20,pct:12}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-  "proprete": {
-    label:"Propreté et services associés", idcc:3043,
+  "cabinet_comptable": {
+    label:"Cabinets comptables et commissaires aux comptes", idcc:787,
     jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
-    note:"IDCC 3043 · Amplitude 13h possible · Horaires décalés (matin/soir)",
+    note:"IDCC 787 · Périodes de surcharge mars-avril · RTT fréquents",
     primes:[
-      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans · 8% à 12 ans"},
-      {nom:"Prime de salissure", montant:"~15-20 €/mois", obligatoire:false, note:"Si travaux particulièrement salissants"},
-      {nom:"Prime de nuit", montant:"+20%", obligatoire:true, note:"Entre 21h et 6h"},
-      {nom:"Indemnité transport", montant:"50% titre de transport", obligatoire:true, note:"Remboursement légal abonnement transports en commun"}
+      {nom:"Prime d'ancienneté", montant:"+2%/5 ans", obligatoire:true, note:"2% à 5 ans · 4% à 10 ans · 6% à 15 ans"},
+      {nom:"Prime de bilan", montant:"Variable", obligatoire:false, note:"Versée pendant la période fiscale"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon accord d'entreprise"},
+    ],
+    anciennete:[{annees:5,pct:2},{annees:10,pct:4},{annees:15,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "avocats": {
+    label:"Cabinets d'avocats", idcc:1000,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1000 · Charge de travail variable (plaidoiries) · Forfait-jours possible",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"3% à 5 ans · 6% à 10 ans · 9% à 15 ans"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon accord ou usage"},
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:6},{annees:15,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "architecture": {
+    label:"Architectes (cabinets d'architecture)", idcc:2332,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2332 · Forfait-jours pour les architectes · Concours et appels d'offres",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de résultat", montant:"Variable", obligatoire:false, note:"Selon chiffre d'affaires et résultats"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "notariat": {
+    label:"Notariat", idcc:31,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 31 · Charge importante fin d'année · Confidentialité stricte",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"Grille conventionnelle", obligatoire:true, note:"Progression par tranches d'ancienneté"},
+      {nom:"Gratification de fin d'année", montant:"Variable", obligatoire:false, note:"Selon politique de l'étude"},
     ],
     anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
     treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
   },
-  "securite": {
-    label:"Entreprises de sécurité privée", idcc:1351,
-    jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:12, pauseApres:6, pauseMin:20,
-    note:"IDCC 1351 · Amplitude 12h · Cycles de garde · Vacation longue",
+  // ─── INDUSTRIE ───
+  "metallurgie": {
+    label:"Métallurgie (nouvelle CCN 2024 — IDCC 1672)", idcc:1672,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1672 · Nouvelle CCN 2024 (fusion) · Forfait-jours · Classifications A à H",
     primes:[
-      {nom:"Prime ancienneté", montant:"+1%/an jusqu'à 7%", obligatoire:true, note:"1% par an, plafond 7% à 7 ans"},
-      {nom:"Prime de nuit", montant:"+10% min", obligatoire:true, note:"Travail entre 21h et 6h"},
-      {nom:"Prime dimanches et jours fériés", montant:"+10% min", obligatoire:true, note:"Pour chaque dimanche/férié travaillé"},
-      {nom:"Prime de tenue", montant:"~20 €/mois", obligatoire:false, note:"Entretien de la tenue obligatoire"},
-      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:false, note:"Prévu dans certains accords d'entreprise"}
+      {nom:"Prime d'ancienneté", montant:"+1%/an jusqu'à 7%", obligatoire:true, note:"1% par an, plafond 7% (art. 67 de la CCN 2024)"},
+      {nom:"Prime de nuit", montant:"+10% à +25%", obligatoire:true, note:"Selon accord d'entreprise"},
+      {nom:"Prime d'équipe", montant:"Variable", obligatoire:false, note:"Travail en équipe 3×8"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Très répandu dans les accords d'entreprise"},
+      {nom:"Prime de vacances", montant:"30% des CP", obligatoire:true, note:"Versée avec les congés (art. 23 de la CCN)"}
     ],
     anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:4,pct:4},{annees:5,pct:5},{annees:6,pct:6},{annees:7,pct:7}],
     treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
-  }
+  },
+  "chimie": {
+    label:"Industries chimiques", idcc:44,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 44 · 3×8 courant · Travail de nuit · Primes de risques",
+    primes:[
+      {nom:"Prime de nuit", montant:"+20% min", obligatoire:true, note:"Travail entre 21h et 5h"},
+      {nom:"Prime de risque / nuisance", montant:"Variable", obligatoire:false, note:"Postes exposés à des produits dangereux"},
+      {nom:"Prime ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"Progression par paliers de 5 ans"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:true, note:"Conventionnel"}
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:6},{annees:15,pct:9},{annees:20,pct:12}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "plasturgie": {
+    label:"Plasturgie et composites", idcc:292,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 292 · Production en continu · 3×8 fréquent",
+    primes:[
+      {nom:"Prime de nuit", montant:"+20%", obligatoire:true, note:"Travail de nuit"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "imprimerie": {
+    label:"Imprimerie de labeur et industries graphiques", idcc:184,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 184 · 3×8 possible · Secteur en mutation numérique",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/5 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"Prime de nuit", montant:"+15% min", obligatoire:true, note:"Travail de nuit"},
+    ],
+    anciennete:[{annees:5,pct:2},{annees:10,pct:4},{annees:15,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "agroalimentaire": {
+    label:"Industries alimentaires diverses (IAA)", idcc:1043,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1043 · Modulation annuelle · 3×8 courant dans les grandes unités",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de nuit", montant:"+15%", obligatoire:true, note:"Si travail de nuit habituel"},
+      {nom:"Prime de panier", montant:"~7 €/jour", obligatoire:false, note:"Selon accord d'entreprise"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── ÉDUCATION / FORMATION ───
+  "enseignement_prive": {
+    label:"Enseignement privé non lucratif (EPNL / ECLAT)", idcc:1516,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1516 · Vacances scolaires · Annualisation du temps de travail",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+1%/an jusqu'à 15%", obligatoire:true, note:"1% par an, plafonné à 15%"},
+    ],
+    anciennete:(()=>{let a=[];for(let i=1;i<=15;i++)a.push({annees:i,pct:i});return a;})(),
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "formation_professionnelle": {
+    label:"Formation professionnelle (organismes de formation)", idcc:1516,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1516 · Activité modulée selon les sessions · CDD de mission fréquents",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+1%/an jusqu'à 15%", obligatoire:true, note:"Progression annuelle"},
+    ],
+    anciennete:(()=>{let a=[];for(let i=1;i<=15;i++)a.push({annees:i,pct:i});return a;})(),
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── MÉDIAS / CULTURE ───
+  "journalistes": {
+    label:"Journalistes et presse écrite (Charte Pigiste)", idcc:1480,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1480 · Mensualisation · Abattement fiscal 30% · Pigistes",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"Variable selon titre", obligatoire:true, note:"Selon accord d'entreprise"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon titre de presse"},
+    ],
+    anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "spectacle": {
+    label:"Spectacle vivant (techniciens, artistes — GUSO)", idcc:1285,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1285 · CDDU (CDD d'usage) fréquents · Cachet ou salaire · GUSO disponible",
+    primes:[
+      {nom:"Indemnité de fin de CDDU", montant:"10% brut", obligatoire:true, note:"Pour les CDD d'usage (précaires)"},
+    ],
+    anciennete:[],
+    treizieme:false, mutuelle:"Selon accord", congesPayes:10, rtts:0
+  },
+  "edition": {
+    label:"Édition (livres, numérique)", idcc:2121,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2121 · Forfait-jours cadres · Période chargée (rentrée littéraire)",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon accord d'entreprise"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── AUTRES SECTEURS ───
+  "interim": {
+    label:"Travail temporaire (agences d'intérim)", idcc:1413,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1413 · IFM 10% + CP 10% · Portage salarial · Qualification spécifique",
+    primes:[
+      {nom:"Indemnité de fin de mission (IFM)", montant:"10% du brut", obligatoire:true, note:"Versée à la fin de chaque mission"},
+      {nom:"Congés payés (ICCP)", montant:"10% du brut + IFM", obligatoire:true, note:"Indemnité compensatrice de congés payés"},
+    ],
+    anciennete:[],
+    treizieme:false, mutuelle:"Obligatoire si > 400h/trimestre", congesPayes:10, rtts:0
+  },
+  "informatique": {
+    label:"Informatique (SSII, ESN)", idcc:1486,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1486 (Syntec) · Forfait-jours courant · RTT · Astreintes possibles",
+    primes:[
+      {nom:"Prime de vacances", montant:"30% masse CP", obligatoire:true, note:"Art. 23 CCN Syntec"},
+      {nom:"Prime ancienneté ETAM", montant:"+1%/an jusqu'à 7%", obligatoire:true, note:"+1%/an pour les ETAM"},
+      {nom:"Prime d'astreinte", montant:"Variable", obligatoire:false, note:"Si astreintes techniques planifiées"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:5},{annees:7,pct:7}],
+    treizieme:false, mutuelle:"Obligatoire (50% employeur)", congesPayes:25, rtts:15
+  },
+  "garderie_periscolaire": {
+    label:"Animation et ALSH (périscolaire, centres de loisirs)", idcc:1518,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1518 (ECLAT) · Modulation annuelle · CDD saisonniers · Temps partiels",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+1%/an jusqu'à 15%", obligatoire:true, note:"Progression annuelle ECLAT"},
+    ],
+    anciennete:(()=>{let a=[];for(let i=1;i<=15;i++)a.push({annees:i,pct:i});return a;})(),
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "fleuriste": {
+    label:"Commerce de détail de fleurs, plantes et graines", idcc:1978,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1978 · Travail le dimanche matin · Fêtes (Fête des mères, Toussaint)",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de dimanche", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche travaillé"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "optique": {
+    label:"Optique-Lunetterie de détail", idcc:1431,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1431 · Samedi travaillé · Ouvertures commerciales",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de résultat / commission", montant:"Variable", obligatoire:false, note:"Sur ventes et chiffre d'affaires"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "location_voiture": {
+    label:"Location de voitures et véhicules automobiles", idcc:1951,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1951 · Amplitude variable · Week-end et jours fériés fréquents",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"Prime de résultat", montant:"Variable", obligatoire:false, note:"Sur locations réalisées"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "pressing_blanchisserie": {
+    label:"Blanchisserie, laverie, teinturerie, pressing", idcc:2002,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2002 · Conditions thermiques particulières · Travail debout",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime chaleur / conditions de travail", montant:"Variable", obligatoire:false, note:"Selon accord d'entreprise"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "funeral": {
+    label:"Pompes funèbres et marbriers", idcc:759,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 759 · Astreintes · Disponibilité 24h/24 · Conditions psychologiques particulières",
+    primes:[
+      {nom:"Prime d'astreinte", montant:"Variable", obligatoire:false, note:"Selon accord d'entreprise"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon usage dans la structure"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "tourisme": {
+    label:"Agences de voyages et de tourisme", idcc:1710,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1710 · Saisonnalité forte · Commissions sur ventes",
+    primes:[
+      {nom:"Commission sur voyages vendus", montant:"Variable", obligatoire:false, note:"Selon politique commerciale"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "commerce_gros": {
+    label:"Commerce de gros (négoce)", idcc:573,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 573 · Commis voyageurs représentants · VRP possibles",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"3% à 5 ans · 6% à 10 ans"},
+      {nom:"Commission VRP", montant:"Variable", obligatoire:false, note:"Pour les représentants commerciaux"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Répandu dans le secteur"}
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:6},{annees:15,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
 };
 
 // Groupes pour affichage dans les selects
 const CCN_GROUPS = [
   { label: '📄 Droit commun', keys: ['droit_commun'] },
-  { label: '🍽️ Hôtellerie / Restauration', keys: ['chr','restauration_rapide'] },
-  { label: '🛒 Commerce / Distribution', keys: ['commerce','commerce_alimentaire','grande_distribution'] },
-  { label: '🥖 Alimentation artisanale', keys: ['boulangerie','patisserie','boucherie'] },
-  { label: '🏗️ BTP / Artisanat', keys: ['btp','btp_etam'] },
+  { label: '🍽️ Hôtellerie / Restauration', keys: ['chr','restauration_rapide','traiteurs'] },
+  { label: '🛒 Commerce / Distribution', keys: ['commerce','commerce_alimentaire','grande_distribution','textile_habillement','sport'] },
+  { label: '🥖 Alimentation artisanale', keys: ['boulangerie','patisserie','boucherie','poissonnerie','charcuterie','epicerie_fine'] },
+  { label: '🏗️ BTP / Artisanat du bâtiment', keys: ['btp','btp_etam','electricite_batiment','travaux_publics'] },
   { label: '💇 Coiffure / Esthétique', keys: ['coiffure','esthetique'] },
-  { label: '🏥 Santé / Médico-social', keys: ['sante','cabinet_medical','pharmacie'] },
-  { label: '🧹 Nettoyage / Propreté', keys: ['nettoyage'] },
-  { label: '🚛 Transport', keys: ['transport_routier','transport_voyageurs'] },
-  { label: '🚗 Automobile', keys: ['automobile'] },
-  { label: '🏠 Immobilier', keys: ['immobilier'] },
-  { label: '🔒 Sécurité', keys: ['securite'] },
-  { label: '🌾 Agriculture', keys: ['agriculture','viticulture'] },
-  { label: '🤝 Services à la personne', keys: ['sap','aide_domicile'] },
+  { label: '🏥 Santé / Médico-social', keys: ['sante','sante_prive_lucratif','cabinet_medical','pharmacie','aide_domicile','sap','crèche_privée'] },
+  { label: '🧹 Nettoyage / Propreté', keys: ['proprete','nettoyage'] },
+  { label: '🚛 Transport / Logistique', keys: ['transport_routier','transport_voyageurs','transport_aerien','logistique_entreposage'] },
+  { label: '🚗 Automobile', keys: ['automobile','deux_roues','location_voiture'] },
+  { label: '🏠 Immobilier / Gardiennage', keys: ['immobilier','copropriete'] },
+  { label: '🔒 Sécurité privée', keys: ['securite'] },
+  { label: '🌾 Agriculture / Nature', keys: ['agriculture','viticulture','fleurs_plants'] },
+  { label: '💼 Conseil / Bureaux / Tech', keys: ['syntec','bureaux_entreprise','informatique','cabinet_comptable','avocats','architecture','notariat'] },
+  { label: '🏦 Banque / Finance / Assurance', keys: ['banque','assurance'] },
+  { label: '🏭 Industrie / Production', keys: ['metallurgie','chimie','plasturgie','imprimerie','agroalimentaire'] },
+  { label: '📚 Éducation / Formation', keys: ['enseignement_prive','formation_professionnelle','garderie_periscolaire'] },
+  { label: '🎭 Médias / Culture / Spectacle', keys: ['journalistes','spectacle','edition'] },
+  { label: '🛠️ Services divers', keys: ['interim','fleuriste','optique','pressing_blanchisserie','funeral','tourisme','commerce_gros'] },
 ];
 
 // Convention par défaut entreprise (chargée depuis Firestore)
@@ -1641,6 +2223,85 @@ function onCCNChange() {
   `;
 }
 window.onCCNChange = onCCNChange;
+// ── RECHERCHE CCN PAR NOM OU CODE IDCC ──
+function searchCCN(query) {
+  const q = (query||'').trim().toLowerCase();
+  const clearBtn = document.getElementById('f-ccn-search-clear');
+  const resultsDiv = document.getElementById('f-ccn-search-results');
+  if(clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+  if(!q || q.length < 2) { if(resultsDiv) resultsDiv.style.display = 'none'; return; }
+
+  const results = Object.entries(CCN_RULES).filter(([k, v]) => {
+    const label = (v.label||'').toLowerCase();
+    const idcc = String(v.idcc||'');
+    return label.includes(q) || idcc.startsWith(q) || k.includes(q);
+  }).slice(0, 12);
+
+  if(!resultsDiv) return;
+  if(!results.length) {
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--muted);text-align:center">Aucune convention trouvée — essayez un code IDCC</div>';
+    return;
+  }
+  resultsDiv.style.display = 'block';
+  resultsDiv.innerHTML = results.map(([k,v]) => {
+    const idccBadge = v.idcc ? `<span style="font-size:10px;background:#e0f2fe;color:#0369a1;padding:1px 6px;border-radius:4px;font-weight:700;flex-shrink:0">IDCC ${v.idcc}</span>` : '';
+    return `<div onclick="selectCCN('${k}')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 14px;cursor:pointer;border-bottom:1px solid #f1f5f9;transition:background .1s" onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background='white'">
+      <span style="font-size:12px;font-weight:600;color:var(--text)">${v.label}</span>
+      ${idccBadge}
+    </div>`;
+  }).join('');
+}
+window.searchCCN = searchCCN;
+
+function searchCCNByIDCC(idccCode) {
+  const code = parseInt(idccCode);
+  if(!code || idccCode.length < 2) return;
+  const match = Object.entries(CCN_RULES).find(([k,v]) => v.idcc === code);
+  const resultsDiv = document.getElementById('f-ccn-search-results');
+  if(match) {
+    selectCCN(match[0]);
+    const searchInput = document.getElementById('f-ccn-search');
+    if(searchInput) { searchInput.value = match[1].label; }
+    if(resultsDiv) resultsDiv.style.display = 'none';
+  } else if(idccCode.length >= 3) {
+    // Recherche partielle
+    searchCCN(idccCode);
+  }
+}
+window.searchCCNByIDCC = searchCCNByIDCC;
+
+function selectCCN(key) {
+  const sel = document.getElementById('f-ccn');
+  if(sel) sel.value = key;
+  const resultsDiv = document.getElementById('f-ccn-search-results');
+  if(resultsDiv) resultsDiv.style.display = 'none';
+  const clearBtn = document.getElementById('f-ccn-search-clear');
+  if(clearBtn) clearBtn.style.display = 'none';
+  const searchInput = document.getElementById('f-ccn-search');
+  if(searchInput && CCN_RULES[key]) {
+    const rule = CCN_RULES[key];
+    searchInput.value = rule.label + (rule.idcc ? ' (IDCC '+rule.idcc+')' : '');
+  }
+  const idccInput = document.getElementById('f-ccn-idcc-direct');
+  if(idccInput && CCN_RULES[key]?.idcc) idccInput.value = CCN_RULES[key].idcc;
+  onCCNChange();
+}
+window.selectCCN = selectCCN;
+
+function clearCCNSearch() {
+  const searchInput = document.getElementById('f-ccn-search');
+  const resultsDiv = document.getElementById('f-ccn-search-results');
+  const clearBtn = document.getElementById('f-ccn-search-clear');
+  const idccInput = document.getElementById('f-ccn-idcc-direct');
+  if(searchInput) searchInput.value = '';
+  if(resultsDiv) resultsDiv.style.display = 'none';
+  if(clearBtn) clearBtn.style.display = 'none';
+  if(idccInput) idccInput.value = '';
+}
+window.clearCCNSearch = clearCCNSearch;
+
+
 
 // Stockage notes personnalisées CCN (en mémoire + Firestore)
 window._ccnCustomNotes = {};
@@ -1680,6 +2341,10 @@ window.openModalNouvelEmploye = function() {
   _photoDataURL = null;
   document.getElementById('modal-emp-title').textContent = '👤 Nouvel employé';
   populateCCNSelect('f-ccn', '');
+  // Vider les champs de recherche CCN
+  const si = document.getElementById('f-ccn-search'); if(si) si.value='';
+  const ii = document.getElementById('f-ccn-idcc-direct'); if(ii) ii.value='';
+  const rd = document.getElementById('f-ccn-search-results'); if(rd) rd.style.display='none';
   ['prenom','nom','naissance','nationalite','adresse','tel','email','nss',
    'poste','dept','entree','fin','brut','net','heures','iban','note','superbrut'].forEach(k => {
     const el = document.getElementById('f-'+k);
@@ -1737,6 +2402,19 @@ window.openModalEdit = function(id) {
   document.getElementById('f-couleur').value  = e.couleur||COLORS[0];
   // CCN
   populateCCNSelect('f-ccn', e.ccn||'');
+  // Pré-remplir le champ de recherche avec le nom de la CCN de l'employé
+  const searchInput = document.getElementById('f-ccn-search');
+  const idccInput = document.getElementById('f-ccn-idcc-direct');
+  if(searchInput) {
+    if(e.ccn && CCN_RULES[e.ccn]) {
+      const rule = CCN_RULES[e.ccn];
+      searchInput.value = rule.label + (rule.idcc ? ' (IDCC '+rule.idcc+')' : '');
+      if(idccInput && rule.idcc) idccInput.value = rule.idcc;
+    } else {
+      searchInput.value = '';
+      if(idccInput) idccInput.value = '';
+    }
+  }
   onCCNChange();
   // Période d'essai
   const pe = e.periodeEssai||{active:false};
