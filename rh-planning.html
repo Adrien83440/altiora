@@ -347,6 +347,7 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 
 /* Barres Timeline */
 .tl-shift-bar{cursor:grab;user-select:none;touch-action:none;}
+.tl-bar-wrap .tl-shift-bar{cursor:grab;}  /* barre = grab, fond = crosshair */
 .tl-shift-bar.pm-dragging{opacity:.25;pointer-events:none;}
 
 /* Drop targets Gantt */
@@ -1176,10 +1177,12 @@ function renderTimeline(){
         </div>
       </div>
       <!-- Zone barres -->
-      <div class="tl-bar-wrap" style="position:relative;flex:1;min-width:0">
+      <div class="tl-bar-wrap" style="position:relative;flex:1;min-width:0;cursor:crosshair"
+        onclick="tlBwrapClick(event,'${e.id}','${fmt(d)}')"
+        data-start="${_pm.tlStartH||6}" data-span="${(_pm.tlEndH||23)-(_pm.tlStartH||6)}">
         ${TICKS.map(hh=>`<div class="tl-grid-line" style="left:${pct(hh)}%"></div>`).join('')}
         ${bars}
-        ${!items.length?`<div style="position:absolute;inset:0;display:flex;align-items:center;padding-left:14px;cursor:pointer;color:#d1d5db;font-size:11px;font-weight:500" onclick="openCreneauModal('${e.id}','${fmt(d)}')">+ Ajouter un créneau</div>`:''}
+        ${!items.length?`<div style="position:absolute;inset:0;display:flex;align-items:center;padding-left:14px;pointer-events:none;color:#d1d5db;font-size:11px;font-weight:500">+ Cliquer pour ajouter</div>`:''}
       </div>
     </div>`;
   }).join('');
@@ -1193,6 +1196,34 @@ function renderTimeline(){
     </div>
   </div>`;
 }
+
+// ── Clic sur la zone horaire timeline → ouvre modal pré-rempli ──
+function tlBwrapClick(ev, empId, date){
+  // Ignorer si c'est la fin d'un drag ou un clic sur une barre existante
+  if(_pm.active) return;
+  if(ev.target.classList.contains('tl-shift-bar') || ev.target.closest('.tl-shift-bar')) return;
+
+  const bwrap = ev.currentTarget;
+  const rect  = bwrap.getBoundingClientRect();
+  const START_H = 6, END_H = 23, SPAN = (END_H - START_H) * 60;
+
+  // Calcul de l'heure cliquée
+  const ratio  = (ev.clientX - rect.left) / rect.width;
+  const rawMin = ratio * SPAN + START_H * 60;
+  const debMin = _snapQ(Math.max(START_H * 60, Math.min(END_H * 60 - 60, rawMin)));
+  const finMin = Math.min(debMin + 60, END_H * 60); // durée par défaut 1h
+  const debStr = _minToStr(debMin);
+  const finStr = _minToStr(finMin);
+
+  // Ouvrir le modal avec l'heure pré-remplie
+  openCreneauModal(empId, date);
+  // Forcer la plage calculée (après que renderPlages() ait tourné)
+  setTimeout(() => {
+    _plages = [{deb: debStr, fin: finStr}];
+    renderPlages();
+  }, 20);
+}
+window.tlBwrapClick = tlBwrapClick;
 
 // dndTlOver/dndTlLeave supprimés (pointer-events engine)
 
