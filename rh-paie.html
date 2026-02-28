@@ -884,6 +884,14 @@ function openFiche(empId) {
   _currentFicheEmpId = empId;
   var temps    = _tempsData[empId] || {};
   var paie     = _paieData[empId]  || {};
+  // Charger les primes sauvegardées (nouveau format tableau) ou migrer l'ancien champ prime
+  _currentPrimes = [];
+  if (paie.primes && Array.isArray(paie.primes) && paie.primes.length) {
+    _currentPrimes = paie.primes.map(function(p){ return Object.assign({}, p); });
+  } else if (paie.prime && parseFloat(paie.prime) > 0) {
+    // Migration : ancien champ prime unique → mensuelle
+    _currentPrimes = [{ periodicite: 'mensuelle', montant: parseFloat(paie.prime).toFixed(2).replace('.',','), moisVersement: 12 }];
+  }
   var estCadre = emp.categoriePoste === 'cadre';
 
   var hContrat = parseFloat(emp.heuresHebdo || 35) * (52/12);
@@ -966,8 +974,24 @@ function openFiche(empId) {
           <div class="field-hint">Modifiable manuellement</div>
         </div>
         <div class="field">
-          <label>Prime / Complément (€)</label>
-          <input type="text" inputmode="decimal" id="fi-prime" value="${paie.prime ? parseFloat(paie.prime).toFixed(2).replace('.',',') : ''}" placeholder="0,00" oninput="onFicheBrutInput(null,'${empId}')"/>
+          <label>Total primes ce mois (€) <span style="font-size:10px;color:var(--rh-main);font-weight:700" id="fi-prime-badge">0,00 €</span></label>
+          <input type="text" readonly id="fi-prime" value="${paie.prime ? parseFloat(paie.prime).toFixed(2).replace('.',',') : '0,00'}" placeholder="0,00" style="background:#f8faff;cursor:default"/>
+          <div class="field-hint">Calculé depuis le gestionnaire de primes ci-dessous</div>
+        </div>
+      </div>
+
+      <!-- GESTIONNAIRE DE PRIMES -->
+      <div style="background:#f8faff;border:1.5px solid var(--border);border-radius:10px;padding:14px;margin-top:4px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:6px">🎁 Primes & compléments <span style="font-size:9px;font-weight:600;color:var(--muted)">(mensuel + annuel proratisé)</span></div>
+          <button type="button" class="btn btn-rh btn-xs" onclick="addPrimeLine('${empId}')">+ Ajouter</button>
+        </div>
+        <div id="fi-primes-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">
+          ${renderPrimesList(paie.primes||[], '${empId}')}
+        </div>
+        <div style="padding:8px 10px;background:white;border:1px solid var(--rh-border);border-radius:7px;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:11px;color:var(--muted);font-weight:600">Total primes ajouté au brut ce mois</span>
+          <span style="font-size:14px;font-weight:800;color:var(--rh-main)" id="fi-primes-total-display">0,00 €</span>
         </div>
       </div>
     </div>
@@ -1194,13 +1218,160 @@ function onFicheHInput(val, empId) {
 }
 window.onFicheHInput = onFicheHInput;
 
+// ── TYPES DE PRIMES ──
+var PRIME_TYPES = [
+  { val: 'mensuelle',       label: 'Prime mensuelle',        freq: 'mois' },
+  { val: 'trimestrielle',   label: 'Prime trimestrielle',    freq: 'trim' },
+  { val: 'semestrielle',    label: 'Prime semestrielle',     freq: 'sem' },
+  { val: 'annuelle',        label: 'Prime annuelle',         freq: 'an' },
+  { val: '13eme',           label: '13ème mois',             freq: 'an' },
+  { val: 'exceptionnelle',  label: 'Prime exceptionnelle',   freq: 'ponct' },
+  { val: 'objectifs',       label: 'Prime sur objectifs',    freq: 'mois' },
+  { val: 'anciennete',      label: "Prime d'ancienneté",     freq: 'mois' },
+  { val: 'panier',          label: 'Indemnité panier/repas', freq: 'mois' },
+  { val: 'transport',       label: 'Complément transport',   freq: 'mois' },
+  { val: 'autre',           label: 'Autre complément',       freq: 'mois' },
+];
+
+// Mois courant sur lequel on travaille (index 0-11)
+function _isPrimeMoisCourant(p) {
+  // Vérifie si une prime doit apparaître ce mois
+  var freq = p.periodicite || 'mensuelle';
+  var moisNum = _curMois.getMonth() + 1; // 1-12
+  if (freq === 'mensuelle' || freq === 'objectifs' || freq === 'anciennete' || freq === 'panier' || freq === 'transport' || freq === 'autre') return true;
+  if (freq === 'exceptionnelle') return !!p.appliquerCeMois;
+  if (freq === 'trimestrielle') return [3,6,9,12].includes(moisNum);
+  if (freq === 'semestrielle') return [6,12].includes(moisNum);
+  if (freq === 'annuelle' || freq === '13eme') {
+    // Mois de versement configuré ou décembre par défaut
+    var moisVersement = parseInt(p.moisVersement) || 12;
+    return moisNum === moisVersement;
+  }
+  return true;
+}
+
+// Calcule le montant à ajouter au brut ce mois
+function _primeMontantCeMois(p) {
+  var montant = parseFloat((p.montant||'0').replace(',','.')) || 0;
+  if (!_isPrimeMoisCourant(p)) return 0;
+  var freq = p.periodicite || 'mensuelle';
+  // Pour les primes annuelles, le montant est le montant TOTAL annuel
+  // → on l'ajoute en entier le mois de versement (pas proratisé)
+  return montant;
+}
+
+// Calcule le prorata mensuel affiché (pour info uniquement)
+function _primeProrataInfo(p) {
+  var montant = parseFloat((p.montant||'0').replace(',','.')) || 0;
+  var freq = p.periodicite || 'mensuelle';
+  if (freq === 'mensuelle' || freq === 'objectifs' || freq === 'anciennete' || freq === 'panier' || freq === 'transport' || freq === 'autre') return null;
+  if (freq === 'trimestrielle') return '÷3 = ' + (montant/3).toFixed(2).replace('.',',') + ' €/mois';
+  if (freq === 'semestrielle') return '÷6 = ' + (montant/6).toFixed(2).replace('.',',') + ' €/mois';
+  if (freq === 'annuelle' || freq === '13eme') return '÷12 = ' + (montant/12).toFixed(2).replace('.',',') + ' €/mois';
+  return null;
+}
+
+function renderPrimesList(primes, empId) {
+  if (!primes || !primes.length) {
+    return '<div style="text-align:center;padding:10px;font-size:12px;color:var(--muted)">Aucune prime — cliquez « + Ajouter »</div>';
+  }
+  var curMoisNum = _curMois.getMonth() + 1;
+  return primes.map(function(p, i) {
+    var typeInfo = PRIME_TYPES.find(function(t){ return t.val === p.periodicite; }) || PRIME_TYPES[0];
+    var actif = _isPrimeMoisCourant(p);
+    var montantMois = actif ? _primeMontantCeMois(p) : 0;
+    var prorata = _primeProrataInfo(p);
+    var freqLabel = {
+      mensuelle:'Chaque mois', trimestrielle:'Chaque trimestre', semestrielle:'Chaque semestre',
+      annuelle:'1×/an', '13eme':'1×/an', exceptionnelle:'Ce mois uniquement',
+      objectifs:'Chaque mois', anciennete:'Chaque mois', panier:'Chaque mois', transport:'Chaque mois', autre:'Chaque mois'
+    }[p.periodicite] || 'Chaque mois';
+
+    // Mois de versement pour annuelles
+    var moisVersSelect = (p.periodicite === 'annuelle' || p.periodicite === '13eme') ? 
+      '<select onchange="updatePrime(\''+empId+'\','+i+',\'moisVersement\',this.value)" style="font-size:10px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:white">'
+      + ['Janv','Févr','Mars','Avr','Mai','Juin','Juil','Août','Sept','Oct','Nov','Déc'].map(function(m,mi){
+          return '<option value="'+(mi+1)+'" '+(parseInt(p.moisVersement||12)===(mi+1)?'selected':'')+'>'+m+'</option>';
+        }).join('')
+      + '</select>' : '';
+
+    return '<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:white;border:1.5px solid '+(actif?'var(--rh-border)':'var(--border)')+';;border-radius:8px">'
+      + '<div style="flex:1;min-width:0">'
+      +   '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
+      +     '<span style="font-size:10px;font-weight:700;color:'+(actif?'var(--rh-main)':'var(--muted)')+'">'+freqLabel+'</span>'
+      +     (actif ? '<span style="font-size:9px;background:var(--rh-ghost);color:var(--rh-main);padding:1px 5px;border-radius:4px;font-weight:700">✓ Ce mois</span>' : '<span style="font-size:9px;background:#f1f5f9;color:var(--muted);padding:1px 5px;border-radius:4px">— Pas ce mois</span>')
+      +   '</div>'
+      +   '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+      +     '<select onchange="updatePrime(\''+empId+'\','+i+',\'periodicite\',this.value)" style="font-size:11px;padding:3px 6px;border:1.5px solid var(--border);border-radius:6px;font-weight:600;background:white;color:var(--text)">'
+      +     PRIME_TYPES.map(function(t){ return '<option value="'+t.val+'" '+(p.periodicite===t.val?'selected':'')+'>'+t.label+'</option>'; }).join('')
+      +     '</select>'
+      +     moisVersSelect
+      +     (prorata ? '<span style="font-size:10px;color:var(--muted)">'+prorata+'</span>' : '')
+      +   '</div>'
+      + '</div>'
+      + '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0">'
+      +   '<div style="display:flex;align-items:center;gap:3px;background:#f8faff;border:1.5px solid var(--border);border-radius:7px;padding:4px 8px">'
+      +     '<input type="text" inputmode="decimal" value="'+(p.montant||'')+'" placeholder="0,00" '
+      +       'oninput="updatePrime(\''+empId+'\','+i+',\'montant\',this.value)" '
+      +       'style="width:70px;border:none;background:transparent;font-size:13px;font-weight:800;color:var(--text);text-align:right;outline:none;font-family:inherit"/>'
+      +     '<span style="font-size:11px;color:var(--muted);font-weight:600">€</span>'
+      +   '</div>'
+      +   '<button type="button" onclick="removePrime(\''+empId+'\','+i+')" style="width:26px;height:26px;border:1px solid #fca5a5;background:#fef2f2;border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center">✕</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+window.renderPrimesList = renderPrimesList;
+
+// État primes en mémoire pour l'employé en cours d'édition
+var _currentPrimes = [];
+
+function addPrimeLine(empId) {
+  _currentPrimes.push({ periodicite: 'mensuelle', montant: '', moisVersement: 12 });
+  refreshPrimesList(empId);
+}
+window.addPrimeLine = addPrimeLine;
+
+function removePrime(empId, idx) {
+  _currentPrimes.splice(idx, 1);
+  refreshPrimesList(empId);
+}
+window.removePrime = removePrime;
+
+function updatePrime(empId, idx, field, value) {
+  if (!_currentPrimes[idx]) return;
+  _currentPrimes[idx][field] = value;
+  refreshPrimesList(empId);
+}
+window.updatePrime = updatePrime;
+
+function refreshPrimesList(empId) {
+  var list = document.getElementById('fi-primes-list');
+  if (list) list.innerHTML = renderPrimesList(_currentPrimes, empId);
+  // Recalculer total primes ce mois
+  var total = _currentPrimes.reduce(function(s,p){ return s + _primeMontantCeMois(p); }, 0);
+  var fi_prime = document.getElementById('fi-prime');
+  var fi_prime_badge = document.getElementById('fi-prime-badge');
+  var fi_primes_total = document.getElementById('fi-primes-total-display');
+  if (fi_prime) fi_prime.value = total.toFixed(2).replace('.',',');
+  if (fi_prime_badge) fi_prime_badge.textContent = total.toFixed(2).replace('.',',') + ' €';
+  if (fi_primes_total) fi_primes_total.textContent = total.toFixed(2).replace('.',',') + ' €';
+  // Recalculer les cotisations
+  var brutInput = document.getElementById('fi-brut');
+  var emp = _emps.find(function(e){ return e.id === empId; });
+  var brut = parseFloat((brutInput ? brutInput.value : '0').replace(',','.')) || 0;
+  refreshFicheCalc(brut + total, emp ? emp.categoriePoste === 'cadre' : false);
+  // Mettre à jour coût réel si la section est ouverte
+  if (typeof calcCoutReel === 'function') setTimeout(calcCoutReel, 20);
+}
+window.refreshPrimesList = refreshPrimesList;
+
 function onFicheBrutInput(val, empId) {
   var emp = _emps.find(function(e){ return e.id === empId; });
   var brutInput = document.getElementById('fi-brut');
-  var primeInput = document.getElementById('fi-prime');
   brutInput.dataset.manual = '1';
   var brut  = parseFloat((brutInput.value||'0').replace(',','.')) || 0;
-  var prime = parseFloat((primeInput.value||'0').replace(',','.')) || 0;
+  var prime = _currentPrimes.reduce(function(s,p){ return s + _primeMontantCeMois(p); }, 0);
   refreshFicheCalc(brut + prime, emp ? emp.categoriePoste === 'cadre' : false);
 }
 window.onFicheBrutInput = onFicheBrutInput;
@@ -1220,7 +1391,8 @@ async function saveFiche() {
   var emp = _emps.find(function(e){ return e.id === empId; });
 
   var brut   = parseFloat((document.getElementById('fi-brut').value||'0').replace(',','.')) || 0;
-  var prime  = parseFloat((document.getElementById('fi-prime').value||'0').replace(',','.')) || 0;
+  // Prime = somme des primes actives ce mois (nouveau système multi-primes)
+  var prime  = _currentPrimes.reduce(function(s,p){ return s + _primeMontantCeMois(p); }, 0);
   var hR     = parseFloat((document.getElementById('fi-h-reelles').value||'0').replace(',','.')) || 0;
   var hSup   = parseFloat((document.getElementById('fi-h-sup').value||'0').replace(',','.')) || 0;
   var note   = document.getElementById('fi-note').value;
@@ -1233,7 +1405,8 @@ async function saveFiche() {
     employeNom: emp ? (emp.prenom||'')+' '+(emp.nom||'') : '',
     mois:       getMoisKey(),
     brut:       brut,
-    prime:      prime,
+    prime:      prime,         // montant total primes ce mois (rétro-compatibilité)
+    primes:     _currentPrimes, // tableau complet des primes configurées
     brutTotal:  brut + prime,
     hReelles:   hR,
     hSup:       hSup,
@@ -1440,7 +1613,18 @@ function openPdfPreview(empId) {
           <tr class="section-head"><td colspan="4">RÉMUNÉRATION</td></tr>
           <tr><td>Salaire de base</td><td style="text-align:right">${fmtH(hContrat)}</td><td style="text-align:right">${emp.salaireBrut && emp.heuresHebdo ? (emp.salaireBrut/(emp.heuresHebdo*52/12)).toFixed(4)+' €/h' : '—'}</td><td style="text-align:right">${fmtE(brut - prime - (hSup > 0 && emp.salaireBrut && emp.heuresHebdo ? calcBrutFromHeures(emp, 0, hSup) - calcBrutFromHeures(emp, 0, 0) : 0))}</td></tr>
           ${hSup > 0 ? `<tr><td>Heures supplémentaires (×${Math.min(hSup,8).toFixed(1)}h à 25% + ${Math.max(hSup-8,0).toFixed(1)}h à 50%)</td><td style="text-align:right">${fmtH(hSup)}</td><td style="text-align:right">+25%/50%</td><td style="text-align:right;color:var(--rh-main)">+${fmtE(emp.salaireBrut&&emp.heuresHebdo ? (emp.salaireBrut/(emp.heuresHebdo*52/12))*(Math.min(hSup,8)*0.25+Math.max(hSup-8,0)*0.50) : 0)}</td></tr>` : ''}
-          ${prime > 0 ? `<tr><td>Prime / Complément</td><td></td><td></td><td style="text-align:right;color:var(--rh-main)">+${fmtE(prime)}</td></tr>` : ''}
+          ${(function(){
+            var primes = paie.primes || [];
+            if (!primes.length && prime > 0) {
+              // Rétro-compat ancien format
+              return '<tr><td>Prime / Complément</td><td></td><td></td><td style="text-align:right;color:var(--rh-main)">+' + fmtE(prime) + '</td></tr>';
+            }
+            return primes.filter(function(p){ return _primeMontantCeMois(p) > 0; }).map(function(p){
+              var typeInfo = PRIME_TYPES.find(function(t){ return t.val === p.periodicite; }) || PRIME_TYPES[0];
+              var mt = _primeMontantCeMois(p);
+              return '<tr><td>' + typeInfo.label + '</td><td></td><td></td><td style="text-align:right;color:var(--rh-main)">+' + fmtE(mt) + '</td></tr>';
+            }).join('');
+          })()}
           <tr class="pdf-total-row"><td><strong>SALAIRE BRUT</strong></td><td></td><td></td><td><strong>${fmtE(brut)}</strong></td></tr>
 
           <tr class="section-head"><td colspan="4">COTISATIONS SALARIALES</td></tr>
