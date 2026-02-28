@@ -1,4 +1,4 @@
-// ── nav.js — Alteore ── v4 (nav centralisée + module RH Master + dirigeant)
+// ── nav.js — Alteore ── v5 (nav centralisée + module RH Master + dirigeant + chatbot)
 (function () {
 
   // ════════════════════════════════════════════════
@@ -394,6 +394,7 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     injectUpgradeModal();
     const configs = {
       fidelisation: { icon: '💎', title: 'Fidélisation — Plan Max requis',       desc: 'La gestion des clients, cartes de fidélité, coupons et campagnes SMS est disponible dès le plan <strong>Max (99€/mois)</strong> ou <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
+      stock:        { icon: '📦', title: 'Gestion des stocks — Plan Max requis',  desc: 'La gestion des stocks est disponible dès le plan <strong>Max (99€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
       bilan:        { icon: '🤖', title: 'Analyse de Bilan — Plan Master requis', desc: 'L\'analyse de bilan comptable par intelligence artificielle est disponible avec le plan <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Master' },
       rapport:      { icon: '📄', title: 'Rapport annuel PDF — Plan Pro requis',  desc: 'La génération de rapports annuels PDF est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Passer au plan Pro' },
       import:       { icon: '📥', title: 'Import/Export — Plan Pro requis',        desc: "L'import et l'export de données est disponible dès le plan <strong>Pro (69€/mois)</strong>.", cta: '⭐ Passer au plan Pro' },
@@ -531,5 +532,15 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
       if (abonPanel) abonPanel.classList.add('on');
     }, 400);
   }
+
+  // ════════════════════════════════════════════════
+  // CHARGEMENT CHATBOT (auto-injectable)
+  // ════════════════════════════════════════════════
+  (function loadChatbot() {
+    var s = document.createElement('script');
+    s.src = 'chatbot.js';
+    s.defer = true;
+    document.body.appendChild(s);
+  })();
 
 })();
