@@ -2506,33 +2506,358 @@ function closePoly(){document.getElementById('modalPoly').classList.remove('show
 window.closePoly=closePoly;
 
 // ── EXPORT ──
+// ══════════════════════════════════════════════════════════════
+// IMPRESSION — moteur multi-vues
+// ══════════════════════════════════════════════════════════════
+
+// Couleurs par type (fond, texte, bordure)
+const PRINT_COLORS = {
+  travail:   ['#d1fae5','#065f46','#6ee7b7'],
+  partiel:   ['#fed7aa','#7c2d12','#fb923c'],
+  conge:     ['#dbeafe','#1e3a8a','#93c5fd'],
+  maladie:   ['#fee2e2','#7f1d1d','#fca5a5'],
+  formation: ['#fef9c3','#713f12','#fde047'],
+  astreinte: ['#ede9fe','#3b0764','#a78bfa'],
+  repos:     ['#f3f4f6','#374151','#d1d5db'],
+  autre:     ['#f0fdf4','#166534','#86efac'],
+};
+
+function _printItemLines(items){
+  // Retourne les lignes HTML pour une cellule (tableau gantt/mois)
+  if(!items.length) return '<span style="color:#d1d5db">—</span>';
+  return items.map(it=>{
+    const plages = it.plages&&it.plages.length>0 ? it.plages : (it.deb?[{deb:it.deb,fin:it.fin}]:[]);
+    const h = plages.reduce((s,p)=>s+diffH(p.deb,p.fin),0);
+    const [bg,fg,br] = PRINT_COLORS[it.type]||PRINT_COLORS.autre;
+    const showH = ['travail','partiel','formation','astreinte'].includes(it.type);
+    const timeStr = showH ? plages.map(p=>`${p.deb}–${p.fin}`).join(' | ') : (TYPE_LBL[it.type]||it.type);
+    const durStr = h>0 ? ` <span style="opacity:.65;font-size:9px">${fmtDur(h)}</span>` : '';
+    const note = it.note ? ` <span style="opacity:.6;font-size:9px;font-style:italic">${it.note}</span>` : '';
+    return `<div style="margin:1px 0;padding:2px 5px;border-radius:4px;background:${bg};color:${fg};border-left:3px solid ${br};font-size:10px;font-weight:600;line-height:1.4">
+      ${TYPE_ICO[it.type]||''} ${timeStr}${durStr}${note}
+    </div>`;
+  }).join('');
+}
+
+function _printDayTotal(items){
+  const h = items.filter(it=>['travail','partiel'].includes(it.type)).reduce((s,it)=>s+itemH(it),0);
+  return h>0 ? `<div style="font-size:9px;color:#6b7280;margin-top:2px;font-weight:600">${fmtDur(h)}</div>` : '';
+}
+
 function exportPDF(){
-  const days=_view==='mois'?[...Array(7)].map((_,i)=>{const d=new Date(_cur);d.setDate(1+i);return d;}):weekDays(_cur);
-  const vis=visibleEmps();
-  let rows='';
-  vis.forEach(e=>{
-    rows+=`<tr><td style="font-weight:700;padding:6px 8px;border:1px solid #e2e8f0;background:#f8faff;white-space:nowrap">${e.prenom||''} ${e.nom||''}</td>`;
-    days.forEach(d=>{
+  const vis = visibleEmps();
+  const now = new Date().toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
+  const label = document.getElementById('week-label')?.textContent || '';
+  const companyEl = document.getElementById('uname');
+  const company = companyEl ? companyEl.textContent : 'ALTEORE';
+
+  let pageTitle = `Planning RH — ${label}`;
+  let body = '';
+  let landscape = true;
+
+  // ─────────────────────────────────────────
+  // VUE SEMAINE GANTT + VUE MOIS
+  // Tableau : employés en lignes, jours en colonnes
+  // ─────────────────────────────────────────
+  if(_view==='semaine' && _disp==='gantt' || _view==='mois'){
+    const days = _view==='mois'
+      ? monthDays(_cur).filter(x=>x.cur).map(x=>x.date)
+      : weekDays(_cur);
+    const isMois = _view==='mois';
+
+    // Totaux hebdo par employé
+    const empTotals = {};
+    vis.forEach(e=>{
+      const h = days.reduce((s,d)=>{
+        const items = (_cr[`${fmt(d)}_${e.id}`]?.items||[]);
+        return s + items.filter(it=>['travail','partiel'].includes(it.type)).reduce((s2,it)=>s2+itemH(it),0);
+      },0);
+      empTotals[e.id] = h;
+    });
+
+    const thead = `<thead><tr>
+      <th style="width:130px">Employé</th>
+      ${days.map(d=>{
+        const we = isWE(d);
+        const today = isToday(d);
+        return `<th style="${we?'background:#f1f5f9;color:#94a3b8':''}${today?'background:#ecfdf5;color:#059669':''}">${d.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:isMois?'short':'short'})}</th>`;
+      }).join('')}
+      <th style="width:60px;background:#f8faff">Total</th>
+    </tr></thead>`;
+
+    const tbody = vis.map(e=>{
+      const cells = days.map(d=>{
+        const we=isWE(d);
+        const items=(_cr[`${fmt(d)}_${e.id}`]?.items||[]);
+        return `<td class="dcell" style="${we?'background:#fafafa':''}">
+          ${_printItemLines(items)}
+          ${_printDayTotal(items)}
+        </td>`;
+      }).join('');
+      const tot = empTotals[e.id];
+      const poste = e.poste||'';
+      return `<tr>
+        <td class="emp-cell">
+          <div style="font-weight:800;font-size:11px">${e.prenom||''} ${e.nom||''}</div>
+          ${poste?`<div style="font-size:9px;color:#6b7280;margin-top:1px">${poste}</div>`:''}
+        </td>
+        ${cells}
+        <td style="text-align:center;background:#f0fdf4;font-weight:800;font-size:11px;color:#059669">${tot>0?fmtDur(tot):'—'}</td>
+      </tr>`;
+    }).join('');
+
+    body = `<table class="main-table"><${thead}<tbody>${tbody}</tbody></table>`;
+
+  // ─────────────────────────────────────────
+  // VUE SEMAINE TIMELINE → une page par jour
+  // ─────────────────────────────────────────
+  } else if(_view==='semaine' && _disp==='timeline'){
+    const days = weekDays(_cur);
+    const START_H=6, END_H=23, SPAN=(END_H-START_H);
+    const ticks = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22];
+
+    body = days.map((d,di)=>{
+      const dayLabel = d.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
+      const we = isWE(d);
+      const today = isToday(d);
+
+      // Règle horaire
+      const ruler = `<div class="tl-ruler">
+        <div class="tl-emp-col"></div>
+        <div class="tl-hours-wrap">
+          ${ticks.map(hh=>`
+            <div class="tl-tick" style="left:${(hh-START_H)/SPAN*100}%">
+              <div class="tl-tick-line"></div>
+              <span class="tl-tick-lbl">${hh}h</span>
+            </div>`).join('')}
+        </div>
+      </div>`;
+
+      // Lignes employés
+      const empRows = vis.map((e,i)=>{
+        const k=`${fmt(d)}_${e.id}`;
+        const items=(_cr[k]?.items||[]);
+        const totalH=items.filter(it=>['travail','partiel'].includes(it.type)).reduce((s,it)=>s+itemH(it),0);
+
+        const bars = items.map(it=>{
+          const plages=it.plages&&it.plages.length>0?it.plages:(it.deb?[{deb:it.deb,fin:it.fin}]:[]);
+          return plages.map(p=>{
+            const [dh,dm]=(p.deb||'00:00').split(':').map(Number);
+            const [fh,fm]=(p.fin||'00:00').split(':').map(Number);
+            const left=(dh*60+dm-START_H*60)/(SPAN*60)*100;
+            const width=(fh*60+fm-(dh*60+dm))/(SPAN*60)*100;
+            if(left>100||left+width<0)return '';
+            const [bg,fg,br]=PRINT_COLORS[it.type]||PRINT_COLORS.autre;
+            const dur=diffH(p.deb,p.fin);
+            return `<div style="position:absolute;left:${Math.max(0,left).toFixed(2)}%;width:${Math.max(0.5,width).toFixed(2)}%;top:4px;bottom:4px;
+              background:${bg};border:1.5px solid ${br};border-radius:4px;overflow:hidden;
+              display:flex;align-items:center;padding:0 4px;box-sizing:border-box">
+              <span style="font-size:8px;font-weight:700;color:${fg};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                ${p.deb}–${p.fin}${dur>=1?' '+fmtDur(dur):''}${it.note?' · '+it.note:''}
+              </span>
+            </div>`;
+          }).join('');
+        }).join('');
+
+        const bgRow = i%2===0?'#fff':'#fafafa';
+        return `<div class="tl-row-print" style="background:${bgRow}">
+          <div class="tl-emp-col">
+            <div style="font-weight:700;font-size:10px;line-height:1.2">${e.prenom||''} ${(e.nom||'')[0]||''}.</div>
+            ${totalH>0?`<div style="font-size:8px;color:#059669;font-weight:700">${fmtDur(totalH)}</div>`:''}
+          </div>
+          <div class="tl-bars-wrap" style="position:relative">${bars||'<div style="position:absolute;inset:0;display:flex;align-items:center;padding-left:8px"><span style="font-size:8px;color:#d1d5db">Repos</span></div>'}</div>
+        </div>`;
+      }).join('');
+
+      const pageBreak = di>0 ? 'page-break-before:always;padding-top:12px;' : '';
+      return `<div style="${pageBreak}">
+        <div class="day-header" style="${we?'background:#f8faff':today?'background:#ecfdf5;border-color:#6ee7b7':''}">
+          ${today?'<span class="today-badge">Aujourd\'hui</span>':''} ${dayLabel}
+        </div>
+        ${ruler}
+        <div class="tl-body">${empRows}</div>
+      </div>`;
+    }).join('');
+    landscape = false; // portrait pour timeline
+
+  // ─────────────────────────────────────────
+  // VUE JOUR — détail complet par employé
+  // ─────────────────────────────────────────
+  } else if(_view==='jour'){
+    const d = _cur;
+    const dayLabel = d.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+    const START_H=6, END_H=23, SPAN=(END_H-START_H);
+    const ticks=[6,8,10,12,14,16,18,20,22];
+
+    const ruler = `<div class="tl-ruler" style="margin-bottom:4px">
+      <div class="tl-emp-col" style="width:160px"></div>
+      <div class="tl-hours-wrap">
+        ${ticks.map(hh=>`
+          <div class="tl-tick" style="left:${(hh-START_H)/SPAN*100}%">
+            <div class="tl-tick-line"></div>
+            <span class="tl-tick-lbl">${hh}h</span>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+    const empRows = vis.map((e,i)=>{
       const k=`${fmt(d)}_${e.id}`;
       const items=(_cr[k]?.items||[]);
-      const txt=items.map(it=>{
-        const plages=it.plages&&it.plages.length>0?it.plages:[{deb:it.deb,fin:it.fin}];
-        const h=plages.reduce((s,p)=>s+diffH(p.deb,p.fin),0);
-        if(it.type==='travail'||it.type==='partiel')return plages.map(p=>`${p.deb}–${p.fin}`).join('|')+(h>0?' '+fmtDur(h):'');
-        return TYPE_LBL[it.type]||it.type;
-      }).join('<br>');
-      rows+=`<td style="padding:6px 8px;border:1px solid #e2e8f0;font-size:10px;min-width:60px">${txt||'—'}</td>`;
-    });
-    rows+=`</tr>`;
-  });
-  const w=window.open('','_blank');
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Planning RH</title>
-  <style>body{font-family:sans-serif;padding:16px;font-size:12px}h1{font-size:16px;font-weight:800;color:#052e16;margin-bottom:3px}p{color:#6b7280;font-size:11px;margin-bottom:12px}table{width:100%;border-collapse:collapse}th{padding:6px 8px;background:#059669;color:white;font-size:10px;font-weight:700;border:1px solid #047857;text-align:left}@media print{@page{margin:.6cm;size:A4 landscape}}</style>
+      const totalH=items.filter(it=>['travail','partiel'].includes(it.type)).reduce((s,it)=>s+itemH(it),0);
+      const poste=e.poste||'';
+
+      const bars=items.map(it=>{
+        const plages=it.plages&&it.plages.length>0?it.plages:(it.deb?[{deb:it.deb,fin:it.fin}]:[]);
+        return plages.map(p=>{
+          const [dh,dm]=(p.deb||'00:00').split(':').map(Number);
+          const [fh,fm]=(p.fin||'00:00').split(':').map(Number);
+          const left=(dh*60+dm-START_H*60)/(SPAN*60)*100;
+          const width=(fh*60+fm-(dh*60+dm))/(SPAN*60)*100;
+          if(left>100||left+width<0)return '';
+          const [bg,fg,br]=PRINT_COLORS[it.type]||PRINT_COLORS.autre;
+          const dur=diffH(p.deb,p.fin);
+          return `<div style="position:absolute;left:${Math.max(0,left).toFixed(2)}%;width:${Math.max(1,width).toFixed(2)}%;
+            top:6px;bottom:6px;background:${bg};border:1.5px solid ${br};border-radius:5px;
+            display:flex;align-items:center;padding:0 6px;box-sizing:border-box">
+            <span style="font-size:9px;font-weight:700;color:${fg};white-space:nowrap">
+              ${p.deb}–${p.fin}${dur>=1?' ('+fmtDur(dur)+')':''}${it.note?' · '+it.note:''}
+            </span>
+          </div>`;
+        }).join('');
+      }).join('');
+
+      return `<div class="tl-row-print jour-row" style="background:${i%2===0?'#fff':'#fafafa'};height:44px">
+        <div class="tl-emp-col" style="width:160px">
+          <div style="font-weight:800;font-size:11px">${e.prenom||''} ${e.nom||''}</div>
+          ${poste?`<div style="font-size:8px;color:#6b7280">${poste}</div>`:''}
+          ${totalH>0?`<div style="font-size:9px;color:#059669;font-weight:700">${fmtDur(totalH)}</div>`:''}
+        </div>
+        <div class="tl-bars-wrap" style="position:relative">${bars||'<div style="position:absolute;inset:0;display:flex;align-items:center;padding-left:8px"><span style="font-size:9px;color:#d1d5db">—</span></div>'}</div>
+      </div>`;
+    }).join('');
+
+    body = `<div class="day-header jour">${dayLabel}</div>${ruler}<div class="tl-body">${empRows}</div>`;
+    landscape = false;
+  }
+
+  // ─────────────────────────────────────────
+  // Légende & stats globales
+  // ─────────────────────────────────────────
+  const types = Object.keys(PRINT_COLORS);
+  const legend = `<div class="legend">
+    ${types.map(t=>{
+      const [bg,fg,br]=PRINT_COLORS[t];
+      return `<div class="leg-item"><span class="leg-dot" style="background:${bg};border:1.5px solid ${br};color:${fg}">${TYPE_ICO[t]||''}</span><span>${TYPE_LBL[t]||t}</span></div>`;
+    }).join('')}
+  </div>`;
+
+  // Stats totales
+  const allDays = _view==='mois'?monthDays(_cur).filter(x=>x.cur).map(x=>x.date):_view==='jour'?[_cur]:weekDays(_cur);
+  const statRows = vis.map(e=>{
+    const h=allDays.reduce((s,d)=>{
+      return s+(_cr[`${fmt(d)}_${e.id}`]?.items||[]).filter(it=>['travail','partiel'].includes(it.type)).reduce((s2,it)=>s2+itemH(it),0);
+    },0);
+    const absences=allDays.reduce((s,d)=>s+(_cr[`${fmt(d)}_${e.id}`]?.items||[]).filter(it=>['conge','maladie'].includes(it.type)).length,0);
+    return h>0||absences>0 ? `<tr><td>${e.prenom||''} ${e.nom||''}</td><td>${h>0?fmtDur(h):'—'}</td><td>${absences>0?absences+'j':'—'}</td></tr>` : '';
+  }).filter(Boolean).join('');
+
+  const stats = statRows ? `<div class="stats-block">
+    <div class="stats-title">Récapitulatif des heures</div>
+    <table class="stats-table">
+      <thead><tr><th>Employé</th><th>Heures travaillées</th><th>Absences</th></tr></thead>
+      <tbody>${statRows}</tbody>
+    </table>
+  </div>` : '';
+
+  // ─────────────────────────────────────────
+  // CSS complet
+  // ─────────────────────────────────────────
+  const css = `
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'Segoe UI',Arial,sans-serif;font-size:11px;color:#1a1f36;background:#fff;padding:14px 16px;}
+    .print-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid #e2e8f0;}
+    .print-title{font-size:18px;font-weight:800;color:#052e16;}
+    .print-sub{font-size:11px;color:#6b7280;margin-top:3px;}
+    .print-company{font-size:12px;font-weight:700;color:#059669;}
+    .print-date{font-size:10px;color:#94a3b8;margin-top:2px;text-align:right;}
+
+    /* Tableau Gantt/Mois */
+    .main-table{width:100%;border-collapse:collapse;font-size:10px;}
+    .main-table th{padding:5px 6px;background:#059669;color:white;font-size:9px;font-weight:700;border:1px solid #047857;text-align:center;white-space:nowrap;}
+    .main-table th:first-child{text-align:left;}
+    .main-table td{border:1px solid #e2e8f0;vertical-align:top;padding:3px 4px;}
+    .emp-cell{background:#f8faff;font-size:10px;white-space:nowrap;vertical-align:middle;padding:4px 8px!important;}
+    .dcell{min-width:70px;}
+
+    /* Timeline */
+    .tl-ruler{display:flex;align-items:flex-end;height:20px;margin-bottom:2px;}
+    .tl-emp-col{width:100px;flex-shrink:0;padding-right:6px;}
+    .tl-hours-wrap{flex:1;position:relative;height:100%;}
+    .tl-tick{position:absolute;height:100%;display:flex;flex-direction:column;align-items:center;}
+    .tl-tick-line{width:1px;flex:1;background:#e2e8f0;}
+    .tl-tick-lbl{font-size:7px;color:#94a3b8;font-weight:600;white-space:nowrap;transform:translateX(-50%);margin-top:1px;}
+    .tl-body{border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;}
+    .tl-row-print{display:flex;align-items:stretch;border-bottom:1px solid #f1f5f9;min-height:34px;}
+    .tl-row-print:last-child{border-bottom:none;}
+    .jour-row{min-height:44px;}
+    .tl-emp-col{width:100px;flex-shrink:0;padding:4px 6px;border-right:1px solid #f1f5f9;display:flex;flex-direction:column;justify-content:center;}
+    .tl-bars-wrap{flex:1;position:relative;background:repeating-linear-gradient(90deg,transparent,transparent calc(${100/17}% - 1px),#f8faff calc(${100/17}% - 1px),#f8faff calc(${100/17}%));}
+
+    /* Jour header */
+    .day-header{font-size:13px;font-weight:800;color:#1a1f36;padding:6px 10px;background:#f8faff;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:6px;display:flex;align-items:center;gap:8px;}
+    .day-header.jour{font-size:16px;margin-bottom:10px;}
+    .today-badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:10px;background:#ecfdf5;color:#059669;border:1px solid #6ee7b7;}
+
+    /* Légende */
+    .legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;padding:8px 10px;background:#f8faff;border-radius:6px;border:1px solid #e2e8f0;}
+    .leg-item{display:flex;align-items:center;gap:4px;font-size:9px;color:#374151;}
+    .leg-dot{padding:1px 5px;border-radius:3px;font-size:9px;}
+
+    /* Stats */
+    .stats-block{margin-top:12px;page-break-inside:avoid;}
+    .stats-title{font-size:11px;font-weight:700;color:#374151;margin-bottom:6px;}
+    .stats-table{border-collapse:collapse;font-size:10px;}
+    .stats-table th{padding:4px 10px;background:#f1f5f9;font-size:9px;font-weight:700;border:1px solid #e2e8f0;text-align:left;}
+    .stats-table td{padding:4px 10px;border:1px solid #f1f5f9;}
+    .stats-table tr:nth-child(even) td{background:#fafafa;}
+
+    @media print{
+      @page{margin:.6cm;size:A4 ${landscape?'landscape':'portrait'};}
+      body{padding:0;}
+      .no-print{display:none!important;}
+    }
+  `;
+
+  const html = `<!DOCTYPE html><html lang="fr"><head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>${pageTitle}</title>
+    <style>${css}</style>
   </head><body>
-  <h1>📅 Planning RH — ${document.getElementById('week-label').textContent}</h1>
-  <p>ALTEORE · ${new Date().toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'})}</p>
-  <table><thead><tr><th>Employé</th>${days.map(d=>`<th>${d.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'})}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table>
-  <script>window.onload=()=>window.print()<\/script></body></html>`);
+    <div class="print-header">
+      <div>
+        <div class="print-company">ALTEORE · ${company}</div>
+        <div class="print-title">${pageTitle}</div>
+        <div class="print-sub">${vis.length} employé(s) · Généré le ${now}</div>
+      </div>
+      <div class="print-date">
+        <button class="no-print" onclick="window.print()" style="padding:7px 16px;background:#059669;color:white;border:none;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit">🖨️ Imprimer / PDF</button>
+        <div style="margin-top:6px;color:#94a3b8;font-size:10px">Ctrl+P ou Cmd+P</div>
+      </div>
+    </div>
+    ${body}
+    ${legend}
+    ${stats}
+    <script>
+      // Auto-print après chargement
+      // Décommentez si vous voulez l'impression automatique :
+      // window.onload = () => window.print();
+    <\/script>
+  </body></html>`;
+
+  const w = window.open('','_blank','width=1000,height=800');
+  if(!w){ alert('Veuillez autoriser les pop-ups pour imprimer.'); return; }
+  w.document.write(html);
   w.document.close();
 }
 window.exportPDF=exportPDF;
