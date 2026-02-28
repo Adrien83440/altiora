@@ -632,49 +632,70 @@ var s=document.createElement('script');s.textContent=js;document.head.appendChil
 
 /* ══════════════════════════════════════════════════════
    PATCH 1 : Override loadPlanningMonth
-   Fix 1 - dateStr : utilise lastIndexOf pour éviter la
-           collision si empId contient des chiffres de date
-   Fix 2 - filtre : inclut TOUS les types de planning
+   Utilise l’API Vercel /api/rh-planning-salarie (proxy admin)
+   pour contourner les règles Firestore qui refusent getDocs
+   à un utilisateur non authentifié (espace salarié public)
    ══════════════════════════════════════════════════════ */
 window.loadPlanningMonth = async function(y, m) {
   window._planningCache = {};
-  var uid    = window._uid   || '';
-  var empId  = window._empId || '';
-  if (!uid || !empId) return;
-
-  // Calculer toutes les semaines du mois
-  var weekKeys = {};
-  var nb = new Date(y, m + 1, 0).getDate();
-  for (var d = 1; d <= nb; d++) {
-    var dt  = new Date(y, m, d);
-    var mon = new Date(dt);
-    var day = mon.getDay();
-    var diff = (day === 0) ? -6 : 1 - day;
-    mon.setDate(mon.getDate() + diff);
-    mon.setHours(0, 0, 0, 0);
-    var wk = mon.toISOString().slice(0, 10).replace(/-/g, '');
-    weekKeys[wk] = true;
+  // Récupérer le publicId depuis l’URL (?pid=xxx ou hash)
+  var publicId = window._publicId || new URLSearchParams(window.location.search).get('pid') || '';
+  if (!publicId) {
+    console.warn('[PATCH] publicId introuvable');
+    return;
   }
-
-  for (var wk in weekKeys) {
-    try {
-      var snap = await window._getDocs('rh', uid, 'plan_' + wk);
-      snap.forEach(function(docSnap) {
-        var suffix = '_' + empId;
-        if (docSnap.id.endsWith(suffix)) {
-          // FIX dateStr : lastIndexOf évite collision chiffres
-          var idx = docSnap.id.lastIndexOf(suffix);
-          var dateStr = docSnap.id.slice(0, idx);
-          var data = docSnap.data();
-          // FIX filtre : TOUS les types (plus aucun filtre)
-          window._planningCache[dateStr] = (data.items || []);
-        }
-      });
-    } catch(e) {
-      console.warn('[PATCH] loadPlanningMonth wk=' + wk, e);
+  try {
+    var resp = await fetch('/api/rh-planning-salarie', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ publicId: publicId, year: y, month: m })
+    });
+    if (!resp.ok) {
+      var err = await resp.json().catch(function(){ return {}; });
+      console.warn('[PATCH] rh-planning-salarie error:', err.error || resp.status);
+      return;
     }
+    var data = await resp.json();
+    window._planningCache = data.planningCache || {};
+    // Synchroniser uid/empId si pas encore définis
+    if (!window._uid   && data.uid)   window._uid   = data.uid;
+    if (!window._empId && data.empId) window._empId = data.empId;
+    console.log('[PATCH] planningCache chargé via API :', Object.keys(window._planningCache).length, 'jours');
+  } catch(e) {
+    console.warn('[PATCH] loadPlanningMonth fetch error:', e);
   }
-  console.log('[PATCH] planningCache chargé :', Object.keys(window._planningCache).length, 'jours');
+};
+
+// Aussi patcher ensureWeekLoaded pour la timeline
+window._ensureWeekLoadedViaAPI = async function(mondayDate) {
+  var publicId = window._publicId || new URLSearchParams(window.location.search).get('pid') || '';
+  if (!publicId) return;
+  // Vérifier si déjà en cache pour cette semaine
+  var hasSome = false;
+  for (var i = 0; i < 7; i++) {
+    var d = new Date(mondayDate);
+    d.setDate(d.getDate() + i);
+    var ds = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    if (window._planningCache[ds] !== undefined) { hasSome = true; break; }
+  }
+  if (hasSome) return;
+  // Charger le mois correspondant au lundi de cette semaine
+  var y = mondayDate.getFullYear();
+  var month = mondayDate.getMonth();
+  try {
+    var resp = await fetch('/api/rh-planning-salarie', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ publicId: publicId, year: y, month: month })
+    });
+    if (!resp.ok) return;
+    var data = await resp.json();
+    // Merger dans le cache existant
+    Object.assign(window._planningCache, data.planningCache || {});
+    console.log('[PATCH] timeline week chargée, cache total:', Object.keys(window._planningCache).length);
+  } catch(e) {
+    console.warn('[PATCH] ensureWeekLoaded API error:', e);
+  }
 };
 
 
@@ -949,34 +970,9 @@ window.tlNext = function() {
 
 /* Charger les données planning pour une semaine si pas encore chargé */
 async function ensureWeekLoaded(mondayDate) {
-  var wk = mondayDate.toISOString().slice(0, 10).replace(/-/g, '');
-  var uid = window._uid || '';
-  var empId = window._empId || '';
-  if (!uid || !empId) return;
-
-  // Vérifier si on a déjà des données pour cette semaine
-  var hasSome = false;
-  for (var i = 0; i < 7; i++) {
-    var d = new Date(mondayDate);
-    d.setDate(d.getDate() + i);
-    var ds = d.toISOString().slice(0, 10);
-    if (window._planningCache[ds] !== undefined) { hasSome = true; break; }
-  }
-  if (hasSome) return;
-
-  try {
-    var snap = await window._getDocs('rh', uid, 'plan_' + wk);
-    snap.forEach(function(docSnap) {
-      var suffix = '_' + empId;
-      if (docSnap.id.endsWith(suffix)) {
-        var idx = docSnap.id.lastIndexOf(suffix);
-        var dateStr = docSnap.id.slice(0, idx);
-        var data = docSnap.data();
-        window._planningCache[dateStr] = (data.items || []);
-      }
-    });
-  } catch(e) {
-    console.warn('[PATCH] ensureWeekLoaded wk=' + wk, e);
+  // Déléguer à la version API (définie dans PATCH 1)
+  if (typeof window._ensureWeekLoadedViaAPI === 'function') {
+    return window._ensureWeekLoadedViaAPI(mondayDate);
   }
 }
 
