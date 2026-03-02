@@ -99,6 +99,11 @@
     .solde-val.good{color:var(--rh-main);}
     .solde-val.warn{color:var(--orange);}
     .solde-val.low{color:var(--red);}
+    .solde-val.neg{color:var(--red);}
+    .badge-avance{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;font-size:9px;padding:1px 5px;border-radius:10px;font-weight:800;margin-left:4px;}
+    .badge-apprenti{background:#dbeafe;color:#1e40af;font-size:9px;padding:1px 5px;border-radius:10px;font-weight:700;margin-left:4px;}
+    .solde-bar-neg{height:6px;background:#fee2e2;border-radius:3px;overflow:hidden;margin-top:4px;min-width:60px;}
+    .solde-fill-neg{height:100%;border-radius:3px;background:var(--red);transition:width .5s ease;}
     .badge{display:inline-flex;align-items:center;padding:3px 8px;border-radius:20px;font-size:10px;font-weight:700;}
     .badge-pending{background:#fef3c7;color:#92400e;}
     .badge-approved{background:#dcfce7;color:#166534;}
@@ -221,12 +226,13 @@
     <!-- TAB : SOLDES -->
     <div class="tab-panel active" id="tab-soldes">
       <!-- KPIs globaux -->
-      <div class="kpi-row" id="kpi-row">
+      <div class="kpi-row" id="kpi-row" style="grid-template-columns:repeat(6,1fr)">
         <div class="kpi-box green"><div class="kpi-label">Employés actifs</div><div class="kpi-val" id="k-emp">—</div><div class="kpi-sub">avec suivi CP</div></div>
         <div class="kpi-box blue"><div class="kpi-label">CP acquis (total)</div><div class="kpi-val" id="k-acquis">—</div><div class="kpi-sub">sur toute l'équipe</div></div>
         <div class="kpi-box orange"><div class="kpi-label">CP pris (total)</div><div class="kpi-val" id="k-pris">—</div><div class="kpi-sub">cette période</div></div>
         <div class="kpi-box green"><div class="kpi-label">CP restants</div><div class="kpi-val" id="k-reste">—</div><div class="kpi-sub">à solder</div></div>
         <div class="kpi-box red"><div class="kpi-label">En attente</div><div class="kpi-val" id="k-pending">—</div><div class="kpi-sub">demandes à valider</div></div>
+        <div class="kpi-box" style="background:#fef9c3;border-color:#fde68a"><div class="kpi-label">Congés en avance</div><div class="kpi-val" id="k-avance" style="color:#b45309">—</div><div class="kpi-sub">soldes négatifs</div></div>
       </div>
 
       <!-- Table soldes par employé -->
@@ -443,17 +449,24 @@
         <label class="mlabel">Employé</label>
         <select class="minput" id="aj-emp" onchange="loadAjustForm()"></select>
       </div>
+      <div id="aj-apprenti-info" style="display:none;padding:8px 12px;background:#dbeafe;border-radius:8px;font-size:11px;color:#1e40af;margin-bottom:8px">
+        📘 <b>Apprenti</b> — Les CP s'accumulent progressivement. Un solde négatif signifie des congés pris en avance.
+      </div>
+      <div id="aj-solde-negatif" style="display:none;padding:8px 12px;background:#fee2e2;border-radius:8px;font-size:11px;color:#991b1b;margin-bottom:8px">
+        ⚠️ <b>Solde négatif</b> — Cet employé a pris <span id="aj-jours-avance">0</span>j de congés en avance sur ses droits futurs.
+      </div>
       <div class="msep">Soldes actuels</div>
       <div class="mrow">
-        <div class="mfield"><label class="mlabel">CP acquis</label><input class="minput" type="number" id="aj-acquis" step="0.5" placeholder="0"/></div>
-        <div class="mfield"><label class="mlabel">CP pris</label><input class="minput" type="number" id="aj-pris" step="0.5" placeholder="0"/></div>
+        <div class="mfield"><label class="mlabel">CP acquis (calculé auto)</label><input class="minput" type="number" id="aj-acquis" step="0.5" placeholder="0"/></div>
+        <div class="mfield"><label class="mlabel">CP pris (total approuvés)</label><input class="minput" type="number" id="aj-pris" step="0.5" placeholder="0" readonly style="background:#f8faff;color:var(--muted)"/></div>
       </div>
+      <div id="aj-solde-affiche" style="padding:10px 14px;border-radius:8px;font-size:12px;font-weight:700;margin-bottom:10px;display:none"></div>
       <div class="mrow">
         <div class="mfield"><label class="mlabel">RTT restants</label><input class="minput" type="number" id="aj-rtt" step="0.5" placeholder="0"/></div>
         <div class="mfield"><label class="mlabel">Récup. restantes (h)</label><input class="minput" type="number" id="aj-recup" step="0.5" placeholder="0"/></div>
       </div>
       <div style="padding:10px 12px;background:#fef3c7;border-radius:8px;font-size:11px;color:#92400e;margin-top:4px">
-        ⚠️ Ces valeurs sont des ajustements manuels. L'accumulation automatique continue à partir de ces bases.
+        ⚠️ Modifiez <b>CP acquis</b> pour corriger un solde incorrect. Le nombre de CP pris est calculé automatiquement depuis les demandes approuvées.
       </div>
     </div>
     <div class="modal-foot">
@@ -636,13 +649,14 @@ function getSoldes(emp){
   const year = _year;
   const cpAcquis = calcCPAcquis(emp, year);
   const cpPris   = calcCPPris(emp.id, year);
-  const cpRestant= Math.max(0, cpAcquis - cpPris);
+  const cpRestant= cpAcquis - cpPris; // Pas de Math.max → on garde les négatifs !
   const rttRestant = Math.max(0, (emp.rttAjust||(_params.rttAnnuels||0)) -
     _demandes.filter(d=>d.empId===emp.id&&d.type==='rtt'&&d.statut==='approved'
       &&new Date(d.dateDebut||0).getFullYear()===year).reduce((s,d)=>s+(d.nbJours||0),0));
   const recupRestant = emp.recupHeures||0;
   const pending = _demandes.filter(d=>d.empId===emp.id&&d.statut==='pending').length;
-  return {cpAcquis, cpPris, cpRestant, rttRestant, recupRestant, pending};
+  const isApprentice = emp.typeContrat==='apprentissage'||emp.typeContrat==='alternance'||emp.apprenti===true;
+  return {cpAcquis, cpPris, cpRestant, rttRestant, recupRestant, pending, isApprentice};
 }
 
 // Calcul jours ouvrés entre deux dates
@@ -672,17 +686,19 @@ function renderAll(){
 
 function renderKPIs(){
   const emps = Object.values(_emps);
-  let totalAcquis=0, totalPris=0, pending=0;
+  let totalAcquis=0, totalPris=0, pending=0, enAvance=0;
   emps.forEach(e=>{
     const s=getSoldes(e);
     totalAcquis+=s.cpAcquis; totalPris+=s.cpPris;
     pending+=s.pending;
+    if(s.cpRestant<0) enAvance++;
   });
   set('k-emp', emps.length);
   set('k-acquis', totalAcquis.toFixed(1)+'j');
   set('k-pris', totalPris.toFixed(1)+'j');
   set('k-reste', (totalAcquis-totalPris).toFixed(1)+'j');
   set('k-pending', pending);
+  set('k-avance', enAvance>0 ? enAvance+' emp.' : '0');
 }
 
 function renderSoldesTable(filter=''){
@@ -706,20 +722,29 @@ function renderSoldesTable(filter=''){
   }
   tbody.innerHTML = emps.map(e=>{
     const s = getSoldes(e);
-    const pct = s.cpAcquis>0 ? Math.min(s.cpPris/s.cpAcquis*100,100) : 0;
+    const isNeg = s.cpRestant < 0;
+    const pct = s.cpAcquis>0 ? Math.min(s.cpPris/s.cpAcquis*100,100) : (isNeg?100:0);
     const col = e.couleur || COLORS_EMP[Object.keys(_emps).indexOf(e.id)%COLORS_EMP.length];
-    const solvCls = s.cpRestant>10?'good':s.cpRestant>5?'warn':'low';
+    const solvCls = isNeg ? 'neg' : s.cpRestant>10?'good':s.cpRestant>5?'warn':'low';
     const demPending = _demandes.filter(d=>d.empId===e.id&&d.statut==='pending').length;
+    const apprentiBadge = s.isApprentice ? '<span class="badge-apprenti">Apprenti</span>' : '';
+    const avanceBadge   = isNeg ? `<span class="badge-avance">−${Math.abs(s.cpRestant).toFixed(1)}j en avance</span>` : '';
+    // Barre de progression : rouge si négatif
+    const barHtml = isNeg
+      ? `<div class="solde-bar-neg"><div class="solde-fill-neg" style="width:${Math.min(Math.abs(s.cpRestant)/Math.max(s.cpAcquis,1)*100,100)}%"></div></div>`
+      : `<div class="solde-bar"><div class="solde-fill" style="width:${100-pct}%;background:var(--rh-main)"></div></div>`;
     return `<tr>
       <td><div class="emp-cell">
         <div class="emp-av" style="background:${col}">${(e.prenom||'?').charAt(0).toUpperCase()}</div>
-        <div><div class="emp-nm">${e.prenom||''} ${e.nom||''}</div><div class="emp-ps">${e.poste||'—'}</div></div>
+        <div><div class="emp-nm">${e.prenom||''} ${e.nom||''} ${apprentiBadge}</div><div class="emp-ps">${e.poste||'—'}</div></div>
       </div></td>
       <td><div style="font-size:13px;font-weight:700">${s.cpAcquis.toFixed(1)}j</div><div style="font-size:9px;color:var(--muted)">${_params.cpAnnuels||25}j/an</div></td>
       <td><div style="font-size:13px;font-weight:700">${s.cpPris.toFixed(1)}j</div>
           <div class="solde-bar"><div class="solde-fill" style="width:${pct}%;background:var(--orange)"></div></div></td>
-      <td><div class="solde-val ${solvCls}">${s.cpRestant.toFixed(1)}j</div>
-          <div class="solde-bar"><div class="solde-fill" style="width:${100-pct}%;background:var(--rh-main)"></div></div></td>
+      <td>
+        <div class="solde-val ${solvCls}">${s.cpRestant.toFixed(1)}j ${avanceBadge}</div>
+        ${barHtml}
+      </td>
       <td><span class="solde-val ${s.rttRestant>0?'good':'low'}">${s.rttRestant.toFixed(1)}j</span></td>
       <td><span style="font-size:12px;font-weight:600;color:var(--muted)">${
         _demandes.filter(d=>d.empId===e.id&&d.type==='css'&&d.statut==='approved'&&new Date(d.dateDebut||0).getFullYear()===_year)
@@ -945,8 +970,14 @@ function calcJours(){
         const s=getSoldes(emp);
         const solde=type==='cp'?s.cpRestant:s.rttRestant;
         if(jours>solde){
-          warnEl.textContent=`⚠️ Solde insuffisant : ${solde.toFixed(1)}j disponibles, ${jours}j demandés`;
+          const manque = (jours-solde).toFixed(1);
+          const isApprentice = s.isApprentice;
+          warnEl.innerHTML = isApprentice
+            ? `📘 <b>Apprenti — congés en avance :</b> Solde actuel : <b>${solde.toFixed(1)}j</b> · Demandé : <b>${jours}j</b> · Il prendra <b>${manque}j en avance</b> sur ses droits futurs. Vous pouvez valider.`
+            : `⚠️ Solde insuffisant : <b>${solde.toFixed(1)}j</b> disponibles, <b>${jours}j</b> demandés (−${manque}j). Vous pouvez tout de même valider si autorisé.`;
           warnEl.style.display='block';
+          warnEl.style.background = isApprentice ? '#dbeafe' : '#fef3c7';
+          warnEl.style.color = isApprentice ? '#1e40af' : '#92400e';
         } else {
           warnEl.style.display='none';
         }
@@ -1104,10 +1135,39 @@ function loadAjustForm(){
   const emp=_emps[empId];
   if(!emp) return;
   const s=getSoldes(emp);
-  setV('aj-acquis', emp.cpAjustAcquis||s.cpAcquis.toFixed(1));
+
+  setV('aj-acquis', (emp.cpAjustAcquis!=null ? emp.cpAjustAcquis : s.cpAcquis).toFixed(1));
   setV('aj-pris', s.cpPris.toFixed(1));
   setV('aj-rtt', emp.rttAjust||(_params.rttAnnuels||0));
   setV('aj-recup', emp.recupHeures||0);
+
+  // Badge apprenti
+  const appInfo = document.getElementById('aj-apprenti-info');
+  if(appInfo) appInfo.style.display = s.isApprentice ? '' : 'none';
+
+  // Badge solde négatif
+  const negInfo = document.getElementById('aj-solde-negatif');
+  const joursAvance = document.getElementById('aj-jours-avance');
+  if(negInfo && joursAvance){
+    if(s.cpRestant < 0){
+      joursAvance.textContent = Math.abs(s.cpRestant).toFixed(1);
+      negInfo.style.display = '';
+    } else {
+      negInfo.style.display = 'none';
+    }
+  }
+
+  // Solde affiché
+  const soldeEl = document.getElementById('aj-solde-affiche');
+  if(soldeEl){
+    const isNeg = s.cpRestant < 0;
+    soldeEl.style.display = '';
+    soldeEl.style.background = isNeg ? '#fee2e2' : '#f0fdf4';
+    soldeEl.style.color = isNeg ? '#991b1b' : '#065f46';
+    soldeEl.innerHTML = isNeg
+      ? `❌ Solde CP actuel : <b>${s.cpRestant.toFixed(1)}j</b> (${Math.abs(s.cpRestant).toFixed(1)}j pris en avance)`
+      : `✅ Solde CP actuel : <b>${s.cpRestant.toFixed(1)}j</b> restants`;
+  }
 }
 window.loadAjustForm=loadAjustForm;
 
@@ -1119,11 +1179,16 @@ async function saveAjust(){
     rttAjust:      parseFloat(document.getElementById('aj-rtt')?.value)||0,
     recupHeures:   parseFloat(document.getElementById('aj-recup')?.value)||0,
   };
+  // Vérifier si solde va devenir négatif après ajustement
+  const s = getSoldes(_emps[empId]);
+  const nouveauSolde = data.cpAjustAcquis - s.cpPris;
+  if(nouveauSolde < 0 && !_emps[empId]?.apprenti && _emps[empId]?.typeContrat!=='apprentissage'){
+    const ok = confirm(`⚠️ Avec ces valeurs, le solde de ${(_emps[empId]?.prenom||'cet employé')} sera de ${nouveauSolde.toFixed(1)}j (négatif).\n\nVoulez-vous confirmer ?`);
+    if(!ok) return;
+  }
   try{
-    // Mise à jour fiche privée
     await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',empId),data);
     Object.assign(_emps[empId],data);
-    // Synchroniser fiche publique (portail salarié) si publicId existe
     const emp=_emps[empId];
     if(emp?.publicId){
       await window._updateDoc(window._doc(window._db,'rh_employes_public',emp.publicId),{
