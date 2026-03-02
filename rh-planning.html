@@ -158,6 +158,9 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 .m-cell.m-other .m-dnum{color:#d1d5db;}
 .m-cell.m-other{background:#fafafa;}
 .m-cell.m-we{background:#f9fafb;}
+.m-cell.m-ferme{background:repeating-linear-gradient(135deg,#fff1f2,#fff1f2 6px,#fafafa 6px,#fafafa 12px)!important;opacity:.78;}
+.m-cell.m-ferme .m-dnum{color:#fca5a5;}
+.m-ferme-badge{position:absolute;bottom:3px;right:3px;font-size:7px;font-weight:700;color:#ef4444;background:#fee2e2;padding:1px 4px;border-radius:3px;letter-spacing:.3px;}
 .m-dnum{font-size:12px;font-weight:700;margin-bottom:3px;}
 .m-dnum-circle{background:var(--rh-main);color:white;border-radius:50%;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;}
 .m-pill{font-size:8px;font-weight:700;padding:2px 5px;border-radius:4px;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;}
@@ -789,6 +792,12 @@ onAuthStateChanged(auth,u=>{
 let _emps=[], _cr={}, _view='semaine', _disp='gantt';
 let _cur=new Date(), _editId=null, _hidden=new Set(), _aiResult=null;
 let _zoom=localStorage.getItem('rh_zoom')||'normal';
+let _joursFermes={hebdo:[0,6],ponctuels:[]};
+function isFerme(d){
+  const dow=d.getDay();
+  if(_joursFermes.hebdo.includes(dow)) return true;
+  return _joursFermes.ponctuels.includes(fmt(d));
+}
 let _multiOpen=false, _filterPoste='', _infractions={}, _ccnDefault='droit_commun';
 let _plages=[{deb:'09:00',fin:'17:00'}], _crType='travail';
 
@@ -933,8 +942,17 @@ window.initPlanning=initPlanning;
 async function loadRHParams(){
   try{
     const snap=await window._getDoc(window._doc(window._db,'rh_params',window._uid));
-    if(snap.exists()){const d=snap.data();if(d.ccnDefault)_ccnDefault=d.ccnDefault;}
+    if(snap.exists()){
+      const d=snap.data();
+      if(d.ccnDefault) _ccnDefault=d.ccnDefault;
+      if(d.joursFermes) _joursFermes={hebdo:d.joursFermes.hebdo||[0,6],ponctuels:d.joursFermes.ponctuels||[]};
+    }
   }catch(e){console.warn(e);}
+}
+async function saveJoursFermes(){
+  try{
+    await window._setDoc(window._doc(window._db,'rh_params',window._uid),{joursFermes:_joursFermes},{merge:true});
+  }catch(e){console.error(e);}
 }
 
 async function loadEmps(){
@@ -1108,7 +1126,7 @@ function renderGantt(){
         ${days.map(d=>{
           const k=`${fmt(d)}_${e.id}`;
           const items=(_cr[k]?.items||[]);
-          const off=isWE(d)&&!items.length;
+          const off=isFerme(d)&&!items.length;
           const infrs=_infractions[k]||[];
           return `<div class="gd-cell ${isToday(d)?'today':''} ${off?'we':''}"
             data-dnd-target-k="${k}"
@@ -1339,8 +1357,10 @@ function renderMois(){
       const totalH=allItems.filter(({it})=>it.type==='travail'||it.type==='partiel').reduce((s,{it})=>s+itemH(it),0);
       const shown=allItems.slice(0,maxPills);
       const empCount=vis.filter(e=>(_cr[`${kp}_${e.id}`]?.items||[]).length>0).length;
-      return `<div class="m-cell ${isToday(date)?'m-today':''} ${!cur?'m-other':''} ${isWE(date)?'m-we':''}"
+      const ferme=isFerme(date);
+      return `<div class="m-cell ${isToday(date)?'m-today':''} ${!cur?'m-other':''} ${isWE(date)?'m-we':''} ${ferme&&cur?'m-ferme':''}"
         onclick="setView('jour');_cur=new Date(${date.getFullYear()},${date.getMonth()},${date.getDate()});render()">
+        ${ferme&&cur&&!allItems.length?'<div class="m-ferme-badge">Fermé</div>':''}
         <div class="m-dnum">
           <span ${isToday(date)?'class="m-dnum-circle"':''}>${date.getDate()}</span>
           ${(_zoom==='comfortable'||_zoom==='large')&&cur?`<span style="font-size:9px;font-weight:500;color:var(--muted);margin-left:4px">${date.toLocaleDateString('fr-FR',{weekday:'short'})}</span>`:''}
@@ -3117,6 +3137,93 @@ function exportPlanningMensuelSalarie(){
   w.document.close();
 }
 window.exportPlanningMensuelSalarie=exportPlanningMensuelSalarie;
+
+// ══════════════════════════════════════════════════════════════
+// JOURS DE FERMETURE
+// ══════════════════════════════════════════════════════════════
+const DOW_LABELS=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
+const DOW_LABELS_FULL=['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+
+function openFermetureModal(){
+  renderFermetureModal();
+  const m=document.getElementById('fermetureModal');
+  m.style.display='flex';
+}
+function closeFermetureModal(){
+  document.getElementById('fermetureModal').style.display='none';
+}
+
+function renderFermetureModal(){
+  // Grille jours semaine (0=dim ... 6=sam)
+  const grid=document.getElementById('ferme-dow-grid');
+  if(grid) grid.innerHTML=[0,1,2,3,4,5,6].map(dow=>{
+    const active=_joursFermes.hebdo.includes(dow);
+    return `<button onclick="toggleFermeDow(${dow},this)"
+      style="padding:7px 4px;border-radius:8px;border:2px solid ${active?'#ef4444':'#e2e8f0'};
+      background:${active?'#fee2e2':'white'};color:${active?'#b91c1c':'#374151'};
+      font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;font-family:inherit">
+      ${DOW_LABELS[dow]}
+    </button>`;
+  }).join('');
+
+  renderFermeDatesList();
+}
+
+function toggleFermeDow(dow, btn){
+  const idx=_joursFermes.hebdo.indexOf(dow);
+  if(idx>=0) _joursFermes.hebdo.splice(idx,1);
+  else _joursFermes.hebdo.push(dow);
+  const active=_joursFermes.hebdo.includes(dow);
+  btn.style.border=`2px solid ${active?'#ef4444':'#e2e8f0'}`;
+  btn.style.background=active?'#fee2e2':'white';
+  btn.style.color=active?'#b91c1c':'#374151';
+}
+
+function addFermetureDate(){
+  const val=document.getElementById('ferme-date-input')?.value;
+  if(!val) return;
+  if(_joursFermes.ponctuels.includes(val)){showToast('Date déjà ajoutée','warn');return;}
+  _joursFermes.ponctuels.push(val);
+  _joursFermes.ponctuels.sort();
+  document.getElementById('ferme-date-input').value='';
+  renderFermeDatesList();
+}
+
+function removeFermetureDate(iso){
+  _joursFermes.ponctuels=_joursFermes.ponctuels.filter(d=>d!==iso);
+  renderFermeDatesList();
+}
+
+function renderFermeDatesList(){
+  const list=document.getElementById('ferme-dates-list');
+  if(!list) return;
+  if(!_joursFermes.ponctuels.length){
+    list.innerHTML='<div style="font-size:11px;color:#9ca3af;padding:8px 0">Aucune fermeture ponctuelle</div>';
+    return;
+  }
+  list.innerHTML=_joursFermes.ponctuels.map(iso=>{
+    const d=new Date(iso+'T12:00:00');
+    const lbl=d.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#fef2f2;border-radius:8px;border:1px solid #fecaca">
+      <span style="font-size:12px;font-weight:600;color:#991b1b">🔒 ${lbl}</span>
+      <button onclick="removeFermetureDate('${iso}')" style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:14px;padding:0 4px" title="Retirer">✕</button>
+    </div>`;
+  }).join('');
+}
+
+async function saveFermetures(){
+  await saveJoursFermes();
+  closeFermetureModal();
+  render();
+  showToast('✅ Jours de fermeture enregistrés','ok');
+}
+
+window.openFermetureModal=openFermetureModal;
+window.closeFermetureModal=closeFermetureModal;
+window.toggleFermeDow=toggleFermeDow;
+window.addFermetureDate=addFermetureDate;
+window.removeFermetureDate=removeFermetureDate;
+window.saveFermetures=saveFermetures;
 
 // ── UTILS ──
 function showToast(m,t=''){const el=document.getElementById('toast');el.textContent=m;el.className='toast show '+(t||'');setTimeout(()=>el.className='toast',3200);}
