@@ -1973,7 +1973,10 @@ async function saveCr(){
 
     // Récurrence (mode multi : s'applique si 1 seule date cochée)
     const recur=document.getElementById('cr-recur')?.value;
-    if(recur&&dates.length===1){await applyRecurrence(dates[0],eid,type,mPlages,note,recur);}
+    if(recur&&dates.length===1){
+      const untilVal=document.getElementById('cr-recur-until')?.value||'';
+      await applyRecurrence(dates[0],eid,type,mPlages,note,recur,untilVal);
+    }
 
     closeCr();await loadCr();render();
     showToast(`✅ ${saved} créneau(x) enregistrés`,'ok');
@@ -2005,7 +2008,7 @@ async function saveCr(){
     const hadRecur=!!recur;
     // Sauvegarder le créneau INITIAL d'abord (avant applyRecurrence pour éviter doublons)
     await saveKey(k,date);
-    if(recur) await applyRecurrence(date,eid,type,plagesData,note,recur);
+    if(recur) await applyRecurrence(date,eid,type,plagesData,note,recur,untilForReload);
     closeCr();
     if(hadRecur){
       await loadCrForMonth(date, untilForReload);
@@ -2025,7 +2028,7 @@ async function saveCr(){
 }
 window.saveCr=saveCr;
 
-async function applyRecurrence(startDate,eid,type,plages,note,recur){
+async function applyRecurrence(startDate,eid,type,plages,note,recur,untilVal=''){
   // Générer un ID de groupe pour permettre la suppression groupée
   const recurId='r'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
   // Aussi marquer le créneau initial avec ce recurId
@@ -2035,8 +2038,7 @@ async function applyRecurrence(startDate,eid,type,plages,note,recur){
     if(lastItem && !lastItem.recurId) lastItem.recurId=recurId;
     await saveKey(initKey,startDate);
   }
-  const untilVal=document.getElementById('cr-recur-until')?.value;
-  // Si pas de date de fin saisie → fin du mois courant par défaut
+  // untilVal passé en paramètre — plus de lecture DOM (modal peut être fermé)
   let endD;
   if(untilVal){
     endD=new Date(untilVal+'T12:00:00');
@@ -2067,19 +2069,30 @@ async function applyRecurrence(startDate,eid,type,plages,note,recur){
     d.setDate(d.getDate()+step);
     count++;
   }
-  // Sauvegarder toutes les occurrences (parallèle pour la vitesse)
+  // Sauvegarder toutes les occurrences
   if(saves.length){
+    // Lire btn AVANT tout traitement (modal encore ouvert à ce moment)
     const btn=document.getElementById('save-btn');
     if(btn){btn.disabled=true;btn.textContent=`⏳ 0/${saves.length}…`;}
     let done=0;
-    for(const {k,iso} of saves){
-      await saveKey(k,iso);
-      done++;
-      if(btn)btn.textContent=`⏳ ${done}/${saves.length}…`;
+    try{
+      for(const {k,iso} of saves){
+        await saveKey(k,iso);
+        done++;
+        // btn peut avoir disparu si modal fermé entre-temps — pas grave
+        const b=document.getElementById('save-btn');
+        if(b)b.textContent=`⏳ ${done}/${saves.length}…`;
+      }
+    } catch(err){
+      console.error('[applyRecurrence saveKey]',err);
+      showToast('Erreur sauvegarde récurrence','warn');
+    } finally {
+      // Toujours restaurer le bouton (même si fermé entre-temps)
+      const b=document.getElementById('save-btn');
+      if(b){b.disabled=false;b.textContent='💾 Enregistrer';}
     }
-    if(btn){btn.disabled=false;btn.textContent='💾 Enregistrer';}
   }
-  if(count>0) showToast(`🔁 Récurrence : ${count} semaine(s) enregistrées ✅`,'ok');
+  if(count>0) showToast(`🔁 Récurrence : ${count} occurrence(s) enregistrées ✅`,'ok');
 }
 
 async function saveKey(k,date){
