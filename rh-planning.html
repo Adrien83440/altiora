@@ -152,7 +152,7 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 .month-wrap{padding:0;}
 .month-grid{display:grid;grid-template-columns:repeat(7,1fr);border-left:1px solid var(--border);border-top:1px solid var(--border);}
 .m-dhead{padding:7px;text-align:center;font-size:10px;font-weight:700;color:var(--muted);background:#f8faff;border-right:1px solid var(--border);border-bottom:1px solid var(--border);}
-.m-cell{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:5px;min-height:90px;cursor:pointer;transition:background .12s;position:relative;}
+.m-cell{border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:5px;min-height:90px;cursor:pointer;transition:background .12s;position:relative;vertical-align:top;}
 .m-cell:hover{background:#f0fdf4;}
 .m-cell.m-today{background:#f0fdf9;}
 .m-cell.m-other .m-dnum{color:#d1d5db;}
@@ -163,7 +163,7 @@ body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(-
 .m-ferme-badge{position:absolute;bottom:3px;right:3px;font-size:7px;font-weight:700;color:#ef4444;background:#fee2e2;padding:1px 4px;border-radius:3px;letter-spacing:.3px;}
 .m-dnum{font-size:12px;font-weight:700;margin-bottom:3px;}
 .m-dnum-circle{background:var(--rh-main);color:white;border-radius:50%;width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;}
-.m-pill{font-size:8px;font-weight:700;padding:2px 5px;border-radius:4px;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;}
+.m-pill{font-size:8px;font-weight:700;padding:2px 5px;border-radius:4px;margin-bottom:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:2px;}
 .m-more{font-size:9px;color:var(--muted);font-weight:600;}
 .m-total-badge{position:absolute;top:4px;right:4px;font-size:8px;font-weight:800;color:var(--rh-main);background:var(--rh-ghost);padding:1px 4px;border-radius:4px;}
 
@@ -1453,37 +1453,53 @@ function renderMois(){
   const pc=document.getElementById('plan-content');
   const JOURS=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
   // Nombre de pills selon le zoom
-  const maxPills={compact:2,normal:3,comfortable:5,large:7}[_zoom]||3;
-
   let h=`<div class="month-wrap"><div class="month-grid">
     ${JOURS.map(j=>`<div class="m-dhead">${j}</div>`).join('')}
     ${days.map(({date,cur})=>{
       const kp=fmt(date);
-      const allItems=[];
-      vis.forEach(e=>(_cr[`${kp}_${e.id}`]?.items||[]).forEach(it=>allItems.push({e,it})));
-      const totalH=allItems.filter(({it})=>it.type==='travail'||it.type==='partiel').reduce((s,{it})=>s+itemH(it),0);
-      const shown=allItems.slice(0,maxPills);
-      const empCount=vis.filter(e=>(_cr[`${kp}_${e.id}`]?.items||[]).length>0).length;
+      // Grouper par salarié : 1 ligne par personne présente
+      const empData=vis.map((e,empIdx)=>{
+        const items=(_cr[`${kp}_${e.id}`]?.items||[]);
+        if(!items.length)return null;
+        const empCol=EMP_PILL_COLORS[empIdx%EMP_PILL_COLORS.length];
+        const workItems=items.filter(it=>it.type==='travail'||it.type==='partiel');
+        const h=workItems.reduce((s,it)=>s+itemH(it),0);
+        // Résumé : heure début + durée ou type si pas travail
+        const firstWork=workItems[0]||items[0];
+        const plages=firstWork.plages&&firstWork.plages.length>0?firstWork.plages:(firstWork.deb?[{deb:firstWork.deb,fin:firstWork.fin}]:[]);
+        const timeTxt=plages[0]?plages[0].deb:(TYPE_LBL[firstWork.type]||firstWork.type);
+        const durTxt=h>0?` ${fmtDur(h)}`:'';
+        // Indicateurs complémentaires (conges/maladie/etc)
+        const hasConge=items.some(it=>it.type==='conge');
+        const hasMal=items.some(it=>it.type==='maladie');
+        const multiType=items.length>1?`+${items.length-1}`:'';
+        const hasRecur=items.some(it=>it.recurId);
+        return {e,empCol,timeTxt,durTxt,multiType,hasConge,hasMal,h,hasRecur};
+      }).filter(Boolean);
+
+      const totalH=empData.reduce((s,d)=>s+d.h,0);
       const ferme=isFerme(date);
+      // Hauteur cellule adaptée au nombre de salariés
+      const cellH=Math.max(82, 22 + empData.length*17);
       return `<div class="m-cell ${isToday(date)?'m-today':''} ${!cur?'m-other':''} ${isWE(date)?'m-we':''} ${ferme&&cur?'m-ferme':''}"
+        style="min-height:${cellH}px"
         onclick="setView('jour');_cur=new Date(${date.getFullYear()},${date.getMonth()},${date.getDate()});render()">
-        ${ferme&&cur&&!allItems.length?'<div class="m-ferme-badge">Fermé</div>':''}
+        ${ferme&&cur&&!empData.length?'<div class="m-ferme-badge">Fermé</div>':''}
         <div class="m-dnum">
           <span ${isToday(date)?'class="m-dnum-circle"':''}>${date.getDate()}</span>
           ${(_zoom==='comfortable'||_zoom==='large')&&cur?`<span style="font-size:9px;font-weight:500;color:var(--muted);margin-left:4px">${date.toLocaleDateString('fr-FR',{weekday:'short'})}</span>`:''}
         </div>
-        ${totalH>0?`<div class="m-total-badge">${fmtDur(totalH)}${(_zoom==='large'&&empCount>0)?` · ${empCount}p`:''}  </div>`:''}
-        ${shown.map(({e,it})=>{
-          const plages=it.plages&&it.plages.length>0?it.plages:(it.deb?[{deb:it.deb,fin:it.fin}]:[]);
-          const timeTxt=plages[0]?`${plages[0].deb}`:TYPE_LBL[it.type]||it.type;
-          const empTxt=(_zoom==='comfortable'||_zoom==='large')?`${e.prenom||''} `:'';
-          const empIdx=vis.indexOf(e);
-          const empCol=EMP_PILL_COLORS[empIdx%EMP_PILL_COLORS.length];
-          const recurMark=it.recurId?'<span style="opacity:.6;font-size:7px">↻</span>':'';
-          return `<div class="m-pill" style="background:${empCol.bg};color:${empCol.fg};border-left:2px solid ${empCol.bd}">${recurMark}${empTxt}${timeTxt}</div>`;
+        ${totalH>0?`<div class="m-total-badge">${fmtDur(totalH)}</div>`:''}
+        ${empData.map(({e,empCol,timeTxt,durTxt,multiType,hasConge,hasMal,hasRecur})=>{
+          const initials=`${(e.prenom||'?')[0]}${(e.nom||'')[0]||''}`.toUpperCase();
+          const showName=(_zoom==='comfortable'||_zoom==='large');
+          const nameTxt=showName?`${e.prenom||''} `:initials+' ';
+          const icons=(hasConge?'🏖':'')+(hasMal?'🤒':'')+(hasRecur?'↻':'');
+          const extra=multiType?`<span style="opacity:.55;font-size:7px"> ${multiType}</span>`:'';
+          const iconsHtml=icons?`<span style="font-size:7px;opacity:.7"> ${icons}</span>`:'';
+          return `<div class="m-pill" style="background:${empCol.bg};color:${empCol.fg};border-left:2px solid ${empCol.bd}">${nameTxt}${timeTxt}${durTxt}${extra}${iconsHtml}</div>`;
         }).join('')}
-        ${allItems.length>maxPills?`<div class="m-more">+${allItems.length-maxPills} autres</div>`:''}
-        ${allItems.length===0&&cur?`<div style="font-size:10px;color:#d1d5db;padding:4px 0">libre</div>`:''}
+        ${empData.length===0&&cur?`<div style="font-size:10px;color:#d1d5db;padding:4px 0">libre</div>`:''}
       </div>`;
     }).join('')}
   </div></div>`;
