@@ -609,50 +609,60 @@ function getDateEntree(emp){
 }
 
 function calcCPAcquis(emp, year){
-  // Accumulation : 2.08j/mois depuis la date d'entrée jusqu'à aujourd'hui (ou fin de période)
-  // Période de référence : 1er juin N-1 → 31 mai N (standard) ou selon rh-params
+  // CP acquis depuis la date d'entrée jusqu'à aujourd'hui
+  // Pour les apprentis / alternants : accumulation continue depuis le 1er jour (pas de période ref.)
+  // Pour les autres : période de référence standard 1 juin N-1 → 31 mai N (ou 1 janv → 31 déc)
   const cpAnnuels = _params.cpAnnuels || 25;
-  const cpMode = _params.cpPeriode || '1juin';
-
-  let periodeDebut, periodeFin;
-  if(cpMode === '1janv'){
-    periodeDebut = new Date(year,0,1);
-    periodeFin   = new Date(year,11,31);
-  } else {
-    // Standard : 1er juin N-1 → 31 mai N
-    periodeDebut = new Date(year-1,5,1);
-    periodeFin   = new Date(year,4,31);
-  }
+  const cpMode    = _params.cpPeriode || '1juin';
+  const isApprentice = emp.typeContrat==='apprentissage'||emp.typeContrat==='alternance'||emp.apprenti===true;
 
   const entree = getDateEntree(emp);
-  const debut  = entree > periodeDebut ? entree : periodeDebut;
-  const fin    = new Date() < periodeFin ? new Date() : periodeFin;
+  const today  = new Date();
+
+  let debut, fin;
+  if(isApprentice){
+    // Apprentis : on calcule depuis la date d'entrée jusqu'à aujourd'hui, sans période de ref
+    debut = entree;
+    fin   = today;
+  } else {
+    let periodeDebut, periodeFin;
+    if(cpMode === '1janv'){
+      periodeDebut = new Date(year,0,1);
+      periodeFin   = new Date(year,11,31);
+    } else {
+      periodeDebut = new Date(year-1,5,1);
+      periodeFin   = new Date(year,4,31);
+    }
+    debut = entree > periodeDebut ? entree : periodeDebut;
+    fin   = today < periodeFin ? today : periodeFin;
+  }
 
   if(debut > fin) return emp.cpAjustAcquis||0;
 
   // Mois complets entre debut et fin
   const moisTotal = (fin.getFullYear()-debut.getFullYear())*12 + (fin.getMonth()-debut.getMonth());
-  const taux = cpAnnuels / 12; // j/mois
-  const acquis = Math.round((moisTotal * taux + (emp.cpAjustAcquis||0)) * 10) / 10;
-  return Math.max(0, acquis);
+  const taux = cpAnnuels / 12; // ex: 25/12 = 2.08j/mois
+  // cpAjustAcquis = correction manuelle éventuelle (ex: solde de reprise)
+  const acquis = Math.round((moisTotal * taux + (emp.cpAjustAcquis||0)) * 100) / 100;
+  return acquis; // Peut être négatif si cpAjustAcquis est négatif — on laisse tel quel
 }
 
-function calcCPPris(empId, year){
-  // Somme des demandes approuvées de type CP pour cet employé cette année
+function calcCPPris(empId){
+  // Tous les CP approuvés, toutes années confondues
+  // (un apprenti qui prend des congés en février sur droits futurs doit être comptabilisé)
   return _demandes
-    .filter(d=> d.empId===empId && d.type==='cp' && d.statut==='approved'
-      && d.dateDebut && new Date(d.dateDebut).getFullYear()===year)
+    .filter(d=> d.empId===empId && d.type==='cp' && d.statut==='approved')
     .reduce((s,d)=>s+(parseFloat(d.nbJours)||0), 0);
 }
 
 function getSoldes(emp){
   const year = _year;
-  const cpAcquis = calcCPAcquis(emp, year);
-  const cpPris   = calcCPPris(emp.id, year);
-  const cpRestant= cpAcquis - cpPris; // Pas de Math.max → on garde les négatifs !
+  const cpAcquis  = calcCPAcquis(emp, year);
+  const cpPris    = calcCPPris(emp.id);          // Tous les CP pris, toutes années
+  const cpRestant = cpAcquis - cpPris;           // Positif = droits restants / Négatif = en avance
   const rttRestant = Math.max(0, (emp.rttAjust||(_params.rttAnnuels||0)) -
-    _demandes.filter(d=>d.empId===emp.id&&d.type==='rtt'&&d.statut==='approved'
-      &&new Date(d.dateDebut||0).getFullYear()===year).reduce((s,d)=>s+(d.nbJours||0),0));
+    _demandes.filter(d=>d.empId===emp.id&&d.type==='rtt'&&d.statut==='approved')
+             .reduce((s,d)=>s+(d.nbJours||0),0));
   const recupRestant = emp.recupHeures||0;
   const pending = _demandes.filter(d=>d.empId===emp.id&&d.statut==='pending').length;
   const isApprentice = emp.typeContrat==='apprentissage'||emp.typeContrat==='alternance'||emp.apprenti===true;
