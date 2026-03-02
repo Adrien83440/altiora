@@ -1396,7 +1396,8 @@ function renderMois(){
           const empTxt=(_zoom==='comfortable'||_zoom==='large')?`${e.prenom||''} `:'';
           const empIdx=vis.indexOf(e);
           const empCol=EMP_PILL_COLORS[empIdx%EMP_PILL_COLORS.length];
-          return `<div class="m-pill" style="background:${empCol.bg};color:${empCol.fg};border-left:2px solid ${empCol.bd}">${empTxt}${timeTxt}</div>`;
+          const recurMark=it.recurId?'<span style="opacity:.6;font-size:7px">↻</span>':'';
+          return `<div class="m-pill" style="background:${empCol.bg};color:${empCol.fg};border-left:2px solid ${empCol.bd}">${recurMark}${empTxt}${timeTxt}</div>`;
         }).join('')}
         ${allItems.length>maxPills?`<div class="m-more">+${allItems.length-maxPills} autres</div>`:''}
         ${allItems.length===0&&cur?`<div style="font-size:10px;color:#d1d5db;padding:4px 0">libre</div>`:''}
@@ -1915,12 +1916,13 @@ async function saveCr(){
     }
   } else {
     _cr[k].items.push(it);
-    // Récurrence — lire AVANT closeCr() qui détruit le DOM du modal
+    // Lire les valeurs de récurrence AVANT closeCr() qui détruit le DOM
     const recur=document.getElementById('cr-recur')?.value;
     const untilForReload=document.getElementById('cr-recur-until')?.value||'';
     const hadRecur=!!recur;
-    if(recur) await applyRecurrence(date,eid,type,plagesData,note,recur);
+    // Sauvegarder le créneau INITIAL d'abord (avant applyRecurrence pour éviter doublons)
     await saveKey(k,date);
+    if(recur) await applyRecurrence(date,eid,type,plagesData,note,recur);
     closeCr();
     if(hadRecur){
       await loadCrForMonth(date, untilForReload);
@@ -1941,6 +1943,15 @@ async function saveCr(){
 window.saveCr=saveCr;
 
 async function applyRecurrence(startDate,eid,type,plages,note,recur){
+  // Générer un ID de groupe pour permettre la suppression groupée
+  const recurId='r'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+  // Aussi marquer le créneau initial avec ce recurId
+  const initKey=`${startDate}_${eid}`;
+  if(_cr[initKey]?.items?.length){
+    const lastItem=_cr[initKey].items[_cr[initKey].items.length-1];
+    if(lastItem && !lastItem.recurId) lastItem.recurId=recurId;
+    await saveKey(initKey,startDate);
+  }
   const untilVal=document.getElementById('cr-recur-until')?.value;
   // Si pas de date de fin saisie → fin du mois courant par défaut
   let endD;
@@ -1968,7 +1979,7 @@ async function applyRecurrence(startDate,eid,type,plages,note,recur){
     const uid_item=`c${iso.replace(/-/g,'')}${eid.slice(-4)}${Math.random().toString(36).slice(2,6)}`;
     // Copie profonde des plages pour chaque occurrence
     const plagesCopy=plages.length>0?plages.map(p=>({deb:p.deb,fin:p.fin})):undefined;
-    _cr[k].items.push({id:uid_item,type,deb:plages[0]?.deb||'',fin:plages[plages.length-1]?.fin||'',plages:plagesCopy,note});
+    _cr[k].items.push({id:uid_item,type,deb:plages[0]?.deb||'',fin:plages[plages.length-1]?.fin||'',plages:plagesCopy,note,recurId});
     saves.push({k,iso});
     d.setDate(d.getDate()+step);
     count++;
@@ -2528,11 +2539,111 @@ window.editCr=editCr;
 async function delCr(){
   if(!_editId)return;
   const{k,itemId}=_editId;
+  const it=(_cr[k]?.items||[]).find(i=>i.id===itemId);
+  // Si l'item fait partie d'une récurrence, proposer les 2 options
+  if(it?.recurId){
+    showDelRecurModal(k,itemId,it.recurId);
+    return;
+  }
   _cr[k].items=(_cr[k].items||[]).filter(i=>i.id!==itemId);
   await saveKey(k,k.split('_')[0]);
   closeCr();await loadCr();render();showToast('Créneau supprimé');
 }
 window.delCr=delCr;
+
+// Modal de confirmation de suppression récurrence
+function showDelRecurModal(k,itemId,recurId){
+  const existing=document.getElementById('delRecurModal');
+  if(existing)existing.remove();
+  const m=document.createElement('div');
+  m.id='delRecurModal';
+  m.style.cssText='position:fixed;inset:0;background:rgba(15,31,92,.5);backdrop-filter:blur(4px);z-index:400;display:flex;align-items:center;justify-content:center';
+  m.innerHTML=`
+    <div style="background:white;border-radius:16px;width:100%;max-width:380px;padding:24px;box-shadow:0 24px 60px rgba(0,0,0,.2)">
+      <div style="font-size:22px;text-align:center;margin-bottom:12px">🔁</div>
+      <div style="font-size:15px;font-weight:800;text-align:center;margin-bottom:8px">Supprimer la récurrence</div>
+      <div style="font-size:13px;color:#6b7280;text-align:center;margin-bottom:20px">Ce créneau fait partie d'une série récurrente. Que voulez-vous supprimer ?</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <button onclick="delSingleOccurrence('${k}','${itemId}')" 
+          style="padding:12px;background:#fef2f2;border:2px solid #fecaca;border-radius:10px;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;color:#b91c1c;text-align:left">
+          🗑 Supprimer uniquement ce créneau
+          <div style="font-size:11px;font-weight:400;color:#9ca3af;margin-top:2px">Les autres occurrences de la série restent</div>
+        </button>
+        <button onclick="delAllRecurrence('${recurId}')" 
+          style="padding:12px;background:#fff7ed;border:2px solid #fed7aa;border-radius:10px;cursor:pointer;font-family:inherit;font-size:13px;font-weight:700;color:#c2410c;text-align:left">
+          🗑🗑 Supprimer toute la série (${recurId.slice(0,6)}…)
+          <div style="font-size:11px;font-weight:400;color:#9ca3af;margin-top:2px">Supprime toutes les occurrences passées et futures</div>
+        </button>
+        <button onclick="document.getElementById('delRecurModal').remove()" 
+          style="padding:10px;background:white;border:1.5px solid #e2e8f0;border-radius:10px;cursor:pointer;font-family:inherit;font-size:13px;color:#374151">
+          Annuler
+        </button>
+      </div>
+    </div>`;
+  document.body.appendChild(m);
+}
+window.showDelRecurModal=showDelRecurModal;
+
+async function delSingleOccurrence(k,itemId){
+  document.getElementById('delRecurModal')?.remove();
+  if(!_cr[k])return;
+  _cr[k].items=(_cr[k].items||[]).filter(i=>i.id!==itemId);
+  await saveKey(k,k.split('_')[0]);
+  closeCr();await loadCr();render();showToast('Créneau supprimé','ok');
+}
+window.delSingleOccurrence=delSingleOccurrence;
+
+async function delAllRecurrence(recurId){
+  document.getElementById('delRecurModal')?.remove();
+  // Chercher TOUS les items avec ce recurId dans _cr (toutes semaines chargées)
+  const toSave=new Set();
+  Object.keys(_cr).forEach(k=>{
+    const before=_cr[k].items?.length||0;
+    _cr[k].items=(_cr[k].items||[]).filter(i=>i.recurId!==recurId);
+    if(_cr[k].items.length!==before) toSave.add(k);
+  });
+  // Sauvegarder les clés modifiées + recharger le mois pour rattraper les semaines non chargées
+  const btn=document.getElementById('save-btn');
+  let done=0;
+  for(const k of toSave){
+    await saveKey(k,k.split('_')[0]);
+    done++;
+  }
+  closeCr();
+  // Recharger toutes les semaines du mois courant pour purger côté Firebase aussi
+  await deleteRecurFromFirebase(recurId);
+  await loadCr();render();
+  showToast(`🗑 Série supprimée (${done} créneau(x))`, 'ok');
+}
+window.delAllRecurrence=delAllRecurrence;
+
+// Purge Firebase : parcourt les semaines du mois courant et mois suivant
+async function deleteRecurFromFirebase(recurId){
+  try{
+    const keys=new Set();
+    // Mois courant + mois suivant (couvre la plupart des récurrences)
+    for(let m=0;m<3;m++){
+      const ref=new Date(_cur.getFullYear(),_cur.getMonth()+m,1);
+      let d=new Date(ref);
+      const stop=new Date(ref.getFullYear(),ref.getMonth()+1,1);
+      while(d<stop){ keys.add(weekKey(d)); d.setDate(d.getDate()+7); }
+    }
+    for(const wk of keys){
+      const snap=await window._getDocs(window._col(window._db,'rh',window._uid,wk));
+      for(const docSnap of snap.docs){
+        const data=docSnap.data();
+        const items=(data.items||[]);
+        const filtered=items.filter(i=>i.recurId!==recurId);
+        if(filtered.length!==items.length){
+          const k=docSnap.id;
+          _cr[k]={...(data),items:filtered};
+          await window._setDoc(window._doc(window._db,'rh',window._uid,wk,k),{...data,items:filtered});
+        }
+      }
+    }
+  }catch(e){console.warn('[deleteRecurFromFirebase]',e);}
+}
+window.deleteRecurFromFirebase=deleteRecurFromFirebase;
 
 async function qDel(k,id){
   if(!_cr[k])return;
