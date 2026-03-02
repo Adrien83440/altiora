@@ -793,6 +793,19 @@ let _multiOpen=false, _filterPoste='', _infractions={}, _ccnDefault='droit_commu
 let _plages=[{deb:'09:00',fin:'17:00'}], _crType='travail';
 
 const COLS=['c0','c1','c2','c3','c4','c5','c6','c7','c8','c9'];
+// Couleurs pills par salarié (vue mois) — bg / texte / bordure gauche
+const EMP_PILL_COLORS=[
+  {bg:'#d1fae5',fg:'#065f46',bd:'#059669'}, // vert
+  {bg:'#dbeafe',fg:'#1e3a8a',bd:'#3b82f6'}, // bleu
+  {bg:'#ede9fe',fg:'#3b0764',bd:'#8b5cf6'}, // violet
+  {bg:'#fef3c7',fg:'#78350f',bd:'#f59e0b'}, // orange
+  {bg:'#fee2e2',fg:'#7f1d1d',bd:'#ef4444'}, // rouge
+  {bg:'#ccfbf1',fg:'#134e4a',bd:'#14b8a6'}, // teal
+  {bg:'#fce7f3',fg:'#831843',bd:'#ec4899'}, // rose
+  {bg:'#e0f2fe',fg:'#0c4a6e',bd:'#0ea5e9'}, // bleu ciel
+  {bg:'#f0fdf4',fg:'#166534',bd:'#22c55e'}, // vert clair
+  {bg:'#fdf4ff',fg:'#581c87',bd:'#a855f7'}, // mauve
+];
 const TYPE_ICO={travail:'💼',partiel:'⏰',conge:'🏖️',maladie:'🤒',formation:'📚',astreinte:'🔔',repos:'😴',autre:'📋'};
 const TYPE_LBL={travail:'Travail',partiel:'Tps partiel',conge:'Congé',maladie:'Maladie',formation:'Formation',astreinte:'Astreinte',repos:'Repos',autre:'Autre'};
 
@@ -1327,7 +1340,7 @@ function renderMois(){
       const shown=allItems.slice(0,maxPills);
       const empCount=vis.filter(e=>(_cr[`${kp}_${e.id}`]?.items||[]).length>0).length;
       return `<div class="m-cell ${isToday(date)?'m-today':''} ${!cur?'m-other':''} ${isWE(date)?'m-we':''}"
-        onclick="setView('jour');_cur=new Date('${kp}T12:00:00');render()">
+        onclick="setView('jour');_cur=new Date(${date.getFullYear()},${date.getMonth()},${date.getDate()});render()">
         <div class="m-dnum">
           <span ${isToday(date)?'class="m-dnum-circle"':''}>${date.getDate()}</span>
           ${(_zoom==='comfortable'||_zoom==='large')&&cur?`<span style="font-size:9px;font-weight:500;color:var(--muted);margin-left:4px">${date.toLocaleDateString('fr-FR',{weekday:'short'})}</span>`:''}
@@ -1335,9 +1348,11 @@ function renderMois(){
         ${totalH>0?`<div class="m-total-badge">${fmtDur(totalH)}${(_zoom==='large'&&empCount>0)?` · ${empCount}p`:''}  </div>`:''}
         ${shown.map(({e,it})=>{
           const plages=it.plages&&it.plages.length>0?it.plages:(it.deb?[{deb:it.deb,fin:it.fin}]:[]);
-          const timeTxt=plages[0]?`${plages[0].deb}`:it.type;
-          const empTxt=(_zoom==='comfortable'||_zoom==='large')?`${e.prenom||''} `:''
-          return `<div class="m-pill t-${it.type}">${empTxt}${timeTxt}</div>`;
+          const timeTxt=plages[0]?`${plages[0].deb}`:TYPE_LBL[it.type]||it.type;
+          const empTxt=(_zoom==='comfortable'||_zoom==='large')?`${e.prenom||''} `:'';
+          const empIdx=vis.indexOf(e);
+          const empCol=EMP_PILL_COLORS[empIdx%EMP_PILL_COLORS.length];
+          return `<div class="m-pill" style="background:${empCol.bg};color:${empCol.fg};border-left:2px solid ${empCol.bd}">${empTxt}${timeTxt}</div>`;
         }).join('')}
         ${allItems.length>maxPills?`<div class="m-more">+${allItems.length-maxPills} autres</div>`:''}
         ${allItems.length===0&&cur?`<div style="font-size:10px;color:#d1d5db;padding:4px 0">libre</div>`:''}
@@ -1832,12 +1847,24 @@ async function saveCr(){
 window.saveCr=saveCr;
 
 async function applyRecurrence(startDate,eid,type,plages,note,recur){
-  const until=document.getElementById('cr-recur-until')?.value;
-  if(!until)return;
+  const untilVal=document.getElementById('cr-recur-until')?.value;
+  // Si pas de date de fin saisie → fin du mois courant par défaut
+  let endD;
+  if(untilVal){
+    endD=new Date(untilVal+'T12:00:00');
+  } else {
+    // Fin du mois de la date de départ
+    const sd=new Date(startDate+'T12:00:00');
+    endD=new Date(sd.getFullYear(),sd.getMonth()+1,0,12,0,0);
+  }
   const step=recur==='week'?7:14;
   let d=new Date(startDate+'T12:00:00');
   d.setDate(d.getDate()+step);
-  const endD=new Date(until+'T12:00:00');
+  if(d>endD){
+    showToast('⚠️ Aucune occurrence : la date de fin est avant la prochaine récurrence','warn');
+    return;
+  }
+  let count=0;
   while(d<=endD){
     const iso=fmt(d);
     const k=`${iso}_${eid}`;
@@ -1845,7 +1872,9 @@ async function applyRecurrence(startDate,eid,type,plages,note,recur){
     _cr[k].items.push({id:'c'+Date.now()+Math.random().toString(36).slice(2),type,deb:plages[0]?.deb||'',fin:plages[plages.length-1]?.fin||'',plages:plages.length>0?plages:undefined,note});
     await saveKey(k,iso);
     d.setDate(d.getDate()+step);
+    count++;
   }
+  if(count>0) showToast(`🔁 Récurrence appliquée sur ${count} semaine(s)`,'ok');
 }
 
 async function saveKey(k,date){
