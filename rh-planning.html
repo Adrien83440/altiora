@@ -691,9 +691,10 @@ body[data-zoom="large"]      { --emp-col-w: 220px; }
           <option value="week">Toutes les semaines (même jour)</option>
           <option value="2week">Toutes les 2 semaines</option>
         </select>
-        <div id="recur-until-row" style="display:none;margin-top:8px">
-          <label class="ml">Jusqu'au</label>
-          <input class="mi" type="date" id="cr-recur-until"/>
+        <div id="recur-until-row" style="display:none;margin-top:8px;background:#f0fdf4;padding:8px 10px;border-radius:8px;border:1px solid #bbf7d0">
+          <label class="ml" style="color:#065f46;font-weight:700">🔁 Répéter jusqu'au <span style="font-size:10px;font-weight:400;color:#6b7280">(laisser vide = fin du mois)</span></label>
+          <input class="mi" type="date" id="cr-recur-until" style="margin-top:4px"/>
+          <div style="font-size:10px;color:#059669;margin-top:4px" id="recur-preview"></div>
         </div>
       </div>
     </div>
@@ -1792,7 +1793,17 @@ window.updMultiDur=updMultiDur;
 function onRecurChange(){
   const v=document.getElementById('cr-recur')?.value;
   const row=document.getElementById('recur-until-row');
-  if(row)row.style.display=v?'block':'none';
+  if(!row) return;
+  row.style.display=v?'block':'none';
+  if(v){
+    // Pré-remplir avec la fin du mois courant si champ vide
+    const inp=document.getElementById('cr-recur-until');
+    if(inp&&!inp.value){
+      // Fin du mois de _cur
+      const lastDay=new Date(_cur.getFullYear(),_cur.getMonth()+1,0);
+      inp.value=fmt(lastDay);
+    }
+  }
 }
 document.getElementById('cr-recur')?.addEventListener('change',onRecurChange);
 
@@ -1827,9 +1838,9 @@ async function saveCr(){
       if(btn)btn.textContent=`⏳ ${saved}/${dates.length}…`;
     }
 
-    // Récurrence
+    // Récurrence (mode multi : s'applique si 1 seule date cochée)
     const recur=document.getElementById('cr-recur')?.value;
-    if(recur&&dates.length===1){await applyRecurrence(dates[0],eid,type,plagesData,note,recur);}
+    if(recur&&dates.length===1){await applyRecurrence(dates[0],eid,type,mPlages,note,recur);}
 
     closeCr();await loadCr();render();
     showToast(`✅ ${saved} créneau(x) enregistrés`,'ok');
@@ -1885,16 +1896,33 @@ async function applyRecurrence(startDate,eid,type,plages,note,recur){
     return;
   }
   let count=0;
+  const saves=[];
   while(d<=endD){
     const iso=fmt(d);
     const k=`${iso}_${eid}`;
     if(!_cr[k])_cr[k]={items:[]};
-    _cr[k].items.push({id:'c'+Date.now()+Math.random().toString(36).slice(2),type,deb:plages[0]?.deb||'',fin:plages[plages.length-1]?.fin||'',plages:plages.length>0?plages:undefined,note});
-    await saveKey(k,iso);
+    // ID unique : combinaison timestamp + counter + random pour éviter collision
+    const uid_item=`c${iso.replace(/-/g,'')}${eid.slice(-4)}${Math.random().toString(36).slice(2,6)}`;
+    // Copie profonde des plages pour chaque occurrence
+    const plagesCopy=plages.length>0?plages.map(p=>({deb:p.deb,fin:p.fin})):undefined;
+    _cr[k].items.push({id:uid_item,type,deb:plages[0]?.deb||'',fin:plages[plages.length-1]?.fin||'',plages:plagesCopy,note});
+    saves.push({k,iso});
     d.setDate(d.getDate()+step);
     count++;
   }
-  if(count>0) showToast(`🔁 Récurrence appliquée sur ${count} semaine(s)`,'ok');
+  // Sauvegarder toutes les occurrences (parallèle pour la vitesse)
+  if(saves.length){
+    const btn=document.getElementById('save-btn');
+    if(btn){btn.disabled=true;btn.textContent=`⏳ 0/${saves.length}…`;}
+    let done=0;
+    for(const {k,iso} of saves){
+      await saveKey(k,iso);
+      done++;
+      if(btn)btn.textContent=`⏳ ${done}/${saves.length}…`;
+    }
+    if(btn){btn.disabled=false;btn.textContent='💾 Enregistrer';}
+  }
+  if(count>0) showToast(`🔁 Récurrence : ${count} semaine(s) enregistrées ✅`,'ok');
 }
 
 async function saveKey(k,date){
