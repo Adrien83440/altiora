@@ -990,6 +990,29 @@ async function loadCr(){
   }catch(e){console.warn(e);}
 }
 
+// Charge toutes les semaines du mois d'une date donnée (pour après récurrence depuis vue semaine)
+async function loadCrForMonth(dateStr, untilVal=''){
+  try{
+    const ref=new Date(dateStr+'T12:00:00');
+    // untilVal passé en paramètre (DOM fermé au moment de l'appel)
+    const endRef=untilVal?new Date(untilVal+'T12:00:00'):new Date(ref.getFullYear(),ref.getMonth()+1,0,12,0,0);
+    const keys=new Set();
+    // Semaines de la période [ref → endRef]
+    let d=new Date(ref.getFullYear(),ref.getMonth(),1);
+    const stop=new Date(endRef.getFullYear(),endRef.getMonth()+1,1);
+    while(d<stop){
+      keys.add(weekKey(d));
+      d.setDate(d.getDate()+7);
+    }
+    // Aussi la semaine courante (pour ne pas perdre ce qui est affiché)
+    keys.add(weekKey(_cur));
+    for(const k of keys){
+      const s=await window._getDocs(window._col(window._db,'rh',window._uid,k));
+      s.forEach(doc=>{_cr[doc.id]=doc.data();});
+    }
+  }catch(e){console.warn('[loadCrForMonth]',e);await loadCr();}
+}
+
 // ── NAV ──
 function navPrev(){
   if(_view==='mois')_cur.setMonth(_cur.getMonth()-1);
@@ -1796,16 +1819,42 @@ function onRecurChange(){
   if(!row) return;
   row.style.display=v?'block':'none';
   if(v){
-    // Pré-remplir avec la fin du mois courant si champ vide
     const inp=document.getElementById('cr-recur-until');
     if(inp&&!inp.value){
-      // Fin du mois de _cur
-      const lastDay=new Date(_cur.getFullYear(),_cur.getMonth()+1,0);
+      // Pré-remplir avec la fin du mois de la DATE DU CRÉNEAU (pas _cur)
+      const crDateVal=document.getElementById('cr-date')?.value;
+      const ref=crDateVal?new Date(crDateVal+'T12:00:00'):_cur;
+      const lastDay=new Date(ref.getFullYear(),ref.getMonth()+1,0);
       inp.value=fmt(lastDay);
+      // Afficher un aperçu du nombre de semaines
+      updateRecurPreview();
     }
   }
 }
+
+function updateRecurPreview(){
+  const preview=document.getElementById('recur-preview');
+  if(!preview) return;
+  const recur=document.getElementById('cr-recur')?.value;
+  const untilVal=document.getElementById('cr-recur-until')?.value;
+  const crDateVal=document.getElementById('cr-date')?.value;
+  if(!recur||!untilVal||!crDateVal) return;
+  const step=recur==='week'?7:14;
+  let d=new Date(crDateVal+'T12:00:00');
+  const endD=new Date(untilVal+'T12:00:00');
+  let count=0;
+  d.setDate(d.getDate()+step);
+  while(d<=endD){ count++; d.setDate(d.getDate()+step); }
+  if(count===0){
+    preview.textContent='⚠️ Aucune occurrence dans cette période';
+    preview.style.color='#dc2626';
+  } else {
+    preview.textContent=`✓ ${count} occurrence(s) seront créées`;
+    preview.style.color='#059669';
+  }
+}
 document.getElementById('cr-recur')?.addEventListener('change',onRecurChange);
+document.getElementById('cr-recur-until')?.addEventListener('change',updateRecurPreview);
 
 // ── SAVE ──
 async function saveCr(){
@@ -1866,14 +1915,28 @@ async function saveCr(){
     }
   } else {
     _cr[k].items.push(it);
-    // Récurrence
+    // Récurrence — lire AVANT closeCr() qui détruit le DOM du modal
     const recur=document.getElementById('cr-recur')?.value;
-    if(recur)await applyRecurrence(date,eid,type,plagesData,note,recur);
+    const untilForReload=document.getElementById('cr-recur-until')?.value||'';
+    const hadRecur=!!recur;
+    if(recur) await applyRecurrence(date,eid,type,plagesData,note,recur);
+    await saveKey(k,date);
+    closeCr();
+    if(hadRecur){
+      await loadCrForMonth(date, untilForReload);
+    } else {
+      await loadCr();
+    }
+    render();
+    showToast(_editId?'Créneau modifié ✅':'Créneau ajouté ✅','ok');
+    return;
   }
 
   await saveKey(k,date);
-  closeCr();await loadCr();render();
-  showToast(_editId?'Créneau modifié ✅':'Créneau ajouté ✅','ok');
+  closeCr();
+  await loadCr();
+  render();
+  showToast('Créneau modifié ✅','ok');
 }
 window.saveCr=saveCr;
 
