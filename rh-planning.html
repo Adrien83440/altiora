@@ -495,7 +495,8 @@ body[data-zoom="large"]      { --emp-col-w: 220px; }
     </div>
     <div class="topbar-right">
       <button class="btn btn-outline btn-sm" onclick="openPolyPanel()">🎯 Polyvalence</button>
-      <button class="btn btn-outline btn-sm" onclick="exportPDF()">🖨️ Imprimer</button>
+      <button class="btn btn-outline btn-sm" onclick="exportPDF()">🖨️ Imprimer vue</button>
+      <button class="btn btn-outline btn-sm" onclick="exportPlanningMensuelSalarie()" title="Planning mensuel individuel — une page par salarié (portrait A4)">👤 Planning individuel</button>
       <button class="btn btn-ai btn-sm" onclick="openAI()">✨ IA Planning</button>
       <button class="btn btn-sm" style="background:linear-gradient(135deg,#1d4ed8,#60a5fa);color:white" onclick="openCongeRapide()">🏖️ Congés</button>
       <button class="btn btn-rh btn-sm" onclick="openCreneauModal()">+ Créneau</button>
@@ -2909,6 +2910,184 @@ function exportPDF(){
   w.document.close();
 }
 window.exportPDF=exportPDF;
+
+// ─────────────────────────────────────────────────────────────
+// IMPRESSION PLANNING MENSUEL INDIVIDUEL
+// Une page A4 portrait par salarié — tous les jours du mois
+// avec horaires détaillés, totaux et récapitulatif
+// ─────────────────────────────────────────────────────────────
+function exportPlanningMensuelSalarie(){
+  const vis = visibleEmps();
+  if(!vis.length){ alert('Aucun employé visible à imprimer.'); return; }
+
+  const refDate = new Date(_cur);
+  const year = refDate.getFullYear();
+  const month = refDate.getMonth();
+  const monthLabel = refDate.toLocaleDateString('fr-FR',{month:'long',year:'numeric'});
+  const now = new Date().toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
+  const companyEl = document.getElementById('uname');
+  const company = companyEl ? companyEl.textContent : 'ALTEORE';
+
+  // Tous les jours du mois (sans padding)
+  const allDays = [];
+  const tmp = new Date(year, month, 1);
+  while(tmp.getMonth() === month){ allDays.push(new Date(tmp)); tmp.setDate(tmp.getDate()+1); }
+
+  function buildEmpPage(e, isLast){
+    // Récap mensuel
+    let totalH=0, totalTravailJ=0, totalCongeJ=0, totalMaladieJ=0;
+    allDays.forEach(d=>{
+      const items=(_cr[`${fmt(d)}_${e.id}`]?.items||[]);
+      const h=items.filter(it=>['travail','partiel'].includes(it.type)).reduce((s,it)=>s+itemH(it),0);
+      totalH+=h;
+      if(h>0) totalTravailJ++;
+      if(items.some(it=>it.type==='conge')) totalCongeJ++;
+      if(items.some(it=>it.type==='maladie')) totalMaladieJ++;
+    });
+
+    // Grouper par semaine lun→dim avec padding
+    const weeks=[];
+    let week=[];
+    allDays.forEach((d,i)=>{
+      if(i===0){ const dow=d.getDay()===0?6:d.getDay()-1; for(let p=0;p<dow;p++) week.push(null); }
+      week.push(d);
+      const dow=d.getDay()===0?6:d.getDay()-1;
+      if(dow===6){ weeks.push(week); week=[]; }
+    });
+    if(week.length){ while(week.length<7) week.push(null); weeks.push(week); }
+
+    const headerHtml=`
+      <div class="page-header">
+        <div>
+          <div class="emp-name">${e.prenom||''} ${e.nom||''}</div>
+          <div class="emp-meta">${[e.poste,e.contrat].filter(Boolean).join(' · ')||'—'}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="month-label">📅 ${monthLabel.charAt(0).toUpperCase()+monthLabel.slice(1)}</div>
+          <div class="company-lbl">🏢 ${company}</div>
+          <div class="print-date-lbl">Édité le ${now}</div>
+        </div>
+      </div>`;
+
+    const recapHtml=`
+      <div class="recap-bar">
+        <div class="recap-item green"><span class="recap-val">${fmtDur(totalH)}</span><span class="recap-lbl">Heures travaillées</span></div>
+        <div class="recap-item blue"><span class="recap-val">${totalTravailJ}j</span><span class="recap-lbl">Jours travaillés</span></div>
+        <div class="recap-item orange"><span class="recap-val">${totalCongeJ}j</span><span class="recap-lbl">Congés</span></div>
+        <div class="recap-item red"><span class="recap-val">${totalMaladieJ}j</span><span class="recap-lbl">Absences maladie</span></div>
+      </div>`;
+
+    const DOW_LBL=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+    const tbodyHtml=weeks.map(wk=>{
+      const cells=wk.map((d,i)=>{
+        if(!d) return `<td class="empty-cell"></td>`;
+        const we=i>=5, today=isToday(d);
+        const items=(_cr[`${fmt(d)}_${e.id}`]?.items||[]);
+        const hTot=items.filter(it=>['travail','partiel'].includes(it.type)).reduce((s,it)=>s+itemH(it),0);
+        const dayNum=`<div class="day-num ${today?'today-num':''} ${we?'we-num':''}">${d.getDate()}</div>`;
+        let contentHtml='';
+        if(!items.length){
+          contentHtml=we?`<div class="day-rest">WE</div>`:`<div class="day-rest">—</div>`;
+        } else {
+          contentHtml=items.map(it=>{
+            const plages=it.plages&&it.plages.length>0?it.plages:(it.deb?[{deb:it.deb,fin:it.fin}]:[]);
+            const [bg,fg,br]=PRINT_COLORS[it.type]||PRINT_COLORS.autre;
+            const showTime=['travail','partiel','formation','astreinte'].includes(it.type);
+            const timeLines=showTime?plages.map(p=>`<span class="plage-time">${p.deb}–${p.fin}</span>`).join(''):`<span class="type-lbl">${TYPE_LBL[it.type]||it.type}</span>`;
+            const itH=plages.reduce((s,p)=>s+diffH(p.deb,p.fin),0);
+            const durStr=showTime&&itH>0?`<span class="dur-lbl">${fmtDur(itH)}</span>`:'';
+            const noteStr=it.note?`<span class="note-lbl">${it.note}</span>`:'';
+            return `<div class="item-pill" style="background:${bg};border-left:2px solid ${br};color:${fg}">${TYPE_ICO[it.type]||''} ${timeLines}${durStr}${noteStr}</div>`;
+          }).join('');
+          if(hTot>0) contentHtml+=`<div class="day-total">${fmtDur(hTot)}</div>`;
+        }
+        return `<td class="day-cell ${we?'we-cell':''} ${today?'today-cell':''}">${dayNum}<div class="day-content">${contentHtml}</div></td>`;
+      }).join('');
+      const weekH=wk.filter(Boolean).reduce((s,d)=>s+(_cr[`${fmt(d)}_${e.id}`]?.items||[]).filter(it=>['travail','partiel'].includes(it.type)).reduce((s2,it)=>s2+itemH(it),0),0);
+      return `<tr>${cells}<td class="week-total-cell">${weekH>0?fmtDur(weekH):'—'}</td></tr>`;
+    }).join('');
+
+    const tableHtml=`
+      <div class="cal-wrap">
+        <table class="cal-table">
+          <thead><tr>${DOW_LBL.map((l,i)=>`<th class="${i>=5?'we-th':''}">${l}</th>`).join('')}<th class="week-total-th">Sem.</th></tr></thead>
+          <tbody>${tbodyHtml}</tbody>
+        </table>
+      </div>`;
+
+    const legendHtml=`
+      <div class="legend-row">
+        ${Object.keys(PRINT_COLORS).map(t=>{const [bg,,br]=PRINT_COLORS[t];return `<div class="leg-item"><span class="leg-dot" style="background:${bg};border:1px solid ${br}"></span>${TYPE_ICO[t]||''} ${TYPE_LBL[t]||t}</div>`;}).join('')}
+      </div>`;
+
+    return `<div class="emp-page" style="${isLast?'':'page-break-after:always;'}">${headerHtml}${recapHtml}${tableHtml}${legendHtml}</div>`;
+  }
+
+  const pagesHtml=vis.map((e,i)=>buildEmpPage(e,i===vis.length-1)).join('');
+
+  const css=`
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'Segoe UI',Arial,sans-serif;font-size:10px;color:#1a1f36;background:#fff;}
+    .emp-page{padding:10px 12px;}
+    .page-header{display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:7px;border-bottom:2.5px solid #059669;margin-bottom:7px;}
+    .emp-name{font-size:17px;font-weight:800;color:#052e16;}
+    .emp-meta{font-size:10px;color:#6b7280;margin-top:2px;}
+    .month-label{font-size:13px;font-weight:800;color:#1a1f36;}
+    .company-lbl{font-size:10px;color:#059669;font-weight:700;margin-top:2px;}
+    .print-date-lbl{font-size:9px;color:#94a3b8;margin-top:2px;}
+    .recap-bar{display:flex;gap:7px;margin-bottom:8px;}
+    .recap-item{flex:1;padding:5px 7px;border-radius:6px;text-align:center;display:flex;flex-direction:column;gap:1px;}
+    .recap-item.green{background:#d1fae5;border:1px solid #6ee7b7;}
+    .recap-item.blue{background:#dbeafe;border:1px solid #93c5fd;}
+    .recap-item.orange{background:#fed7aa;border:1px solid #fb923c;}
+    .recap-item.red{background:#fee2e2;border:1px solid #fca5a5;}
+    .recap-val{font-size:14px;font-weight:800;color:#1a1f36;}
+    .recap-lbl{font-size:8px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.3px;}
+    .cal-wrap{margin-bottom:6px;}
+    .cal-table{width:100%;border-collapse:collapse;table-layout:fixed;}
+    .cal-table th{padding:4px 2px;text-align:center;font-size:9px;font-weight:700;background:#059669;color:white;border:1px solid #047857;}
+    .cal-table th.we-th{background:#4b5563;}
+    .cal-table th.week-total-th{background:#1e3a8a;color:white;width:36px;font-size:8px;}
+    .day-cell{border:1px solid #e2e8f0;vertical-align:top;padding:3px;height:64px;}
+    .day-cell.we-cell{background:#f9fafb;}
+    .day-cell.today-cell{background:#ecfdf5;border-color:#6ee7b7;}
+    .empty-cell{border:1px solid #f1f5f9;background:#fafafa;}
+    .week-total-cell{border:1px solid #e2e8f0;text-align:center;vertical-align:middle;font-size:10px;font-weight:800;color:#1e3a8a;background:#eff6ff;width:36px;}
+    .day-num{font-size:10px;font-weight:800;color:#374151;margin-bottom:2px;line-height:1;}
+    .day-num.today-num{color:#059669;}
+    .day-num.we-num{color:#9ca3af;}
+    .day-content{display:flex;flex-direction:column;gap:1px;}
+    .item-pill{padding:1px 3px;border-radius:3px;font-size:8.5px;font-weight:600;line-height:1.35;display:flex;flex-wrap:wrap;align-items:center;gap:2px;}
+    .plage-time{font-size:8.5px;font-weight:700;}
+    .type-lbl{font-size:8px;font-weight:600;}
+    .dur-lbl{font-size:7.5px;opacity:.7;margin-left:1px;}
+    .note-lbl{font-size:7px;font-style:italic;opacity:.7;width:100%;}
+    .day-total{font-size:8px;font-weight:800;color:#059669;margin-top:1px;text-align:right;}
+    .day-rest{font-size:8px;color:#d1d5db;font-weight:500;margin-top:2px;}
+    .legend-row{display:flex;flex-wrap:wrap;gap:5px;padding:5px 6px;background:#f8faff;border-radius:5px;border:1px solid #e2e8f0;}
+    .leg-item{display:flex;align-items:center;gap:3px;font-size:8px;color:#374151;}
+    .leg-dot{width:8px;height:8px;border-radius:2px;flex-shrink:0;}
+    @media print{
+      @page{size:A4 portrait;margin:.7cm .6cm .7cm .6cm;}
+      body{padding:0;}
+      .emp-page{padding:0;}
+      .no-print{display:none!important;}
+    }`;
+
+  const html=`<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Planning individuel — ${monthLabel}</title><style>${css}</style></head><body>
+    <div class="no-print" style="position:fixed;bottom:16px;right:16px;z-index:999;display:flex;align-items:center;gap:10px;background:white;padding:8px 12px;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.15)">
+      <span style="font-size:11px;color:#6b7280">${vis.length} salarié(s)</span>
+      <button onclick="window.print()" style="padding:9px 18px;background:#059669;color:white;border:none;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer">🖨️ Imprimer / PDF</button>
+    </div>
+    ${pagesHtml}
+  </body></html>`;
+
+  const w=window.open('','_blank','width=900,height=800');
+  if(!w){ alert('Veuillez autoriser les pop-ups pour imprimer.'); return; }
+  w.document.write(html);
+  w.document.close();
+}
+window.exportPlanningMensuelSalarie=exportPlanningMensuelSalarie;
 
 // ── UTILS ──
 function showToast(m,t=''){const el=document.getElementById('toast');el.textContent=m;el.className='toast show '+(t||'');setTimeout(()=>el.className='toast',3200);}
