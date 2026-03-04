@@ -550,108 +550,144 @@ async function finalizeBankConnection(reqId) {
 
 // ── SYNC — récupère les transactions et les stocke dans bank_pending (pas dans Pilotage) ──
 async function fetchAndStagePending(requisitionId) {
-  // 1. API GoCardless → retourne les transactions (sans Firebase Admin)
+  // ── 1. Appel API GoCardless (sans Firebase Admin) ──────────────────────
+  console.log('[SYNC] Appel /api/bank-sync, requisition_id:', requisitionId);
   const res = await fetch('/api/bank-sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ requisition_id: requisitionId })
   });
-  const data = await res.json();
-  if (!data.success) throw new Error(data.error || 'Sync échouée');
 
-  // 2. Aplatir toutes les transactions de tous les comptes
-  const allTx = [];
-  const accountsSummary = [];
-  for (const acc of data.accounts) {
-    for (const tx of acc.transactions) {
-      allTx.push(tx);
-    }
-    accountsSummary.push({
-      accountId: acc.accountId,
-      iban:  acc.iban  || '',
-      name:  acc.name  || '',
-      balance: acc.balance || null,
-      balanceNum: acc.balanceNum || 0,
-      transactionsCount: acc.transactionsCount || 0,
-      debitsCount: acc.debitsCount || 0,
-    });
+  let data;
+  try { data = await res.json(); }
+  catch(e) { throw new Error('Réponse API invalide (statut HTTP ' + res.status + ')'); }
+
+  console.log('[SYNC] Réponse API:', JSON.stringify(data).substring(0, 300));
+
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || 'Sync échouée (HTTP ' + res.status + ')');
   }
 
-  // 3. Écrire dans bank_pending (côté client — rules autorisent hasPaidPlan)
+  if (!data.accounts || data.accounts.length === 0) {
+    throw new Error('Aucun compte retourné par l\'API');
+  }
+
+  // ── 2. Aplatir les transactions ────────────────────────────────────────
+  const allTx = data.accounts.flatMap(a => a.transactions || []);
+  const accountsSummary = data.accounts.map(a => ({
+    accountId:         a.accountId || '',
+    iban:              a.iban      || '',
+    name:              a.name      || 'Compte bancaire',
+    balance:           a.balance   || null,
+    balanceNum:        a.balanceNum || 0,
+    transactionsCount: a.transactionsCount || 0,
+    debitsCount:       a.debitsCount       || 0,
+  }));
+  console.log('[SYNC] Transactions totales:', allTx.length, '| Comptes:', accountsSummary.length);
+
+  // ── 3. Écrire bank_pending ─────────────────────────────────────────────
+  console.log('[SYNC] Écriture bank_pending…');
   await window._setDoc(
     window._doc(window._db, 'bank_pending', window._uid),
     { transactions: allTx, syncedAt: new Date().toISOString(), requisition_id: requisitionId }
   );
+  console.log('[SYNC] bank_pending écrit OK');
 
-  // 4. Mettre à jour bank_connections
+  // ── 4. Écrire bank_connections ─────────────────────────────────────────
+  console.log('[SYNC] Écriture bank_connections…');
   await window._setDoc(
     window._doc(window._db, 'bank_connections', window._uid),
     { requisition_id: requisitionId, accounts: accountsSummary, lastSync: new Date().toISOString(), status: 'active' },
     { merge: true }
   );
+  console.log('[SYNC] bank_connections écrit OK');
 
-  // 5. Sync solde → cashflow (non bloquant)
+  // ── 5. Sync solde cashflow (non bloquant) ─────────────────────────────
   try {
-    const totalBalance = accountsSummary.reduce((s, a) => s + (a.balanceNum || 0), 0);
-    if (totalBalance !== 0) {
-      const today = new Date().toISOString().split('T')[0];
+    const total = accountsSummary.reduce((s, a) => s + (a.balanceNum || 0), 0);
+    if (total !== 0) {
       await window._setDoc(
         window._doc(window._db, 'cashflow', window._uid, 'config', 'tresorerie'),
-        { solde: totalBalance, date: today, source: 'bank_sync', syncedAt: new Date().toISOString() }
+        { solde: total, date: new Date().toISOString().split('T')[0], source: 'bank_sync', syncedAt: new Date().toISOString() }
       );
+      console.log('[SYNC] cashflow solde:', total);
     }
-  } catch(e) { console.warn('Sync cashflow:', e.message); }
+  } catch(e) { console.warn('[SYNC] cashflow skip:', e.message); }
 
-  // 6. Mettre à jour l'UI avec les données fraîches
-  _connection = {
-    ..._connection,
-    accounts: accountsSummary,
-    lastSync: new Date().toISOString(),
-    status: 'active'
-  };
+  // ── 6. Mettre à jour _connection pour l'UI ────────────────────────────
+  _connection = { ..._connection, accounts: accountsSummary, lastSync: new Date().toISOString(), status: 'active' };
 
   return allTx.filter(t => t.type === 'debit').length;
 }
 
 async function syncNow() {
   if (!_connection?.requisition_id && !_connection?.pending_requisition_id) {
-    showToast('Aucune connexion bancaire active.', 'error');
+    showError('Aucune connexion bancaire active. Connectez votre banque d\'abord.');
     return;
   }
-  // Afficher overlay de sync
-  const overlay = document.getElementById('syncOverlay');
-  const overlayText = document.getElementById('syncOverlayText');
-  const overlaySub = document.getElementById('syncOverlaySub');
-  if (overlay) overlay.classList.add('show');
-  if (overlayText) overlayText.textContent = 'Synchronisation en cours…';
-  if (overlaySub) overlaySub.textContent = 'Récupération de vos transactions bancaires';
 
-  const btn = document.getElementById('btn-sync');
-  if (btn) { btn.disabled = true; }
-  const dot = document.getElementById('status-dot');
-  if (dot) dot.className = 'status-dot syncing';
+  const overlay     = document.getElementById('syncOverlay');
+  const overlayText = document.getElementById('syncOverlayText');
+  const overlaySub  = document.getElementById('syncOverlaySub');
+  const btnTop      = document.getElementById('btn-sync');
+  const btnMain     = document.getElementById('btn-sync-main');
+  const dot         = document.getElementById('status-dot');
+
+  // Masquer toute erreur précédente
+  const errDiv = document.getElementById('sync-error-banner');
+  if (errDiv) errDiv.remove();
+
+  if (overlay)     overlay.classList.add('show');
+  if (overlayText) overlayText.textContent = 'Connexion à votre banque…';
+  if (overlaySub)  overlaySub.textContent  = 'Récupération des transactions GoCardless';
+  if (btnTop)      btnTop.disabled  = true;
+  if (btnMain)     btnMain.disabled = true;
+  if (dot)         dot.className    = 'status-dot syncing';
 
   try {
     const reqId = _connection.requisition_id || _connection.pending_requisition_id;
+    console.log('[SYNC] reqId:', reqId);
+
     if (overlayText) overlayText.textContent = 'Analyse des transactions…';
+    if (overlaySub)  overlaySub.textContent  = 'Écriture dans Firestore…';
+
     const count = await fetchAndStagePending(reqId);
-    if (overlayText) overlayText.textContent = `✅ ${count} transactions récupérées !`;
-    if (overlaySub) overlaySub.textContent = 'Redirection vers la validation…';
+
+    if (overlayText) overlayText.textContent = `✅ ${count} dépense(s) prêtes !`;
+    if (overlaySub)  overlaySub.textContent  = 'Redirection vers la validation…';
+
     setTimeout(() => {
       if (overlay) overlay.classList.remove('show');
       window.location.href = 'bank-validation.html';
-    }, 800);
+    }, 900);
+
   } catch(e) {
     if (overlay) overlay.classList.remove('show');
+    if (btnTop)  btnTop.disabled  = false;
+    if (btnMain) btnMain.disabled = false;
+    if (dot)     dot.className    = 'status-dot inactive';
+
     let msg = e.message || 'Erreur inconnue';
-    // Cas commun : requisition expirée
-    if (msg.includes('Aucun compte') || msg.includes('EXPIRED') || msg.includes('SUSPENDED')) {
-      msg = 'La connexion bancaire a expiré. Déconnectez et reconnectez votre banque.';
+    if (msg.includes('EXPIRED') || msg.includes('expirée')) {
+      msg = '⌛ Connexion bancaire expirée. Déconnectez et reconnectez votre banque.';
     }
-    showToast('❌ ' + msg, 'error');
-    if (btn) { btn.disabled = false; }
-    if (dot) dot.className = 'status-dot inactive';
+    console.error('[SYNC] Erreur:', msg);
+
+    // Afficher l'erreur de façon persistante (pas un toast qui disparaît)
+    showError(msg);
   }
+}
+
+function showError(msg) {
+  // Supprimer l'ancien si présent
+  const old = document.getElementById('sync-error-banner');
+  if (old) old.remove();
+  const div = document.createElement('div');
+  div.id = 'sync-error-banner';
+  div.style.cssText = 'background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:14px 18px;color:#b91c1c;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:12px;';
+  div.innerHTML = `<span>❌ ${msg}</span><button onclick="this.parentElement.remove()" style="background:none;border:none;color:#b91c1c;cursor:pointer;font-size:16px">✕</button>`;
+  const content = document.querySelector('.content');
+  if (content) content.insertBefore(div, content.firstChild);
 }
 
 // ── DÉCONNEXION ──
@@ -809,6 +845,7 @@ async function purgeBankLines() {
 }
 
 window.syncNow = syncNow;
+window.showError = showError;
 window.fetchAndStagePending = fetchAndStagePending;
 window.disconnectBank = disconnectBank;
 window.showRecentTx = showRecentTx;
