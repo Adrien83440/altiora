@@ -155,6 +155,13 @@
       .accounts-grid{grid-template-columns:1fr!important;}
     }
     .nav-section-label{font-size:10px;font-weight:700;color:rgba(255,255,255,.28);letter-spacing:1px;text-transform:uppercase;padding:12px 20px 4px}
+
+    /* ── SYNC OVERLAY ── */
+    .sync-overlay{position:fixed;inset:0;background:rgba(15,31,92,.6);backdrop-filter:blur(6px);z-index:500;display:none;align-items:center;justify-content:center;flex-direction:column;gap:16px;}
+    .sync-overlay.show{display:flex;}
+    .sync-spinner{width:56px;height:56px;border:4px solid rgba(255,255,255,.2);border-top-color:white;border-radius:50%;animation:spin .8s linear infinite;}
+    .sync-overlay-text{color:white;font-size:15px;font-weight:700;text-align:center;}
+    .sync-overlay-sub{color:rgba(255,255,255,.6);font-size:12px;text-align:center;margin-top:-8px;}
   </style>
 </head>
 <body>
@@ -181,6 +188,12 @@
 </aside>
 
 <!-- MAIN -->
+
+<div class="sync-overlay" id="syncOverlay">
+  <div class="sync-spinner"></div>
+  <div class="sync-overlay-text" id="syncOverlayText">Synchronisation en cours…</div>
+  <div class="sync-overlay-sub" id="syncOverlaySub">Récupération de vos transactions bancaires</div>
+</div>
 <div class="main">
   <div class="topbar">
     <div class="topbar-left">
@@ -210,10 +223,13 @@
           <div class="loader"><div class="spin"></div></div>
         </div>
         <div class="sync-info">
-          <div class="sync-text">Dernière synchronisation : <strong id="last-sync-text">—</strong></div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <div class="sync-text">Dernière synchronisation : <strong id="last-sync-text">—</strong></div>
+            <div style="font-size:11px;color:var(--muted)">💡 Cliquez sur <strong>Synchroniser</strong> pour récupérer vos dépenses, puis sur <strong>Valider les transactions</strong> pour les ajouter dans Pilotage.</div>
+          </div>
           <div style="display:flex;gap:8px">
             <button class="btn btn-primary btn-sm" onclick="window.location.href='bank-validation.html'">✅ Valider les transactions</button>
-            <button class="btn btn-success btn-sm" onclick="syncNow()">🔄 Synchroniser maintenant</button>
+            <button class="btn btn-success btn-sm" id="btn-sync-main" onclick="syncNow()">🔄 Synchroniser maintenant</button>
           </div>
         </div>
       </div>
@@ -512,20 +528,20 @@ async function finalizeBankConnection(reqId) {
     return;
   }
 
-  document.getElementById('not-connected-zone').innerHTML = `
-    <div style="background:white;border:1px solid var(--border);border-radius:var(--radius);padding:32px;text-align:center">
-      <div style="font-size:48px;margin-bottom:16px">🔄</div>
-      <div style="font-size:16px;font-weight:700;margin-bottom:8px">Connexion en cours…</div>
-      <div style="font-size:13px;color:var(--muted)">Nous récupérons vos transactions bancaires.<br>Cela peut prendre quelques secondes.</div>
-    </div>
-  `;
-  document.getElementById('not-connected-zone').style.display = 'block';
+  // Afficher overlay
+  const ov = document.getElementById('syncOverlay');
+  const ovT = document.getElementById('syncOverlayText');
+  const ovS = document.getElementById('syncOverlaySub');
+  if (ov) ov.classList.add('show');
+  if (ovT) ovT.textContent = 'Connexion bancaire en cours…';
+  if (ovS) ovS.textContent = 'Récupération de vos transactions';
 
   try {
     const count = await fetchAndStagePending(realReqId);
     showToast(`✅ ${count} transactions récupérées — ouverture de la validation…`, 'success');
     setTimeout(() => window.location.href = 'bank-validation.html', 900);
   } catch(e) {
+    if (ov) ov.classList.remove('show');
     showToast('❌ Erreur sync : ' + e.message, 'error');
     showNotConnectedZone();
   }
@@ -587,6 +603,21 @@ async function fetchAndStagePending(requisitionId) {
     { merge: true }
   );
 
+  // 5. Sync solde total → Cashflow trésorerie disponible (non bloquant)
+  try {
+    const totalBalance = accountsSummary.reduce((sum, acc) => {
+      const raw = (acc.balance || '').toString().replace(/[^0-9.,\-]/g, '').replace(',', '.');
+      return sum + (parseFloat(raw) || 0);
+    }, 0);
+    if (totalBalance !== 0) {
+      const today = new Date().toISOString().split('T')[0];
+      await window._setDoc(
+        window._doc(window._db, 'cashflow', window._uid, 'config', 'tresorerie'),
+        { solde: totalBalance, date: today, source: 'bank_sync', syncedAt: new Date().toISOString() }
+      );
+    }
+  } catch(e) { console.warn('Sync solde cashflow:', e.message); }
+
   return allTx.length;
 }
 
@@ -595,20 +626,34 @@ async function syncNow() {
     showToast('Aucune connexion bancaire active.', 'error');
     return;
   }
+  // Afficher overlay de sync
+  const overlay = document.getElementById('syncOverlay');
+  const overlayText = document.getElementById('syncOverlayText');
+  const overlaySub = document.getElementById('syncOverlaySub');
+  if (overlay) overlay.classList.add('show');
+  if (overlayText) overlayText.textContent = 'Synchronisation en cours…';
+  if (overlaySub) overlaySub.textContent = 'Récupération de vos transactions bancaires';
+
   const btn = document.getElementById('btn-sync');
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Récupération…'; }
+  if (btn) { btn.disabled = true; }
   const dot = document.getElementById('status-dot');
   if (dot) dot.className = 'status-dot syncing';
 
   try {
     const reqId = _connection.requisition_id || _connection.pending_requisition_id;
+    if (overlayText) overlayText.textContent = 'Analyse des transactions…';
     const count = await fetchAndStagePending(reqId);
-    showToast(`✅ ${count} transactions récupérées — ouverture de la validation…`, 'success');
-    setTimeout(() => window.location.href = 'bank-validation.html', 900);
+    if (overlayText) overlayText.textContent = `✅ ${count} transactions récupérées !`;
+    if (overlaySub) overlaySub.textContent = 'Redirection vers la validation…';
+    setTimeout(() => {
+      if (overlay) overlay.classList.remove('show');
+      window.location.href = 'bank-validation.html';
+    }, 800);
   } catch(e) {
+    if (overlay) overlay.classList.remove('show');
     showToast('❌ ' + e.message, 'error');
-    if (btn) { btn.disabled = false; btn.textContent = '🔄 Synchroniser'; }
-    if (dot) dot.className = 'status-dot connected';
+    if (btn) { btn.disabled = false; }
+    if (dot) dot.className = 'status-dot';
   }
 }
 
