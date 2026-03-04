@@ -1,8 +1,23 @@
 // api/bank-sync.js
-// Récupère les transactions GoCardless et les retourne au client
-// Zéro écriture Firestore — tout passe par bank-validation.html
+// Récupère les transactions GoCardless via Firebase Admin
+// Écrit dans bank_pending (pas dans Pilotage) — validation manuelle dans bank-validation.html
+
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
 
 const GC_BASE = 'https://bankaccountdata.gocardless.com/api/v2';
+
+function initFirebase() {
+  if (getApps().length > 0) return getFirestore();
+  initializeApp({
+    credential: cert({
+      projectId: 'altiora-70599',
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
+    })
+  });
+  return getFirestore();
+}
 
 async function getAccessToken() {
   const res = await fetch(`${GC_BASE}/token/new/`, {
@@ -20,43 +35,20 @@ async function getAccessToken() {
 
 function parseAmount(val) {
   if (val == null) return 0;
-  // Gère "1234.56", "1234,56", "-1234.56", etc.
   return parseFloat(String(val).replace(',', '.')) || 0;
 }
 
-function extractIban(details) {
-  // GoCardless retourne l'IBAN à différents endroits selon les banques
-  return details?.account?.iban
-    || details?.account?.bban
-    || details?.account?.resourceId
-    || details?.iban
-    || details?.account?.identifier
-    || '';
-}
-
-function extractName(details) {
-  return details?.account?.name
-    || details?.account?.ownerName
-    || details?.account?.product
-    || details?.account?.displayName
-    || details?.account?.currency
-    || '';
-}
-
 function extractLabel(tx) {
-  // Ordre de priorité pour le libellé le plus lisible
   const candidates = [
     tx.creditorName,
     tx.debtorName,
     tx.remittanceInformationUnstructured,
     tx.additionalInformation,
-    tx.remittanceInformationStructuredArray?.[0]?.reference,
     tx.remittanceInformationStructured,
     tx.proprietaryBankTransactionCode,
-    'Transaction bancaire'
   ];
-  const label = candidates.find(c => c && c.trim() && c.trim().length > 1) || 'Transaction bancaire';
-  return label.substring(0, 80).trim();
+  const label = candidates.find(c => c && String(c).trim().length > 1) || 'Transaction bancaire';
+  return String(label).substring(0, 80).trim();
 }
 
 export default async function handler(req, res) {
@@ -67,12 +59,13 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { requisition_id } = req.body;
-    if (!requisition_id) return res.status(400).json({ error: 'requisition_id requis' });
+    const { uid, requisition_id } = req.body;
+    if (!uid || !requisition_id) return res.status(400).json({ error: 'uid + requisition_id requis' });
 
+    const db = initFirebase();
     const token = await getAccessToken();
 
-    // 1. Récupérer les comptes du requisition
+    // 1. Comptes du requisition
     const reqRes = await fetch(`${GC_BASE}/requisitions/${requisition_id}/`, {
       headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
     });
@@ -81,41 +74,41 @@ export default async function handler(req, res) {
 
     if (!requisition.accounts || requisition.accounts.length === 0) {
       return res.status(400).json({
-        error: 'Aucun compte trouvé',
-        detail: `Statut requisition: ${requisition.status}. Reconnectez votre banque.`
+        error: requisition.status === 'EXPIRED'
+          ? 'Connexion bancaire expirée — déconnectez et reconnectez votre banque.'
+          : 'Aucun compte trouvé dans ce requisition (statut: ' + requisition.status + ')'
       });
     }
 
-    const accounts = [];
+    const accountsSummary = [];
+    const allTransactions = [];
 
     for (const accountId of requisition.accounts) {
-      console.log('Processing account:', accountId);
+      // 2. Détails compte
+      const detailsRes = await fetch(`${GC_BASE}/accounts/${accountId}/details/`, {
+        headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
+      });
+      const details = await detailsRes.json();
+      console.log('Details account keys:', Object.keys(details?.account || {}));
 
-      // 2. Détails du compte
-      let details = {};
-      try {
-        const r = await fetch(`${GC_BASE}/accounts/${accountId}/details/`, {
-          headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
-        });
-        details = await r.json();
-        console.log('Details keys:', Object.keys(details?.account || {}));
-      } catch(e) { console.warn('Details error:', e.message); }
+      const iban = details.account?.iban || details.account?.bban || details.account?.resourceId || '';
+      const name = details.account?.name || details.account?.ownerName || details.account?.product || '';
 
       // 3. Solde
       let balanceStr = null;
       let balanceNum = 0;
       try {
-        const r = await fetch(`${GC_BASE}/accounts/${accountId}/balances/`, {
+        const balRes = await fetch(`${GC_BASE}/accounts/${accountId}/balances/`, {
           headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
         });
-        const bd = await r.json();
+        const bd = await balRes.json();
         const bal = bd.balances?.find(b => b.balanceType === 'interimAvailable')
           || bd.balances?.find(b => b.balanceType === 'closingBooked')
           || bd.balances?.[0];
         if (bal) {
           balanceNum = parseAmount(bal.balanceAmount?.amount);
           const currency = bal.balanceAmount?.currency || 'EUR';
-          balanceStr = `${balanceNum.toLocaleString('fr-FR', {minimumFractionDigits:2})} ${currency}`;
+          balanceStr = `${balanceNum.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} ${currency}`;
           console.log('Balance:', balanceStr);
         }
       } catch(e) { console.warn('Balance error:', e.message); }
@@ -123,70 +116,99 @@ export default async function handler(req, res) {
       // 4. Transactions
       let rawTxs = [];
       try {
-        const r = await fetch(`${GC_BASE}/accounts/${accountId}/transactions/`, {
+        const txRes = await fetch(`${GC_BASE}/accounts/${accountId}/transactions/`, {
           headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
         });
-        const txData = await r.json();
+        const txData = await txRes.json();
         rawTxs = [
           ...(txData.transactions?.booked || []),
           ...(txData.transactions?.pending || [])
         ];
         console.log('Raw transactions:', rawTxs.length);
-        // Log un exemple pour debug
-        if (rawTxs.length > 0) {
-          const ex = rawTxs[0];
-          console.log('TX sample keys:', Object.keys(ex));
-          console.log('TX sample amount:', ex.transactionAmount);
-        }
+        if (rawTxs[0]) console.log('TX sample:', JSON.stringify(rawTxs[0]).substring(0, 200));
       } catch(e) { console.warn('Transactions error:', e.message); }
 
-      // 5. Formater les transactions
-      const transactions = [];
+      // 5. Formater
+      let accTxCount = 0;
       for (const tx of rawTxs) {
         const dateStr = tx.bookingDate || tx.valueDate || tx.transactionDate;
         if (!dateStr) continue;
-
-        // Construire la date sans ambiguïté timezone
         const [y, m, d] = dateStr.split('-').map(Number);
         if (!y || !m || !d) continue;
 
         const amount = parseAmount(tx.transactionAmount?.amount);
         if (amount === 0) continue;
 
-        const monthKey = `${y}-${String(m).padStart(2,'0')}`;
-        const dateLabel = `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`;
-        const label = extractLabel(tx);
+        const monthKey = `${y}-${String(m).padStart(2, '0')}`;
+        const dateLabel = `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
+        const bankTxId = tx.transactionId || tx.internalTransactionId || `${accountId}_${dateStr}_${amount}`;
 
-        transactions.push({
-          bankTxId:  tx.transactionId || tx.internalTransactionId || `${accountId}_${dateStr}_${amount}`,
-          date:      dateLabel,
-          dateISO:   dateStr,
+        allTransactions.push({
+          bankTxId,
+          date: dateLabel,
+          dateISO: dateStr,
           monthKey,
-          label,
-          montant:   Math.abs(amount).toFixed(2),
-          type:      amount < 0 ? 'debit' : 'credit',
-          currency:  tx.transactionAmount?.currency || 'EUR',
-          pending:   !tx.bookingDate,
+          label: extractLabel(tx),
+          montant: Math.abs(amount).toFixed(2),
+          type: amount < 0 ? 'debit' : 'credit',
+          currency: tx.transactionAmount?.currency || 'EUR',
+          pending: !tx.bookingDate,
+          accountName: name || accountId.substring(0, 8),
+          accountIban: iban,
         });
+        accTxCount++;
       }
 
-      console.log('Formatted transactions:', transactions.length, '| debits:', transactions.filter(t=>t.type==='debit').length);
-
-      accounts.push({
+      accountsSummary.push({
         accountId,
-        iban:    extractIban(details),
-        name:    extractName(details),
+        iban,
+        name,
         balance: balanceStr,
         balanceNum,
-        transactionsCount: transactions.length,
-        transactions,
+        transactionsCount: accTxCount,
+        debitsCount: allTransactions.filter(t => t.accountId === accountId || true).length, // recalculé après
       });
     }
 
+    // Recalculer debitsCount par compte
+    for (const acc of accountsSummary) {
+      acc.debitsCount = allTransactions.filter(t => t.accountIban === acc.iban && t.type === 'debit').length;
+      acc.transactionsCount = allTransactions.filter(t => t.accountIban === acc.iban).length;
+    }
+
+    // 6. Sauvegarder dans bank_pending (pas dans Pilotage — validation manuelle requise)
+    await db.collection('bank_pending').doc(uid).set({
+      transactions: allTransactions,
+      syncedAt: new Date().toISOString(),
+      requisition_id,
+    });
+
+    // 7. Mettre à jour bank_connections
+    await db.collection('bank_connections').doc(uid).set({
+      requisition_id,
+      accounts: accountsSummary,
+      lastSync: new Date().toISOString(),
+      status: 'active'
+    }, { merge: true });
+
+    // 8. Sync solde → cashflow (non bloquant)
+    try {
+      const totalBalance = accountsSummary.reduce((s, a) => s + (a.balanceNum || 0), 0);
+      if (totalBalance !== 0) {
+        const today = new Date().toISOString().split('T')[0];
+        await db.collection('cashflow').doc(uid)
+          .collection('config').doc('tresorerie')
+          .set({ solde: totalBalance, date: today, source: 'bank_sync', syncedAt: new Date().toISOString() });
+      }
+    } catch(e) { console.warn('Sync cashflow:', e.message); }
+
+    console.log('Done — transactions:', allTransactions.length, '| accounts:', accountsSummary.length);
+
     return res.status(200).json({
       success: true,
-      accounts,
-      totalTransactions: accounts.reduce((s, a) => s + a.transactionsCount, 0)
+      accounts: accountsSummary,
+      totalTransactions: allTransactions.length,
+      pendingCount: allTransactions.filter(t => t.type === 'debit').length,
     });
 
   } catch (e) {
