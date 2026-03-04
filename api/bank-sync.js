@@ -1,6 +1,6 @@
 // api/bank-sync.js
 // Récupère les transactions GoCardless et les retourne au client
-// L'écriture dans Firestore se fait côté client (bank-validation.html)
+// Zéro écriture Firestore — tout passe par bank-validation.html
 
 const GC_BASE = 'https://bankaccountdata.gocardless.com/api/v2';
 
@@ -16,6 +16,47 @@ async function getAccessToken() {
   const data = await res.json();
   if (!data.access) throw new Error('Token GoCardless invalide : ' + JSON.stringify(data));
   return data.access;
+}
+
+function parseAmount(val) {
+  if (val == null) return 0;
+  // Gère "1234.56", "1234,56", "-1234.56", etc.
+  return parseFloat(String(val).replace(',', '.')) || 0;
+}
+
+function extractIban(details) {
+  // GoCardless retourne l'IBAN à différents endroits selon les banques
+  return details?.account?.iban
+    || details?.account?.bban
+    || details?.account?.resourceId
+    || details?.iban
+    || details?.account?.identifier
+    || '';
+}
+
+function extractName(details) {
+  return details?.account?.name
+    || details?.account?.ownerName
+    || details?.account?.product
+    || details?.account?.displayName
+    || details?.account?.currency
+    || '';
+}
+
+function extractLabel(tx) {
+  // Ordre de priorité pour le libellé le plus lisible
+  const candidates = [
+    tx.creditorName,
+    tx.debtorName,
+    tx.remittanceInformationUnstructured,
+    tx.additionalInformation,
+    tx.remittanceInformationStructuredArray?.[0]?.reference,
+    tx.remittanceInformationStructured,
+    tx.proprietaryBankTransactionCode,
+    'Transaction bancaire'
+  ];
+  const label = candidates.find(c => c && c.trim() && c.trim().length > 1) || 'Transaction bancaire';
+  return label.substring(0, 80).trim();
 }
 
 export default async function handler(req, res) {
@@ -36,65 +77,85 @@ export default async function handler(req, res) {
       headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
     });
     const requisition = await reqRes.json();
+    console.log('Requisition status:', requisition.status, '| accounts:', requisition.accounts?.length);
+
     if (!requisition.accounts || requisition.accounts.length === 0) {
-      return res.status(400).json({ error: 'Aucun compte trouvé dans ce requisition' });
+      return res.status(400).json({
+        error: 'Aucun compte trouvé',
+        detail: `Statut requisition: ${requisition.status}. Reconnectez votre banque.`
+      });
     }
 
     const accounts = [];
 
     for (const accountId of requisition.accounts) {
+      console.log('Processing account:', accountId);
+
       // 2. Détails du compte
-      const detailsRes = await fetch(`${GC_BASE}/accounts/${accountId}/details/`, {
-        headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
-      });
-      const details = await detailsRes.json();
+      let details = {};
+      try {
+        const r = await fetch(`${GC_BASE}/accounts/${accountId}/details/`, {
+          headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
+        });
+        details = await r.json();
+        console.log('Details keys:', Object.keys(details?.account || {}));
+      } catch(e) { console.warn('Details error:', e.message); }
 
       // 3. Solde
-      const balanceRes = await fetch(`${GC_BASE}/accounts/${accountId}/balances/`, {
-        headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
-      });
-      const balanceData = await balanceRes.json();
-      const balance = balanceData.balances?.find(b => b.balanceType === 'interimAvailable')
-        || balanceData.balances?.[0];
-      const balanceStr = balance
-        ? `${balance.balanceAmount?.amount} ${balance.balanceAmount?.currency}`
-        : null;
-      const balanceNum = balance ? parseFloat(balance.balanceAmount?.amount || 0) : 0;
+      let balanceStr = null;
+      let balanceNum = 0;
+      try {
+        const r = await fetch(`${GC_BASE}/accounts/${accountId}/balances/`, {
+          headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
+        });
+        const bd = await r.json();
+        const bal = bd.balances?.find(b => b.balanceType === 'interimAvailable')
+          || bd.balances?.find(b => b.balanceType === 'closingBooked')
+          || bd.balances?.[0];
+        if (bal) {
+          balanceNum = parseAmount(bal.balanceAmount?.amount);
+          const currency = bal.balanceAmount?.currency || 'EUR';
+          balanceStr = `${balanceNum.toLocaleString('fr-FR', {minimumFractionDigits:2})} ${currency}`;
+          console.log('Balance:', balanceStr);
+        }
+      } catch(e) { console.warn('Balance error:', e.message); }
 
-      // 4. Transactions (booked + pending)
-      const txRes = await fetch(`${GC_BASE}/accounts/${accountId}/transactions/`, {
-        headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
-      });
-      const txData = await txRes.json();
-      const rawTxs = [
-        ...(txData.transactions?.booked || []),
-        ...(txData.transactions?.pending || [])
-      ];
+      // 4. Transactions
+      let rawTxs = [];
+      try {
+        const r = await fetch(`${GC_BASE}/accounts/${accountId}/transactions/`, {
+          headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
+        });
+        const txData = await r.json();
+        rawTxs = [
+          ...(txData.transactions?.booked || []),
+          ...(txData.transactions?.pending || [])
+        ];
+        console.log('Raw transactions:', rawTxs.length);
+        // Log un exemple pour debug
+        if (rawTxs.length > 0) {
+          const ex = rawTxs[0];
+          console.log('TX sample keys:', Object.keys(ex));
+          console.log('TX sample amount:', ex.transactionAmount);
+        }
+      } catch(e) { console.warn('Transactions error:', e.message); }
 
-      // 5. Formatter chaque transaction
+      // 5. Formater les transactions
       const transactions = [];
       for (const tx of rawTxs) {
         const dateStr = tx.bookingDate || tx.valueDate || tx.transactionDate;
         if (!dateStr) continue;
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) continue;
 
-        const amount = parseFloat(tx.transactionAmount?.amount || 0);
-        if (isNaN(amount) || amount === 0) continue;
+        // Construire la date sans ambiguïté timezone
+        const [y, m, d] = dateStr.split('-').map(Number);
+        if (!y || !m || !d) continue;
 
-        const monthKey = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}`;
+        const amount = parseAmount(tx.transactionAmount?.amount);
+        if (amount === 0) continue;
 
-        // Libellé : meilleure source disponible
-        const label = (
-          tx.creditorName ||
-          tx.debtorName ||
-          tx.remittanceInformationUnstructured ||
-          tx.remittanceInformationStructured ||
-          tx.additionalInformation ||
-          'Transaction bancaire'
-        ).substring(0, 80).trim();
-
-        const dateLabel = `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}/${date.getFullYear()}`;
+        const monthKey = `${y}-${String(m).padStart(2,'0')}`;
+        const dateLabel = `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`;
+        const label = extractLabel(tx);
 
         transactions.push({
           bankTxId:  tx.transactionId || tx.internalTransactionId || `${accountId}_${dateStr}_${amount}`,
@@ -102,28 +163,19 @@ export default async function handler(req, res) {
           dateISO:   dateStr,
           monthKey,
           label,
-          montant:   amount.toFixed(2),
+          montant:   Math.abs(amount).toFixed(2),
           type:      amount < 0 ? 'debit' : 'credit',
           currency:  tx.transactionAmount?.currency || 'EUR',
           pending:   !tx.bookingDate,
         });
       }
 
-      // GoCardless peut retourner l'IBAN à différents niveaux
-      const iban = details.account?.iban
-        || details.account?.bban
-        || details.iban
-        || '';
-      const name = details.account?.name
-        || details.account?.ownerName
-        || details.account?.product
-        || details.account?.displayName
-        || '';
+      console.log('Formatted transactions:', transactions.length, '| debits:', transactions.filter(t=>t.type==='debit').length);
 
       accounts.push({
         accountId,
-        iban,
-        name,
+        iban:    extractIban(details),
+        name:    extractName(details),
         balance: balanceStr,
         balanceNum,
         transactionsCount: transactions.length,
