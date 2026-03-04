@@ -522,18 +522,18 @@ async function finalizeBankConnection(reqId) {
   document.getElementById('not-connected-zone').style.display = 'block';
 
   try {
-    const total = await syncTransactions(realReqId);
-    showToast(`✅ ${total} transactions importées !`, 'success');
-    await loadConnectionStatus();
+    const count = await fetchAndStagePending(realReqId);
+    showToast(`✅ ${count} transactions récupérées — ouverture de la validation…`, 'success');
+    setTimeout(() => window.location.href = 'bank-validation.html', 900);
   } catch(e) {
     showToast('❌ Erreur sync : ' + e.message, 'error');
     showNotConnectedZone();
   }
 }
 
-// ── SYNC (cœur — côté client, écrit dans Firestore directement) ──
-async function syncTransactions(requisitionId) {
-  // 1. Appel proxy Vercel — récupère les transactions GoCardless
+// ── SYNC — récupère les transactions et les stocke dans bank_pending (pas dans Pilotage) ──
+async function fetchAndStagePending(requisitionId) {
+  // 1. Appel proxy Vercel
   const res = await fetch('/api/bank-sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -542,46 +542,20 @@ async function syncTransactions(requisitionId) {
   const data = await res.json();
   if (!data.success) throw new Error(data.error || 'Sync échouée');
 
-  // 2. Écriture dans Firestore côté client (pas besoin d'Admin SDK)
-  let totalImported = 0;
+  // 2. Aplatir toutes les transactions de tous les comptes
+  const allTx = [];
   const accountsSummary = [];
 
   for (const acc of data.accounts) {
-    // Grouper les transactions par mois
-    const byMonth = {};
     for (const tx of acc.transactions) {
-      if (!byMonth[tx.monthKey]) byMonth[tx.monthKey] = { credits: [], chargesVar: [] };
-      if (tx.type === 'credit') byMonth[tx.monthKey].credits.push(tx);
-      else byMonth[tx.monthKey].chargesVar.push(tx);
+      // Ignorer les crédits (encaissements) — on ne mappe que les débits
+      if (tx.type === 'credit') continue;
+      allTx.push({
+        ...tx,
+        accountName: acc.name || '',
+        accountIban: acc.iban || ''
+      });
     }
-
-    // Merger dans Firestore sans écraser les données existantes
-    for (const [monthKey, newData] of Object.entries(byMonth)) {
-      const docRef = window._doc(window._db, 'pilotage', window._uid, 'months', monthKey);
-      const existing = await window._getDoc(docRef);
-      const existingData = existing.exists() ? existing.data() : {};
-
-      const existingCredits = existingData.credits || [];
-      const existingCharges = existingData.chargesVar || [];
-
-      // Dédupliquer par bankTxId
-      const existingCreditIds = new Set(existingCredits.filter(c => c.bankTxId).map(c => c.bankTxId));
-      const existingChargeIds = new Set(existingCharges.filter(c => c.bankTxId).map(c => c.bankTxId));
-
-      const newCredits = newData.credits.filter(t => !existingCreditIds.has(t.bankTxId));
-      const newCharges = newData.chargesVar.filter(t => !existingChargeIds.has(t.bankTxId));
-
-      if (newCredits.length > 0 || newCharges.length > 0) {
-        await window._setDoc(docRef, {
-          ...existingData,
-          credits: [...existingCredits, ...newCredits],
-          chargesVar: [...existingCharges, ...newCharges],
-          lastBankSync: new Date().toISOString()
-        }, { merge: true });
-        totalImported += newCredits.length + newCharges.length;
-      }
-    }
-
     accountsSummary.push({
       accountId: acc.accountId,
       iban: acc.iban,
@@ -591,15 +565,29 @@ async function syncTransactions(requisitionId) {
     });
   }
 
-  // 3. Sauvegarder le statut de connexion
-  await window._setDoc(window._doc(window._db, 'bank_connections', window._uid), {
-    requisition_id: requisitionId,
-    accounts: accountsSummary,
-    lastSync: new Date().toISOString(),
-    status: 'active'
-  }, { merge: true });
+  // 3. Sauvegarder les transactions en attente dans bank_pending
+  await window._setDoc(
+    window._doc(window._db, 'bank_pending', window._uid),
+    {
+      transactions: allTx,
+      syncedAt: new Date().toISOString(),
+      requisition_id: requisitionId
+    }
+  );
 
-  return totalImported;
+  // 4. Mettre à jour le statut de connexion
+  await window._setDoc(
+    window._doc(window._db, 'bank_connections', window._uid),
+    {
+      requisition_id: requisitionId,
+      accounts: accountsSummary,
+      lastSync: new Date().toISOString(),
+      status: 'active'
+    },
+    { merge: true }
+  );
+
+  return allTx.length;
 }
 
 async function syncNow() {
@@ -608,20 +596,19 @@ async function syncNow() {
     return;
   }
   const btn = document.getElementById('btn-sync');
-  btn.disabled = true;
-  btn.textContent = '⏳ Sync…';
-  document.getElementById('status-dot').className = 'status-dot syncing';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Récupération…'; }
+  const dot = document.getElementById('status-dot');
+  if (dot) dot.className = 'status-dot syncing';
 
   try {
     const reqId = _connection.requisition_id || _connection.pending_requisition_id;
-    const total = await syncTransactions(reqId);
-    showToast(`✅ ${total} transactions importées !`, 'success');
-    await loadConnectionStatus();
+    const count = await fetchAndStagePending(reqId);
+    showToast(`✅ ${count} transactions récupérées — ouverture de la validation…`, 'success');
+    setTimeout(() => window.location.href = 'bank-validation.html', 900);
   } catch(e) {
     showToast('❌ ' + e.message, 'error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '🔄 Synchroniser';
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Synchroniser'; }
+    if (dot) dot.className = 'status-dot connected';
   }
 }
 
@@ -729,6 +716,7 @@ window.selectBank = selectBank;
 window.connectSelectedBank = connectSelectedBank;
 window.filterBanks = filterBanks;
 window.syncNow = syncNow;
+window.fetchAndStagePending = fetchAndStagePending;
 window.disconnectBank = disconnectBank;
 window.showRecentTx = showRecentTx;
 window.handleLogout = handleLogout;
