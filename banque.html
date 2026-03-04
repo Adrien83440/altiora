@@ -231,6 +231,7 @@
             <button class="btn btn-primary btn-sm" onclick="window.location.href='bank-validation.html'">✅ Valider les transactions</button>
             <button class="btn btn-success btn-sm" id="btn-sync-main" onclick="syncNow()">🔄 Synchroniser maintenant</button>
             <button class="btn btn-danger btn-sm" onclick="purgeBankLines()" title="Supprimer toutes les lignes importées automatiquement par la banque (source:bank_sync)">🧹 Purger les imports banque</button>
+            <button class="btn btn-outline btn-sm" onclick="runDebug()" title="Voir les données brutes GoCardless">🔍 Debug</button>
           </div>
         </div>
       </div>
@@ -274,6 +275,19 @@
         <div class="bank-picker-foot">
           <button class="btn btn-outline" onclick="hideBankPicker()">Annuler</button>
           <button class="btn btn-primary" id="btn-select-bank" onclick="connectSelectedBank()" disabled>Connecter →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ZONE DEBUG -->
+    <div id="debug-zone" style="display:none">
+      <div class="status-card">
+        <div class="status-head">
+          <div class="status-title">🔍 Données brutes GoCardless</div>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('debug-zone').style.display='none'">✕ Fermer</button>
+        </div>
+        <div id="debug-content" style="padding:16px;overflow-x:auto">
+          <div class="loader"><div class="spin"></div></div>
         </div>
       </div>
     </div>
@@ -843,6 +857,58 @@ async function purgeBankLines() {
     showToast('❌ Erreur purge : ' + e.message, 'error');
   }
 }
+
+// ── DEBUG — voir les données brutes GoCardless ──
+async function runDebug() {
+  const zone = document.getElementById('debug-zone');
+  const content = document.getElementById('debug-content');
+  zone.style.display = 'block';
+  content.innerHTML = '<div class="loader"><div class="spin"></div><span>Appel GoCardless en cours…</span></div>';
+
+  const reqId = _connection?.requisition_id || _connection?.pending_requisition_id;
+  if (!reqId) {
+    content.innerHTML = '<div style="color:var(--red);padding:12px">Aucun requisition_id trouvé dans _connection.</div>';
+    return;
+  }
+
+  try {
+    const res  = await fetch('/api/bank-debug', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requisition_id: reqId })
+    });
+    const data = await res.json();
+    content.innerHTML = `
+      <div style="margin-bottom:12px;font-size:12px;color:var(--muted)">
+        Requisition <strong>${data.requisition?.id || '?'}</strong> — statut : <strong>${data.requisition?.status || '?'}</strong> — banque : <strong>${data.requisition?.institution_id || '?'}</strong>
+      </div>
+      ${(data.accounts || []).map((acc, i) => `
+        <div style="margin-bottom:20px;border:1.5px solid var(--border);border-radius:10px;overflow:hidden">
+          <div style="background:#f8faff;padding:10px 14px;font-size:12px;font-weight:700;border-bottom:1px solid var(--border)">
+            Compte ${i+1} : <code>${acc.accountId}</code>
+          </div>
+          <div style="padding:12px 14px">
+            <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">DETAILS RAW :</div>
+            <pre style="font-size:10px;background:#1a1f36;color:#e2e8f0;padding:10px;border-radius:8px;overflow-x:auto;white-space:pre-wrap;word-break:break-all">${JSON.stringify(acc.details_raw || acc.details_error, null, 2)}</pre>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);margin:10px 0 6px">BALANCES RAW :</div>
+            <pre style="font-size:10px;background:#1a1f36;color:#e2e8f0;padding:10px;border-radius:8px;overflow-x:auto;white-space:pre-wrap;word-break:break-all">${JSON.stringify(acc.balances_raw || acc.balances_error, null, 2)}</pre>
+            <div style="font-size:11px;font-weight:700;color:var(--muted);margin:10px 0 6px">
+              TRANSACTIONS : ${acc.transactions_count?.booked || 0} bookées · ${acc.transactions_count?.pending || 0} pending<br>
+              Champs dispo : <code>${(acc.transactions_raw_keys || []).join(', ')}</code>
+            </div>
+            <pre style="font-size:10px;background:#1a1f36;color:#e2e8f0;padding:10px;border-radius:8px;overflow-x:auto;white-space:pre-wrap;word-break:break-all">${JSON.stringify(acc.transactions_sample_booked?.[0] || acc.transactions_error, null, 2)}</pre>
+          </div>
+        </div>
+      `).join('')}
+      <div style="font-size:11px;color:var(--muted);padding:8px 0">💡 Copie ce contenu et envoie-le pour diagnostiquer le problème.</div>
+    `;
+    console.log('[DEBUG] Données brutes GoCardless :', data);
+  } catch(e) {
+    content.innerHTML = `<div style="color:var(--red);padding:12px">❌ Erreur : ${e.message}</div>`;
+  }
+}
+
+window.runDebug = runDebug;
 
 window.syncNow = syncNow;
 window.showError = showError;
