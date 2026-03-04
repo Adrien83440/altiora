@@ -86,6 +86,9 @@
     .btn-ign:hover{background:#e2e8f0;}
     .btn-rule{background:#eef2ff;color:#4338ca;border:none;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:600;}
     .btn-rule:hover{background:#e0e7ff;}
+    .btn-import-one{background:linear-gradient(135deg,#10b981,#34d399);color:white;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:700;transition:opacity .15s;}
+    .btn-import-one:hover{opacity:.85;}
+    .btn-import-one:disabled{opacity:.3;cursor:not-allowed;}
     .act-row{display:flex;gap:4px;align-items:center;}
     .import-footer{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;bottom:16px;box-shadow:0 8px 32px rgba(15,31,92,.12);}
     .footer-info{font-size:13px;color:var(--muted);}
@@ -437,7 +440,6 @@ function renderAll(){
             <th class="${thCls('montant')}" style="text-align:right" onclick="sortBy('montant')">Montant<span class="sort-icon"></span></th>
             <th>→ Pilotage</th>
             <th>Statut</th>
-            <th>Date Pilotage</th>
             <th>Actions</th>
           </tr></thead>
           <tbody>
@@ -496,26 +498,13 @@ function renderRow(tx){
 
   let actHtml='';
   if(tx.type==='credit') actHtml=`<span style="color:var(--muted)">—</span>`;
-  else if(tx.status==='imported') actHtml=`<button class="btn-ign" onclick="unimport(${tx.id})">↩</button>`;
+  else if(tx.status==='imported') actHtml=`<button class="btn-ign" onclick="unimport(${tx.id})" title="Annuler l'import">↩</button>`;
   else if(tx.status==='ignored')  actHtml=`<button class="btn-ign" onclick="restore(${tx.id})">↩ Rétablir</button>`;
   else actHtml=`<div class="act-row">
+    <button class="btn-import-one" onclick="importOne(${tx.id})" title="Importer cette ligne dans Pilotage" ${!tx.cat||tx.cat==='ignore'?'disabled':''}>⬇️</button>
     <button class="btn-ign" onclick="ignoreOne(${tx.id})" title="Ignorer">🚫</button>
     <button class="btn-rule" onclick="learnRule(${tx.id})" title="Mémoriser règle">🧠</button>
   </div>`;
-
-  // Champ date Pilotage éditable (dd/mm/yyyy)
-  let datePilagHtml='';
-  if(tx.type==='credit'){
-    datePilagHtml=`<span style="font-size:11px;color:var(--muted)">—</span>`;
-  } else {
-    const dis = tx.status!=='pending' ? 'disabled' : '';
-    datePilagHtml=`<input class="date-input" type="text" id="datepit-${tx.id}"
-      value="${escHtml(tx.customDate||tx.date||'')}"
-      placeholder="jj/mm/aaaa"
-      maxlength="10"
-      oninput="updateDate(${tx.id},this.value)"
-      ${dis}/>`;
-  }
 
   return `<tr class="${rowCls}" id="row-${tx.id}">
     <td style="white-space:nowrap;color:var(--muted);font-size:11px">${tx.date}</td>
@@ -525,7 +514,6 @@ function renderRow(tx){
     <td style="text-align:right" class="${amtCls}">${amtSign}${fmt(tx.montant)}</td>
     <td>${destHtml}</td>
     <td>${statusHtml}</td>
-    <td>${datePilagHtml}</td>
     <td>${actHtml}</td>
   </tr>`;
 }
@@ -591,6 +579,71 @@ function openDblModal(id){
 function closeDblModal(){document.getElementById('dblModal').classList.remove('show');_dblCtx=null;}
 function dblKeepBoth(){if(_dblCtx===null)return;_txList[_dblCtx].doublonInfo=null;renderAll();closeDblModal();}
 function dblReplace(){if(_dblCtx===null)return;_txList[_dblCtx].replaceMode=true;_txList[_dblCtx].doublonInfo=null;renderAll();closeDblModal();}
+
+async function importOne(id){
+  const tx = _txList[id];
+  if(!tx || tx.type!=='debit' || tx.status!=='pending' || !tx.cat || tx.cat==='ignore') return;
+
+  // Désactiver le bouton pendant l'import
+  const btn = document.querySelector(`#row-${id} .btn-import-one`);
+  if(btn){ btn.disabled=true; btn.textContent='⏳'; }
+
+  try{
+    const mk = tx.monthKey;
+    const docRef = window._doc(window._db,'pilotage',window._uid,'months',mk);
+    const snap   = await window._getDoc(docRef);
+    const data   = snap.exists()?{...snap.data()}:{chargesFixe:[],chargesVar:[],leasing:[],credits:[],ca:[]};
+    const sec    = tx.cat;
+    if(!data[sec]) data[sec]=[];
+
+    // Dédupliquer par bankTxId
+    if(data[sec].some(r=>r.bankTxId===tx.bankTxId)){
+      showToast('⚠️ Déjà importée','warning');
+      if(btn){btn.disabled=false;btn.textContent='⬇️';}
+      return;
+    }
+
+    // Remplacer doublon si demandé
+    if(tx.replaceMode && tx.doublonInfo){
+      data[tx.doublonInfo.section]=(data[tx.doublonInfo.section]||[]).filter(r=>Math.abs(parseFloat(r.montantHT||0)-tx.montant)>=0.5);
+    }
+
+    data[sec].push({
+      fournisseur: tx.customLabel,
+      date:        tx.customDate || tx.date || '',
+      type:        sec==='chargesFixe'?'Charge fixe':sec==='leasing'?'Leasing / LOA':'Charge variable',
+      montantHT:   tx.montant.toFixed(2),
+      tvaRate:20, deductible:'Oui', pointe:'Non',
+      source:'bank_sync', bankTxId:tx.bankTxId,
+      importedAt:  new Date().toISOString()
+    });
+
+    await window._setDoc(docRef, data, {merge:true});
+
+    tx.status = 'imported';
+    // Mettre à jour juste cette ligne sans re-render toute la table
+    const row = document.getElementById('row-'+id);
+    if(row){ row.className='s-imported'; }
+    const actCell = row?.querySelector('.act-row');
+    if(actCell) actCell.outerHTML=`<button class="btn-ign" onclick="unimport(${id})" title="Annuler l'import">↩</button>`;
+    const statCell = row?.cells[6];
+    if(statCell) statCell.innerHTML=`<span style="font-size:11px;font-weight:700;color:var(--green)">✅ Importée</span>`;
+
+    // Mettre à jour compteurs
+    const readyN = _txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore').length;
+    const impN   = _txList.filter(t=>t.status==='imported').length;
+    const btnTop = document.getElementById('btn-import');
+    if(btnTop){btnTop.disabled=readyN===0;btnTop.textContent=`⬇️ Importer (${readyN})`;}
+    // Stats
+    const statImported = document.querySelector('.stat-val.green:last-of-type');
+
+    showToast(`✅ "${tx.customLabel}" importée dans Pilotage`,'success');
+  }catch(e){
+    showToast('❌ Erreur : '+e.message,'error');
+    if(btn){btn.disabled=false;btn.textContent='⬇️';}
+  }
+}
+
 
 async function importSelected(){
   const toImport=_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore');
@@ -692,6 +745,7 @@ async function handleLogout(){await window._signOut(window._auth);window.locatio
 window.initPage=initPage;window.setFilter=setFilter;window.setSearch=setSearch;
 window.updateLabel=updateLabel;window.updateDate=updateDate;window.updateCat=updateCat;
 window.sortBy=sortBy;
+window.importOne=importOne;
 window.ignoreOne=ignoreOne;window.restore=restore;window.unimport=unimport;
 window.ignoreAllPending=ignoreAllPending;window.autoAll=autoAll;
 window.learnRule=learnRule;window.importSelected=importSelected;
