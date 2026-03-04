@@ -227,9 +227,10 @@
             <div class="sync-text">Dernière synchronisation : <strong id="last-sync-text">—</strong></div>
             <div style="font-size:11px;color:var(--muted)">💡 Cliquez sur <strong>Synchroniser</strong> pour récupérer vos dépenses, puis sur <strong>Valider les transactions</strong> pour les ajouter dans Pilotage.</div>
           </div>
-          <div style="display:flex;gap:8px">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="window.location.href='bank-validation.html'">✅ Valider les transactions</button>
             <button class="btn btn-success btn-sm" id="btn-sync-main" onclick="syncNow()">🔄 Synchroniser maintenant</button>
+            <button class="btn btn-danger btn-sm" onclick="purgeBankLines()" title="Supprimer toutes les lignes importées automatiquement par la banque (source:bank_sync)">🧹 Purger les imports banque</button>
           </div>
         </div>
       </div>
@@ -760,6 +761,57 @@ window.hideBankPicker = hideBankPicker;
 window.selectBank = selectBank;
 window.connectSelectedBank = connectSelectedBank;
 window.filterBanks = filterBanks;
+
+// ── PURGE lignes bank_sync (nettoyage en cas de doublons parasites) ──
+async function purgeBankLines() {
+  if (!confirm('⚠️ Supprimer TOUTES les lignes importées automatiquement depuis la banque (source: bank_sync) dans Pilotage ?\n\nLes entrées saisies manuellement ne seront pas touchées.')) return;
+
+  const overlay = document.getElementById('syncOverlay');
+  const overlayText = document.getElementById('syncOverlayText');
+  const overlaySub = document.getElementById('syncOverlaySub');
+  if (overlay) overlay.classList.add('show');
+  if (overlayText) overlayText.textContent = 'Nettoyage en cours…';
+  if (overlaySub) overlaySub.textContent = 'Suppression des lignes bank_sync dans Pilotage';
+
+  try {
+    // Lister les mois des 2 dernières années
+    const months = [];
+    const now = new Date();
+    for (let i = 0; i < 24; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`);
+    }
+
+    let totalPurged = 0;
+    for (const mk of months) {
+      const docRef = window._doc(window._db, 'pilotage', window._uid, 'months', mk);
+      const snap = await window._getDoc(docRef);
+      if (!snap.exists()) continue;
+      const data = snap.data();
+      let changed = false;
+
+      for (const sec of ['chargesFixe', 'chargesVar', 'leasing']) {
+        if (!data[sec]) continue;
+        const before = data[sec].length;
+        data[sec] = data[sec].filter(r => r.source !== 'bank_sync');
+        const removed = before - data[sec].length;
+        if (removed > 0) { totalPurged += removed; changed = true; }
+      }
+
+      if (changed) await window._setDoc(docRef, data, { merge: true });
+    }
+
+    // Vider bank_pending aussi
+    try { await window._deleteDoc(window._doc(window._db, 'bank_pending', window._uid)); } catch(e) {}
+
+    if (overlay) overlay.classList.remove('show');
+    showToast(`✅ ${totalPurged} ligne(s) bank_sync supprimée(s) de Pilotage`, 'success');
+  } catch(e) {
+    if (overlay) overlay.classList.remove('show');
+    showToast('❌ Erreur purge : ' + e.message, 'error');
+  }
+}
+
 window.syncNow = syncNow;
 window.fetchAndStagePending = fetchAndStagePending;
 window.disconnectBank = disconnectBank;
