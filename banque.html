@@ -391,10 +391,10 @@ function showConnectedZone(conn) {
   if (conn.accounts && conn.accounts.length > 0) {
     grid.innerHTML = conn.accounts.map(acc => `
       <div class="account-card">
-        <div class="account-iban">${acc.iban || 'IBAN non disponible'}</div>
+        <div class="account-iban">${acc.iban ? acc.iban.replace(/(.{4})/g,'$1 ').trim() : 'IBAN non disponible'}</div>
         <div class="account-name">🏦 ${acc.name || 'Compte bancaire'}</div>
-        <div class="account-balance">${acc.balance || '—'}</div>
-        <div class="account-tx">${acc.transactionsCount || 0} transactions lors de la dernière sync</div>
+        <div class="account-balance" style="color:${(acc.balanceNum||0)>=0?'var(--blue-main)':'var(--red)'}">${acc.balance || '—'}</div>
+        <div class="account-tx">${acc.transactionsCount || 0} transactions · <span style="color:var(--red)">${acc.debitsCount||0} dépenses</span></div>
       </div>
     `).join('');
   } else {
@@ -557,7 +557,10 @@ async function fetchAndStagePending(requisitionId) {
     body: JSON.stringify({ requisition_id: requisitionId })
   });
   const data = await res.json();
-  if (!data.success) throw new Error(data.error || 'Sync échouée');
+  if (!data.success) {
+    const detail = data.detail ? '\n' + data.detail : '';
+    throw new Error((data.error || 'Sync échouée') + detail);
+  }
 
   // 2. Aplatir toutes les transactions de tous les comptes
   const allTx = [];
@@ -565,8 +568,8 @@ async function fetchAndStagePending(requisitionId) {
 
   for (const acc of data.accounts) {
     for (const tx of acc.transactions) {
-      // Ignorer les crédits (encaissements) — on ne mappe que les débits
-      if (tx.type === 'credit') continue;
+      // Sauvegarder TOUTES les transactions (débits + crédits)
+      // bank-validation.html filtre selon le besoin
       allTx.push({
         ...tx,
         accountName: acc.name || '',
@@ -578,7 +581,9 @@ async function fetchAndStagePending(requisitionId) {
       iban: acc.iban,
       name: acc.name,
       balance: acc.balance,
-      transactionsCount: acc.transactions.length
+      balanceNum: acc.balanceNum || 0,
+      transactionsCount: acc.transactions.length,
+      debitsCount: acc.transactions.filter(t => t.type === 'debit').length,
     });
   }
 
@@ -619,6 +624,14 @@ async function fetchAndStagePending(requisitionId) {
     }
   } catch(e) { console.warn('Sync solde cashflow:', e.message); }
 
+  // Mettre à jour l'UI directement depuis les données fraîches
+  _connection = {
+    ..._connection,
+    accounts: accountsSummary,
+    lastSync: new Date().toISOString(),
+    status: 'active'
+  };
+
   return allTx.length;
 }
 
@@ -652,9 +665,14 @@ async function syncNow() {
     }, 800);
   } catch(e) {
     if (overlay) overlay.classList.remove('show');
-    showToast('❌ ' + e.message, 'error');
+    let msg = e.message || 'Erreur inconnue';
+    // Cas commun : requisition expirée
+    if (msg.includes('Aucun compte') || msg.includes('EXPIRED') || msg.includes('SUSPENDED')) {
+      msg = 'La connexion bancaire a expiré. Déconnectez et reconnectez votre banque.';
+    }
+    showToast('❌ ' + msg, 'error');
     if (btn) { btn.disabled = false; }
-    if (dot) dot.className = 'status-dot';
+    if (dot) dot.className = 'status-dot inactive';
   }
 }
 
