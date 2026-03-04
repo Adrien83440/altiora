@@ -76,11 +76,6 @@
       <span>📈</span><span>Suivi CA &amp; Résultats</span>
     </div>
 
-    <div class="ni${a('banque.html')}" id="nav-banque" onclick="location.href='banque.html'">
-      <span>🏦</span><span style="flex:1">Connexion bancaire</span>
-      <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.25);color:#6ee7b7;padding:2px 7px;border-radius:20px">Nouveau</span>
-    </div>
-
     <!-- KPIs -->
     <div class="ni${aNI(kpisPages)}" id="nav-kpis" onclick="toggleAlteoreNav('kpis-sub',this)">
       <span>🎯</span><span style="flex:1">KPIs Clés</span><span class="chev" id="chev-kpis">›</span>
@@ -180,7 +175,11 @@
   </div><!-- /nav-scroll-area -->
 
   <div class="nav-footer">
-    <div class="ni" id="nav-import" onclick="location.href='import.html'" style="border-top:1px solid rgba(255,255,255,.08);padding:10px 0 8px;margin:0">
+    <div class="ni${a('banque.html')}" id="nav-banque" onclick="location.href='banque.html'" style="border-top:1px solid rgba(255,255,255,.08);padding:10px 0 8px;margin:0">
+      <span>🏦</span><span style="flex:1">Connexion bancaire</span>
+      <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.25);color:#6ee7b7;padding:2px 7px;border-radius:20px">Nouveau</span>
+    </div>
+    <div class="ni" id="nav-import" onclick="location.href='import.html'" style="padding:8px 0;margin:0">
       <span>📥</span><span>Import de données</span>
     </div>
     <div class="ni${a('tutoriels.html')}" id="nav-tutos" onclick="location.href='tutoriels.html'" style="padding:8px 0;margin:0">
