@@ -28,6 +28,11 @@
   // PAGE ACTIVE
   // ════════════════════════════════════════════════
   const PAGE = location.pathname.split('/').pop() || 'dashboard.html';
+  // Année active dans le pilotage (lue depuis ?year=XXXX)
+  const ACTIVE_YEAR = parseInt(new URLSearchParams(location.search).get('year')) || new Date().getFullYear();
+  // Génère les années dynamiquement : année courante -1, courante, courante +1
+  const CUR_YEAR = new Date().getFullYear();
+  const PIL_YEARS = [CUR_YEAR - 1, CUR_YEAR, CUR_YEAR + 1];
 
   // ════════════════════════════════════════════════
   // BUILD NAV HTML
@@ -88,9 +93,7 @@
       <span>🧭</span><span style="flex:1">Pilotage</span><span class="chev" id="chev-pil">›</span>
     </div>
     <div class="sub" id="pil-sub" ${pilOpen}>
-      <div class="si${a('pilotage.html')}" onclick="location.href='pilotage.html?year=2025'"><span class="dot"></span>Pilotage 2025</div>
-      <div class="si"                      onclick="location.href='pilotage.html?year=2026'"><span class="dot"></span>Pilotage 2026</div>
-      <div class="si"                      onclick="location.href='pilotage.html?year=2027'"><span class="dot"></span>Pilotage 2027</div>
+      ${PIL_YEARS.map(y => `<div class="si${PAGE === 'pilotage.html' && ACTIVE_YEAR === y ? ' on' : ''}" onclick="location.href='pilotage.html?year=${y}'"><span class="dot"></span>Pilotage ${y}</div>`).join('\n      ')}
       <div class="si${a('cashflow.html')}" onclick="location.href='cashflow.html'" style="border-top:1px solid rgba(255,255,255,.06);margin-top:4px;padding-top:8px">
         <span class="dot" style="background:#0d9488"></span>💧 Cashflow
       </div>
