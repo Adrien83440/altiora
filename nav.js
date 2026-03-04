@@ -178,6 +178,9 @@
     <div class="ni" id="nav-import" onclick="location.href='import.html'" style="border-top:1px solid rgba(255,255,255,.08);padding:10px 0 8px;margin:0">
       <span>📥</span><span>Import de données</span>
     </div>
+    <div class="ni${a('tutoriels.html')}" id="nav-tutos" onclick="location.href='tutoriels.html'" style="padding:8px 0;margin:0">
+      <span>🎓</span><span>Tutoriels</span>
+    </div>
     <div class="ni${a('aide.html')}" id="nav-aide" onclick="location.href='aide.html'" style="padding:8px 0;margin:0">
       <span>❓</span><span>Centre d'aide</span>
     </div>
@@ -468,7 +471,7 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
   function checkPageAccess(plan) {
     // ── Plan free / past_due → redirection pricing (pas de plan gratuit) ──
     const BLOCKED_PLANS = ['free', 'past_due'];
-    const ALLOWED_PAGES_FREE = ['profil.html', 'aide.html'];
+    const ALLOWED_PAGES_FREE = ['profil.html', 'aide.html', 'tutoriels.html'];
     if (BLOCKED_PLANS.includes(plan) && !ALLOWED_PAGES_FREE.includes(PAGE)) {
       location.href = 'profil.html?tab=abonnement&upgrade=core';
       return false;
