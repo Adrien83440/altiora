@@ -76,6 +76,11 @@
       <span>📈</span><span>Suivi CA &amp; Résultats</span>
     </div>
 
+    <div class="ni${a('banque.html')}" id="nav-banque" onclick="location.href='banque.html'">
+      <span>🏦</span><span style="flex:1">Connexion bancaire</span>
+      <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.25);color:#6ee7b7;padding:2px 7px;border-radius:20px">Nouveau</span>
+    </div>
+
     <!-- KPIs -->
     <div class="ni${aNI(kpisPages)}" id="nav-kpis" onclick="toggleAlteoreNav('kpis-sub',this)">
       <span>🎯</span><span style="flex:1">KPIs Clés</span><span class="chev" id="chev-kpis">›</span>
