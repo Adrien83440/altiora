@@ -42,6 +42,7 @@
     function aNI(arr) { return arr.includes(PAGE) ? ' on' : ''; }
 
     const kpisPages = ['cout-revient.html', 'marges.html', 'panier-moyen.html', 'dettes.html', 'gestion-stock.html'];
+    const integPage = PAGE === 'integrations.html';
     const kpisOpen  = kpisPages.includes(PAGE)                                   ? 'style="max-height:500px"' : '';
     const pilOpen   = ['pilotage.html', 'cashflow.html'].includes(PAGE)          ? 'style="max-height:500px"' : '';
     const fidOpen   = PAGE === 'fidelisation.html'                               ? 'style="max-height:500px"' : '';
@@ -177,6 +178,9 @@
   <div class="nav-footer">
     <div class="ni" id="nav-import" onclick="location.href='import.html'" style="border-top:1px solid rgba(255,255,255,.08);padding:10px 0 8px;margin:0">
       <span>📥</span><span>Import de données</span>
+    </div>
+    <div class="ni${integPage ? ' on' : ''}" id="nav-integrations" onclick="location.href='integrations.html'" style="padding:8px 0;margin:0">
+      <span>🔌</span><span>Intégrations &amp; API</span>
     </div>
     <div class="ni${a('aide.html')}" id="nav-aide" onclick="location.href='aide.html'" style="padding:8px 0;margin:0">
       <span>❓</span><span>Centre d'aide</span>
