@@ -1,5 +1,4 @@
 // api/public-ca-setup.js — Génération / révocation de clé API Alteore
-// Le client envoie son uid (déjà authentifié côté Firebase Auth frontend)
 
 const FB_PROJECT = 'altiora-70599';
 const FB_KEY     = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
@@ -13,19 +12,23 @@ function generateApiKey() {
 }
 
 async function fsGet(uid) {
-  const r = await fetch(`${FS_BASE}/users/${uid}?key=${FB_KEY}`);
+  const r = await fetch(`${FS_BASE}/users/${uid}`, {
+    headers: { 'x-goog-api-key': FB_KEY }
+  });
   if (r.status === 404) return null;
-  if (!r.ok) throw new Error(`Firestore GET ${r.status}`);
+  if (!r.ok) throw new Error(`Firestore GET ${r.status}: ${await r.text()}`);
   return r.json();
 }
 
 async function fsPatch(uid, fieldsObj) {
-  const mask = Object.keys(fieldsObj).map(f => `updateMask.fieldPaths=${encodeURIComponent(f)}`).join('&');
-  const url  = `${FS_BASE}/users/${uid}?${mask}&key=${FB_KEY}`;
+  const mask = Object.keys(fieldsObj)
+    .map(f => `updateMask.fieldPaths=${encodeURIComponent(f)}`)
+    .join('&');
+  const url = `${FS_BASE}/users/${uid}?${mask}`;
 
   const fields = {};
   for (const [k, v] of Object.entries(fieldsObj)) {
-    if (v === null)              fields[k] = { nullValue: null };
+    if      (v === null)             fields[k] = { nullValue: null };
     else if (typeof v === 'string')  fields[k] = { stringValue: v };
     else if (typeof v === 'number')  fields[k] = { integerValue: String(Math.round(v)) };
     else if (typeof v === 'boolean') fields[k] = { booleanValue: v };
@@ -33,14 +36,14 @@ async function fsPatch(uid, fieldsObj) {
 
   const r = await fetch(url, {
     method:  'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ fields })
+    headers: {
+      'Content-Type':  'application/json',
+      'x-goog-api-key': FB_KEY
+    },
+    body: JSON.stringify({ fields })
   });
 
-  if (!r.ok) {
-    const txt = await r.text();
-    throw new Error(`Firestore PATCH ${r.status}: ${txt}`);
-  }
+  if (!r.ok) throw new Error(`Firestore PATCH ${r.status}: ${await r.text()}`);
   return r.json();
 }
 
