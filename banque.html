@@ -550,89 +550,28 @@ async function finalizeBankConnection(reqId) {
 
 // ── SYNC — récupère les transactions et les stocke dans bank_pending (pas dans Pilotage) ──
 async function fetchAndStagePending(requisitionId) {
-  // 1. Appel proxy Vercel
+  // Le serveur (bank-sync.js) gère tout :
+  // - récupère les transactions GoCardless
+  // - écrit dans bank_pending via Firebase Admin
+  // - met à jour bank_connections
+  // - sync le solde dans cashflow
   const res = await fetch('/api/bank-sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ requisition_id: requisitionId })
+    body: JSON.stringify({ uid: window._uid, requisition_id: requisitionId })
   });
   const data = await res.json();
-  if (!data.success) {
-    const detail = data.detail ? '\n' + data.detail : '';
-    throw new Error((data.error || 'Sync échouée') + detail);
-  }
+  if (!data.success) throw new Error(data.error || 'Sync échouée');
 
-  // 2. Aplatir toutes les transactions de tous les comptes
-  const allTx = [];
-  const accountsSummary = [];
-
-  for (const acc of data.accounts) {
-    for (const tx of acc.transactions) {
-      // Sauvegarder TOUTES les transactions (débits + crédits)
-      // bank-validation.html filtre selon le besoin
-      allTx.push({
-        ...tx,
-        accountName: acc.name || '',
-        accountIban: acc.iban || ''
-      });
-    }
-    accountsSummary.push({
-      accountId: acc.accountId,
-      iban: acc.iban,
-      name: acc.name,
-      balance: acc.balance,
-      balanceNum: acc.balanceNum || 0,
-      transactionsCount: acc.transactions.length,
-      debitsCount: acc.transactions.filter(t => t.type === 'debit').length,
-    });
-  }
-
-  // 3. Sauvegarder les transactions en attente dans bank_pending
-  await window._setDoc(
-    window._doc(window._db, 'bank_pending', window._uid),
-    {
-      transactions: allTx,
-      syncedAt: new Date().toISOString(),
-      requisition_id: requisitionId
-    }
-  );
-
-  // 4. Mettre à jour le statut de connexion
-  await window._setDoc(
-    window._doc(window._db, 'bank_connections', window._uid),
-    {
-      requisition_id: requisitionId,
-      accounts: accountsSummary,
-      lastSync: new Date().toISOString(),
-      status: 'active'
-    },
-    { merge: true }
-  );
-
-  // 5. Sync solde total → Cashflow trésorerie disponible (non bloquant)
-  try {
-    const totalBalance = accountsSummary.reduce((sum, acc) => {
-      const raw = (acc.balance || '').toString().replace(/[^0-9.,\-]/g, '').replace(',', '.');
-      return sum + (parseFloat(raw) || 0);
-    }, 0);
-    if (totalBalance !== 0) {
-      const today = new Date().toISOString().split('T')[0];
-      await window._setDoc(
-        window._doc(window._db, 'cashflow', window._uid, 'config', 'tresorerie'),
-        { solde: totalBalance, date: today, source: 'bank_sync', syncedAt: new Date().toISOString() }
-      );
-    }
-  } catch(e) { console.warn('Sync solde cashflow:', e.message); }
-
-  // Mettre à jour l'UI directement depuis les données fraîches
+  // Mettre à jour l'UI directement avec les données reçues
   _connection = {
     ..._connection,
-    accounts: accountsSummary,
+    accounts: data.accounts || [],
     lastSync: new Date().toISOString(),
     status: 'active'
   };
 
-  return allTx.length;
+  return data.pendingCount || data.totalTransactions || 0;
 }
 
 async function syncNow() {
