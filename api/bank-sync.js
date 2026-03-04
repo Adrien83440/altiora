@@ -109,10 +109,21 @@ export default async function handler(req, res) {
         });
       }
 
+      // GoCardless peut retourner l'IBAN à différents niveaux
+      const iban = details.account?.iban
+        || details.account?.bban
+        || details.iban
+        || '';
+      const name = details.account?.name
+        || details.account?.ownerName
+        || details.account?.product
+        || details.account?.displayName
+        || '';
+
       accounts.push({
         accountId,
-        iban:    details.account?.iban || '',
-        name:    details.account?.name || details.account?.ownerName || accountId.substring(0, 8),
+        iban,
+        name,
         balance: balanceStr,
         balanceNum,
         transactionsCount: transactions.length,
