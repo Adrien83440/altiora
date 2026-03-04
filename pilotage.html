@@ -4,6 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Pilotage — ALTEORE</title>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   :root{
@@ -316,14 +317,14 @@
 
 <!-- SIDEBAR -->
 <!-- MAIN -->
-<div class="main">
+<div class="main" x-data="pilotageApp()" x-init="init()">
   <div class="topbar">
     <div class="topbar-left">
-      <h1 id="topTitle">Pilotage — Chargement...</h1>
+      <h1 x-text="'Pilotage — ' + monthLabel">Pilotage — Chargement...</h1>
       <p>Saisie et suivi mensuel complet</p>
     </div>
     <div class="topbar-right">
-      <select class="month-select" id="monthSelect" onchange="loadMonth()">
+      <select class="month-select" x-model="selectedMonth" @change="onMonthChange()">
         <option value="0">Janvier</option><option value="1">Février</option>
         <option value="2">Mars</option><option value="3">Avril</option>
         <option value="4">Mai</option><option value="5">Juin</option>
@@ -331,13 +332,50 @@
         <option value="8">Septembre</option><option value="9">Octobre</option>
         <option value="10">Novembre</option><option value="11">Décembre</option>
       </select>
+      <!-- Select legacy caché pour compatibilité fonctions internes -->
+      <select id="monthSelect" style="display:none" aria-hidden="true">
+        <option value="0">Janvier</option><option value="1">Février</option><option value="2">Mars</option>
+        <option value="3">Avril</option><option value="4">Mai</option><option value="5">Juin</option>
+        <option value="6">Juillet</option><option value="7">Août</option><option value="8">Septembre</option>
+        <option value="9">Octobre</option><option value="10">Novembre</option><option value="11">Décembre</option>
+      </select>
       <button class="btn btn-orange btn-sm" onclick="openFixedModal()">⚡ Charges fixes → Année</button>
       <button class="btn btn-outline btn-sm" onclick="openSuppliersModal()" title="Gérer mes fournisseurs">📋 Fournisseurs</button>
       <button class="btn btn-primary" onclick="saveAll()">💾 Sauvegarder</button>
     </div>
   </div>
   <div class="content" id="mainContent">
-    <div class="loader"><div class="spin"></div> Connexion en cours...</div>
+    <!-- KPI SUMMARY — réactif via Alpine -->
+    <div class="summary-grid" id="kpi-summary">
+      <div class="sum-card blue">
+        <div class="sum-label">CA HT du mois</div>
+        <div class="sum-value" x-text="fmtSigned(t.caHT)" id="s-ca"></div>
+        <div class="sum-sub" x-text="'Journalier : ' + fmtE(t.caHT_j) + ' · Factures pro : ' + fmtE(t.caFP_HT)" id="s-ca-detail"></div>
+      </div>
+      <div class="sum-card orange">
+        <div class="sum-label">Charges totales HT</div>
+        <div class="sum-value" x-text="fmtSigned(t.chargesHT)" id="s-ch"></div>
+        <div class="sum-sub" x-text="'Fixes ' + fmtE(t.fixesHT) + ' · Var. ' + fmtE(t.varHT)"></div>
+      </div>
+      <div class="sum-card" :class="t.resultat >= 0 ? 'green' : 'red'">
+        <div class="sum-label">Résultat HT</div>
+        <div class="sum-value" :class="t.resultat >= 0 ? 'positive' : 'negative'" x-text="fmtSigned(t.resultat)" id="s-res"></div>
+        <div class="sum-sub">CA − Dépenses</div>
+      </div>
+      <div class="sum-card purple">
+        <div class="sum-label">TVA collectée</div>
+        <div class="sum-value" x-text="fmtSigned(t.tvaCollectee)" id="s-tvac"></div>
+      </div>
+      <div class="sum-card" :class="t.tvaDue >= 0 ? 'red' : 'green'">
+        <div class="sum-label">TVA due / crédit</div>
+        <div class="sum-value" :class="t.tvaDue >= 0 ? 'negative' : 'positive'" x-text="fmtSigned(t.tvaDue)" id="s-tvad"></div>
+        <div class="sum-sub" x-text="t.tvaDue >= 0 ? '🔴 À payer' : '🟢 Crédit TVA'"></div>
+      </div>
+    </div>
+    <!-- Contenu tableaux rendu dynamiquement -->
+    <div id="mainContentInner">
+      <div class="loader"><div class="spin"></div> Connexion en cours...</div>
+    </div>
   </div>
 </div>
 
@@ -597,6 +635,48 @@ onAuthStateChanged(auth, function(user) {
      Tout le code métier est ici — pas de Firebase direct
      ═══════════════════════════════════════════════ -->
 <script>
+/* ─── ALPINE APP ─── */
+function pilotageApp() {
+  return {
+    // État réactif des KPIs
+    t: {
+      caHT: 0, caHT_j: 0, caFP_HT: 0, chargesHT: 0, fixesHT: 0, varHT: 0,
+      resultat: 0, tvaCollectee: 0, tvaDue: 0, tvaDed: 0,
+      creditsPrincipal: 0, creditsInteret: 0, cashflow: 0, delta: 0, prevCA: 0
+    },
+    monthLabel: 'Chargement...',
+    selectedMonth: new Date().getMonth().toString(),
+
+    init() {
+      // Sync initial vers le select legacy
+      var legacy = document.getElementById('monthSelect');
+      if (legacy) legacy.value = this.selectedMonth;
+
+      // Exposer la mise à jour Alpine sur window pour que refreshTotals() puisse l'appeler
+      window._alpineUpdateKPIs = (totals, label) => {
+        if (totals && Object.keys(totals).length) this.t = { ...this.t, ...totals };
+        if (label) this.monthLabel = label;
+      };
+
+      // Sync selectedMonth → select legacy à chaque changement
+      this.$watch('selectedMonth', (val) => {
+        var leg = document.getElementById('monthSelect');
+        if (leg) leg.value = val;
+      });
+    },
+
+    onMonthChange() {
+      // Sync vers le select legacy puis appel loadMonth()
+      var legacy = document.getElementById('monthSelect');
+      if (legacy) legacy.value = this.selectedMonth;
+      window.loadMonth && window.loadMonth();
+    },
+
+    fmtE(n)      { return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €'; },
+    fmtSigned(n) { var v = parseFloat(n)||0; return (v>=0?'+':'') + v.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €'; }
+  };
+}
+
 /* ─── INIT ─── */
 var MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 var TVA_RATES = [0, 5.5, 10, 20];
@@ -606,12 +686,13 @@ window._year = parseInt(new URLSearchParams(window.location.search).get('year'))
 
 // Activer le bon bouton dans la sidebar dès le DOM prêt
 document.addEventListener('DOMContentLoaded', function() {
-  document.getElementById('monthSelect').value = new Date().getMonth();
+  // monthSelect legacy (utilisé par fonctions internes)
+  var ms = document.getElementById('monthSelect');
+  if (ms) ms.value = new Date().getMonth();
   document.querySelectorAll('.sub-year-badge').forEach(function(badge) {
     var item = badge.closest('.sub-item');
     if (item) item.classList.toggle('active', parseInt(badge.textContent) === window._year);
   });
-  document.getElementById('topTitle').textContent = 'Pilotage — ' + MONTHS[new Date().getMonth()] + ' ' + window._year;
 });
 
 var _data = {};
@@ -639,11 +720,13 @@ function toggleFidNav(el) {
 
 /* ─── HELPERS ─── */
 function getMonthKey() {
-  var m = parseInt(document.getElementById('monthSelect').value);
+  var ms = document.getElementById('monthSelect');
+  var m = ms ? parseInt(ms.value) : new Date().getMonth();
   return window._year + '-' + String(m + 1).padStart(2, '0');
 }
 function getMonthLabel() {
-  var m = parseInt(document.getElementById('monthSelect').value);
+  var ms = document.getElementById('monthSelect');
+  var m = ms ? parseInt(ms.value) : new Date().getMonth();
   return MONTHS[m] + ' ' + window._year;
 }
 function fmt(n)  { return (n >= 0 ? '+' : '') + fmtN(n) + ' €'; }
@@ -684,13 +767,18 @@ function defaultData(year, month) {
 /* ─── CHARGEMENT DONNÉES ─── */
 async function loadMonth() {
   var key   = getMonthKey();
-  var m     = parseInt(document.getElementById('monthSelect').value);
+  var ms    = document.getElementById('monthSelect');
+  var m     = ms ? parseInt(ms.value) : new Date().getMonth();
   var data  = defaultData(window._year, m);
 
-  document.getElementById('topTitle').textContent = 'Pilotage — ' + getMonthLabel();
+  // Mettre à jour le label Alpine
+  if (window._alpineUpdateKPIs) window._alpineUpdateKPIs({}, MONTHS[m] + ' ' + window._year);
+
+  // Afficher loader dans le panneau interne
+  var inner = document.getElementById('mainContentInner');
+  if (inner) inner.innerHTML = '<div class="loader"><div class="spin"></div> Chargement...</div>';
 
   if (window._uid && window._getDoc && window._db) {
-    document.getElementById('mainContent').innerHTML = '<div class="loader"><div class="spin"></div> Chargement...</div>';
     try {
       var snap = await window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', key));
       if (snap.exists()) {
@@ -911,14 +999,16 @@ async function saveQuiet() {
 /* ─── RENDU PAGE ─── */
 function renderPage(data, month) {
   var t = calcTotals(data);
-  document.getElementById('mainContent').innerHTML =
-    '<div class="summary-grid">' +
-      '<div class="sum-card blue"><div class="sum-label">CA HT du mois</div><div class="sum-value" id="s-ca">' + fmt(t.caHT) + '</div><div class="sum-sub" id="s-ca-detail">Journalier : ' + fmtE(t.caHT_j) + ' · Factures pro : ' + fmtE(t.caFP_HT) + '</div></div>' +
-      '<div class="sum-card orange"><div class="sum-label">Charges totales HT</div><div class="sum-value" id="s-ch">' + fmt(t.chargesHT) + '</div><div class="sum-sub">Fixes ' + fmtE(t.fixesHT) + ' · Var. ' + fmtE(t.varHT) + '</div></div>' +
-      '<div class="sum-card ' + (t.resultat>=0?'green':'red') + '"><div class="sum-label">Résultat HT</div><div class="sum-value ' + (t.resultat>=0?'positive':'negative') + '" id="s-res">' + fmt(t.resultat) + '</div><div class="sum-sub">CA − Dépenses</div></div>' +
-      '<div class="sum-card purple"><div class="sum-label">TVA collectée</div><div class="sum-value" id="s-tvac">' + fmt(t.tvaCollectee) + '</div></div>' +
-      '<div class="sum-card ' + (t.tvaDue>=0?'red':'green') + '"><div class="sum-label">TVA due / crédit</div><div class="sum-value ' + (t.tvaDue>=0?'negative':'positive') + '" id="s-tvad">' + fmt(t.tvaDue) + '</div><div class="sum-sub">' + (t.tvaDue>=0?'🔴 À payer':'🟢 Crédit TVA') + '</div></div>' +
-    '</div>' +
+
+  // Mettre à jour les KPIs via Alpine
+  if (window._alpineUpdateKPIs) {
+    window._alpineUpdateKPIs(t, MONTHS[month] + ' ' + window._year);
+  }
+
+  // Écrire le contenu des tableaux dans mainContentInner
+  var inner = document.getElementById('mainContentInner');
+  if (!inner) return;
+  inner.innerHTML =
 
     '<div class="sections-grid">' +
       '<div class="section-card">' +
@@ -1608,13 +1698,16 @@ function calcTotals(data) {
 
 function refreshTotals() {
   var t = calcTotals(_data);
+
+  // ── Mise à jour Alpine (KPIs summary + TVA + Cashflow) ──
+  if (window._alpineUpdateKPIs) window._alpineUpdateKPIs(t);
+
   function s(id,v,cls){var el=document.getElementById(id);if(!el)return;el.textContent=typeof v==='string'?v:fmtN(v);if(cls){el.className=el.className.replace(/positive|negative/g,'').trim();el.classList.add(cls);}}
   s('tot-ca055',t.caHT055);s('tot-ca10',t.caHT10);s('tot-ca20',t.caHT20);
   // Footer tableau CA journalier = journalier SEULEMENT (sans factures pro)
   s('tot-caHT', t.caHT_j);
   s('tot-caTTC', t.caHT055*1.055 + t.caHT10*1.10 + t.caHT20*1.20);
   s('tot-tvaC',  t.caHT055*0.055 + t.caHT10*0.10 + t.caHT20*0.20);
-  var fpR = _data.facturesPro || [];
   var fp055=fpR.reduce(function(s,r){return s+(parseFloat(r.ht055)||0);},0);
   var fp10=fpR.reduce(function(s,r){return s+(parseFloat(r.ht10)||0);},0);
   var fp20=fpR.reduce(function(s,r){return s+(parseFloat(r.ht20)||0);},0);
@@ -1675,11 +1768,7 @@ function refreshTotals() {
   s('cf-val',fmt(t.cashflow),t.cashflow>=0?'positive':'negative');
   s('cf-prev',fmt(t.prevCA-t.chargesHT));
   s('cf-delta',fmt(t.delta),t.delta>=0?'positive':'negative');
-  s('s-ca',fmt(t.caHT));s('s-ch',fmt(t.chargesHT));
-  var detEl=document.getElementById('s-ca-detail');
-  if(detEl) detEl.textContent='Journalier : '+fmtE(t.caHT_j)+' · Factures pro : '+fmtE(t.caFP_HT);
-  s('s-res',fmt(t.resultat),t.resultat>=0?'positive':'negative');
-  s('s-tvac',fmt(t.tvaCollectee));s('s-tvad',fmt(t.tvaDue),t.tvaDue>=0?'negative':'positive');
+  // s-ca, s-ch, s-res, s-tvac, s-tvad, s-ca-detail → gérés par Alpine (réactivité auto)
 }
 
 
