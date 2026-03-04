@@ -634,7 +634,8 @@ function renderRapport(){
   var resMens=T.moisData>0?T.resultat/T.moisData:0;
   var txFixe=T.caHT>0?T.fixe/T.caHT*100:0;
   var txVar=T.caHT>0?T.variable/T.caHT*100:0;
-  var seuil=T.moisData>0?T.fixe/(1-txVar/100)||0:0; // seuil mensuel approximatif
+  var fixeMens=T.moisData>0?T.fixe/T.moisData:0; // charges fixes moyennes par mois
+  var seuil=T.moisData>0&&txVar<100?fixeMens/(1-txVar/100)||0:0; // seuil de rentabilité mensuel
 
   var dettesActives=_dettesData.filter(function(d){return d.statut!=='soldee'&&d.statut!=='soldé';});
   var totDettes=dettesActives.reduce(function(s,d){return s+(parseFloat(d.montantRestant||d.montant)||0);},0);
@@ -899,6 +900,8 @@ function renderRapport(){
     else{scoreGlobal-=25;analyse.push({type:'bad',titre:'Déficit important',texte:'La situation est déficitaire avec une perte de <strong>'+fmt(Math.abs(T.resultat))+'</strong> ('+Math.abs(margeN).toFixed(1)+'% du CA). Les charges structurelles sont trop élevées par rapport au CA généré. Une restructuration est à envisager.'});}
 
     // Structure des charges
+    if(txCharges>100){scoreGlobal-=15;} // taux de charges > 100% du CA = déficit structurel
+    else if(txCharges>90){scoreGlobal-=8;}
     if(txFixe>60){scoreGlobal-=10;analyse.push({type:'warn',titre:'Charges fixes dominantes',texte:'Les charges fixes représentent <strong>'+txFixe.toFixed(1)+'% du CA</strong> ('+fmt(T.fixe)+'), ce qui est élevé. Cette rigidité expose l\'activité aux fluctuations de CA : même en cas de baisse d\'activité, ces charges restent dues.'});}
     else if(txFixe>40){analyse.push({type:'info',titre:'Équilibre charges fixes/variables',texte:'Les charges fixes représentent '+txFixe.toFixed(1)+'% du CA. La structure est équilibrée mais le seuil de rentabilité reste à surveiller.'});}
 
@@ -921,6 +924,8 @@ function renderRapport(){
 
     // Score global
     scoreGlobal=Math.max(0,Math.min(100,50+scoreGlobal));
+    // Cohérence : résultat négatif → jamais "Situation saine"
+    if(margeN<0) scoreGlobal=Math.min(scoreGlobal,59);
     var scoreLabel=scoreGlobal>=70?'Situation saine':scoreGlobal>=50?'Situation correcte':scoreGlobal>=35?'Situation fragile':'Situation préoccupante';
     var scoreColor=scoreGlobal>=70?'var(--green)':scoreGlobal>=50?'var(--orange)':scoreGlobal>=35?'#f97316':'var(--red)';
 
@@ -1744,9 +1749,13 @@ function exportPDF(){
       if(evCA>15)scoreG+=20;else if(evCA>5)scoreG+=12;else if(evCA<-10)scoreG-=15;else if(evCA<0)scoreG-=5;else scoreG+=6;
     }
     if(mgN>15)scoreG+=25;else if(mgN>8)scoreG+=15;else if(mgN>0)scoreG+=5;else if(mgN>-5)scoreG-=10;else scoreG-=25;
+    // Taux de charges
+    if(txCharges>100)scoreG-=15;else if(txCharges>90)scoreG-=8;
     if(txFixe>60)scoreG-=10;
     if(totD>0){if(ratioEndett>150)scoreG-=15;else if(ratioEndett>80)scoreG-=5;}
     scoreG=Math.max(0,Math.min(100,scoreG));
+    // Cohérence : résultat négatif → jamais "Situation saine"
+    if(mgN<0) scoreG=Math.min(scoreG,59);
     var scoreLbl=scoreG>=70?'Situation saine':scoreG>=50?'Situation correcte':scoreG>=35?'Situation fragile':'Situation preoccupante';
     var scoreCl=scoreG>=70?cGR:scoreG>=50?cOR:scoreG>=35?[249,115,22]:cRD;
     var scoreBg=scoreG>=70?cLGR:scoreG>=50?cLOR:cLRD;
