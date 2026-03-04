@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="fr" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ma Caisse • v0.1</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body { font-family: 'Inter', system-ui, sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-950 text-white h-full">
+
+<div class="max-w-7xl mx-auto p-4" x-data="caisse()">
+
+  <div class="flex justify-between items-center mb-8">
+    <h1 class="text-4xl font-bold">🛒 Ma Caisse</h1>
+    <div class="text-right">
+      <div class="text-3xl font-mono font-bold" x-text="total.toFixed(2) + ' €'"></div>
+      <div class="text-sm text-green-400">Total à payer</div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- Produits -->
+    <div class="lg:col-span-2">
+      <h2 class="text-xl mb-4">Produits</h2>
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+        <template x-for="product in products" :key="product.id">
+          <button @click="addToCart(product)"
+            class="bg-gray-900 hover:bg-gray-800 p-4 rounded-2xl text-left transition-all active:scale-95">
+            <div class="text-lg font-medium" x-text="product.name"></div>
+            <div class="text-2xl font-bold text-emerald-400" x-text="product.price.toFixed(2) + ' €'"></div>
+          </button>
+        </template>
+      </div>
+    </div>
+
+    <!-- Panier -->
+    <div>
+      <h2 class="text-xl mb-4">Panier (<span x-text="cart.length"></span>)</h2>
+      
+      <div class="bg-gray-900 rounded-3xl p-6 min-h-[400px] flex flex-col">
+        <div class="flex-1 space-y-4 overflow-auto" id="cart-items">
+          <template x-for="(item, index) in cart" :key="index">
+            <div class="flex justify-between items-center bg-gray-800 rounded-2xl p-4">
+              <div>
+                <div x-text="item.name"></div>
+                <div class="text-sm text-gray-400" x-text="item.price.toFixed(2) + ' €'"></div>
+              </div>
+              <div class="flex items-center gap-4">
+                <button @click="changeQty(index, -1)" class="w-8 h-8 bg-gray-700 rounded-xl hover:bg-red-600">-</button>
+                <span class="font-mono w-6 text-center" x-text="item.qty"></span>
+                <button @click="changeQty(index, 1)" class="w-8 h-8 bg-gray-700 rounded-xl hover:bg-green-600">+</button>
+                <button @click="removeFromCart(index)" class="text-red-500 hover:text-red-400 ml-2">×</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <div class="border-t border-gray-700 pt-6 mt-auto">
+          <button @click="validerVente()" 
+            class="w-full bg-emerald-500 hover:bg-emerald-600 py-6 rounded-3xl text-2xl font-bold transition-all active:scale-95">
+            ✅ Valider la vente
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ticket après vente -->
+  <div x-show="showReceipt" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+    <div class="bg-gray-900 rounded-3xl p-8 max-w-md w-full mx-4">
+      <h2 class="text-2xl font-bold mb-6 text-center">Ticket de caisse</h2>
+      <div class="space-y-2 font-mono text-sm" id="receipt-content"></div>
+      <button @click="showReceipt = false" 
+        class="mt-8 w-full py-4 bg-white text-black rounded-2xl font-bold">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function caisse() {
+  return {
+    products: [
+      { id: 1, name: "Café", price: 2.50 },
+      { id: 2, name: "Croissant", price: 1.80 },
+      { id: 3, name: "Bouteille d'eau", price: 1.20 },
+      { id: 4, name: "Sandwich", price: 5.90 },
+      { id: 5, name: "T-shirt", price: 19.99 },
+      { id: 6, name: "Bonbon", price: 0.50 },
+    ],
+    cart: [],
+    total: 0,
+    showReceipt: false,
+
+    addToCart(product) {
+      const existing = this.cart.find(item => item.id === product.id);
+      if (existing) {
+        existing.qty++;
+      } else {
+        this.cart.push({ ...product, qty: 1 });
+      }
+      this.calculateTotal();
+    },
+
+    changeQty(index, change) {
+      this.cart[index].qty += change;
+      if (this.cart[index].qty <= 0) this.cart.splice(index, 1);
+      this.calculateTotal();
+    },
+
+    removeFromCart(index) {
+      this.cart.splice(index, 1);
+      this.calculateTotal();
+    },
+
+    calculateTotal() {
+      this.total = this.cart.reduce((sum, item) => sum + item.price * item.qty, 0);
+    },
+
+    validerVente() {
+      if (this.cart.length === 0) return alert("Panier vide !");
+
+      // Générer le ticket
+      let receipt = `Ma Caisse\n`;
+      receipt += `Date : ${new Date().toLocaleString('fr-FR')}\n`;
+      receipt += `--------------------------------\n`;
+      
+      this.cart.forEach(item => {
+        receipt += `${item.name.padEnd(20)} ${item.qty} x ${item.price.toFixed(2)} € = ${(item.price*item.qty).toFixed(2)} €\n`;
+      });
+      
+      receipt += `--------------------------------\n`;
+      receipt += `TOTAL : ${this.total.toFixed(2)} €\n\n`;
+      receipt += `Merci pour votre achat ! ❤️`;
+
+      document.getElementById('receipt-content').innerHTML = receipt.replace(/\n/g, '<br>');
+
+      this.showReceipt = true;
+
+      // On vide le panier après la vente
+      this.cart = [];
+      this.calculateTotal();
+    }
+  }
+}
+</script>
+</body>
+</html>
