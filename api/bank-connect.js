@@ -42,7 +42,16 @@ export default async function handler(req, res) {
     const { institution_id } = req.body;
     if (!institution_id) return res.status(400).json({ error: 'institution_id requis' });
 
-    // 2. Créer un end-user agreement (90 jours, 180 jours historique)
+    // 2. Récupérer les limites de la banque
+    const instRes = await fetch(`${GC_BASE}/institutions/${institution_id}/`, {
+      headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
+    });
+    const instData = await instRes.json();
+    const maxDays = instData.transaction_total_days
+      ? Math.min(180, parseInt(instData.transaction_total_days))
+      : 90;
+
+    // 3. Créer un end-user agreement
     const agreementRes = await fetch(`${GC_BASE}/agreements/enduser/`, {
       method: 'POST',
       headers: {
@@ -52,7 +61,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         institution_id,
-        max_historical_days: 180,
+        max_historical_days: maxDays,
         access_valid_for_days: 90,
         access_scope: ['balances', 'details', 'transactions']
       })
