@@ -1,50 +1,27 @@
 // api/public-ca-setup.js — Génération / révocation de clé API Alteore
+// Utilise Firebase Admin SDK (bypass règles Firestore)
 
-const FB_PROJECT = 'altiora-70599';
-const FB_KEY     = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
-const FS_BASE    = `https://firestore.googleapis.com/v1/projects/${FB_PROJECT}/databases/(default)/documents`;
+const { initializeApp, cert, getApps } = require('firebase-admin/app');
+const { getFirestore, FieldValue }      = require('firebase-admin/firestore');
+
+function getDb() {
+  if (!getApps().length) {
+    initializeApp({
+      credential: cert({
+        projectId:   'altiora-70599',
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey:  (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+      }),
+    });
+  }
+  return getFirestore();
+}
 
 function generateApiKey() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let key = 'alte_';
   for (let i = 0; i < 35; i++) key += chars[Math.floor(Math.random() * chars.length)];
   return key;
-}
-
-async function fsGet(uid) {
-  const r = await fetch(`${FS_BASE}/users/${uid}`, {
-    headers: { 'x-goog-api-key': FB_KEY }
-  });
-  if (r.status === 404) return null;
-  if (!r.ok) throw new Error(`Firestore GET ${r.status}: ${await r.text()}`);
-  return r.json();
-}
-
-async function fsPatch(uid, fieldsObj) {
-  const mask = Object.keys(fieldsObj)
-    .map(f => `updateMask.fieldPaths=${encodeURIComponent(f)}`)
-    .join('&');
-  const url = `${FS_BASE}/users/${uid}?${mask}`;
-
-  const fields = {};
-  for (const [k, v] of Object.entries(fieldsObj)) {
-    if      (v === null)             fields[k] = { nullValue: null };
-    else if (typeof v === 'string')  fields[k] = { stringValue: v };
-    else if (typeof v === 'number')  fields[k] = { integerValue: String(Math.round(v)) };
-    else if (typeof v === 'boolean') fields[k] = { booleanValue: v };
-  }
-
-  const r = await fetch(url, {
-    method:  'PATCH',
-    headers: {
-      'Content-Type':  'application/json',
-      'x-goog-api-key': FB_KEY
-    },
-    body: JSON.stringify({ fields })
-  });
-
-  if (!r.ok) throw new Error(`Firestore PATCH ${r.status}: ${await r.text()}`);
-  return r.json();
 }
 
 module.exports = async (req, res) => {
@@ -64,21 +41,24 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const doc = await fsGet(uid);
-    if (!doc) return res.status(404).json({ ok: false, error: 'Utilisateur introuvable' });
+    const db      = getDb();
+    const userRef = db.collection('users').doc(uid);
 
     if (action === 'generate') {
       const apiKey = generateApiKey();
-      await fsPatch(uid, {
+      await userRef.update({
         apiKey,
         apiKeyCreatedAt: Date.now(),
-        apiCallsTotal:   0
+        apiCallsTotal:   0,
       });
       return res.status(200).json({ ok: true, apiKey });
     }
 
     if (action === 'revoke') {
-      await fsPatch(uid, { apiKey: null });
+      await userRef.update({
+        apiKey:          FieldValue.delete(),
+        apiKeyCreatedAt: FieldValue.delete(),
+      });
       return res.status(200).json({ ok: true });
     }
 
