@@ -49,6 +49,16 @@
     .table-title{font-size:13px;font-weight:700;}
     .tx-table{width:100%;border-collapse:collapse;font-size:12px;}
     .tx-table th{padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;background:#f8faff;border-bottom:1px solid var(--border);white-space:nowrap;}
+    .tx-table th.sortable{cursor:pointer;user-select:none;}
+    .tx-table th.sortable:hover{color:var(--blue-main);background:#eef2ff;}
+    .sort-icon{margin-left:4px;opacity:.4;font-size:10px;}
+    .tx-table th.sort-asc .sort-icon::after{content:'▲';opacity:1;}
+    .tx-table th.sort-desc .sort-icon::after{content:'▼';opacity:1;}
+    .tx-table th:not(.sort-asc):not(.sort-desc) .sort-icon::after{content:'⇅';}
+    .date-input{border:1.5px solid transparent;border-radius:6px;padding:3px 6px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:600;color:var(--muted);background:transparent;width:100px;transition:all .15s;}
+    .date-input:hover{border-color:var(--border);background:white;color:var(--text);}
+    .date-input:focus{border-color:var(--blue-main);background:white;color:var(--text);outline:none;}
+    .date-input:disabled{opacity:.5;pointer-events:none;}
     .tx-table td{padding:8px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle;}
     .tx-table tr:last-child td{border-bottom:none;}
     .tx-table tr:hover td{background:#fafbff;}
@@ -243,6 +253,34 @@ const CAT_LABELS={chargesFixe:'🏗 Charge fixe',chargesVar:'📦 Charge variabl
 const CAT_CLS={chargesFixe:'d-cf',chargesVar:'d-cv',leasing:'d-leas',ignore:'d-ign'};
 
 let _txList=[], _pilData={}, _rules=[], _filter='all', _search='', _dblCtx=null;
+let _sortCol='date', _sortDir='desc'; // tri par défaut : date décroissante
+
+function sortBy(col){
+  if(_sortCol===col) _sortDir=_sortDir==='asc'?'desc':'asc';
+  else{_sortCol=col;_sortDir=col==='date'?'desc':'asc';}
+  renderAll();
+}
+
+function sortedTx(list){
+  return [...list].sort((a,b)=>{
+    let va, vb;
+    if(_sortCol==='date'){
+      // dd/mm/yyyy → sortable
+      const toTs = s => {
+        if(!s) return 0;
+        const p = s.split('/');
+        return p.length===3 ? new Date(`${p[2]}-${p[1]}-${p[0]}`).getTime() : 0;
+      };
+      va=toTs(a.date); vb=toTs(b.date);
+    } else if(_sortCol==='montant'){
+      va=a.montant; vb=b.montant;
+    } else if(_sortCol==='label'){
+      va=(a.customLabel||'').toLowerCase(); vb=(b.customLabel||'').toLowerCase();
+      return _sortDir==='asc'?va.localeCompare(vb):vb.localeCompare(va);
+    } else { return 0; }
+    return _sortDir==='asc'?va-vb:vb-va;
+  });
+}
 
 async function initPage(){
   await loadRules();
@@ -282,6 +320,7 @@ async function loadPending(){
       return{
         id:idx, date:tx.date||'', monthKey:tx.monthKey||'',
         label:tx.label||'', customLabel:tx.label||'',
+        customDate:tx.date||'',
         montant, type:isDebit?'debit':'credit',
         accountName:tx.accountName||'', accountIban:tx.accountIban||'',
         bankTxId:tx.bankTxId||('bk_'+idx),
@@ -347,6 +386,15 @@ function renderAll(){
   });
   if(_search){const q=_search.toLowerCase();filtered=filtered.filter(t=>t.customLabel.toLowerCase().includes(q)||(t.accountName||'').toLowerCase().includes(q));}
 
+  // Appliquer tri
+  filtered = sortedTx(filtered);
+
+  const thCls = col => {
+    let c = 'sortable';
+    if(_sortCol===col) c += _sortDir==='asc'?' sort-asc':' sort-desc';
+    return c;
+  };
+
   content.innerHTML=`
     <div class="stats-row">
       <div class="stat-box"><div class="stat-val blue">${_txList.length}</div><div class="stat-lbl">Transactions</div></div>
@@ -382,13 +430,19 @@ function renderAll(){
       <div style="overflow-x:auto">
         <table class="tx-table">
           <thead><tr>
-            <th>Date</th><th>Libellé banque</th><th>Libellé Pilotage</th>
-            <th>Compte</th><th style="text-align:right">Montant</th>
-            <th>→ Pilotage</th><th>Statut</th><th>Actions</th>
+            <th class="${thCls('date')}" onclick="sortBy('date')">Date<span class="sort-icon"></span></th>
+            <th class="${thCls('label')}" onclick="sortBy('label')">Libellé banque<span class="sort-icon"></span></th>
+            <th>Libellé Pilotage</th>
+            <th>Compte</th>
+            <th class="${thCls('montant')}" style="text-align:right" onclick="sortBy('montant')">Montant<span class="sort-icon"></span></th>
+            <th>→ Pilotage</th>
+            <th>Statut</th>
+            <th>Date Pilotage</th>
+            <th>Actions</th>
           </tr></thead>
           <tbody>
             ${filtered.length===0
-              ?`<tr><td colspan="8" style="text-align:center;padding:32px;color:var(--muted)">Aucune transaction dans ce filtre.</td></tr>`
+              ?`<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--muted)">Aucune transaction dans ce filtre.</td></tr>`
               :filtered.map(tx=>renderRow(tx)).join('')}
           </tbody>
         </table>
@@ -449,6 +503,20 @@ function renderRow(tx){
     <button class="btn-rule" onclick="learnRule(${tx.id})" title="Mémoriser règle">🧠</button>
   </div>`;
 
+  // Champ date Pilotage éditable (dd/mm/yyyy)
+  let datePilagHtml='';
+  if(tx.type==='credit'){
+    datePilagHtml=`<span style="font-size:11px;color:var(--muted)">—</span>`;
+  } else {
+    const dis = tx.status!=='pending' ? 'disabled' : '';
+    datePilagHtml=`<input class="date-input" type="text" id="datepit-${tx.id}"
+      value="${escHtml(tx.customDate||tx.date||'')}"
+      placeholder="jj/mm/aaaa"
+      maxlength="10"
+      oninput="updateDate(${tx.id},this.value)"
+      ${dis}/>`;
+  }
+
   return `<tr class="${rowCls}" id="row-${tx.id}">
     <td style="white-space:nowrap;color:var(--muted);font-size:11px">${tx.date}</td>
     <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(tx.label)}">${typeBadge} <span style="font-size:11px;color:var(--muted)">${escHtml(tx.label)}</span></td>
@@ -457,11 +525,23 @@ function renderRow(tx){
     <td style="text-align:right" class="${amtCls}">${amtSign}${fmt(tx.montant)}</td>
     <td>${destHtml}</td>
     <td>${statusHtml}</td>
+    <td>${datePilagHtml}</td>
     <td>${actHtml}</td>
   </tr>`;
 }
 
 function updateLabel(id,v){_txList[id].customLabel=v;}
+function updateDate(id,v){
+  _txList[id].customDate=v;
+  // Mettre à jour monthKey si date valide dd/mm/yyyy
+  const p=v.split('/');
+  if(p.length===3&&p[2].length===4){
+    const [d,m,y]=[parseInt(p[0]),parseInt(p[1]),parseInt(p[2])];
+    if(d>0&&m>0&&m<=12&&y>2000){
+      _txList[id].monthKey=`${y}-${String(m).padStart(2,'0')}`;
+    }
+  }
+}
 function updateCat(id,v){
   _txList[id].cat=v||null;
   const sel=document.getElementById('dest-'+id);
@@ -539,6 +619,7 @@ async function importSelected(){
         if((data[sec]||[]).some(r=>r.bankTxId===tx.bankTxId)) continue;
         const entry={
           fournisseur:tx.customLabel,
+          date: tx.customDate || tx.date || '',
           type:sec==='chargesFixe'?'Charge fixe':sec==='leasing'?'Leasing / LOA':'Charge variable',
           montantHT:tx.montant.toFixed(2),
           tvaRate:20, deductible:'Oui', pointe:'Non',
@@ -609,7 +690,8 @@ function toggleHamburger(){document.getElementById('hamburger').classList.toggle
 async function handleLogout(){await window._signOut(window._auth);window.location.href='index.html';}
 
 window.initPage=initPage;window.setFilter=setFilter;window.setSearch=setSearch;
-window.updateLabel=updateLabel;window.updateCat=updateCat;
+window.updateLabel=updateLabel;window.updateDate=updateDate;window.updateCat=updateCat;
+window.sortBy=sortBy;
 window.ignoreOne=ignoreOne;window.restore=restore;window.unimport=unimport;
 window.ignoreAllPending=ignoreAllPending;window.autoAll=autoAll;
 window.learnRule=learnRule;window.importSelected=importSelected;
