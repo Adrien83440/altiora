@@ -377,7 +377,7 @@ async function submitForm(){
     const telNorm = fmtTel(tel);
 
     // Vérifier si déjà inscrit (par téléphone)
-    const existing = await checkExisting(telNorm);
+    const existing = await checkExisting(telNorm, email);
     if(existing){
       document.getElementById('alreadyName').textContent = `${existing.prenom} ${existing.nom} — déjà ${existing.points||0} points`;
       document.getElementById('alreadyCardLink').href = `client-fidelite.html?c=${existing.id}&m=${_merchantUid}`;
@@ -418,8 +418,8 @@ async function submitForm(){
   }
 }
 
-async function checkExisting(telNorm){
-  // Chercher dans fidelite/{merchantUid}/clients où tel == telNorm
+async function checkExisting(telNorm, email){
+  // 1. Chercher par téléphone
   try{
     const q = window._fsQuery(
       window._fsCollection(window._db,'fidelite',_merchantUid,'clients'),
@@ -427,7 +427,18 @@ async function checkExisting(telNorm){
     );
     const snap = await window._fsGetDocs(q);
     if(!snap.empty) return snap.docs[0].data();
-  }catch(e){ console.warn('checkExisting:',e); }
+  }catch(e){ console.warn('checkExisting tel:',e); }
+  // 2. Chercher par email si fourni
+  if(email){
+    try{
+      const q2 = window._fsQuery(
+        window._fsCollection(window._db,'fidelite',_merchantUid,'clients'),
+        window._fsWhere('email','==',email.toLowerCase())
+      );
+      const snap2 = await window._fsGetDocs(q2);
+      if(!snap2.empty) return snap2.docs[0].data();
+    }catch(e){ console.warn('checkExisting email:',e); }
+  }
   return null;
 }
 

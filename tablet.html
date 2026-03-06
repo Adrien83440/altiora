@@ -726,13 +726,28 @@ function closeNewClient(){ document.getElementById('modalNew').classList.remove(
 async function createClient(){
   const prenom=document.getElementById('nc-prenom').value.trim();
   const nom=document.getElementById('nc-nom').value.trim();
-  const tel=document.getElementById('nc-tel').value.trim();
+  const tel=fmtTel(document.getElementById('nc-tel').value.trim());
+  const email=document.getElementById('nc-email').value.trim().toLowerCase();
   if(!prenom||!nom||!tel){ toast('Prénom, nom et téléphone obligatoires','warn'); return; }
+
+  // ── VÉRIFICATION DOUBLONS ──
+  const telNorm = tel.replace(/\s/g,'');
+  const dupTel  = _clients.find(c=> c.tel && c.tel.replace(/\s/g,'')===telNorm);
+  const dupMail = email ? _clients.find(c=> c.email && c.email.toLowerCase()===email) : null;
+
+  if(dupTel){
+    // Proposer d'ouvrir la fiche existante
+    showDuplicateWarning(dupTel, 'téléphone');
+    return;
+  }
+  if(dupMail){
+    showDuplicateWarning(dupMail, 'email');
+    return;
+  }
+
   const id=genId();
   const client={
-    id,prenom,nom,
-    tel:fmtTel(tel),
-    email:document.getElementById('nc-email').value.trim(),
+    id,prenom,nom,tel,email,
     birthday:document.getElementById('nc-bday').value,
     points:0,tampons:0,lastVisit:today(),createdAt:today(),history:[],source:'tablet'
   };
@@ -749,6 +764,26 @@ async function createClient(){
     searchClient(prenom);
     toast(`✅ ${prenom} ${nom} créé(e) !`,'success');
   }catch(e){ toast('Erreur : '+e.message); }
+}
+
+function showDuplicateWarning(existing, type){
+  // Réutilise la modale confirm pour afficher le doublon
+  document.getElementById('confirmEmoji').textContent='⚠️';
+  document.getElementById('confirmTtl').textContent='Client déjà existant';
+  document.getElementById('confirmTxt').innerHTML=
+    `Un client avec ce ${type} existe déjà :<br><br>
+    <b>${existing.prenom} ${existing.nom}</b><br>
+    <span style="font-size:13px;color:var(--muted)">${existing.tel||''} ${existing.email?'· '+existing.email:''}</span><br><br>
+    Voulez-vous ouvrir sa fiche ?`;
+  document.getElementById('confirmYesBtn').textContent='📂 Ouvrir la fiche';
+  document.getElementById('confirmYesBtn').onclick=()=>{
+    closeConfirm();
+    closeNewClient();
+    selectClient(existing.id);
+    document.getElementById('telSearch').value=existing.prenom;
+    searchClient(existing.prenom);
+  };
+  document.getElementById('confirmOverlay').classList.add('show');
 }
 
 // ── ÉCRITURE FIRESTORE DIRECTE (auth anonyme autorisée par les règles) ──
