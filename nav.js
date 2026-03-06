@@ -119,12 +119,12 @@
       <span>💎</span><span style="flex:1">Fidélisation</span><span class="chev">›</span>
     </div>
     <div class="sub" id="fid-nav-sub" ${fidOpen}>
-      <div class="si${a('fidelisation.html')}" onclick="location.href='fidelisation.html'"><span class="dot"></span>Dashboard fidélité</div>
-      <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('clients',null),300)"><span class="dot"></span>Clients</div>
-      <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('carte',null),300)"><span class="dot"></span>Carte fidélité</div>
-      <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('points',null),300)"><span class="dot"></span>Points &amp; Récompenses</div>
-      <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('coupons',null),300)"><span class="dot"></span>Coupons &amp; Offres</div>
-      <div class="si" onclick="location.href='fidelisation.html';setTimeout(()=>window.switchTab&&window.switchTab('campagnes',null),300)"><span class="dot"></span>Campagnes</div>
+      <div class="si${a('fidelisation.html')}" onclick="goFid('dashboard')"><span class="dot"></span>Dashboard fidélité</div>
+      <div class="si" onclick="goFid('clients')"><span class="dot"></span>Clients</div>
+      <div class="si" onclick="goFid('carte')"><span class="dot"></span>Carte fidélité</div>
+      <div class="si" onclick="goFid('points')"><span class="dot"></span>Points &amp; Récompenses</div>
+      <div class="si" onclick="goFid('coupons')"><span class="dot"></span>Coupons &amp; Offres</div>
+      <div class="si" onclick="goFid('campagnes')"><span class="dot"></span>Campagnes</div>
     </div>
 
     <!-- ═══════════════════════════════════ -->
@@ -314,6 +314,16 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     if (oldHamburger) oldHamburger.remove();
     const oldOverlay = document.querySelector('.nav-overlay');
     if (oldOverlay) oldOverlay.remove();
+
+    // goFid doit être défini AVANT l'injection du HTML (les onclick l'appellent immédiatement)
+    window.goFid = function(tab){
+      const onFid = location.pathname.endsWith('fidelisation.html');
+      if(onFid){
+        if(window.switchTab) window.switchTab(tab, null);
+      } else {
+        location.href = 'fidelisation.html?tab=' + tab;
+      }
+    };
 
     document.body.insertAdjacentHTML('afterbegin', buildNavHTML());
 
