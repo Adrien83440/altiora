@@ -386,39 +386,27 @@ async function submitForm(){
       return;
     }
 
-    // Créer le client
+    // Créer le client via l'API Vercel (pas de règles Firestore à gérer)
     const clientId = genId();
-    const client = {
-      id: clientId,
-      prenom, nom,
-      tel: telNorm,
-      email: email||'',
-      birthday: bday||'',
-      points: 0,
-      tampons: 0,
-      lastVisit: today(),
-      createdAt: today(),
-      history: [],
-      source: 'inscription-autonome',
-      uid: _merchantUid
-    };
 
-    // Sauvegarder dans fidelite/{merchantUid}/clients/{clientId}
-    // uid requis par les règles Firestore (inscription autonome)
-    const clientWithUid = { ...client, uid: _merchantUid };
-    await window._fsSetDoc(
-      window._fsDoc(window._db,'fidelite',_merchantUid,'clients',clientId),
-      clientWithUid
-    );
+    const apiRes = await fetch('/api/register-client', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        merchantUid: _merchantUid,
+        clientId,
+        prenom, nom,
+        tel: telNorm,
+        email: email||'',
+        birthday: bday||''
+      })
+    });
+    const apiData = await apiRes.json();
+    if (!apiRes.ok || !apiData.success) {
+      throw new Error(apiData.error || 'Erreur inscription');
+    }
 
-    // Sauvegarder dans fidelite_public/{clientId}
-    await window._fsSetDoc(
-      window._fsDoc(window._db,'fidelite_public',clientId),
-      { id:clientId, prenom, nom, points:0, tampons:0,
-        lastVisit:today(), createdAt:today(), birthday:bday||'',
-        history:[], uid:_merchantUid }
-    );
-
+    const client = { id: clientId, prenom, nom, tel: telNorm, email: email||'', birthday: bday||'', points: 0, tampons: 0 };
     _newClientId = clientId;
     showConfirmation(client);
 
