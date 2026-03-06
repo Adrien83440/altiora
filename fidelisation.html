@@ -1966,15 +1966,23 @@ window.envoyerCampagneSMS = async function envoyerCampagneSMS(campagne) {
   toast('⏳ Envoi en cours...', 'ok');
 
   try {
-    const res = await fetch('https://altiora-theta.vercel.app/api/send-sms', {
+    let firebaseToken2 = '';
+    try{
+      if(window._auth && window._auth.currentUser){
+        firebaseToken2 = await window._auth.currentUser.getIdToken();
+      }
+    }catch(e){ console.warn('getIdToken campagne:',e); }
+
+    const res = await fetch('/api/send-sms', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + firebaseToken2 },
       body: JSON.stringify({
         uid: window._uid,
         campagneId: campagne.id,
         recipients: cibles.map(function(c) { return c.tel; }),
         message: campagne.msg,
         sender: (cfg.smsSender || cfg.shopName || 'ALTIORA').replace(/[^a-zA-Z0-9]/g,'').slice(0, 11),
+        clientCredits: window._smsCredits || 0,
       }),
     });
     const data = await res.json();
@@ -2375,14 +2383,23 @@ async function sendWheelSms(clientId, prenom, tel){
   if(!window._smsCredits || window._smsCredits < 1){ toast('Crédits SMS insuffisants','warn'); return; }
   if(!confirm(`Envoyer la roue cadeaux à ${prenom} (${tel}) ?\n\nMessage : ${msg}`)){ return; }
   try{
+    // Récupérer le token Firebase du user courant
+    let firebaseToken = '';
+    try{
+      if(window._auth && window._auth.currentUser){
+        firebaseToken = await window._auth.currentUser.getIdToken();
+      }
+    }catch(e){ console.warn('getIdToken:',e); }
+
     const res = await fetch('/api/send-sms',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+firebaseToken},
       body:JSON.stringify({
         uid: window._uid,
         recipients: [tel],
         message: msg,
-        sender: cfg.smsSender||'ALTEORE'
+        sender: (cfg.smsSender||'ALTEORE').replace(/[^a-zA-Z0-9]/g,'').slice(0,11),
+        clientCredits: window._smsCredits||0
       })
     });
     const data = await res.json();
