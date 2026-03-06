@@ -199,6 +199,27 @@
     .confirm-yes:hover{opacity:.9;}
     .confirm-no{padding:13px 20px;border:1px solid var(--border);border-radius:12px;background:transparent;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:14px;font-weight:600;cursor:pointer;}
 
+
+    /* ── MODALE ROUE + GOOGLE ── */
+    .bonus-overlay{position:fixed;inset:0;z-index:95;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);opacity:0;pointer-events:none;transition:opacity .3s;}
+    .bonus-overlay.show{opacity:1;pointer-events:all;}
+    .bonus-box{background:var(--surface);border:1px solid var(--border);border-radius:28px;padding:28px 24px;max-width:480px;width:100%;text-align:center;transform:scale(.9);transition:transform .35s cubic-bezier(.34,1.56,.64,1);}
+    .bonus-overlay.show .bonus-box{transform:scale(1);}
+    .bonus-tabs{display:flex;gap:8px;margin-bottom:20px;background:var(--bg);border-radius:14px;padding:4px;}
+    .bonus-tab{flex:1;padding:10px;border:none;border-radius:11px;font-family:'Syne',sans-serif;font-size:13px;font-weight:700;cursor:pointer;background:transparent;color:var(--muted);transition:.15s;}
+    .bonus-tab.active{background:var(--surface2);color:var(--text);}
+    /* Roue */
+    .wheel-wrap{position:relative;width:240px;height:240px;margin:0 auto 16px;}
+    #wheelCanvas{border-radius:50%;box-shadow:0 0 30px rgba(110,231,183,.2);}
+    .wheel-pointer{position:absolute;top:-14px;left:50%;transform:translateX(-50%);font-size:28px;line-height:1;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5));}
+    .wheel-spin-btn{display:inline-block;padding:13px 32px;border:none;border-radius:14px;background:linear-gradient(135deg,#f5c842,#ff9f1c);color:#1a1000;font-family:'Syne',sans-serif;font-size:15px;font-weight:800;cursor:pointer;transition:.15s;margin-bottom:8px;}
+    .wheel-spin-btn:disabled{opacity:.4;cursor:default;}
+    .wheel-result{margin-top:12px;padding:12px 16px;border-radius:12px;background:rgba(110,231,183,.1);border:1px solid rgba(110,231,183,.3);font-size:14px;font-weight:700;color:var(--accent);display:none;}
+    /* QR Google */
+    .google-qr-wrap{display:flex;flex-direction:column;align-items:center;gap:12px;}
+    .google-qr-img{background:white;padding:14px;border-radius:16px;border:2px solid #4285f4;}
+    .google-stars{font-size:28px;letter-spacing:4px;margin-bottom:4px;}
+    .skip-btn{margin-top:8px;background:none;border:none;color:var(--muted);font-size:13px;cursor:pointer;padding:8px;text-decoration:underline;}
     /* Modal nouveau client */
     .modal-wrap{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.7);backdrop-filter:blur(6px);opacity:0;pointer-events:none;transition:opacity .25s;}
     .modal-wrap.show{opacity:1;pointer-events:all;}
@@ -322,6 +343,39 @@
   </div>
 </div>
 
+<!-- Modale Roue + Avis Google (post-tampon) -->
+<div class="bonus-overlay" id="bonusOverlay">
+  <div class="bonus-box">
+    <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:16px" id="bonus-title">🎉 Bonus disponible !</div>
+    <div class="bonus-tabs" id="bonusTabs">
+      <button class="bonus-tab active" id="tab-roue" onclick="switchBonusTab('roue')">🎡 Tourner la roue</button>
+      <button class="bonus-tab" id="tab-google" onclick="switchBonusTab('google')">⭐ Avis Google</button>
+    </div>
+
+    <!-- Panel Roue -->
+    <div id="bonus-panel-roue">
+      <div class="wheel-wrap">
+        <div class="wheel-pointer">▼</div>
+        <canvas id="wheelCanvas" width="240" height="240"></canvas>
+      </div>
+      <button class="wheel-spin-btn" id="spinBtn" onclick="spinWheel()">🎡 Tourner !</button>
+      <div class="wheel-result" id="wheelResult"></div>
+    </div>
+
+    <!-- Panel Google -->
+    <div id="bonus-panel-google" style="display:none">
+      <div class="google-qr-wrap">
+        <div class="google-stars">⭐⭐⭐⭐⭐</div>
+        <div style="font-size:14px;color:var(--muted);margin-bottom:8px">Le client scanne avec son téléphone</div>
+        <div class="google-qr-img" id="googleQrImg"></div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">Scan = +1 tour de roue offert</div>
+      </div>
+    </div>
+
+    <button class="skip-btn" onclick="closeBonusOverlay()">Passer →</button>
+  </div>
+</div>
+
 <!-- Modal nouveau client -->
 <div class="modal-wrap" id="modalNew">
   <div class="modal-box">
@@ -419,11 +473,34 @@ window.addEventListener('fbReady', async ()=>{
       _clients = snap.docs.map(d=>d.data());
     }catch(e){ console.warn('Clients:', e.message); }
 
+    // Config roue
+    try{
+      const wSnap = await window._getDoc(window._doc(window._db,'fidelite',_merchantUid,'config','main'));
+      if(wSnap.exists() && wSnap.data().wheelCfg) _wheelCfg = {..._wheelCfg, ...wSnap.data().wheelCfg};
+    }catch(e){}
+
     // UI
     document.getElementById('tb-badge').textContent = _cfg.emoji;
     document.getElementById('tb-name').textContent = _cfg.shopName;
     document.getElementById('pin-logo').textContent = _cfg.emoji;
     document.getElementById('pin-title').textContent = _cfg.shopName;
+
+    // Afficher/masquer onglet roue selon config
+    const tabRoue = document.getElementById('tab-roue');
+    if(tabRoue) tabRoue.style.display = _wheelCfg.enabled ? '' : 'none';
+    // Onglet actif par défaut = Google si roue désactivée
+    if(!_wheelCfg.enabled) switchBonusTab('google');
+
+    // Préparer QR code Google
+    if(_wheelCfg.googleUrl){
+      const qrEl = document.getElementById('googleQrImg');
+      if(qrEl){
+        const img = document.createElement('img');
+        img.src = 'https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl='+encodeURIComponent(_wheelCfg.googleUrl);
+        img.width = 200; img.height = 200;
+        qrEl.appendChild(img);
+      }
+    }
 
   }catch(e){ console.error('fbReady error:',e); }
 });
@@ -601,8 +678,12 @@ async function doTampon(id){
     await apiAction('tampon', id, {tampons:newT, lastVisit:today(), history:c.history.slice(-20)});
     toast(`✅ Tampon ajouté — ${c.prenom} : ${newT}/${cfgT}`,newT>=cfgT?'warn':'success');
   }catch(e){ toast('Erreur : '+e.message); }
-  // Auto-reset fiche après 3s
-  autoResetPanel();
+  // Proposer roue / avis Google si au moins une option dispo
+  if(_wheelCfg.enabled || _wheelCfg.googleUrl){
+    openBonusOverlay(c.prenom);
+  } else {
+    autoResetPanel();
+  }
 }
 
 // ── POINTS ──
@@ -733,6 +814,161 @@ function autoResetPanel(){
   _resetTimer = setTimeout(()=>{
     document.getElementById('panelRight').innerHTML=`<div class="empty-right"><div class="empty-right-icon" style="font-size:52px;opacity:.3">👈</div><div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700">Sélectionnez un client</div><div style="font-size:13px">Recherchez par téléphone ou nom</div></div>`;
   }, 2000);
+}
+
+// ── ROUE + BONUS ──
+let _wheelCfg = { enabled: false, googleUrl: '', cooldownDays: 1, segments: [] };
+const DEFAULT_SEGS = [
+  {emoji:'☕',label:'Café offert',type:'code',weight:2,color:'#f59e0b'},
+  {emoji:'⭐',label:'+50 points',type:'points',pts:50,weight:3,color:'#6366f1'},
+  {emoji:'🎫',label:'-10%',type:'code',weight:2,color:'#14b8a6'},
+  {emoji:'😅',label:'Perdu',type:'lose',weight:4,color:'#374151'},
+  {emoji:'💫',label:'+100 pts',type:'points',pts:100,weight:2,color:'#10b981'},
+  {emoji:'🎁',label:'Cadeau',type:'code',weight:1,color:'#ec4899'},
+  {emoji:'😅',label:'Perdu',type:'lose',weight:4,color:'#4b5563'},
+  {emoji:'✨',label:'+25 pts',type:'points',pts:25,weight:3,color:'#3b82f6'},
+];
+let _spinning = false;
+let _currentAngle = 0;
+
+function getSegs(){
+  const s = _wheelCfg.segments && _wheelCfg.segments.length ? _wheelCfg.segments : DEFAULT_SEGS;
+  // Expand by weight
+  const expanded = [];
+  s.forEach(seg => { for(let i=0;i<(seg.weight||1);i++) expanded.push(seg); });
+  return expanded;
+}
+
+function drawWheel(){
+  const canvas = document.getElementById('wheelCanvas');
+  if(!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const segs = getSegs();
+  const n = segs.length;
+  const r = 120;
+  const cx = 120, cy = 120;
+  const arc = (2*Math.PI)/n;
+  const colors = ['#1e3a5f','#1a3a2a','#3b1f4e','#3b2a0a','#1a2e4a','#2a1a3a','#0a2e1a','#2e2a0a'];
+
+  ctx.clearRect(0,0,240,240);
+  segs.forEach((seg,i)=>{
+    const start = _currentAngle + i*arc - Math.PI/2;
+    const end = start + arc;
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,r,start,end);
+    ctx.closePath();
+    ctx.fillStyle = seg.color || colors[i%colors.length];
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.15)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    // Texte
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.rotate(start+arc/2);
+    ctx.textAlign='right';
+    ctx.fillStyle='white';
+    ctx.font='bold 11px DM Sans, sans-serif';
+    ctx.shadowColor='rgba(0,0,0,.5)';
+    ctx.shadowBlur=4;
+    ctx.fillText(seg.emoji+' '+seg.label.slice(0,10), r-6, 4);
+    ctx.restore();
+  });
+  // Centre
+  ctx.beginPath();
+  ctx.arc(cx,cy,18,0,2*Math.PI);
+  ctx.fillStyle='#0d0d14';
+  ctx.fill();
+  ctx.strokeStyle='rgba(255,255,255,.2)';
+  ctx.lineWidth=2;
+  ctx.stroke();
+}
+
+function spinWheel(){
+  if(_spinning) return;
+  _spinning = true;
+  document.getElementById('spinBtn').disabled = true;
+  document.getElementById('wheelResult').style.display = 'none';
+
+  const segs = getSegs();
+  const n = segs.length;
+  const arc = (2*Math.PI)/n;
+
+  // Choisir un segment aléatoire pondéré (déjà pondéré par expansion)
+  const winner = Math.floor(Math.random()*n);
+
+  // Angle cible : pointer (en haut = -PI/2) doit tomber sur le centre du segment winner
+  // Centre du segment i = i*arc + arc/2
+  // On veut : _currentAngle + winner*arc + arc/2 = -PI/2 (mod 2PI)
+  // Donc delta = -PI/2 - (_currentAngle + winner*arc + arc/2)
+  const targetAngle = -Math.PI/2 - (winner*arc + arc/2);
+  const spins = 5 + Math.random()*3; // 5-8 tours
+  const totalDelta = spins*2*Math.PI + (targetAngle - _currentAngle%(2*Math.PI));
+  const duration = 4000;
+  const start = performance.now();
+  const startAngle = _currentAngle;
+
+  function animate(now){
+    const elapsed = now - start;
+    const t = Math.min(elapsed/duration, 1);
+    // Easing out cubic
+    const ease = 1 - Math.pow(1-t, 3);
+    _currentAngle = startAngle + totalDelta*ease;
+    drawWheel();
+    if(t < 1){ requestAnimationFrame(animate); }
+    else {
+      _spinning = false;
+      _currentAngle = startAngle + totalDelta;
+      showWheelResult(segs[winner]);
+    }
+  }
+  requestAnimationFrame(animate);
+}
+
+function showWheelResult(seg){
+  const el = document.getElementById('wheelResult');
+  if(!el) return;
+  let msg = '';
+  if(seg.type==='lose') msg = `😅 ${seg.label} — Bonne chance la prochaine fois !`;
+  else if(seg.type==='points') msg = `⭐ ${seg.emoji} ${seg.label} crédités sur la carte !`;
+  else msg = `🎁 ${seg.emoji} ${seg.label} — Code à présenter en caisse`;
+  el.textContent = msg;
+  el.style.display = 'block';
+  // Si google dispo, proposer de laisser un avis pour un tour supplémentaire
+  if(_wheelCfg.googleUrl){
+    el.innerHTML += `<div style="margin-top:8px;font-size:12px;color:var(--muted)">Laissez un avis Google pour <b>+1 tour bonus</b> ! <button onclick="switchBonusTab('google')" style="background:none;border:none;color:#60a5fa;cursor:pointer;font-size:12px;font-weight:700">Voir →</button></div>`;
+  }
+}
+
+function openBonusOverlay(prenom){
+  document.getElementById('bonus-title').textContent = `🎉 Merci ${prenom} !`;
+  // Reset roue
+  _spinning = false;
+  document.getElementById('spinBtn').disabled = false;
+  document.getElementById('wheelResult').style.display = 'none';
+  // Onglet par défaut
+  const hasWheel = _wheelCfg.enabled;
+  const hasGoogle = !!_wheelCfg.googleUrl;
+  if(!hasWheel && !hasGoogle){ autoResetPanel(); return; }
+  document.getElementById('tab-roue').style.display = hasWheel ? '' : 'none';
+  document.getElementById('tab-google').style.display = hasGoogle ? '' : 'none';
+  switchBonusTab(hasWheel ? 'roue' : 'google');
+  setTimeout(()=>{ if(_wheelCfg.enabled) drawWheel(); }, 50);
+  document.getElementById('bonusOverlay').classList.add('show');
+}
+
+function closeBonusOverlay(){
+  document.getElementById('bonusOverlay').classList.remove('show');
+  autoResetPanel();
+}
+
+function switchBonusTab(tab){
+  document.getElementById('bonus-panel-roue').style.display = tab==='roue' ? '' : 'none';
+  document.getElementById('bonus-panel-google').style.display = tab==='google' ? '' : 'none';
+  document.getElementById('tab-roue').classList.toggle('active', tab==='roue');
+  document.getElementById('tab-google').classList.toggle('active', tab==='google');
+  if(tab==='roue') drawWheel();
 }
 
 // ── UI UTILS ──
