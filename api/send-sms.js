@@ -132,7 +132,11 @@ module.exports = async (req, res) => {
 
     // Vérifier le solde
     const creditsDoc = await firestoreGet(token, 'sms_credits/' + uid);
-    const currentCredits = parseInt((creditsDoc.fields && creditsDoc.fields.credits && creditsDoc.fields.credits.integerValue) || '0');
+    const creditsField = creditsDoc.fields && creditsDoc.fields.credits;
+    const currentCredits = parseInt(
+      (creditsField && (creditsField.integerValue || creditsField.doubleValue || creditsField.stringValue)) || '0'
+    );
+    console.log('creditsField raw:', JSON.stringify(creditsField));
     console.log('Solde actuel:', currentCredits, '| SMS requis:', recipients.length);
 
     if (currentCredits < recipients.length) {
