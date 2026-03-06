@@ -473,11 +473,11 @@ window.addEventListener('fbReady', async ()=>{
       _clients = snap.docs.map(d=>d.data());
     }catch(e){ console.warn('Clients:', e.message); }
 
-    // Config roue
+    // Config roue (stockée dans fidelite_public_cfg par fidelisation.html)
     try{
-      const wSnap = await window._getDoc(window._doc(window._db,'fidelite',_merchantUid,'config','main'));
+      const wSnap = await window._getDoc(window._doc(window._db,'fidelite_public_cfg',_merchantUid));
       if(wSnap.exists() && wSnap.data().wheelCfg) _wheelCfg = {..._wheelCfg, ...wSnap.data().wheelCfg};
-    }catch(e){}
+    }catch(e){ console.warn('wheelCfg:', e.message); }
 
     // UI
     document.getElementById('tb-badge').textContent = _cfg.emoji;
@@ -491,16 +491,7 @@ window.addEventListener('fbReady', async ()=>{
     // Onglet actif par défaut = Google si roue désactivée
     if(!_wheelCfg.enabled) switchBonusTab('google');
 
-    // Préparer QR code Google
-    if(_wheelCfg.googleUrl){
-      const qrEl = document.getElementById('googleQrImg');
-      if(qrEl){
-        const img = document.createElement('img');
-        img.src = 'https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl='+encodeURIComponent(_wheelCfg.googleUrl);
-        img.width = 200; img.height = 200;
-        qrEl.appendChild(img);
-      }
-    }
+    // QR Google généré à l'ouverture de la modale
 
   }catch(e){ console.error('fbReady error:',e); }
 });
@@ -945,14 +936,28 @@ function openBonusOverlay(prenom){
   document.getElementById('bonus-title').textContent = `🎉 Merci ${prenom} !`;
   // Reset roue
   _spinning = false;
-  document.getElementById('spinBtn').disabled = false;
-  document.getElementById('wheelResult').style.display = 'none';
+  const spinBtn = document.getElementById('spinBtn');
+  if(spinBtn) spinBtn.disabled = false;
+  const wr = document.getElementById('wheelResult');
+  if(wr) wr.style.display = 'none';
   // Onglet par défaut
   const hasWheel = _wheelCfg.enabled;
   const hasGoogle = !!_wheelCfg.googleUrl;
   if(!hasWheel && !hasGoogle){ autoResetPanel(); return; }
-  document.getElementById('tab-roue').style.display = hasWheel ? '' : 'none';
-  document.getElementById('tab-google').style.display = hasGoogle ? '' : 'none';
+  const tabR = document.getElementById('tab-roue');
+  const tabG = document.getElementById('tab-google');
+  if(tabR) tabR.style.display = hasWheel ? '' : 'none';
+  if(tabG) tabG.style.display = hasGoogle ? '' : 'none';
+  // Générer QR Google ici (URL connue à ce moment)
+  if(hasGoogle){
+    const qrEl = document.getElementById('googleQrImg');
+    if(qrEl && !qrEl.querySelector('img')){
+      const img = document.createElement('img');
+      img.src = 'https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl='+encodeURIComponent(_wheelCfg.googleUrl);
+      img.width=200; img.height=200; img.style.borderRadius='8px';
+      qrEl.appendChild(img);
+    }
+  }
   switchBonusTab(hasWheel ? 'roue' : 'google');
   setTimeout(()=>{ if(_wheelCfg.enabled) drawWheel(); }, 50);
   document.getElementById('bonusOverlay').classList.add('show');
