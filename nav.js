@@ -119,12 +119,12 @@
       <span>💎</span><span style="flex:1">Fidélisation</span><span class="chev">›</span>
     </div>
     <div class="sub" id="fid-nav-sub" ${fidOpen}>
-      <div class="si${a('fidelisation.html')}" onclick="goFid('dashboard')"><span class="dot"></span>Dashboard fidélité</div>
-      <div class="si" onclick="goFid('clients')"><span class="dot"></span>Clients</div>
-      <div class="si" onclick="goFid('carte')"><span class="dot"></span>Carte fidélité</div>
-      <div class="si" onclick="goFid('points')"><span class="dot"></span>Points &amp; Récompenses</div>
-      <div class="si" onclick="goFid('coupons')"><span class="dot"></span>Coupons &amp; Offres</div>
-      <div class="si" onclick="goFid('campagnes')"><span class="dot"></span>Campagnes</div>
+      <div class="si" id="fid-si-dashboard" onclick="goFid('dashboard')"><span class="dot"></span>Dashboard fidélité</div>
+      <div class="si" id="fid-si-clients" onclick="goFid('clients')"><span class="dot"></span>Clients</div>
+      <div class="si" id="fid-si-carte" onclick="goFid('carte')"><span class="dot"></span>Carte fidélité</div>
+      <div class="si" id="fid-si-points" onclick="goFid('points')"><span class="dot"></span>Points &amp; Récompenses</div>
+      <div class="si" id="fid-si-coupons" onclick="goFid('coupons')"><span class="dot"></span>Coupons &amp; Offres</div>
+      <div class="si" id="fid-si-campagnes" onclick="goFid('campagnes')"><span class="dot"></span>Campagnes</div>
     </div>
 
     <!-- ═══════════════════════════════════ -->
@@ -317,6 +317,10 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
 
     // goFid doit être défini AVANT l'injection du HTML (les onclick l'appellent immédiatement)
     window.goFid = function(tab){
+      // Mettre à jour surbrillance sidebar
+      document.querySelectorAll('[id^="fid-si-"]').forEach(el => el.classList.remove('on'));
+      const activeEl = document.getElementById('fid-si-' + tab);
+      if(activeEl) activeEl.classList.add('on');
       const onFid = location.pathname.endsWith('fidelisation.html');
       if(onFid){
         if(window.switchTab) window.switchTab(tab, null);
@@ -324,6 +328,18 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
         location.href = 'fidelisation.html?tab=' + tab;
       }
     };
+
+    // Surbrillance initiale selon ?tab= dans l'URL
+    (function(){
+      if(PAGE === 'fidelisation.html'){
+        const urlTab = new URLSearchParams(location.search).get('tab') || 'dashboard';
+        setTimeout(()=>{
+          document.querySelectorAll('[id^="fid-si-"]').forEach(el => el.classList.remove('on'));
+          const el = document.getElementById('fid-si-' + urlTab);
+          if(el) el.classList.add('on');
+        }, 50);
+      }
+    })();
 
     document.body.insertAdjacentHTML('afterbegin', buildNavHTML());
 
