@@ -289,6 +289,7 @@
 <!-- Firebase -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
   import { getFirestore, doc, setDoc, getDoc, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   const app = initializeApp({
     apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
@@ -298,11 +299,14 @@
     messagingSenderId:"120905555746",
     appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
   });
+  const auth = getAuth(app);
   const db = getFirestore(app);
   window._db = db;
   window._fsDoc = doc; window._fsSetDoc = setDoc; window._fsGetDoc = getDoc;
   window._fsCollection = collection; window._fsQuery = query;
   window._fsWhere = where; window._fsGetDocs = getDocs;
+  // Auth anonyme — permet les écritures Firestore selon les règles
+  signInAnonymously(auth).catch(e => console.warn('Auth anonyme:', e.message));
   window._fbReady = true;
   window.dispatchEvent(new Event('fbReady'));
 </script>
@@ -386,25 +390,25 @@ async function submitForm(){
       return;
     }
 
-    // Créer le client via l'API Vercel (pas de règles Firestore à gérer)
+    // Créer le client (auth anonyme → règles Firestore l'autorisent)
     const clientId = genId();
-
-    const apiRes = await fetch('/api/register-client', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        merchantUid: _merchantUid,
-        clientId,
-        prenom, nom,
-        tel: telNorm,
-        email: email||'',
-        birthday: bday||''
-      })
+    const t = today();
+    const clientData = {
+      id: clientId, prenom, nom,
+      tel: telNorm, email: email||'', birthday: bday||'',
+      points: 0, tampons: 0,
+      lastVisit: t, createdAt: t,
+      history: [],
+      source: 'inscription-autonome',
+      uid: _merchantUid
+    };
+    await window._fsSetDoc(window._fsDoc(window._db,'fidelite',_merchantUid,'clients',clientId), clientData);
+    await window._fsSetDoc(window._fsDoc(window._db,'fidelite_public',clientId), {
+      id: clientId, prenom, nom,
+      points: 0, tampons: 0,
+      lastVisit: t, createdAt: t, birthday: bday||'',
+      history: [], uid: _merchantUid
     });
-    const apiData = await apiRes.json();
-    if (!apiRes.ok || !apiData.success) {
-      throw new Error(apiData.error || 'Erreur inscription');
-    }
 
     const client = { id: clientId, prenom, nom, tel: telNorm, email: email||'', birthday: bday||'', points: 0, tampons: 0 };
     _newClientId = clientId;

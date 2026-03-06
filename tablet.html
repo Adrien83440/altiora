@@ -345,8 +345,8 @@
 <!-- Firebase -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-  import { getFirestore, doc, setDoc, getDoc, collection, getDocs, query, where, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getFirestore, doc, setDoc, getDoc, updateDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   const app = initializeApp({
     apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
     authDomain:"altiora-70599.firebaseapp.com",
@@ -357,31 +357,35 @@
   });
   const auth = getAuth(app);
   const db = getFirestore(app);
-  window._db = db; window._auth = auth;
+  window._db = db;
   window._doc = doc; window._setDoc = setDoc; window._getDoc = getDoc;
+  window._updateDoc = updateDoc;
   window._collection = collection; window._getDocs = getDocs;
-  window._query = query; window._where = where;
 
-  onAuthStateChanged(auth, user => {
-    if(user){
-      window._uid = user.uid;
-      window._firebaseReady = true;
-      window.dispatchEvent(new Event('fbReady'));
-    } else {
-      // Pas connecté → rediriger vers login
-      window.location.href = 'index.html';
-    }
+  // Auth anonyme — la tablette n'a pas de compte commerçant
+  signInAnonymously(auth).then(cred => {
+    window._anonToken = null;
+    cred.user.getIdToken().then(t => { window._anonToken = t; });
+    window._firebaseReady = true;
+    window.dispatchEvent(new Event('fbReady'));
+  }).catch(e => {
+    console.error('Auth anonyme échouée:', e);
+    // Continuer quand même (les écritures passent par l'API)
+    window._firebaseReady = true;
+    window.dispatchEvent(new Event('fbReady'));
   });
 </script>
 
 <script>
 // ── STATE ──
 let _pin = '';
-let _correctPin = '1234'; // défaut, chargé depuis Firebase
+let _correctPin = '1234';
 let _clients = [];
 let _cfg = {};
 let _selectedClient = null;
 let _unlocked = false;
+// merchantUid depuis URL ?m=
+const _merchantUid = new URLSearchParams(location.search).get('m') || '';
 
 const COLORS = {
   blue:'linear-gradient(135deg,#0f1f5c,#4f7ef8)',
@@ -402,25 +406,35 @@ setInterval(updateClock,10000); updateClock();
 
 // ── FIREBASE ──
 window.addEventListener('fbReady', async ()=>{
+  if(!_merchantUid){
+    document.getElementById('pin-sub').textContent = 'Lien invalide — paramètre ?m= manquant';
+    return;
+  }
   try{
-    // Charger config
-    const cfgSnap = await window._getDoc(window._doc(window._db,'fidelite',window._uid,'config','main'));
-    if(cfgSnap.exists()) _cfg = cfgSnap.data();
+    // Config publique (lecture publique, pas d'auth requise)
+    const cfgSnap = await window._getDoc(window._doc(window._db,'fidelite_public_cfg',_merchantUid));
+    if(cfgSnap.exists()) {
+      const pub = cfgSnap.data();
+      _cfg = { shopName: pub.shopName||'Ma Boutique', emoji: pub.emoji||'☕',
+               tampons: pub.tampons||10, reward: pub.reward||'Récompense',
+               cardColor: pub.cardColor||'blue', vipPts: pub.vipPts||2000,
+               tabletPin: pub.tabletPin||'1234', ptsPerEuro: pub.ptsPerEuro||1 };
+    }
 
-    // Charger tous les clients
-    const snap = await window._getDocs(window._collection(window._db,'fidelite',window._uid,'clients'));
-    _clients = snap.docs.map(d=>d.data());
-
-    // PIN depuis config (ou défaut 1234)
+    // PIN
     _correctPin = String(_cfg.tabletPin||'1234');
 
+    // Charger clients (auth anonyme = autorisé par les règles Firestore)
+    try{
+      const snap = await window._getDocs(window._collection(window._db,'fidelite',_merchantUid,'clients'));
+      _clients = snap.docs.map(d=>d.data());
+    }catch(e){ console.warn('Clients:', e.message); }
+
     // UI
-    const badge = _cfg.emoji||'🎯';
-    const name = _cfg.shopName||'Fidélité Caisse';
-    document.getElementById('tb-badge').textContent = badge;
-    document.getElementById('tb-name').textContent = name;
-    document.getElementById('pin-logo').textContent = badge;
-    document.getElementById('pin-title').textContent = name;
+    document.getElementById('tb-badge').textContent = _cfg.emoji;
+    document.getElementById('tb-name').textContent = _cfg.shopName;
+    document.getElementById('pin-logo').textContent = _cfg.emoji;
+    document.getElementById('pin-title').textContent = _cfg.shopName;
 
   }catch(e){ console.error('fbReady error:',e); }
 });
@@ -589,18 +603,17 @@ async function doTampon(id){
   const c=_clients[idx];
   const cfgT=parseInt(_cfg.tampons)||10;
   const newT=(c.tampons||0)+1;
-  const ptsGain=parseInt(_cfg.ptsPerEuro)||0;
 
   c.tampons=newT; c.lastVisit=today();
   c.history=[...(c.history||[]),{type:'tampon',date:today(),pts:0}].slice(-50);
   _clients[idx]=c;
 
   try{
-    await window._setDoc(window._doc(window._db,'fidelite',window._uid,'clients',id),c,{merge:true});
-    await window._setDoc(window._doc(window._db,'fidelite_public',id),{tampons:newT,lastVisit:today(),history:c.history.slice(-20)},{merge:true});
-    renderClientPanel(c);
+    await apiAction('tampon', id, {tampons:newT, lastVisit:today(), history:c.history.slice(-20)});
     toast(`✅ Tampon ajouté — ${c.prenom} : ${newT}/${cfgT}`,newT>=cfgT?'warn':'success');
   }catch(e){ toast('Erreur : '+e.message); }
+  // Auto-reset fiche après 3s
+  autoResetPanel();
 }
 
 // ── POINTS ──
@@ -617,11 +630,10 @@ async function doPoints(id,pts){
   c.history=[...(c.history||[]),{type:'points',date:today(),pts}].slice(-50);
   _clients[idx]=c;
   try{
-    await window._setDoc(window._doc(window._db,'fidelite',window._uid,'clients',id),c,{merge:true});
-    await window._setDoc(window._doc(window._db,'fidelite_public',id),{points:c.points,lastVisit:today(),history:c.history.slice(-20)},{merge:true});
-    renderClientPanel(c);
+    await apiAction('points', id, {points:c.points, lastVisit:today(), history:c.history.slice(-20)});
     toast(`⭐ +${pts} points — total : ${c.points} pts`,'success');
   }catch(e){ toast('Erreur : '+e.message); }
+  autoResetPanel();
 }
 
 // ── RÉCOMPENSE ──
@@ -641,11 +653,10 @@ async function doReward(id){
   c.history=[...(c.history||[]),{type:'reward',date:today(),reward:_cfg.reward}].slice(-50);
   _clients[idx]=c;
   try{
-    await window._setDoc(window._doc(window._db,'fidelite',window._uid,'clients',id),c,{merge:true});
-    await window._setDoc(window._doc(window._db,'fidelite_public',id),{tampons:0,lastVisit:today(),history:c.history.slice(-20)},{merge:true});
-    renderClientPanel(c);
+    await apiAction('reward', id, {tampons:0, lastVisit:today(), history:c.history.slice(-20)});
     toast(`🎁 Récompense donnée à ${c.prenom} !`,'success');
   }catch(e){ toast('Erreur : '+e.message); }
+  autoResetPanel();
 }
 
 // ── RESET ──
@@ -663,11 +674,10 @@ async function doReset(id){
   const c=_clients[idx]; c.tampons=0;
   _clients[idx]=c;
   try{
-    await window._setDoc(window._doc(window._db,'fidelite',window._uid,'clients',id),{tampons:0},{merge:true});
-    await window._setDoc(window._doc(window._db,'fidelite_public',id),{tampons:0},{merge:true});
-    renderClientPanel(c);
+    await apiAction('reset', id, {tampons:0});
     toast('Carte réinitialisée');
   }catch(e){ toast('Erreur : '+e.message); }
+  autoResetPanel();
 }
 
 // ── NOUVEAU CLIENT ──
@@ -687,9 +697,10 @@ async function createClient(){
     points:0,tampons:0,lastVisit:today(),createdAt:today(),history:[],source:'tablet'
   };
   try{
-    await window._setDoc(window._doc(window._db,'fidelite',window._uid,'clients',id),client);
+    await window._setDoc(window._doc(window._db,'fidelite',_merchantUid,'clients',id), client);
     await window._setDoc(window._doc(window._db,'fidelite_public',id),{
-      id,prenom,nom,points:0,tampons:0,lastVisit:today(),createdAt:today(),birthday:client.birthday,history:[],uid:window._uid
+      id,prenom,nom,points:0,tampons:0,lastVisit:today(),createdAt:today(),
+      birthday:client.birthday,history:[],uid:_merchantUid
     });
     _clients.push(client);
     closeNewClient();
@@ -698,6 +709,41 @@ async function createClient(){
     searchClient(prenom);
     toast(`✅ ${prenom} ${nom} créé(e) !`,'success');
   }catch(e){ toast('Erreur : '+e.message); }
+}
+
+// ── ÉCRITURE FIRESTORE DIRECTE (auth anonyme autorisée par les règles) ──
+async function apiAction(type, clientId, data){
+  // Écrire dans fidelite/{merchantUid}/clients/{clientId}
+  await window._updateDoc(window._doc(window._db,'fidelite',_merchantUid,'clients',clientId), data);
+  // Écrire le sous-ensemble public
+  const pub = {};
+  if('tampons'   in data) pub.tampons   = data.tampons;
+  if('points'    in data) pub.points    = data.points;
+  if('lastVisit' in data) pub.lastVisit = data.lastVisit;
+  if('history'   in data) pub.history   = (data.history||[]).slice(-20);
+  if(Object.keys(pub).length>0)
+    await window._updateDoc(window._doc(window._db,'fidelite_public',clientId), pub);
+}
+
+// ── AUTO-RESET FICHE APRÈS ACTION ──
+let _resetTimer = null;
+function autoResetPanel(){
+  _selectedClient = null;
+  // Effacer la recherche
+  document.getElementById('telSearch').value='';
+  document.getElementById('resultsList').innerHTML='<div class="result-empty"><div class="result-empty-icon">👤</div><div>Entrez un numéro ou un nom<br>pour trouver un client</div></div>';
+  // Réinitialiser le panneau droit avec message de succès pendant 2s
+  document.getElementById('panelRight').innerHTML=`
+    <div class="empty-right">
+      <div style="font-size:64px;margin-bottom:12px;animation:popIn .4s cubic-bezier(.34,1.56,.64,1) both">✅</div>
+      <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:700;color:var(--accent)">Action enregistrée</div>
+      <div style="font-size:14px;color:var(--muted);margin-top:6px">Fiche effacée pour la confidentialité</div>
+    </div>`;
+  // Après 2s → retour à l'écran vide normal
+  clearTimeout(_resetTimer);
+  _resetTimer = setTimeout(()=>{
+    document.getElementById('panelRight').innerHTML='<div class="empty-right"><div class="empty-right-icon" style="font-size:52px;opacity:.3">👈</div><div style="font-family:'Syne',sans-serif;font-size:16px;font-weight:700">Sélectionnez un client</div><div style="font-size:13px">Recherchez par téléphone ou nom</div></div>';
+  }, 2000);
 }
 
 // ── UI UTILS ──
