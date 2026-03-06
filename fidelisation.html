@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
 <title>ALTEORE — Fidélisation</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -468,6 +469,19 @@ html,body{overflow-x:hidden;max-width:100vw}
         <div class="card-body">
           <div class="field"><label>Nom boutique (affiché sur carte)</label><div class="field-wrap"><input class="field-in" id="cfg-shop-name" placeholder="Ma Boutique" oninput="saveConfig();renderFidCard()"/ "debounceSaveConfig()"></div></div>
           <div class="field"><label>Expéditeur SMS <span style="font-size:10px;color:#94a3b8">(max 11 caractères, sans espace)</span></label><div class="field-wrap"><input class="field-in" id="cfg-sms-sender" placeholder="MABOUTIQUE" maxlength="11" oninput="this.value=this.value.replace(/[^a-zA-Z0-9]/g,'');saveConfig()"></div></div>
+          <div class="field"><label>PIN tablette caisse <span style="font-size:10px;color:#94a3b8">(4 chiffres — pour tablet.html)</span></label><div class="field-wrap"><input class="field-in" id="cfg-tablet-pin" placeholder="1234" maxlength="4" type="password" oninput="this.value=this.value.replace(/[^0-9]/g,'');saveConfig()" autocomplete="new-password"></div></div>
+          <div class="field"><label>🔗 Lien inscription autonome client</label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input class="field-in" id="cfg-inscription-link" readonly style="font-size:11px;color:#64748b;background:#f8faff;cursor:text"/>
+              <button class="btn btn-outline btn-xs" onclick="copyInscriptionLink()" title="Copier le lien">📋</button>
+              <button class="btn btn-primary btn-xs" onclick="openInscriptionLink()" title="Ouvrir">↗</button>
+            </div>
+            <div style="font-size:10px;color:#94a3b8;margin-top:4px">Affichez ce QR code en caisse — les clients s'inscrivent seuls</div>
+            <div id="cfg-qr-wrap" style="margin-top:10px;display:none">
+              <div id="cfg-qr-code" style="display:inline-block"></div>
+            </div>
+            <button class="btn btn-outline btn-xs" style="margin-top:6px" onclick="toggleInscriptionQR()">🖨️ Afficher QR code à imprimer</button>
+          </div>
           <div class="field"><label>Secteur</label><div class="field-wrap"><select class="field-sel" id="cfg-sector"><option>🥐 Boulangerie</option><option>☕ Café</option><option>🍕 Restaurant</option><option>💇 Coiffeur</option><option>💆 Bien-être</option><option>🛍️ Commerce</option><option>Autre</option></select></div></div>
           <div class="field"><label>Couleur carte</label>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -970,6 +984,12 @@ function load(){
   document.getElementById('cfg-vip-pts').value=cfg.vipPts||2000;
   document.getElementById('cfg-shop-name').value=cfg.shopName||'';
   if(document.getElementById('cfg-sms-sender'))document.getElementById('cfg-sms-sender').value=cfg.smsSender||'';
+  if(document.getElementById('cfg-tablet-pin'))document.getElementById('cfg-tablet-pin').value=cfg.tabletPin||'1234';
+  // Lien inscription
+  if(document.getElementById('cfg-inscription-link')){
+    const lnk = window.location.origin+'/inscription.html?m='+(window._uid||'');
+    document.getElementById('cfg-inscription-link').value = lnk;
+  }
   document.getElementById('cfg-notif-bday').checked=cfg.notifBday!==false;
   document.getElementById('cfg-notif-inactif').checked=cfg.notifInactif!==false;
   document.getElementById('cfg-notif-palier').checked=cfg.notifPalier!==false;
@@ -1018,6 +1038,7 @@ function saveConfig(){
     vipPts:parseInt(document.getElementById('cfg-vip-pts').value)||2000,
     shopName:document.getElementById('cfg-shop-name').value||'',
     smsSender:document.getElementById('cfg-sms-sender')?document.getElementById('cfg-sms-sender').value.replace(/[^a-zA-Z0-9]/g,'').slice(0,11)||''  :'',
+    tabletPin:document.getElementById('cfg-tablet-pin')?document.getElementById('cfg-tablet-pin').value.replace(/[^0-9]/g,'').slice(0,4)||'1234':'1234',
     notifBday:document.getElementById('cfg-notif-bday').checked,
     notifInactif:document.getElementById('cfg-notif-inactif').checked,
     notifPalier:document.getElementById('cfg-notif-palier').checked,
@@ -2444,6 +2465,42 @@ window.previewWheel = previewWheel;
 window.getWheelLink = getWheelLink;
 window.updateWheelLinkDisplay = updateWheelLinkDisplay;
 window.sendWheelSms = sendWheelSms;
+
+// ── INSCRIPTION LIEN + QR ──
+function copyInscriptionLink(){
+  const lnk = window.location.origin+'/inscription.html?m='+(window._uid||'');
+  navigator.clipboard.writeText(lnk).then(()=>toast('Lien copié !','ok')).catch(()=>{});
+}
+function openInscriptionLink(){
+  const lnk = window.location.origin+'/inscription.html?m='+(window._uid||'');
+  window.open(lnk,'_blank');
+}
+let _qrShown=false;
+function toggleInscriptionQR(){
+  const wrap=document.getElementById('cfg-qr-wrap');
+  const qrEl=document.getElementById('cfg-qr-code');
+  if(!wrap||!qrEl)return;
+  _qrShown=!_qrShown;
+  if(_qrShown){
+    wrap.style.display='block';
+    qrEl.innerHTML='';
+    const lnk=window.location.origin+'/inscription.html?m='+(window._uid||'');
+    if(window.QRCode){
+      new QRCode(qrEl,{text:lnk,width:180,height:180,correctLevel:QRCode.CorrectLevel.M});
+    } else {
+      // Fallback : QR via API Google Charts
+      const img=document.createElement('img');
+      img.src='https://chart.googleapis.com/chart?cht=qr&chs=180x180&chl='+encodeURIComponent(lnk);
+      img.style.borderRadius='8px';
+      qrEl.appendChild(img);
+    }
+  } else {
+    wrap.style.display='none';
+  }
+}
+window.copyInscriptionLink=copyInscriptionLink;
+window.openInscriptionLink=openInscriptionLink;
+window.toggleInscriptionQR=toggleInscriptionQR;
 window.fcCopyRoueLink = fcCopyRoueLink;
 window.fcSendRoueSms = fcSendRoueSms;
 window.markRoueCouponUsed = markRoueCouponUsed;
