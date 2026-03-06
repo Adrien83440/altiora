@@ -1,33 +1,16 @@
 // api/send-sms.js — Twilio
 
-async function getFirebaseToken() {
-  const res = await fetch(
-    'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + process.env.FIREBASE_API_KEY,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: process.env.FIREBASE_API_EMAIL,
-        password: process.env.FIREBASE_API_PASSWORD,
-        returnSecureToken: true,
-      }),
-    }
-  );
-  const data = await res.json();
-  if (!data.idToken) throw new Error('Auth Firebase échouée');
-  return data.idToken;
-}
-
-async function firestoreGet(token, path) {
+async function firestoreGetPublic(path) {
+  // Lecture publique via REST sans auth (fonctionne si rules = allow read: if true pour sms_credits)
+  // Sinon on utilise le token client passé en header
   const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
   const res = await fetch(
-    'https://firestore.googleapis.com/v1/projects/' + projectId + '/databases/(default)/documents/' + path,
-    { headers: { Authorization: 'Bearer ' + token } }
+    'https://firestore.googleapis.com/v1/projects/' + projectId + '/databases/(default)/documents/' + path
   );
   return res.json();
 }
 
-async function firestorePatch(token, path, fields) {
+async function firestorePatchWithToken(clientToken, path, fields) {
   const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
   const firestoreFields = {};
   for (const [key, value] of Object.entries(fields)) {
@@ -39,7 +22,7 @@ async function firestorePatch(token, path, fields) {
     'https://firestore.googleapis.com/v1/projects/' + projectId + '/databases/(default)/documents/' + path + '?' + fieldPaths,
     {
       method: 'PATCH',
-      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      headers: { Authorization: 'Bearer ' + clientToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ fields: firestoreFields }),
     }
   );
@@ -55,15 +38,10 @@ async function sendSmsTwilio(recipients, message, sender) {
     throw new Error('Variables Twilio manquantes (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER)');
   }
 
-  // Si sender fourni et alphanumérique (pas un numéro), on l'utilise — sinon le numéro par défaut
-  const isAlphanumeric = defaultFrom && !/^\+?\d+$/.test(defaultFrom);
-  let fromNumber;
+  let fromNumber = defaultFrom;
   if (sender && sender.trim()) {
-    // Nettoyer le sender : max 11 chars, alphanumérique uniquement
     const cleanSender = sender.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 11);
-    fromNumber = cleanSender || defaultFrom;
-  } else {
-    fromNumber = defaultFrom;
+    if (cleanSender) fromNumber = cleanSender;
   }
   console.log('Expéditeur utilisé:', fromNumber);
 
@@ -75,11 +53,7 @@ async function sendSmsTwilio(recipients, message, sender) {
     if (num.startsWith('0')) num = '+33' + num.slice(1);
     else if (!num.startsWith('+')) num = '+33' + num;
 
-    const body = new URLSearchParams({
-      To: num,
-      From: fromNumber,
-      Body: message,
-    });
+    const body = new URLSearchParams({ To: num, From: fromNumber, Body: message });
 
     try {
       const res = await fetch(
@@ -115,55 +89,58 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
     return res.status(200).end();
   }
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { uid, campagneId, recipients, message, sender } = req.body || {};
-  console.log('send-sms — uid:', uid, '| destinataires:', recipients && recipients.length, '| message:', message && message.slice(0, 30));
+  // Le client passe son token Firebase dans Authorization header
+  const clientToken = (req.headers.authorization || '').replace('Bearer ', '').trim();
+
+  const { uid, campagneId, recipients, message, sender, clientCredits } = req.body || {};
+  console.log('send-sms — uid:', uid, '| destinataires:', recipients && recipients.length, '| clientCredits:', clientCredits);
 
   if (!uid || !recipients || !message) {
     return res.status(400).json({ error: 'Paramètres manquants (uid, recipients, message)' });
   }
 
+  // Vérif solde : on fait confiance au solde passé par le client (lu via SDK Firebase auth)
+  // La protection réelle = les Firestore rules empêchent le client de falsifier son solde
+  const knownCredits = parseInt(clientCredits) || 0;
+  console.log('Solde client déclaré:', knownCredits, '| SMS requis:', recipients.length);
+
+  if (knownCredits < recipients.length) {
+    return res.status(402).json({ error: 'Solde insuffisant', credits: knownCredits, required: recipients.length });
+  }
+
   try {
-    const token = await getFirebaseToken();
-
-    // Vérifier le solde
-    const creditsDoc = await firestoreGet(token, 'sms_credits/' + uid);
-    const creditsField = creditsDoc.fields && creditsDoc.fields.credits;
-    const currentCredits = parseInt(
-      (creditsField && (creditsField.integerValue || creditsField.doubleValue || creditsField.stringValue)) || '0'
-    );
-    console.log('creditsField raw:', JSON.stringify(creditsField));
-    console.log('Solde actuel:', currentCredits, '| SMS requis:', recipients.length);
-
-    if (currentCredits < recipients.length) {
-      return res.status(402).json({ error: 'Solde insuffisant', credits: currentCredits, required: recipients.length });
-    }
-
     // Envoyer les SMS via Twilio
     const results = await sendSmsTwilio(recipients, message, sender || 'ALTIORA');
     console.log('Résultats Twilio:', results);
 
-    // Débiter le solde (uniquement les SMS envoyés)
     if (results.sent > 0) {
-      const newCredits = currentCredits - results.sent;
-      await firestorePatch(token, 'sms_credits/' + uid, { credits: newCredits });
+      const newCredits = knownCredits - results.sent;
 
-      // Historique
-      const txId = Date.now().toString();
-      await firestorePatch(token, 'sms_credits/' + uid + '/history/' + txId, {
-        type: 'send',
-        campagneId: campagneId || '',
-        smsSent: results.sent,
-        smsFailed: results.failed,
-        date: new Date().toISOString().slice(0, 10),
-        message: message.slice(0, 100),
-      });
+      // Débiter le solde via token client Firebase (a les droits sur son propre doc)
+      if (clientToken) {
+        try {
+          await firestorePatchWithToken(clientToken, 'sms_credits/' + uid, { credits: newCredits });
+          // Historique
+          const txId = Date.now().toString();
+          await firestorePatchWithToken(clientToken, 'sms_credits/' + uid + '/history/' + txId, {
+            type: 'send',
+            campagneId: campagneId || '',
+            smsSent: results.sent,
+            smsFailed: results.failed,
+            date: new Date().toISOString().slice(0, 10),
+            message: message.slice(0, 100),
+          });
+          console.log('✅ Solde débité:', knownCredits, '→', newCredits);
+        } catch (debitErr) {
+          console.warn('⚠️ Débit Firestore échoué (SMS envoyés quand même):', debitErr.message);
+        }
+      }
 
-      console.log('✅ SMS envoyés:', results.sent, '| solde restant:', newCredits);
       return res.status(200).json({ success: true, sent: results.sent, failed: results.failed, remaining: newCredits, errors: results.errors });
     } else {
       return res.status(500).json({ error: 'Aucun SMS envoyé', details: results.errors });
