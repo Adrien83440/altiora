@@ -346,32 +346,11 @@
 <!-- Modale Roue + Avis Google (post-tampon) -->
 <div class="bonus-overlay" id="bonusOverlay">
   <div class="bonus-box">
-    <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800;margin-bottom:16px" id="bonus-title">🎉 Bonus disponible !</div>
-    <div class="bonus-tabs" id="bonusTabs">
-      <button class="bonus-tab active" id="tab-roue" onclick="switchBonusTab('roue')">🎡 Tourner la roue</button>
-      <button class="bonus-tab" id="tab-google" onclick="switchBonusTab('google')">⭐ Avis Google</button>
-    </div>
-
-    <!-- Panel Roue -->
-    <div id="bonus-panel-roue">
-      <div class="wheel-wrap">
-        <div class="wheel-pointer">▼</div>
-        <canvas id="wheelCanvas" width="240" height="240"></canvas>
-      </div>
-      <button class="wheel-spin-btn" id="spinBtn" onclick="spinWheel()">🎡 Tourner !</button>
-      <div class="wheel-result" id="wheelResult"></div>
-    </div>
-
-    <!-- Panel Google -->
-    <div id="bonus-panel-google" style="display:none">
-      <div class="google-qr-wrap">
-        <div class="google-stars">⭐⭐⭐⭐⭐</div>
-        <div style="font-size:14px;color:var(--muted);margin-bottom:8px">Le client scanne avec son téléphone</div>
-        <div class="google-qr-img" id="googleQrImg"></div>
-        <div style="font-size:12px;color:var(--muted);margin-top:4px">Scan = +1 tour de roue offert</div>
-      </div>
-    </div>
-
+    <div style="font-family:'Syne',sans-serif;font-size:20px;font-weight:800;margin-bottom:6px" id="bonus-title">🎉 Merci !</div>
+    <div class="google-stars">⭐⭐⭐⭐⭐</div>
+    <div style="font-size:14px;color:var(--muted);margin:10px 0 14px">Scannez avec votre téléphone<br>pour laisser un avis Google</div>
+    <div class="google-qr-img" id="googleQrImg" style="margin:0 auto 14px"></div>
+    <div style="font-size:12px;color:rgba(255,255,255,.3);margin-bottom:12px">Ça prend 30 secondes !</div>
     <button class="skip-btn" onclick="closeBonusOverlay()">Passer →</button>
   </div>
 </div>
@@ -694,7 +673,7 @@ async function doPoints(id,pts){
     await apiAction('points', id, {points:c.points, lastVisit:today(), history:c.history.slice(-20)});
     toast(`⭐ +${pts} points — total : ${c.points} pts`,'success');
   }catch(e){ toast('Erreur : '+e.message); }
-  autoResetPanel();
+  if(_wheelCfg.googleUrl){ openBonusOverlay(c.prenom); } else { autoResetPanel(); }
 }
 
 // ── RÉCOMPENSE ──
@@ -933,33 +912,16 @@ function showWheelResult(seg){
 }
 
 function openBonusOverlay(prenom){
+  if(!_wheelCfg.googleUrl){ autoResetPanel(); return; }
   document.getElementById('bonus-title').textContent = `🎉 Merci ${prenom} !`;
-  // Reset roue
-  _spinning = false;
-  const spinBtn = document.getElementById('spinBtn');
-  if(spinBtn) spinBtn.disabled = false;
-  const wr = document.getElementById('wheelResult');
-  if(wr) wr.style.display = 'none';
-  // Onglet par défaut
-  const hasWheel = _wheelCfg.enabled;
-  const hasGoogle = !!_wheelCfg.googleUrl;
-  if(!hasWheel && !hasGoogle){ autoResetPanel(); return; }
-  const tabR = document.getElementById('tab-roue');
-  const tabG = document.getElementById('tab-google');
-  if(tabR) tabR.style.display = hasWheel ? '' : 'none';
-  if(tabG) tabG.style.display = hasGoogle ? '' : 'none';
-  // Générer QR Google ici (URL connue à ce moment)
-  if(hasGoogle){
-    const qrEl = document.getElementById('googleQrImg');
-    if(qrEl && !qrEl.querySelector('img')){
-      const img = document.createElement('img');
-      img.src = 'https://chart.googleapis.com/chart?cht=qr&chs=200x200&chl='+encodeURIComponent(_wheelCfg.googleUrl);
-      img.width=200; img.height=200; img.style.borderRadius='8px';
-      qrEl.appendChild(img);
-    }
+  // Générer QR si pas encore fait
+  const qrEl = document.getElementById('googleQrImg');
+  if(qrEl && !qrEl.querySelector('img')){
+    const img = document.createElement('img');
+    img.src = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data='+encodeURIComponent(_wheelCfg.googleUrl);
+    img.width=200; img.height=200; img.style.borderRadius='8px';
+    qrEl.appendChild(img);
   }
-  switchBonusTab(hasWheel ? 'roue' : 'google');
-  setTimeout(()=>{ if(_wheelCfg.enabled) drawWheel(); }, 50);
   document.getElementById('bonusOverlay').classList.add('show');
 }
 
