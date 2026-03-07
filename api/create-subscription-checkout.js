@@ -7,7 +7,7 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { priceId, plan, billing, uid, email, skipTrial } = req.body || {};
+  const { priceId, plan, billing, uid, email, skipTrial, referralCode } = req.body || {};
   if (!priceId) return res.status(400).json({ error: 'priceId manquant' });
 
   const stripeKey = process.env.STRIPE_SECRET_KEY;
@@ -33,6 +33,7 @@ module.exports = async (req, res) => {
         'metadata[billing]': billing || 'monthly',
         ...(uid ? { 'metadata[uid]': uid } : {}),
         ...(email ? { customer_email: email } : {}),
+        ...(referralCode ? { 'metadata[referralCode]': referralCode.toUpperCase().trim() } : {}),
       }).toString()
     });
 
