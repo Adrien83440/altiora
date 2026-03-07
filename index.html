@@ -1114,24 +1114,40 @@ const wc=document.getElementById('whyCard');if(wc)whyObs.observe(wc);
 (function(){
   const track=document.getElementById('tTrack'),nav=document.getElementById('tNav');
   if(!track) return;
-  const cards=Array.from(track.querySelectorAll('.tc')),total=cards.length;
-  let cur=0;
-  // Passer en mode fade au lieu de translateX
-  track.style.cssText='display:block;position:relative;min-height:220px;';
-  cards.forEach((c,i)=>{
-    c.style.cssText=`position:${i===0?'relative':'absolute'};top:0;left:0;width:100%;max-width:100%;opacity:${i===0?1:0};transition:opacity .5s ease;pointer-events:${i===0?'auto':'none'};`;
-  });
+  const origCards=Array.from(track.querySelectorAll('.tc')),total=origCards.length;
+  // Cloner les slides pour boucle infinie : [clone fin] + [originaux] + [clone début]
+  const clonesBefore=origCards.map(c=>c.cloneNode(true));
+  const clonesAfter=origCards.map(c=>c.cloneNode(true));
+  clonesBefore.reverse().forEach(c=>track.insertBefore(c,track.firstChild));
+  clonesAfter.forEach(c=>track.appendChild(c));
+  let cur=0; // index dans les originaux (0..total-1)
+  // Dots
   for(let i=0;i<total;i++){const d=document.createElement('button');d.className='tdot'+(i===0?' act':'');d.onclick=()=>go(i);nav.appendChild(d);}
+  function getW(){return origCards[0].offsetWidth+16;}
+  function setPos(idx,animated){
+    const realIdx=idx+total; // offset des clones avant
+    track.style.transition=animated?'transform .6s cubic-bezier(.4,0,.2,1)':'none';
+    track.style.transform=`translateX(-${realIdx*getW()}px)`;
+  }
   function go(i){
     cur=((i%total)+total)%total;
-    cards.forEach((c,j)=>{
-      const active=j===cur;
-      c.style.opacity=active?1:0;
-      c.style.position=active?'relative':'absolute';
-      c.style.pointerEvents=active?'auto':'none';
-    });
+    setPos(cur,true);
     nav.querySelectorAll('.tdot').forEach((d,j)=>d.classList.toggle('act',j===cur));
   }
+  // Init sans animation
+  setPos(0,false);
+  // Après transition, si on est sur un clone, téléporter sans animation
+  track.addEventListener('transitionend',()=>{
+    const realIdx=cur+total;
+    const allCards=track.querySelectorAll('.tc');
+    const w=getW();
+    const currentX=-realIdx*w;
+    // Vérifier si on est sorti des bornes (ne devrait pas arriver mais sécurité)
+    const parsed=parseFloat(track.style.transform.replace('translateX(',''))||0;
+    if(Math.abs(parsed-currentX)>1){
+      setPos(cur,false);
+    }
+  });
   let t=setInterval(()=>go(cur+1),4200);
   const wrap=track.parentElement;
   wrap.addEventListener('mouseenter',()=>clearInterval(t));
@@ -1139,6 +1155,7 @@ const wc=document.getElementById('whyCard');if(wc)whyObs.observe(wc);
   let tx=0;
   wrap.addEventListener('touchstart',e=>{tx=e.touches[0].clientX;clearInterval(t);},{passive:true});
   wrap.addEventListener('touchend',e=>{const dx=e.changedTouches[0].clientX-tx;if(Math.abs(dx)>40)go(dx<0?cur+1:cur-1);t=setInterval(()=>go(cur+1),4200);},{passive:true});
+  window.addEventListener('resize',()=>setPos(cur,false));
 })();
 
 /* 9 — Menu mob */
