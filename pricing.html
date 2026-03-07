@@ -227,11 +227,25 @@ async function startCheckout(plan, skipTrial=false) {
   btn.disabled = true;
   btn.textContent = '⏳ Chargement...';
 
+  // Récupérer uid Firebase si connecté
+  let uid = null, email = null;
   try {
+    const { getAuth } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+    const auth = getAuth();
+    const user = auth.currentUser;
+    if (user) { uid = user.uid; email = user.email; }
+  } catch(e) {}
+
+  try {
+    const body = { priceId, plan, billing: isAnnual ? 'annual' : 'monthly', skipTrial };
+    if (uid)                body.uid = uid;
+    if (email)              body.email = email;
+    if (_validatedReferral) body.referralCode = _validatedReferral;
+
     const res = await fetch('/api/create-subscription-checkout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ priceId, plan, billing: isAnnual ? 'annual' : 'monthly', skipTrial })
+      body: JSON.stringify(body)
     });
     const data = await res.json();
     if (data.url) {
@@ -244,6 +258,60 @@ async function startCheckout(plan, skipTrial=false) {
     btn.disabled = false;
     btn.textContent = skipTrial ? 'S\'abonner directement' : 'Commencer l\'essai gratuit';
   }
+}
+
+// ── Code parrainage ──
+let _validatedReferral = null;
+
+async function validateReferralCode() {
+  const code = document.getElementById('referralInput').value.trim().toUpperCase();
+  const statusEl = document.getElementById('referralStatus');
+  const btn = document.getElementById('referralCheckBtn');
+
+  if (!code || code.length < 5) {
+    statusEl.textContent = '⚠️ Saisissez un code valide';
+    statusEl.style.color = '#f59e0b';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  statusEl.textContent = '';
+
+  // Récupérer uid si connecté
+  let uid = null, email = null;
+  try {
+    const { getAuth } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+    const user = getAuth().currentUser;
+    if (user) { uid = user.uid; email = user.email; }
+  } catch(e) {}
+
+  try {
+    const res = await fetch('/api/apply-referral', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ referralCode: code, filleulUid: uid || 'anonymous', filleulEmail: email || '' })
+    });
+    const data = await res.json();
+
+    if (res.ok && data.ok) {
+      _validatedReferral = code;
+      statusEl.innerHTML = '✅ <strong>Code valide !</strong> Votre parrain bénéficiera d\'une réduction de 50% sur sa prochaine échéance.';
+      statusEl.style.color = '#10b981';
+      document.getElementById('referralInput').style.borderColor = '#10b981';
+    } else {
+      _validatedReferral = null;
+      statusEl.textContent = '❌ ' + (data.error || 'Code invalide');
+      statusEl.style.color = '#ef4444';
+      document.getElementById('referralInput').style.borderColor = '#ef4444';
+    }
+  } catch(e) {
+    statusEl.textContent = '❌ Erreur de vérification';
+    statusEl.style.color = '#ef4444';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Vérifier';
 }
 
 function toast(msg) {
@@ -259,6 +327,23 @@ function toast(msg) {
   <div class="modal-box">
     <h2>📋 Avant de continuer</h2>
     <p>Pour souscrire au plan <strong id="modalPlanName"></strong>, merci de prendre connaissance et d'accepter nos documents contractuels.</p>
+
+    <!-- Code parrainage -->
+    <div style="margin-bottom:16px">
+      <label style="font-size:12px;font-weight:700;color:#6b7280;display:block;margin-bottom:6px">🎁 Code de parrainage (optionnel)</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="text" id="referralInput" placeholder="Ex: ALEX-X7K2" maxlength="9"
+          style="flex:1;padding:9px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;text-transform:uppercase;letter-spacing:1px;outline:none"
+          oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9-]/g,'')"
+          onfocus="this.style.borderColor='#1a3dce'" onblur="this.style.borderColor='#e2e8f0'"/>
+        <button onclick="validateReferralCode()" id="referralCheckBtn"
+          style="padding:9px 16px;background:#1a3dce;color:white;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">
+          Vérifier
+        </button>
+      </div>
+      <div id="referralStatus" style="font-size:12px;margin-top:6px;min-height:18px"></div>
+    </div>
+
     <div class="modal-cgv-wrap">
       <input type="checkbox" id="modalCgvCheck" onchange="toggleModalConfirm()"/>
       <label for="modalCgvCheck">
@@ -285,6 +370,15 @@ function toast(msg) {
 let _pendingPlan = null;
 let _pendingSkip = false;
 
+// Pré-remplir le code parrainage depuis l'URL ?ref=CODE
+(function autoFillRef() {
+  const ref = new URLSearchParams(location.search).get('ref');
+  if (ref) {
+    // On le stocke, il sera injecté dans le champ quand la modale s'ouvre
+    window._autoRef = ref.toUpperCase().trim();
+  }
+})();
+
 function startCheckoutWithModal(plan, skipTrial=false) {
   _pendingPlan = plan;
   _pendingSkip = skipTrial;
@@ -292,12 +386,23 @@ function startCheckoutWithModal(plan, skipTrial=false) {
   document.getElementById('modalCgvCheck').checked = false;
   document.getElementById('modalConfirmBtn').disabled = true;
   document.getElementById('modalConfirmBtn').classList.remove('active');
+  // Pré-remplir code parrainage depuis URL si présent
+  if (window._autoRef) {
+    const ri = document.getElementById('referralInput');
+    if (ri) ri.value = window._autoRef;
+  }
   document.getElementById('cgvModal').classList.add('show');
 }
 
 function closeModal() {
   document.getElementById('cgvModal').classList.remove('show');
   _pendingPlan = null;
+  // Reset champ parrainage
+  const ri = document.getElementById('referralInput');
+  const rs = document.getElementById('referralStatus');
+  if (ri) { ri.value = ''; ri.style.borderColor = '#e2e8f0'; }
+  if (rs) rs.textContent = '';
+  _validatedReferral = null;
 }
 
 function toggleModalConfirm() {
