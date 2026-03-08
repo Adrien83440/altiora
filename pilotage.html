@@ -596,7 +596,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const app = initializeApp({
   apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
@@ -616,6 +616,8 @@ window._auth    = auth;
 window._doc     = doc;
 window._setDoc  = setDoc;
 window._getDoc  = getDoc;
+window._collection = collection;
+window._getDocs = getDocs;
 window._signOut = signOut;
 
 onAuthStateChanged(auth, function(user) {
@@ -892,71 +894,73 @@ async function syncDettesToMonth(data, monthKey) {
     }
   } catch(e) { console.warn('syncDettesToMonth error:', e); }
 
-  // Scan : vérifier les mois précédents pour des crédits/leasings propagés manquants
+  // Scan complémentaire : pour chaque crédit/leasing visible ce mois
+  // mais absent dans data, aller chercher dans son mois de début dans pilotage
   try {
-    var parts = monthKey.split('-'), curY = parseInt(parts[0]), curM = parseInt(parts[1]);
     var changed2 = false;
 
-    // Chercher dans les 6 derniers mois pour trouver des lignes propagées
-    for (var back = 1; back <= 6; back++) {
-      var scanM = curM - back;
-      var scanY = curY;
-      while (scanM < 1) { scanM += 12; scanY--; }
-      var scanKey = scanY + '-' + String(scanM).padStart(2, '0');
+    // Collecter les noms déjà présents
+    var existingCredNoms = data.credits.map(function(c){ return (c.fournisseur||'').trim().toLowerCase(); }).filter(Boolean);
+    var existingLeasNoms = data.leasing.map(function(l){ return (l.fournisseur||'').trim().toLowerCase(); }).filter(Boolean);
 
-      var scanSnap = await window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', scanKey));
-      if (!scanSnap.exists()) continue;
-      var scanData = scanSnap.data();
+    // Scanner TOUS les mois pilotage (une seule requête) pour trouver les lignes propagées
+    var allMonthsSnap = await window._getDocs(window._collection(window._db, 'pilotage', window._uid, 'months'));
+    var sourceCreds = {}, sourceLeas = {};
 
-      // Crédits propagés
-      (scanData.credits || []).forEach(function(c) {
+    allMonthsSnap.forEach(function(doc) {
+      var md = doc.data();
+      (md.credits || []).forEach(function(c) {
         if (!c.fournisseur || !c.fournisseur.trim() || !parseFloat(c.montant)) return;
         if (!c.dateDebut || !c.dateFin) return;
-        var deb = c.dateDebut.slice(0, 7), fin = c.dateFin.slice(0, 7);
+        var deb = c.dateDebut.slice(0,7), fin = c.dateFin.slice(0,7);
         if (monthKey < deb || monthKey > fin) return;
-        var nom = c.fournisseur.trim().toLowerCase();
-        var exists = data.credits.some(function(cr) {
-          return ((cr.fournisseur || '').trim().toLowerCase() === nom || (cr.nom || '').trim().toLowerCase() === nom)
-            && parseFloat(cr.montant) > 0;
-        });
-        if (!exists) {
-          var copy = JSON.parse(JSON.stringify(c));
-          if (data.credits.length === 1 && !data.credits[0].fournisseur && !parseFloat(data.credits[0].montant)) {
-            data.credits[0] = copy;
-          } else {
-            data.credits.push(copy);
-          }
-          changed2 = true;
-        }
+        // Valider dates
+        if (parseInt(c.dateDebut.slice(0,4)) < 2000) return;
+        var key = c.fournisseur.trim().toLowerCase();
+        if (!sourceCreds[key]) sourceCreds[key] = c;
       });
-
-      // Leasings propagés
-      (scanData.leasing || []).forEach(function(l) {
+      (md.leasing || []).forEach(function(l) {
         if (!l.fournisseur || !l.fournisseur.trim() || !parseFloat(l.montantHT)) return;
         if (!l.dateDebut || !l.dateFin) return;
-        var deb = l.dateDebut.slice(0, 7), fin = l.dateFin.slice(0, 7);
+        var deb = l.dateDebut.slice(0,7), fin = l.dateFin.slice(0,7);
         if (monthKey < deb || monthKey > fin) return;
-        var nom = l.fournisseur.trim().toLowerCase();
-        var exists = data.leasing.some(function(le) {
-          return (le.fournisseur || '').trim().toLowerCase() === nom && parseFloat(le.montantHT) > 0;
-        });
-        if (!exists) {
-          var copy = JSON.parse(JSON.stringify(l));
-          if (data.leasing.length === 1 && !data.leasing[0].fournisseur && !parseFloat(data.leasing[0].montantHT)) {
-            data.leasing[0] = copy;
-          } else {
-            data.leasing.push(copy);
-          }
-          changed2 = true;
-        }
+        if (parseInt(l.dateDebut.slice(0,4)) < 2000) return;
+        var key = l.fournisseur.trim().toLowerCase();
+        if (!sourceLeas[key]) sourceLeas[key] = l;
       });
-    }
+    });
+
+    // Injecter les crédits manquants
+    Object.keys(sourceCreds).forEach(function(nom) {
+      if (existingCredNoms.indexOf(nom) >= 0) return;
+      var copy = JSON.parse(JSON.stringify(sourceCreds[nom]));
+      if (data.credits.length === 1 && !data.credits[0].fournisseur && !parseFloat(data.credits[0].montant)) {
+        data.credits[0] = copy;
+      } else {
+        data.credits.push(copy);
+      }
+      existingCredNoms.push(nom);
+      changed2 = true;
+    });
+
+    // Injecter les leasings manquants
+    Object.keys(sourceLeas).forEach(function(nom) {
+      if (existingLeasNoms.indexOf(nom) >= 0) return;
+      var copy = JSON.parse(JSON.stringify(sourceLeas[nom]));
+      if (data.leasing.length === 1 && !data.leasing[0].fournisseur && !parseFloat(data.leasing[0].montantHT)) {
+        data.leasing[0] = copy;
+      } else {
+        data.leasing.push(copy);
+      }
+      existingLeasNoms.push(nom);
+      changed2 = true;
+    });
 
     if (changed2) {
       _data = data;
       scheduleSave();
     }
-  } catch(e) { console.warn('syncFromPrevMonths error:', e); }
+  } catch(e) { console.warn('syncFromAllMonths error:', e); }
 }
 
 /* ─── SAUVEGARDE ─── */
