@@ -7,11 +7,11 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { priceId, plan, billing, uid, email } = req.body || {};
+  const { priceId, plan, billing, uid, email, skipTrial, referralCode } = req.body || {};
   if (!priceId) return res.status(400).json({ error: 'priceId manquant' });
 
   const stripeKey = process.env.STRIPE_SECRET_KEY;
-  const baseUrl = process.env.APP_URL || 'https://alteore-dev.vercel.app';
+  const baseUrl = process.env.APP_URL || 'https://altiora-theta.vercel.app';
 
   try {
     const res2 = await fetch('https://api.stripe.com/v1/checkout/sessions', {
@@ -24,14 +24,16 @@ module.exports = async (req, res) => {
         mode: 'subscription',
         'line_items[0][price]': priceId,
         'line_items[0][quantity]': '1',
-        'subscription_data[trial_period_days]': '15',
-        'payment_method_collection': 'always',
+        ...(!skipTrial ? { 'subscription_data[trial_period_days]': '15' } : {}),
+        'payment_method_collection': 'if_required',
+        'allow_promotion_codes': 'true',
         success_url: baseUrl + '/dashboard.html?subscription=success&plan=' + plan,
         cancel_url: baseUrl + '/pricing.html?cancelled=1',
         'metadata[plan]': plan,
         'metadata[billing]': billing || 'monthly',
         ...(uid ? { 'metadata[uid]': uid } : {}),
         ...(email ? { customer_email: email } : {}),
+        ...(referralCode ? { 'metadata[referralCode]': referralCode.toUpperCase().trim() } : {}),
       }).toString()
     });
 

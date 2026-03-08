@@ -8,7 +8,7 @@
 //   invoice.payment_succeeded         → paiement ok → confirmer plan actif
 //   invoice.payment_failed            → échec paiement → plan = 'past_due'
 
-const FIREBASE_PROJECT = 'alteore-dev';
+const FIREBASE_PROJECT = 'altiora-70599';
 
 // ── Déterminer le plan depuis le priceId Stripe ──
 const PRICE_TO_PLAN = {
@@ -27,7 +27,7 @@ function getPlanFromSubscription(subscription) {
 
 // ── Mise à jour Firestore via REST API ──
 async function updateFirestore(uid, fields) {
-  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/users/${uid}?updateMask.fieldPaths=${Object.keys(fields).join('&updateMask.fieldPaths=')}`;
 
   // Convertir les champs en format Firestore
@@ -55,7 +55,7 @@ async function updateFirestore(uid, fields) {
 
 // ── Récupérer uid depuis customerId (via Firestore query) ──
 async function getUidFromCustomer(customerId) {
-  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents:runQuery?key=${fbKey}`;
 
   const res = await fetch(url, {
@@ -81,6 +81,140 @@ async function getUidFromCustomer(customerId) {
   if (!doc) return null;
   // L'uid est la dernière partie du path: projects/.../documents/users/{uid}
   return doc.name.split('/').pop();
+}
+
+// ── Lecture Firestore REST ──
+async function fsGet(path) {
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}?key=${fbKey}`;
+  const res = await fetch(url);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error('Firestore GET: ' + await res.text());
+  return res.json();
+}
+
+function fv(doc, field) {
+  const f = doc?.fields?.[field];
+  return f?.stringValue ?? f?.integerValue ?? f?.booleanValue ?? null;
+}
+
+// ── Incrémenter un champ numérique dans Firestore (sans transaction SDK) ──
+async function fsIncrement(path, field, delta) {
+  const doc = await fsGet(path);
+  const current = parseInt(fv(doc, field) || 0);
+  await updateFirestore(path.replace(`users/`, ''), { [field]: current + delta });
+}
+
+// ── Récompenser le parrain : applique un coupon 50% one-time sur son abonnement Stripe ──
+async function rewardParrain(parrainUid, filleulUid, referralCode, stripeKey) {
+  try {
+    // 1. Récupérer le stripeCustomerId du parrain
+    const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+    const parrainDoc = await fsGet(`users/${parrainUid}`);
+    const customerId = fv(parrainDoc, 'stripeCustomerId');
+    const subscriptionId = fv(parrainDoc, 'stripeSubscriptionId');
+
+    if (!customerId || !subscriptionId) {
+      console.warn(`[Referral] Parrain ${parrainUid} n'a pas de subscription active — récompense ignorée`);
+      return;
+    }
+
+    // 2. Créer un coupon Stripe 50% once
+    const couponParams = new URLSearchParams({
+      percent_off: '50',
+      duration: 'once',
+      name: `Parrainage ${referralCode}`,
+      metadata: JSON.stringify({ type: 'parrainage', parrainUid, filleulUid, referralCode }),
+    });
+    // Stripe n'accepte pas JSON dans metadata via form-encoded, on l'envoie champ par champ
+    const couponBody = new URLSearchParams({
+      percent_off: '50',
+      duration: 'once',
+      name: `Parrainage ${referralCode}`,
+      'metadata[type]': 'parrainage',
+      'metadata[parrainUid]': parrainUid,
+      'metadata[filleulUid]': filleulUid,
+      'metadata[referralCode]': referralCode,
+    });
+
+    const couponRes = await fetch('https://api.stripe.com/v1/coupons', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + stripeKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: couponBody.toString()
+    });
+    const coupon = await couponRes.json();
+    if (!coupon.id) {
+      console.error('[Referral] Erreur création coupon:', coupon);
+      return;
+    }
+
+    // 3. Appliquer le coupon sur l'abonnement du parrain (sera déduit à la prochaine facture)
+    const subUpdateRes = await fetch(`https://api.stripe.com/v1/subscriptions/${subscriptionId}`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + stripeKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({ coupon: coupon.id }).toString()
+    });
+    const updatedSub = await subUpdateRes.json();
+    if (updatedSub.error) {
+      console.error('[Referral] Erreur application coupon:', updatedSub.error);
+      return;
+    }
+
+    // 4. Mettre à jour Firestore : statut de l'utilisation + compteurs parrain
+    const now = new Date().toISOString();
+
+    // Marquer l'utilisation comme récompensée
+    await updateFirestore(`referrals/${referralCode}/uses/${filleulUid}`.replace('users/', ''), {});
+    // Note : updateFirestore cible users/{uid}, on utilise fsSet direct
+    const fsSetDirect = async (path, fields) => {
+      const fbKeyVal = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+      const firestoreFields = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (typeof v === 'string')      firestoreFields[k] = { stringValue: v };
+        else if (typeof v === 'number') firestoreFields[k] = { integerValue: v };
+        else if (v === null)            firestoreFields[k] = { nullValue: null };
+      }
+      const mask = Object.keys(fields).map(k => `updateMask.fieldPaths=${k}`).join('&');
+      const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}?${mask}&key=${fbKeyVal}`;
+      const r = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields: firestoreFields })
+      });
+      if (!r.ok) throw new Error('fsSet failed: ' + await r.text());
+    };
+
+    await fsSetDirect(`referrals/${referralCode}/uses/${filleulUid}`, {
+      status: 'rewarded',
+      rewardedAt: now,
+      stripeCouponId: coupon.id,
+    });
+
+    // Incrémenter le compteur de récompenses du parrain + le compteur global
+    const currentRewards = parseInt(fv(parrainDoc, 'referralRewards') || 0);
+    await updateFirestore(parrainUid, {
+      referralRewards: currentRewards + 1,
+    });
+
+    // Incrémenter totalRewarded sur le document referrals/{code}
+    const refDoc = await fsGet(`referrals/${referralCode}`);
+    const currentRewarded = parseInt(fv(refDoc, 'totalRewarded') || 0);
+    await fsSetDirect(`referrals/${referralCode}`, {
+      totalRewarded: currentRewarded + 1,
+    });
+
+    console.log(`[Referral] ✅ Parrain récompensé: uid=${parrainUid} coupon=${coupon.id} (−50% prochaine échéance)`);
+
+  } catch (e) {
+    // Non bloquant : logguer l'erreur mais ne pas faire échouer le webhook
+    console.error('[Referral] Erreur rewardParrain:', e);
+  }
 }
 
 // ── Handler principal ──
@@ -158,26 +292,33 @@ module.exports = async (req, res) => {
       const plan = session.metadata?.plan || 'pro';
 
       if (uid && customerId) {
-        // Récupérer les détails de la subscription pour la date de fin de trial
+        // Récupérer les détails de la subscription
         let trialEnd = null;
+        let subStatus = 'trialing';
         if (subscriptionId && stripeKey) {
           const subRes = await fetch(`https://api.stripe.com/v1/subscriptions/${subscriptionId}`, {
             headers: { Authorization: 'Bearer ' + stripeKey }
           });
           const sub = await subRes.json();
           if (sub.trial_end) trialEnd = new Date(sub.trial_end * 1000).toISOString().split('T')[0];
+          subStatus = sub.status || 'trialing';
         }
 
+        // Si pas de trial (abonnement direct) → plan actif immédiatement
+        const isTrial = subStatus === 'trialing';
+        const activePlan = isTrial ? 'trial' : plan;
+
         await updateFirestore(uid, {
-          plan:                 'trial',
+          plan:                 activePlan,
           stripeCustomerId:     customerId,
           stripeSubscriptionId: subscriptionId || '',
-          trialStart:           new Date().toISOString().split('T')[0],
-          ...(trialEnd ? { trialEnd } : {}),
-          pendingPlan:          plan,  // plan qui s'activera après le trial
+          ...(isTrial ? { trialStart: new Date().toISOString().split('T')[0] } : {}),
+          ...(isTrial && trialEnd ? { trialEnd } : {}),
+          ...(isTrial ? { pendingPlan: plan } : { pendingPlan: '' }),
+          subscriptionStatus:   subStatus,
         });
 
-        console.log(`[Webhook] Trial démarré pour uid=${uid} plan=${plan}`);
+        console.log(`[Webhook] checkout.session.completed uid=${uid} plan=${activePlan} status=${subStatus}`);
       }
     }
 
@@ -195,18 +336,18 @@ module.exports = async (req, res) => {
       if (!plan) { console.warn('[Webhook] plan non reconnu pour sub:', sub.id); return res.status(200).end(); }
 
       let newPlan = plan;
-      // Si le trial vient de se terminer → activer le vrai plan
-      if (sub.status === 'active' && !sub.trial_end) newPlan = plan;
-      else if (sub.status === 'trialing')             newPlan = 'trial';
-      else if (sub.status === 'past_due')             newPlan = 'past_due';
-      else if (sub.status === 'canceled')             newPlan = 'free';
-      else if (sub.status === 'active')               newPlan = plan;
+      if (sub.status === 'trialing')             newPlan = 'trial';
+      else if (sub.status === 'active')          newPlan = plan;
+      else if (sub.status === 'past_due')        newPlan = 'past_due';
+      else if (sub.status === 'canceled')        newPlan = 'free';
+      else if (sub.status === 'incomplete')      newPlan = 'trial'; // CB pas encore fournie
+      else if (sub.status === 'incomplete_expired') newPlan = 'free'; // jamais fourni la CB
 
       await updateFirestore(uid, {
         plan:                 newPlan,
         stripeSubscriptionId: sub.id,
         subscriptionStatus:   sub.status,
-        ...(plan !== 'trial' ? { pendingPlan: '' } : {}),
+        ...(newPlan !== 'trial' ? { pendingPlan: '' } : {}),
       });
 
       console.log(`[Webhook] Subscription updated uid=${uid} plan=${newPlan} status=${sub.status}`);
@@ -233,11 +374,19 @@ module.exports = async (req, res) => {
     // ════════════════════════════════════════════
     // 4. invoice.payment_succeeded
     //    → Paiement OK → activer le plan
+    //    Note : amount_paid peut être 0 avec un coupon (2 mois offerts) — on active quand même
     // ════════════════════════════════════════════
     else if (event.type === 'invoice.payment_succeeded') {
       const invoice = event.data.object;
-      // Ignorer les invoices de trial (montant = 0)
-      if (invoice.amount_paid === 0) return res.status(200).end();
+
+      // Ignorer uniquement les invoices de trial pur (sans subscription, montant 0 et billing_reason = subscription_create)
+      const isFreeTrialInvoice = invoice.amount_paid === 0
+        && invoice.billing_reason === 'subscription_create'
+        && !invoice.discount;
+      if (isFreeTrialInvoice) {
+        console.log('[Webhook] Invoice trial ignorée (pas de coupon, montant 0)');
+        return res.status(200).end();
+      }
 
       const uid = await getUidFromCustomer(invoice.customer);
       if (!uid) return res.status(200).end();
@@ -259,7 +408,28 @@ module.exports = async (req, res) => {
           lastPayment:        new Date().toISOString().split('T')[0],
           pendingPlan:        '',
         });
-        console.log(`[Webhook] Paiement OK uid=${uid} plan=${plan}`);
+        console.log(`[Webhook] Paiement OK uid=${uid} plan=${plan} montant=${invoice.amount_paid}`);
+
+        // ── PARRAINAGE : récompenser le parrain à la 1ère vraie facture du filleul ──
+        // On ne récompense que sur billing_reason = 'subscription_create' ou 'subscription_cycle'
+        // et seulement si le filleul a un code de parrainage et que le statut est encore 'pending'
+        try {
+          const filleulDoc = await fsGet(`users/${uid}`);
+          const referralCode = fv(filleulDoc, 'referralCode');
+          const parrainUid   = fv(filleulDoc, 'parrainedBy');
+
+          if (referralCode && parrainUid) {
+            // Vérifier que la récompense n'a pas déjà été donnée
+            const useDoc = await fsGet(`referrals/${referralCode}/uses/${uid}`);
+            const status = fv(useDoc, 'status');
+            if (status === 'pending') {
+              await rewardParrain(parrainUid, uid, referralCode, stripeKey);
+            }
+          }
+        } catch (refErr) {
+          console.error('[Webhook] Erreur vérification parrainage:', refErr);
+          // Non bloquant
+        }
       }
     }
 
@@ -286,4 +456,9 @@ module.exports = async (req, res) => {
     console.error('[Webhook] Erreur:', e);
     return res.status(500).json({ error: e.message });
   }
+};
+
+// ── Vercel : désactiver le bodyParser pour lire le rawBody (signature Stripe) ──
+module.exports.config = {
+  api: { bodyParser: false }
 };

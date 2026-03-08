@@ -1,0 +1,152 @@
+// api/bank-sync.js  — SANS Firebase Admin SDK
+// GoCardless uniquement → retourne JSON au client
+// Le client (banque.html) écrit dans Firestore via Firebase SDK browser
+
+const GC_BASE = 'https://bankaccountdata.gocardless.com/api/v2';
+
+async function getGCToken() {
+  const res = await fetch(`${GC_BASE}/token/new/`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'accept': 'application/json' },
+    body: JSON.stringify({
+      secret_id:  process.env.GC_BANK_SECRET_ID,
+      secret_key: process.env.GC_BANK_SECRET_KEY
+    })
+  });
+  const data = await res.json();
+  if (!data.access) throw new Error('Token GoCardless invalide : ' + JSON.stringify(data));
+  return data.access;
+}
+
+function parseAmount(val) {
+  if (val == null) return 0;
+  return parseFloat(String(val).replace(',', '.')) || 0;
+}
+
+function extractLabel(tx) {
+  const c = [
+    tx.creditorName, tx.debtorName,
+    tx.remittanceInformationUnstructured,
+    tx.remittanceInformationStructuredArray?.[0]?.reference,
+    tx.remittanceInformationStructured,
+    tx.additionalInformation, tx.merchantName,
+    tx.proprietaryBankTransactionCode,
+  ];
+  const found = c.find(v => v && String(v).trim().length > 1);
+  return found ? String(found).trim().substring(0, 120) : 'Transaction bancaire';
+}
+
+export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  try {
+    const { requisition_id } = req.body || {};
+    if (!requisition_id) return res.status(400).json({ error: 'requisition_id manquant' });
+
+    if (!process.env.GC_BANK_SECRET_ID || !process.env.GC_BANK_SECRET_KEY) {
+      return res.status(500).json({ error: 'Variables GC_BANK_SECRET_ID / GC_BANK_SECRET_KEY manquantes dans Vercel' });
+    }
+
+    const token = await getGCToken();
+    const gcH = { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' };
+
+    // Requisition
+    const rRes  = await fetch(`${GC_BASE}/requisitions/${requisition_id}/`, { headers: gcH });
+    const rData = await rRes.json();
+    console.log('Req status:', rData.status, '| nb accounts:', rData.accounts?.length);
+
+    if (!rData.accounts || rData.accounts.length === 0) {
+      return res.status(400).json({
+        error: rData.status === 'EXPIRED'
+          ? 'Connexion expirée. Déconnectez et reconnectez votre banque.'
+          : `Aucun compte trouvé (statut: ${rData.status || 'inconnu'})`
+      });
+    }
+
+    const accounts = [];
+
+    for (const accountId of rData.accounts) {
+      try {
+        // Détails
+        const detRes  = await fetch(`${GC_BASE}/accounts/${accountId}/details/`, { headers: gcH });
+        const detData = await detRes.json();
+        const acc     = detData.account || detData || {};
+        const iban    = acc.iban || acc.bban || acc.resourceId || accountId;
+        const name    = acc.name || acc.ownerName || acc.product || 'Compte bancaire';
+        console.log(`[${accountId}] iban=${iban} name=${name}`);
+
+        // Solde
+        let balanceNum = 0, balanceStr = null;
+        try {
+          const bRes  = await fetch(`${GC_BASE}/accounts/${accountId}/balances/`, { headers: gcH });
+          const bData = await bRes.json();
+          const b     = bData.balances?.find(x => x.balanceType === 'interimAvailable')
+                     || bData.balances?.find(x => x.balanceType === 'closingBooked')
+                     || bData.balances?.[0];
+          if (b) {
+            balanceNum = parseAmount(b.balanceAmount?.amount);
+            const curr = b.balanceAmount?.currency || 'EUR';
+            balanceStr = balanceNum.toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ' + curr;
+            console.log(`[${accountId}] balance: ${balanceStr}`);
+          }
+        } catch(e) { console.warn(`[${accountId}] balance err:`, e.message); }
+
+        // Transactions
+        let rawTxs = [];
+        try {
+          const txRes  = await fetch(`${GC_BASE}/accounts/${accountId}/transactions/`, { headers: gcH });
+          const txData = await txRes.json();
+          rawTxs = [...(txData.transactions?.booked || []), ...(txData.transactions?.pending || [])];
+          console.log(`[${accountId}] ${rawTxs.length} transactions`);
+          if (rawTxs[0]) console.log('sample:', JSON.stringify(rawTxs[0]).substring(0, 250));
+        } catch(e) { console.warn(`[${accountId}] tx err:`, e.message); }
+
+        const transactions = [];
+        for (const tx of rawTxs) {
+          const dateStr = tx.bookingDate || tx.valueDate || tx.transactionDate;
+          if (!dateStr || typeof dateStr !== 'string') continue;
+          const [y, m, d] = dateStr.split('-').map(Number);
+          if (!y || !m || !d) continue;
+          const rawAmt = parseAmount(tx.transactionAmount?.amount);
+          if (rawAmt === 0) continue;
+          transactions.push({
+            bankTxId:  tx.transactionId || tx.internalTransactionId || `${accountId}_${dateStr}_${Math.abs(rawAmt)}`,
+            date:      `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`,
+            dateISO:   dateStr,
+            monthKey:  `${y}-${String(m).padStart(2,'0')}`,
+            label:     extractLabel(tx),
+            montant:   Math.abs(rawAmt).toFixed(2),
+            type:      rawAmt < 0 ? 'debit' : 'credit',
+            currency:  tx.transactionAmount?.currency || 'EUR',
+            pending:   !tx.bookingDate,
+            accountId, accountName: name, accountIban: iban
+          });
+        }
+
+        accounts.push({
+          accountId, iban, name,
+          balance: balanceStr,
+          balanceNum,
+          transactionsCount: transactions.length,
+          debitsCount: transactions.filter(t => t.type === 'debit').length,
+          transactions
+        });
+
+      } catch(e) { console.error(`[${accountId}] FATAL:`, e.message); }
+    }
+
+    if (accounts.length === 0) return res.status(500).json({ error: 'Impossible de récupérer les données bancaires.' });
+
+    const total = accounts.reduce((s, a) => s + a.transactions.length, 0);
+    console.log('OK — total tx:', total);
+    return res.status(200).json({ success: true, accounts, totalTransactions: total });
+
+  } catch(e) {
+    console.error('bank-sync FATAL:', e);
+    return res.status(500).json({ error: e.message || 'Erreur interne serveur' });
+  }
+}
