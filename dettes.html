@@ -709,6 +709,7 @@ const TYPE_CONFIG={
   decouvert:{icon:'💳',label:'Découvert',color:'#ef4444',bg:'#fef2f2'},
 };
 let _dettes=[], _filter='tous', _editId=null, _selectedType='emprunt', _charts={};
+var _pilotageItems = [];
 
 // ── STORAGE (Firebase uniquement) ──
 function load(){_dettes=_dettes||[];}
@@ -892,7 +893,7 @@ function renderAlertes(){
   const now=new Date();
   const soon=new Date(now); soon.setDate(soon.getDate()+7);
   const alerts=[];
-  _dettes.filter(d=>d.active!==false).forEach(d=>{
+  allDettes().filter(d=>d.active!==false).forEach(d=>{
     const ech=calcEcheancier(d);
     const paid=new Set(d.paiements||[]);
     ech.forEach(r=>{
@@ -917,7 +918,7 @@ function renderCalendar(){
   const now=new Date(); const yr=now.getFullYear();
   document.getElementById('calYear').textContent=yr;
   const monthly=Array(12).fill(0);
-  _dettes.filter(d=>d.active!==false).forEach(d=>{
+  allDettes().filter(d=>d.active!==false).forEach(d=>{
     const ech=calcEcheancier(d);
     ech.forEach(r=>{
       const dt=new Date(r.date);
@@ -946,7 +947,7 @@ function renderCharts(){
   // Solde restant dans le temps — projection mensuelle
   const now=new Date(); const yr=now.getFullYear();
   const monthly=Array(12).fill(0);
-  _dettes.filter(d=>d.active!==false).forEach(d=>{
+  allDettes().filter(d=>d.active!==false).forEach(d=>{
     const ech=calcEcheancier(d);
     const paid=new Set(d.paiements||[]);
     const montant=parseFloat(d.montant)||0;
@@ -968,7 +969,7 @@ function renderCharts(){
 
   // Répartition par type
   const byType={emprunt:0,fournisseur:0,leasing:0,decouvert:0};
-  _dettes.filter(d=>d.active!==false).forEach(d=>{byType[d.type]=(byType[d.type]||0)+getSoldeRestantPrecis(d);});
+  allDettes().filter(d=>d.active!==false).forEach(d=>{byType[d.type]=(byType[d.type]||0)+(parseFloat(d.montant)||0);});
   const types=Object.keys(byType).filter(t=>byType[t]>0);
   dc('cType');const ct=document.getElementById('cType');
   if(ct){
@@ -989,7 +990,7 @@ function setFilter(f,el){
 
 function renderDettes(){
   const grid=document.getElementById('detteGrid');
-  let list=_dettes;
+  let list=allDettes();
   if(_filter!=='tous')list=list.filter(d=>d.type===_filter);
   if(!list.length){
     grid.innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)"><div style="font-size:36px;margin-bottom:10px">🏦</div><div style="font-weight:700">Aucune dette${_filter!=='tous'?' de ce type':''}</div></div>`;
@@ -1016,6 +1017,7 @@ function renderDettes(){
           <div class="dette-nom">
             ${d.nom||'Sans nom'}
             <span class="badge badge-${d.type==='emprunt'?'blue':d.type==='fournisseur'?'orange':d.type==='leasing'?'purple':'red'}">${tc.label}</span>
+            ${d._virtual?'<span class="badge badge-blue" style="background:#eff6ff;color:#4f7ef8">📥 Pilotage</span>':''}
             ${hasBientot?'<span class="badge badge-orange">📅 Bientôt</span>':''}
             ${solde<=0?'<span class="badge badge-green">✅ Soldée</span>':''}
           </div>
@@ -1043,9 +1045,9 @@ function renderDettes(){
       <div class="dette-detail">
         <div class="dette-detail-body">
           <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap" id="det-btns-${d.id}">
-            <button class="btn btn-o btn-xs" onclick="editDette('${d.id}')">✏️ Modifier</button>
-            <button class="btn btn-d btn-xs" onclick="deleteDette('${d.id}')">🗑 Supprimer</button>
-            ${renderBulkBtn(d)}
+            ${d._virtual
+              ?'<button class="btn btn-o btn-xs" onclick="location.href=\'pilotage.html\'">📥 Gérer dans Pilotage →</button><span style="font-size:11px;color:var(--muted);align-self:center">Données synchronisées depuis le module Pilotage</span>'
+              :`<button class="btn btn-o btn-xs" onclick="editDette('${d.id}')">✏️ Modifier</button><button class="btn btn-d btn-xs" onclick="deleteDette('${d.id}')">🗑 Supprimer</button>${renderBulkBtn(d)}`}
           </div>
           ${renderDetailStats(d)}
           ${renderEcheancier(d)}
@@ -1103,11 +1105,15 @@ function renderEcheancier(d){
       <td>${fe(r.mensualite)}</td>
       <td style="color:${r.solde>0?'var(--text)':'var(--green)'}">${fe(r.solde)}</td>
       <td>
-        ${isManuallyPaid
+        ${d._virtual
+          ?(isPaid
+            ?`<span style="font-size:11px;color:var(--muted);font-style:italic">✅ Payé (auto)</span>`
+            :`<span style="font-size:11px;color:var(--muted)">—</span>`)
+          :(isManuallyPaid
           ?`<button class="ech-paid-btn" style="background:#f0fdf4;color:var(--green)" onclick="togglePaid('${d.id}',${r.idx})">✅ Payé</button>`
           :isPast
             ?`<span style="font-size:11px;color:var(--muted);font-style:italic">✅ Payé (auto)</span>`
-            :`<button class="ech-paid-btn" style="background:#f8faff;color:var(--blue2);border:1px solid var(--border)" onclick="togglePaid('${d.id}',${r.idx})">Marquer payé</button>`
+            :`<button class="ech-paid-btn" style="background:#f8faff;color:var(--blue2);border:1px solid var(--border)" onclick="togglePaid('${d.id}',${r.idx})">Marquer payé</button>`)
         }
       </td>
     </tr>`;
@@ -1542,11 +1548,79 @@ async function tryFirebase(){
   if(!window._uid||!window._getDoc)return;
   try{
     const snap=await window._getDoc(window._doc(window._db,'dettes',window._uid,'data','all'));
-    if(snap.exists()&&snap.data().list){_dettes=snap.data().list;renderAll();}
+    if(snap.exists()&&snap.data().list){_dettes=snap.data().list;}
     const u=window._auth?.currentUser;
     if(u){const n=u.displayName||u.email?.split('@')[0]||'';document.getElementById('uname').textContent=n;document.getElementById('av').textContent=n[0]?.toUpperCase()||'A';}
   }catch(e){}
+  // Charger les leasings + crédits depuis Pilotage (lecture seule)
+  await loadFromPilotage();
+  renderAll();
 }
+
+// Leasings et crédits lus depuis pilotage — virtuels, jamais sauvegardés dans dettes
+
+async function loadFromPilotage(){
+  _pilotageItems = [];
+  if(!window._uid||!window._getDocs)return;
+  try{
+    var snap=await window._getDocs(window._collection(window._db,'pilotage',window._uid,'months'));
+    var leasMap={}, credMap={};
+    snap.forEach(function(doc){
+      var d=doc.data();
+      (d.leasing||[]).forEach(function(l){
+        if(!l.fournisseur||!l.fournisseur.trim()||!parseFloat(l.montantHT))return;
+        var ref=l.fournisseur.trim();
+        if(!leasMap[ref]) leasMap[ref]=l;
+      });
+      (d.credits||[]).forEach(function(c){
+        if(c.ligneType&&c.ligneType!=='principal')return;
+        if(!c.fournisseur||!c.fournisseur.trim()||!parseFloat(c.montant))return;
+        var ref=c.fournisseur.trim();
+        if(!credMap[ref]) credMap[ref]=c;
+      });
+    });
+
+    Object.values(leasMap).forEach(function(l){
+      var loyer=parseFloat(l.montantHT)||0;
+      var duree=0;
+      if(l.dateDebut&&l.dateFin){
+        var d1=new Date(l.dateDebut+'-01'), d2=new Date(l.dateFin+'-01');
+        duree=Math.max(0, Math.round((d2-d1)/(1000*60*60*24*30.44)));
+      }
+      _pilotageItems.push({
+        id:'_pil_leas_'+l.fournisseur.trim().replace(/\s+/g,'_'),
+        type:'leasing', _virtual:true,
+        nom:(l.type?l.type+' — ':'')+l.fournisseur.trim(),
+        montant:duree>0?loyer*duree:loyer,
+        loyer:loyer, debut:l.dateDebut?l.dateDebut+'-01':'',
+        duree:duree, dureeLea:duree,
+        active:true, paiements:[]
+      });
+    });
+
+    Object.values(credMap).forEach(function(c){
+      var mensualite=parseFloat(c.montant)||0;
+      var taux=parseFloat(c.tauxInteret)||0;
+      var duree=0;
+      if(c.dateDebut&&c.dateFin){
+        var d1=new Date(c.dateDebut+'-01'), d2=new Date(c.dateFin+'-01');
+        duree=Math.max(0, Math.round((d2-d1)/(1000*60*60*24*30.44)));
+      }
+      _pilotageItems.push({
+        id:'_pil_cred_'+c.fournisseur.trim().replace(/\s+/g,'_'),
+        type:'emprunt', _virtual:true,
+        nom:(c.nom&&c.nom.trim())?c.nom.trim():c.fournisseur.trim(),
+        montant:duree>0?mensualite*duree:mensualite,
+        debut:c.dateDebut?c.dateDebut+'-01':'',
+        taux:taux, duree:duree, amort:c.amort||'constant',
+        active:true, paiements:[]
+      });
+    });
+  }catch(e){console.warn('loadFromPilotage:',e);}
+}
+
+// Toutes les dettes = saisies + virtuelles pilotage
+function allDettes(){ return _dettes.concat(_pilotageItems); }
 
 // ═══════════════════════════════════════════════════
 // ALPINE COMPONENT — reactive KPIs + tabs
@@ -1564,7 +1638,7 @@ function dettesApp() {
     // ── KPIs (réactifs via tick) ──
     get kpis() {
       this.tick;
-      var actives = _dettes.filter(function(d){ return d.active !== false; });
+      var actives = allDettes().filter(function(d){ return d.active !== false; });
       var total = actives.reduce(function(s,d){ return s + getSoldeRestantPrecis(d); }, 0);
       var mois = actives.reduce(function(s,d){ return s + getEchCeMois(d); }, 0);
       var trois = actives.reduce(function(s,d){ return s + getEch3Mois(d); }, 0);
@@ -1589,10 +1663,10 @@ function dettesApp() {
 <script type="module">
 import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import{getAuth,onAuthStateChanged,signOut}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import{getFirestore,doc,setDoc,getDoc}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import{getFirestore,doc,setDoc,getDoc,collection,getDocs}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 const app=initializeApp({apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",authDomain:"altiora-70599.firebaseapp.com",projectId:"altiora-70599",storageBucket:"altiora-70599.firebasestorage.app",messagingSenderId:"120905555746",appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"});
 const auth=getAuth(app),db=getFirestore(app);
-window._auth=auth;window._db=db;window._doc=doc;window._setDoc=setDoc;window._getDoc=getDoc;window._signOut=signOut;
+window._auth=auth;window._db=db;window._doc=doc;window._setDoc=setDoc;window._getDoc=getDoc;window._collection=collection;window._getDocs=getDocs;window._signOut=signOut;
 onAuthStateChanged(auth,user=>{
   if(!user){location.href='index.html';return;}
   window._uid=user.uid;
