@@ -1784,18 +1784,12 @@ function openCreditScopeUpdate(i) {
 }
 function openCreditScopeDel(i) {
   var r = _data.credits[i];
-  // Lignes sans fournisseur ou sans dates : suppression directe (pas de scope multi-mois)
-  if (!r || (!r.fournisseur || !r.fournisseur.trim())) {
-    _data.credits.splice(i, 1);
-    if (_data.credits.length === 0) _data.credits.push({fournisseur:'', nom:'', ligneType:'principal', montant:'', tvaRate:20, tvaAuto:false, tauxInteret:'', pointe:'Non', dateDebut:'', dateFin:'', amort:'constant'});
-    refreshCredits();
-    scheduleSave();
-    showToast('Ligne supprimée', 'success');
-    return;
-  }
+  if (!r) return;
   openScopeModal({
     type: 'delete', dataKey: 'credits', rowIdx: i,
     fournisseur: r.fournisseur || '',
+    nom: r.nom || '',
+    montant: r.montant || '',
     ligneType: r.ligneType || 'principal',
     tbodyId: 'cred-tbody', renderFn: null
   });
@@ -1823,15 +1817,18 @@ function openScopeModal(action) {
   var desc  = document.getElementById('scope-desc');
   var priceWrap = document.getElementById('scope-price-wrap');
   var confirmBtn = document.getElementById('scope-confirm-btn');
+  var lineLabel = action.fournisseur && action.fournisseur.trim()
+    ? action.fournisseur
+    : (action.nom && action.nom.trim() ? action.nom : 'cette ligne');
   if (action.type === 'delete') {
     title.textContent = '🗑 Supprimer cette ligne';
-    desc.textContent  = 'Supprimer "' + (action.fournisseur||action.lineKey||'cette ligne') + '" sur :';
+    desc.textContent  = 'Supprimer "' + lineLabel + '" sur :';
     priceWrap.style.display = 'none';
     confirmBtn.textContent = '🗑 Supprimer';
     confirmBtn.className = 'btn btn-danger';
   } else {
     title.textContent = '✏️ Modifier le montant';
-    desc.textContent  = 'Appliquer le nouveau prix sur "' + (action.fournisseur||'cette ligne') + '" sur :';
+    desc.textContent  = 'Appliquer le nouveau prix sur "' + lineLabel + '" sur :';
     priceWrap.style.display = 'block';
     document.getElementById('scope-price-input').value = action.currentVal || '';
     confirmBtn.textContent = '✏️ Appliquer';
@@ -1908,7 +1905,17 @@ async function executeScopeAction() {
       if (!arr) continue;
       // Trouver la ligne par fournisseur + type ou lineKey
       var idx2 = arr.findIndex(function(r) {
-        if (a.dataKey === 'credits') return r.fournisseur === a.fournisseur && r.ligneType === a.ligneType;
+        if (a.dataKey === 'credits') {
+          // Match par fournisseur si renseigné, sinon par montant+nom
+          if (a.fournisseur && a.fournisseur.trim()) {
+            return r.fournisseur === a.fournisseur && (r.ligneType||'principal') === (a.ligneType||'principal');
+          }
+          // Ligne sans fournisseur : matcher par montant + nom
+          return (!r.fournisseur || !r.fournisseur.trim())
+            && (r.ligneType||'principal') === (a.ligneType||'principal')
+            && String(r.montant||'') === String(a.montant||'')
+            && (r.nom||'') === (a.nom||'');
+        }
         return r.fournisseur === a.fournisseur && (r.type||'') === (a.lineType||'');
       });
       if (idx2 < 0) continue;
@@ -1935,7 +1942,15 @@ async function executeScopeAction() {
   if (inCurrentMonth) {
     var arr2 = _data[a.dataKey];
     var idx3 = arr2 ? arr2.findIndex(function(r){
-      if (a.dataKey==='credits') return r.fournisseur===a.fournisseur && r.ligneType===a.ligneType;
+      if (a.dataKey==='credits') {
+        if (a.fournisseur && a.fournisseur.trim()) {
+          return r.fournisseur===a.fournisseur && (r.ligneType||'principal')===(a.ligneType||'principal');
+        }
+        return (!r.fournisseur || !r.fournisseur.trim())
+          && (r.ligneType||'principal')===(a.ligneType||'principal')
+          && String(r.montant||'')===String(a.montant||'')
+          && (r.nom||'')===(a.nom||'');
+      }
       return r.fournisseur===a.fournisseur && (r.type||'')===(a.lineType||'');
     }) : -1;
     if (idx3 >= 0) {
