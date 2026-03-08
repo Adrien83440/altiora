@@ -1039,6 +1039,19 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 <script>
 // ═══ CALCULS (fonctions pures, réutilisées dans Alpine) ═══
 
+function _convertQty(val, unitFrom, unitTo){
+  if(!unitFrom||!unitTo||unitFrom===unitTo) return val;
+  var conv={'g_kg':0.001,'kg_g':1000,'ml_l':0.001,'l_ml':1000};
+  var key=unitFrom+'_'+unitTo;
+  return conv[key]!==undefined ? val*conv[key] : val;
+}
+
+function _ingrCost(r){
+  var qte=parseFloat(r.qte)||0, pu=parseFloat(r.prixUnitaire)||0, colisQte=parseFloat(r.colisQte)||0;
+  if(colisQte>0 && pu>0){ return (_convertQty(qte, r.unite||'', r.colisUnite||'')/colisQte)*pu; }
+  return qte*pu;
+}
+
 function _calcMB(p) {
   if(!p) return {cv:0, mb:0, txMB:0};
   var cv = (parseFloat(p.mp)||0) + (parseFloat(p.mo)||0) + (parseFloat(p.emb)||0) + (parseFloat(p.liv)||0);
@@ -1122,7 +1135,7 @@ async function loadProducts() {
     snap.forEach(function(d) {
       var p = d.data();
       var qte = parseFloat(p.quantiteProduites)||1;
-      var mp = (p.ingredients||[]).reduce(function(s,r){var q=parseFloat(r.qte)||0,pu=parseFloat(r.prixUnitaire)||0,colis=parseFloat(r.colisQte)||0;return s+(colis>0?(q/colis)*pu:q*pu);},0)/qte;
+      var mp = (p.ingredients||[]).reduce(function(s,r){return s+_ingrCost(r);},0)/qte;
       var mo = (p.mainOeuvre||[]).reduce(function(s,r){return (parseFloat(r.heures)||0)*(parseFloat(r.tauxHoraire)||0)+s;},0)/qte;
       var emb = (p.emballages||[]).reduce(function(s,r){return (parseFloat(r.qte)||0)*(parseFloat(r.prixUnit)||0)+s;},0)/qte;
       var liv = (p.livraison||[]).reduce(function(s,r){return s+(parseFloat(r.montant)||0);},0)/qte;
