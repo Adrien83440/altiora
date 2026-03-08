@@ -6,6 +6,7 @@
   <title>ALTEORE — Marge brute & nette</title>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
@@ -509,12 +510,16 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 
 
     .nav-section-label{font-size:10px;font-weight:700;color:rgba(255,255,255,.28);letter-spacing:1px;text-transform:uppercase;padding:12px 20px 4px}
+    [x-cloak]{display:none!important}
 </style>
+
 </head>
 <body>
-  <!-- SIDEBAR -->
-<!-- MAIN -->
-<div class="main">
+  <!-- SIDEBAR (injecté par nav.js) -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<!--  ALPINE APP                                            -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<div class="main" x-data="margesApp()" x-cloak>
   <div class="topbar">
     <div class="topbar-left">
       <h1>Marge brute & nette</h1>
@@ -522,121 +527,485 @@ html, body { overflow-x: hidden; max-width: 100vw; }
     </div>
     <div class="topbar-right">
       <button class="btn btn-outline btn-sm" onclick="window.location.href='cout-revient.html'">🧮 Coût de revient</button>
-      <button class="btn btn-primary btn-sm" onclick="openNewProductModal()">+ Ajouter un produit</button>
+      <button class="btn btn-primary btn-sm" @click="openModal()">+ Ajouter un produit</button>
     </div>
   </div>
 
   <div class="content">
-    <!-- LEFT -->
+    <!-- ════════ LEFT PANEL — LISTE PRODUITS (x-for) ════════ -->
     <div class="left-panel">
       <div class="panel-card" style="flex:1">
         <div class="panel-head">
           <div class="panel-title">📦 Produits</div>
           <div style="display:flex;gap:6px;align-items:center">
-            <button class="btn btn-outline btn-xs" id="select-all-btn" onclick="toggleSelectAll()" title="Tout sélectionner" style="font-size:14px;padding:2px 7px">☐</button>
-            <button class="btn btn-primary btn-xs" onclick="openNewProductModal()">+ Nouveau</button>
+            <button class="btn btn-outline btn-xs" @click="toggleSelectAll()" title="Tout sélectionner" style="font-size:14px;padding:2px 7px" x-text="allSelected ? '☑' : '☐'"></button>
+            <button class="btn btn-primary btn-xs" @click="openModal()">+ Nouveau</button>
           </div>
         </div>
         <div class="search-wrap">
-          <input class="search-input" placeholder="🔍 Rechercher..." oninput="filterProducts(this.value)"/>
+          <input class="search-input" placeholder="🔍 Rechercher..." x-model="search"/>
         </div>
-        <div id="productList"><div class="loader"><div class="spin"></div></div></div>
-        <div class="bulk-bar hidden" id="bulkBar">
-          <span id="bulk-count">0 sélectionné(s)</span>
+
+        <!-- Loader -->
+        <div x-show="loading" class="loader"><div class="spin"></div></div>
+
+        <!-- Liste vide -->
+        <div x-show="!loading && filteredProducts.length === 0" style="padding:24px;text-align:center;color:var(--muted);font-size:12px">
+          <div style="font-size:32px;margin-bottom:8px">📦</div>
+          Aucun produit.<br>Créez-en un ou saisissez dans<br>le Coût de revient.
+        </div>
+
+        <!-- Liste produits -->
+        <template x-for="prod in filteredProducts" :key="prod.id">
+          <div class="product-item"
+               :class="{ active: currentId === prod.id, selected: selected.includes(prod.id) }"
+               @click="if(!$event.target.classList.contains('product-cb')) currentId = prod.id">
+            <input type="checkbox" class="product-cb"
+                   :checked="selected.includes(prod.id)"
+                   @click.stop="toggleSelect(prod.id)"/>
+            <span class="product-emoji" x-text="prod.emoji || '📦'"></span>
+            <div class="product-info">
+              <div class="product-name" x-text="prod.nom"></div>
+              <div class="product-cat">
+                <span x-text="prod.categorie || '—'"></span>
+                <span x-show="prod.source==='cout-revient'" style="color:#4f7ef8;font-size:9px;font-weight:700"> ●CR</span>
+              </div>
+            </div>
+            <div class="product-mb" :class="mbCls(prod)" x-text="prod.pv > 0 ? calcMB(prod).txMB.toFixed(1) + '%' : ''"></div>
+          </div>
+        </template>
+
+        <!-- Barre sélection multiple -->
+        <div class="bulk-bar" x-show="selected.length > 0" x-transition>
+          <span x-text="selected.length + ' sélectionné(s)'"></span>
           <div style="display:flex;gap:6px">
-            <button class="btn-bulk-cancel" onclick="clearSelection()">✕</button>
-            <button class="btn-bulk-del" onclick="deleteSelected()">🗑 Supprimer</button>
+            <button class="btn-bulk-cancel" @click="selected = []">✕</button>
+            <button class="btn-bulk-del" @click="deleteSelected()">🗑 Supprimer</button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- RIGHT -->
-    <div class="right-panel" id="rightPanel">
-      <div class="empty-state">
+    <!-- ════════ RIGHT PANEL ════════ -->
+    <div class="right-panel">
+
+      <!-- EMPTY STATE -->
+      <div x-show="!p" class="empty-state">
         <div class="empty-icon">📊</div>
         <h3 style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px">Sélectionnez un produit</h3>
         <p style="font-size:13px;line-height:1.7;max-width:320px">Choisissez un produit pour analyser ses marges brute et nette, configurer votre clé de répartition et simuler des scénarios.</p>
-        <button class="btn btn-primary" style="margin-top:16px" onclick="openNewProductModal()">+ Créer un produit</button>
+        <button class="btn btn-primary" style="margin-top:16px" @click="openModal()">+ Créer un produit</button>
       </div>
-    </div>
-  </div>
-</div>
 
-<!-- MODAL NOUVEAU PRODUIT -->
-<div class="modal-overlay" id="newProductModal">
+      <!-- ════════ PRODUCT DETAIL (réactif via Alpine) ════════ -->
+      <template x-if="p">
+        <div>
+
+        <!-- HEADER + KPIs -->
+        <div class="marge-header">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <div>
+              <div class="marge-product-name" x-text="(p.emoji||'📦') + ' ' + p.nom"></div>
+              <div class="marge-meta">
+                <span class="meta-badge" x-text="p.categorie || 'Sans catégorie'"></span>
+                <span x-show="p.source==='cout-revient'" class="meta-badge" style="background:#f0fdf4;color:#10b981">📥 Importé du Coût de revient</span>
+                <span style="font-size:12px;color:var(--muted)">PV : <b x-text="fmtE(p.pv)"></b> HT · Qté : <b x-text="p.qte||1"></b> unités/période</span>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-outline btn-sm" @click="openModal(currentId)">✏️ Modifier</button>
+              <button class="btn btn-danger btn-sm" @click="deleteProduct(currentId)">🗑</button>
+            </div>
+          </div>
+
+          <!-- KPI ROW -->
+          <div class="kpi-row">
+            <div class="kpi-box blue">
+              <div class="kpi-label">Prix vente <span style="font-size:9px;background:#e0f2fe;color:#0369a1;padding:1px 5px;border-radius:4px;font-weight:700">HT</span></div>
+              <div class="kpi-val blue" x-text="fmtE(p.pv)"></div>
+              <div class="kpi-sub">Par unité</div>
+            </div>
+            <div class="kpi-box" :class="calc.txMB>=30?'green':calc.txMB>=10?'orange':'red'">
+              <div class="kpi-label">Marge brute <span style="font-size:9px;background:#dcfce7;color:#166534;padding:1px 5px;border-radius:4px;font-weight:700">HT</span></div>
+              <div class="kpi-val" :class="calc.txMB>=30?'pos':calc.txMB>=10?'':'neg'" x-text="fmtE(calc.mb)"></div>
+              <div class="kpi-sub" x-text="calc.txMB.toFixed(1) + '% du PV'"></div>
+            </div>
+            <div class="kpi-box" :class="calc.txMN>=20?'green':calc.txMN>=5?'orange':'red'">
+              <div class="kpi-label">Marge nette <span style="font-size:9px;background:#dcfce7;color:#166534;padding:1px 5px;border-radius:4px;font-weight:700">HT</span></div>
+              <div class="kpi-val" :class="calc.txMN>=20?'pos':calc.txMN>=5?'':'neg'" x-text="fmtE(calc.mn)"></div>
+              <div class="kpi-sub" x-text="calc.txMN.toFixed(1) + '% du PV'"></div>
+            </div>
+            <div class="kpi-box">
+              <div class="kpi-label">Coûts variables <span style="font-size:9px;background:#fef9c3;color:#854d0e;padding:1px 5px;border-radius:4px;font-weight:700">HT</span></div>
+              <div class="kpi-val" x-text="fmtE(calc.cv)"></div>
+              <div class="kpi-sub" x-text="p.pv>0 ? (calc.cv/p.pv*100).toFixed(1)+'% du PV' : '—'"></div>
+            </div>
+            <div class="kpi-box purple">
+              <div class="kpi-label">CF imputées <span style="font-size:9px;background:#f3e8ff;color:#6b21a8;padding:1px 5px;border-radius:4px;font-weight:700">HT</span></div>
+              <div class="kpi-val" x-text="fmtE(calc.cfImpute)"></div>
+              <div class="kpi-sub">Par unité (clé répart.)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DÉCOMPOSITION -->
+        <div class="decomp-grid">
+          <!-- Marge Brute -->
+          <div class="decomp-card">
+            <div class="decomp-head">
+              <div class="decomp-title">🟢 Marge Brute <span style="font-size:10px;color:var(--muted);font-weight:400;margin-left:4px">= PV − Coûts variables</span></div>
+              <div class="decomp-total" x-text="fmtE(calc.mb) + ' (' + calc.txMB.toFixed(1) + '%)'"></div>
+            </div>
+            <div class="decomp-body">
+              <template x-for="row in decompBrute" :key="row.label">
+                <div>
+                  <div class="decomp-row">
+                    <div class="decomp-label"><span class="decomp-dot" :style="'background:'+row.color"></span><span x-text="row.label"></span></div>
+                    <div class="decomp-val" :style="'color:'+(row.isRevenu?'var(--green)':'var(--red)')">
+                      <span x-text="(row.isRevenu?'+':'-') + fmtE(row.val)"></span>
+                      <span class="decomp-pct" x-text="'(' + (p.pv>0?(row.val/p.pv*100).toFixed(1):0) + '%)'"></span>
+                    </div>
+                  </div>
+                  <div class="decomp-bar-wrap"><div class="decomp-bar-fill" :style="'width:'+Math.min(p.pv>0?row.val/p.pv*100:0,100)+'%;background:'+row.color"></div></div>
+                </div>
+              </template>
+              <div style="margin-top:12px;padding-top:10px;border-top:2px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:12px;font-weight:700">= Marge brute</span>
+                <span style="font-size:16px;font-weight:800" :style="'color:'+(calc.txMB>=30?'var(--green)':calc.txMB>=10?'var(--orange)':'var(--red)')" x-text="fmtE(calc.mb) + ' (' + calc.txMB.toFixed(1) + '%)'"></span>
+              </div>
+            </div>
+          </div>
+          <!-- Marge Nette -->
+          <div class="decomp-card">
+            <div class="decomp-head">
+              <div class="decomp-title">🔵 Marge Nette <span style="font-size:10px;color:var(--muted);font-weight:400;margin-left:4px">= MB − Charges fixes imputées</span></div>
+              <div class="decomp-total" x-text="fmtE(calc.mn) + ' (' + calc.txMN.toFixed(1) + '%)'"></div>
+            </div>
+            <div class="decomp-body">
+              <div class="decomp-row">
+                <div class="decomp-label"><span class="decomp-dot" style="background:#10b981"></span>Marge brute</div>
+                <div class="decomp-val" style="color:var(--green)" x-text="'+' + fmtE(calc.mb)"></div>
+              </div>
+              <div class="decomp-bar-wrap"><div class="decomp-bar-fill" :style="'width:'+Math.min(p.pv>0?calc.mb/p.pv*100:0,100)+'%;background:#10b981'"></div></div>
+              <div class="decomp-row" style="margin-top:10px">
+                <div class="decomp-label"><span class="decomp-dot" style="background:#6366f1"></span>Charges fixes imputées</div>
+                <div class="decomp-val" style="color:var(--red)" x-text="'-' + fmtE(calc.cfImpute)"></div>
+              </div>
+              <div class="decomp-bar-wrap"><div class="decomp-bar-fill" :style="'width:'+Math.min(p.pv>0?calc.cfImpute/p.pv*100:0,100)+'%;background:#6366f1'"></div></div>
+              <div style="margin-top:8px;padding:8px 10px;background:var(--purple-light);border-radius:8px;font-size:11px;color:var(--purple)">
+                🔑 Clé : <b x-text="cleLabels[p.cle.type][0]"></b> · Produit : <b x-text="p.cle.produit || '?'"></b> / Total : <b x-text="p.cle.total || '?'"></b> = <b x-text="p.cle.total > 0 ? ((p.cle.produit||0)/(p.cle.total||1)*100).toFixed(1)+'%' : '—'"></b>
+              </div>
+              <div style="margin-top:12px;padding-top:10px;border-top:2px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:12px;font-weight:700">= Marge nette</span>
+                <span style="font-size:16px;font-weight:800" :style="'color:'+(calc.txMN>=20?'var(--green)':calc.txMN>=5?'var(--orange)':'var(--red)')" x-text="fmtE(calc.mn) + ' (' + calc.txMN.toFixed(1) + '%)'"></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- BARRE VISUELLE -->
+        <div class="marge-viz">
+          <div class="viz-title">📊 Décomposition visuelle du prix de vente</div>
+          <div class="viz-bar-wrap">
+            <div class="viz-bar" x-show="p.pv > 0">
+              <div class="viz-seg" :style="'width:'+(p.mp/p.pv*100).toFixed(1)+'%;background:#ef4444'" x-text="p.mp/p.pv>0.05?'MP':''"></div>
+              <div class="viz-seg" :style="'width:'+(p.mo/p.pv*100).toFixed(1)+'%;background:#f59e0b'" x-text="p.mo/p.pv>0.05?'MO':''"></div>
+              <div class="viz-seg" :style="'width:'+(p.emb/p.pv*100).toFixed(1)+'%;background:#14b8a6'" x-text="p.emb/p.pv>0.05?'Emb.':''"></div>
+              <div class="viz-seg" :style="'width:'+(p.liv/p.pv*100).toFixed(1)+'%;background:#8b5cf6'" x-text="p.liv/p.pv>0.05?'Liv.':''"></div>
+              <div class="viz-seg" :style="'width:'+(calc.cfImpute/p.pv*100).toFixed(1)+'%;background:#6366f1'">CF</div>
+              <div class="viz-seg" :style="'flex:1;background:'+(calc.mn>=0?'#10b981':'#ef4444')" x-text="calc.mn>=0?'✓ Marge':'Perte'"></div>
+            </div>
+            <div class="viz-bar" x-show="p.pv <= 0"><div class="viz-seg" style="flex:1;background:#e2e8f0;color:var(--muted)">Saisissez un prix de vente</div></div>
+          </div>
+          <div class="viz-legend">
+            <div class="viz-leg-item"><div class="viz-leg-dot" style="background:#ef4444"></div>Matières premières</div>
+            <div class="viz-leg-item"><div class="viz-leg-dot" style="background:#f59e0b"></div>Main d'œuvre</div>
+            <div class="viz-leg-item"><div class="viz-leg-dot" style="background:#14b8a6"></div>Emballages</div>
+            <div class="viz-leg-item"><div class="viz-leg-dot" style="background:#8b5cf6"></div>Livraison</div>
+            <div class="viz-leg-item"><div class="viz-leg-dot" style="background:#6366f1"></div>Charges fixes</div>
+            <div class="viz-leg-item"><div class="viz-leg-dot" style="background:#10b981"></div>Marge nette</div>
+          </div>
+        </div>
+
+        <!-- CAMEMBERT -->
+        <div class="marge-viz" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:center">
+          <div>
+            <div class="viz-title">🥧 Répartition du prix de vente</div>
+            <div style="position:relative;height:200px"><canvas x-ref="chartCamembert"></canvas></div>
+          </div>
+          <div>
+            <div class="viz-title" style="margin-bottom:12px">📋 Détail par poste</div>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <template x-for="d in chartParts" :key="d.label">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-radius:6px;background:#f8faff">
+                  <div style="display:flex;align-items:center;gap:8px">
+                    <div style="width:10px;height:10px;border-radius:3px;flex-shrink:0" :style="'background:'+d.color"></div>
+                    <span style="font-size:12px;color:var(--text)" x-text="d.label"></span>
+                  </div>
+                  <span style="font-size:12px;font-weight:700;color:var(--text)"><span x-text="fmtE(d.val)"></span> <span style="font-size:10px;color:var(--muted)" x-text="'(' + d.pct + '%)'"></span></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <!-- CLÉ DE RÉPARTITION -->
+        <div class="cle-card">
+          <div class="cle-title">🔑 Clé de répartition des charges fixes <span style="font-size:11px;font-weight:400;color:var(--muted)">— Comment allouer les charges fixes à ce produit ?</span></div>
+          <div class="cle-grid">
+            <template x-for="k in ['temps','superficie','volume','ca']" :key="k">
+              <button class="cle-btn" :class="{ active: p.cle.type === k }" @click="p.cle.type = k">
+                <div class="cle-icon" x-text="{ temps:'⏱', superficie:'📐', volume:'📦', ca:'💰' }[k]"></div>
+                <div class="cle-label" x-text="{ temps:'Temps', superficie:'Superficie', volume:'Volume', ca:'CA' }[k]"></div>
+              </button>
+            </template>
+          </div>
+          <div class="cle-inputs">
+            <div class="cle-field">
+              <label x-text="cleLabels[p.cle.type][1]"></label>
+              <input class="cle-input" type="number" placeholder="Ex: 120" x-model.number="p.cle.produit"/>
+            </div>
+            <div class="cle-field">
+              <label x-text="cleLabels[p.cle.type][2]"></label>
+              <input class="cle-input" type="number" placeholder="Ex: 800" x-model.number="p.cle.total"/>
+            </div>
+            <div class="cle-field">
+              <label>Total charges fixes (€)</label>
+              <input class="cle-input" type="number" placeholder="Ex: 5000" x-model.number="p.cfTotal"/>
+            </div>
+          </div>
+          <div class="cle-result" x-html="p.cle.total>0 && p.cle.produit>0 ? '✅ Quote-part : <b>'+((p.cle.produit||0)/(p.cle.total||1)*100).toFixed(1)+'%</b> → <b>'+fmtE(calc.cfImpute)+'</b> de charges fixes imputées par unité' : '⚠️ Renseignez les valeurs pour calculer la quote-part de charges fixes'"></div>
+        </div>
+
+        <!-- SIMULATEUR -->
+        <div class="sim-card">
+          <div class="sim-head">
+            <div class="sim-title">🔮 Simulateur de scénarios <span style="font-size:11px;opacity:0.7;font-weight:400">— Testez l'impact sur vos marges</span></div>
+            <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3)" @click="resetSim()">↺ Réinitialiser</button>
+          </div>
+          <div class="sim-body">
+            <div class="sim-levers">
+
+              <!-- LEVER PV -->
+              <div class="sim-lever">
+                <div class="sim-lever-label">💰 Prix de vente <span class="sim-lever-tag">HT</span></div>
+                <div class="sim-fields-row">
+                  <div class="sim-field-group">
+                    <div class="sim-field-lbl">Nouveau prix HT</div>
+                    <div class="sim-field-wrap">
+                      <input type="number" class="sim-field-input" min="0" step="0.1" :value="simEur('pv').toFixed(2)" @input="setSimFromEur('pv',$event.target.value)" :placeholder="p.pv||'0'"/>
+                      <span class="sim-field-unit">€</span>
+                    </div>
+                  </div>
+                  <div class="sim-sep">ou</div>
+                  <div class="sim-field-group">
+                    <div class="sim-field-lbl">Augmentation</div>
+                    <div class="sim-field-wrap">
+                      <input type="number" class="sim-field-input" min="0" max="100" step="1" x-model.number="p.sim.pv" placeholder="0"/>
+                      <span class="sim-field-unit">%</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="sim-slider-wrap">
+                  <input type="range" class="sim-slider" min="0" max="100" step="1" x-model.number="p.sim.pv"/>
+                  <div class="sim-range-labels"><span>0%</span><span>+100%</span></div>
+                </div>
+              </div>
+
+              <!-- LEVER MP -->
+              <div class="sim-lever">
+                <div class="sim-lever-label">🧪 Matières premières <span class="sim-lever-tag">HT</span></div>
+                <div class="sim-fields-row">
+                  <div class="sim-field-group">
+                    <div class="sim-field-lbl">Nouveau coût HT</div>
+                    <div class="sim-field-wrap">
+                      <input type="number" class="sim-field-input" min="0" step="0.01" :value="simEur('mp').toFixed(2)" @input="setSimFromEur('mp',$event.target.value)" :placeholder="p.mp||'0'"/>
+                      <span class="sim-field-unit">€</span>
+                    </div>
+                  </div>
+                  <div class="sim-sep">ou</div>
+                  <div class="sim-field-group">
+                    <div class="sim-field-lbl">Réduction</div>
+                    <div class="sim-field-wrap">
+                      <input type="number" class="sim-field-input" min="0" max="100" step="1" x-model.number="p.sim.mp" placeholder="0"/>
+                      <span class="sim-field-unit">%</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="sim-slider-wrap">
+                  <input type="range" class="sim-slider" min="0" max="100" step="1" x-model.number="p.sim.mp"/>
+                  <div class="sim-range-labels"><span>0%</span><span>−100%</span></div>
+                </div>
+              </div>
+
+              <!-- LEVER MO -->
+              <div class="sim-lever">
+                <div class="sim-lever-label">👷 Main d'œuvre <span class="sim-lever-tag">HT</span></div>
+                <div class="sim-fields-row">
+                  <div class="sim-field-group">
+                    <div class="sim-field-lbl">Nouveau coût HT</div>
+                    <div class="sim-field-wrap">
+                      <input type="number" class="sim-field-input" min="0" step="0.01" :value="simEur('mo').toFixed(2)" @input="setSimFromEur('mo',$event.target.value)" :placeholder="p.mo||'0'"/>
+                      <span class="sim-field-unit">€</span>
+                    </div>
+                  </div>
+                  <div class="sim-sep">ou</div>
+                  <div class="sim-field-group">
+                    <div class="sim-field-lbl">Réduction</div>
+                    <div class="sim-field-wrap">
+                      <input type="number" class="sim-field-input" min="0" max="100" step="1" x-model.number="p.sim.mo" placeholder="0"/>
+                      <span class="sim-field-unit">%</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="sim-slider-wrap">
+                  <input type="range" class="sim-slider" min="0" max="100" step="1" x-model.number="p.sim.mo"/>
+                  <div class="sim-range-labels"><span>0%</span><span>−100%</span></div>
+                </div>
+              </div>
+
+              <!-- LEVER CF -->
+              <div class="sim-lever">
+                <div class="sim-lever-label">🏗️ Charges fixes <span class="sim-lever-tag">HT</span></div>
+                <div class="sim-fields-row">
+                  <div class="sim-field-group">
+                    <div class="sim-field-lbl">Nouveau total HT</div>
+                    <div class="sim-field-wrap">
+                      <input type="number" class="sim-field-input" min="0" step="1" :value="simEur('cf').toFixed(2)" @input="setSimFromEur('cf',$event.target.value)" :placeholder="p.cfTotal||'0'"/>
+                      <span class="sim-field-unit">€</span>
+                    </div>
+                  </div>
+                  <div class="sim-sep">ou</div>
+                  <div class="sim-field-group">
+                    <div class="sim-field-lbl">Réduction</div>
+                    <div class="sim-field-wrap">
+                      <input type="number" class="sim-field-input" min="0" max="100" step="1" x-model.number="p.sim.cf" placeholder="0"/>
+                      <span class="sim-field-unit">%</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="sim-slider-wrap">
+                  <input type="range" class="sim-slider" min="0" max="100" step="1" x-model.number="p.sim.cf"/>
+                  <div class="sim-range-labels"><span>0%</span><span>−100%</span></div>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- LEVER VOLUME -->
+            <div class="sim-lever-full">
+              <div class="sim-lever-label">📈 Volume de ventes (unités / période) <span class="sim-lever-tag">HT</span></div>
+              <div class="sim-fields-row" style="margin-bottom:10px">
+                <div class="sim-field-group">
+                  <div class="sim-field-lbl">Nombre d'unités</div>
+                  <div class="sim-field-wrap" style="min-width:100px">
+                    <input type="number" class="sim-field-input" style="width:70px" min="1" step="1" x-model.number="p.sim.vol" placeholder="1"/>
+                    <span class="sim-field-unit">unités</span>
+                  </div>
+                </div>
+                <div style="flex:1;margin-top:18px">
+                  <input type="range" class="sim-slider" min="1" :max="Math.max((p.qte||1)*10,500)" step="1" x-model.number="p.sim.vol" style="width:100%"/>
+                  <div class="sim-range-labels"><span>1</span><span x-text="Math.max((p.qte||1)*10,500)+' unités'"></span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- RÉSULTAT SIMULATION -->
+            <div class="sim-result">
+              <div class="sim-result-title">📊 Résultat simulé vs situation actuelle</div>
+              <div class="sim-result-grid">
+                <template x-for="box in simBoxes" :key="box.label">
+                  <div class="sim-res-box">
+                    <div class="sim-res-label" x-text="box.label"></div>
+                    <div class="sim-res-current" :style="box.cur<0?'color:#f87171':''" x-text="fmtE(box.cur) + (box.curPct !== undefined ? ' (' + box.curPct.toFixed(1) + '%)' : '')"></div>
+                    <div class="sim-res-new" :class="box.sim>=0?'pos':'neg'" x-text="fmtE(box.sim) + (box.simPct !== undefined ? ' (' + box.simPct.toFixed(1) + '%)' : '')"></div>
+                    <div class="sim-res-delta" :class="(box.sim-box.cur)>=0?'pos':'neg'" x-text="((box.sim-box.cur)>=0?'▲':'▼') + ' ' + fmtE(Math.abs(box.sim-box.cur))"></div>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <!-- TABLEAU COMPARATIF -->
+            <div style="margin-top:16px;border:1px solid rgba(255,255,255,0.1);border-radius:10px;overflow:hidden">
+              <table class="comp-table">
+                <thead><tr>
+                  <th>Indicateur</th><th>Situation actuelle</th><th>Simulation</th><th>Écart</th><th>Évolution</th>
+                </tr></thead>
+                <tbody>
+                  <template x-for="row in compRows" :key="row.label">
+                    <tr>
+                      <td style="font-weight:600" x-text="row.label"></td>
+                      <td :class="row.cur<0?'td-neg':''" x-text="row.isPct ? row.cur.toFixed(1)+'%' : fmtE(row.cur)"></td>
+                      <td :class="row.sim<0?'td-neg':(deltaGood(row)?'td-pos':'td-neg')" x-text="row.isPct ? row.sim.toFixed(1)+'%' : fmtE(row.sim)"></td>
+                      <td :class="deltaGood(row)?'td-pos':'td-neg'" x-text="(row.sim-row.cur>=0?'+':'') + (row.isPct ? (row.sim-row.cur).toFixed(1)+'%' : fmtE(row.sim-row.cur))"></td>
+                      <td :class="deltaGood(row)?'td-arrow-pos':'td-arrow-neg'" x-text="deltaGood(row)?'▲ Mieux':'▼ Moins bien'"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- SAUVEGARDE -->
+        <div style="display:flex;justify-content:flex-end;gap:10px;padding-bottom:20px">
+          <button class="btn btn-success" @click="saveProduct()">💾 Sauvegarder les paramètres</button>
+        </div>
+
+        </div><!-- fin template x-if="p" -->
+      </template>
+
+    </div><!-- fin right-panel -->
+  </div><!-- fin content -->
+
+<!-- MODAL NOUVEAU / EDIT PRODUIT -->
+<div class="modal-overlay" :class="{ show: showModal }" @click.self="showModal = false">
   <div class="modal">
     <div class="modal-head">
-      <h3 id="modal-title">➕ Nouveau produit / service</h3>
-      <button class="modal-close" onclick="closeModal()">✕</button>
+      <h3 x-text="modalEdit ? '✏️ Modifier : ' + (modal.nom||'') : '➕ Nouveau produit / service'"></h3>
+      <button class="modal-close" @click="showModal = false">✕</button>
     </div>
     <div class="modal-body">
       <div class="modal-row">
-        <div class="modal-field">
-          <label class="modal-label">Nom *</label>
-          <input class="modal-input" id="mn-nom" placeholder="Ex: Tarte citron, Consulting..."/>
-        </div>
-        <div class="modal-field">
-          <label class="modal-label">Catégorie</label>
-          <input class="modal-input" id="mn-cat" placeholder="Pâtisseries, Services..."/>
-        </div>
+        <div class="modal-field"><label class="modal-label">Nom *</label><input class="modal-input" x-model="modal.nom" placeholder="Ex: Tarte citron, Consulting..."/></div>
+        <div class="modal-field"><label class="modal-label">Catégorie</label><input class="modal-input" x-model="modal.categorie" placeholder="Pâtisseries, Services..."/></div>
       </div>
       <div class="modal-row">
-        <div class="modal-field">
-          <label class="modal-label">Prix de vente HT (€)</label>
-          <input class="modal-input" id="mn-pv" type="number" placeholder="0.00"/>
-        </div>
-        <div class="modal-field">
-          <label class="modal-label">Quantité / période</label>
-          <input class="modal-input" id="mn-qte" type="number" placeholder="Ex: 100 unités/mois"/>
-        </div>
+        <div class="modal-field"><label class="modal-label">Prix de vente HT (€)</label><input class="modal-input" x-model="modal.pv" type="number" placeholder="0.00"/></div>
+        <div class="modal-field"><label class="modal-label">Quantité / période</label><input class="modal-input" x-model="modal.qte" type="number" placeholder="Ex: 100 unités/mois"/></div>
       </div>
       <div style="font-size:12px;font-weight:700;color:var(--text);margin:14px 0 10px">Coûts variables (par unité)</div>
       <div class="modal-row">
-        <div class="modal-field">
-          <label class="modal-label">Matières premières (€)</label>
-          <input class="modal-input" id="mn-mp" type="number" placeholder="0.00"/>
-        </div>
-        <div class="modal-field">
-          <label class="modal-label">Main d'œuvre (€)</label>
-          <input class="modal-input" id="mn-mo" type="number" placeholder="0.00"/>
-        </div>
+        <div class="modal-field"><label class="modal-label">Matières premières (€)</label><input class="modal-input" x-model="modal.mp" type="number" placeholder="0.00"/></div>
+        <div class="modal-field"><label class="modal-label">Main d'œuvre (€)</label><input class="modal-input" x-model="modal.mo" type="number" placeholder="0.00"/></div>
       </div>
       <div class="modal-row">
-        <div class="modal-field">
-          <label class="modal-label">Emballages (€)</label>
-          <input class="modal-input" id="mn-emb" type="number" placeholder="0.00"/>
-        </div>
-        <div class="modal-field">
-          <label class="modal-label">Livraison (€)</label>
-          <input class="modal-input" id="mn-liv" type="number" placeholder="0.00"/>
-        </div>
+        <div class="modal-field"><label class="modal-label">Emballages (€)</label><input class="modal-input" x-model="modal.emb" type="number" placeholder="0.00"/></div>
+        <div class="modal-field"><label class="modal-label">Livraison (€)</label><input class="modal-input" x-model="modal.liv" type="number" placeholder="0.00"/></div>
       </div>
       <div style="font-size:12px;font-weight:700;color:var(--text);margin:14px 0 10px">Charges fixes totales de la structure (€/mois)</div>
       <div class="modal-row">
-        <div class="modal-field">
-          <label class="modal-label">Total charges fixes (€)</label>
-          <input class="modal-input" id="mn-cf" type="number" placeholder="Ex: 5000"/>
-        </div>
-        <div class="modal-field">
-          <label class="modal-label">Emoji</label>
-          <input class="modal-input" id="mn-emoji" placeholder="🍰" maxlength="2"/>
-        </div>
+        <div class="modal-field"><label class="modal-label">Total charges fixes (€)</label><input class="modal-input" x-model="modal.cfTotal" type="number" placeholder="Ex: 5000"/></div>
+        <div class="modal-field"><label class="modal-label">Emoji</label><input class="modal-input" x-model="modal.emoji" placeholder="🍰" maxlength="2"/></div>
       </div>
       <div style="font-size:11px;color:var(--muted);background:var(--blue-ghost);padding:10px;border-radius:8px;margin-top:4px">
         💡 Si vous avez déjà saisi ce produit dans le <strong>Coût de revient</strong>, sélectionnez-le depuis la liste existante — les données seront importées automatiquement.
       </div>
     </div>
     <div class="modal-foot">
-      <button class="btn btn-outline" onclick="closeModal()">Annuler</button>
-      <button class="btn btn-primary" id="modal-cta" onclick="createProduct()">Créer & Analyser →</button>
+      <button class="btn btn-outline" @click="showModal = false">Annuler</button>
+      <button class="btn btn-primary" @click="submitModal()" x-text="modalEdit ? 'Sauvegarder →' : 'Créer & Analyser →'"></button>
     </div>
   </div>
 </div>
 
+</div><!-- fin main / x-data -->
+
 <div class="toast" id="toast"></div>
 
-<!-- Firebase -->
+<!-- ═══════════════════════════════════════════════════════ -->
+<!--  FIREBASE (inchangé — pattern standard)                -->
+<!-- ═══════════════════════════════════════════════════════ -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
@@ -664,1004 +1033,485 @@ html, body { overflow-x: hidden; max-width: 100vw; }
   });
 </script>
 
+<!-- ═══════════════════════════════════════════════════════ -->
+<!--  ALPINE APP + LOGIQUE MÉTIER                           -->
+<!-- ═══════════════════════════════════════════════════════ -->
 <script>
-// ── STATE ──
-let _products = {};
-let _currentId = null;
-let _selected = new Set();
-// Simulateur
-let _sim = { pv:0, mp:0, mo:0, cf:0, vol:0 };
-// Clé répartition
-let _cle = { type:'temps', produit:0, total:0 };
+// ═══ CALCULS (fonctions pures, réutilisées dans Alpine) ═══
 
-function toggleMenu(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('open');}
-async function handleLogout(){await window._signOut(window._auth);window.location.href='index.html';}
-
-// ── LOAD ──
-async function loadProducts(){
-  if(!window._uid){setTimeout(loadProducts,500);return;}
-  _products = {};
-
-  // 1. Charger depuis module Coût de revient
-  try{
-    const snap = await window._getDocs(window._collection(window._db,'produits',window._uid,'items'));
-    snap.forEach(d=>{
-      const p = d.data();
-      const qte = parseFloat(p.quantiteProduites)||1;
-      const mp = (p.ingredients||[]).reduce((s,r)=>(parseFloat(r.qte)||0)*(parseFloat(r.prixUnitaire)||0)+s,0)/qte;
-      const mo = (p.mainOeuvre||[]).reduce((s,r)=>(parseFloat(r.heures)||0)*(parseFloat(r.tauxHoraire)||0)+s,0)/qte;
-      const emb = (p.emballages||[]).reduce((s,r)=>(parseFloat(r.qte)||0)*(parseFloat(r.prixUnit)||0)+s,0)/qte;
-      const liv = (p.livraison||[]).reduce((s,r)=>s+(parseFloat(r.montant)||0),0)/qte;
-      const cfTotal = (p.chargesFixes||[]).reduce((s,r)=>{
-        const m=parseFloat(r.montant)||0, rep=parseFloat(r.repartition)||0;
-        return s+(rep>0?m*rep/100:m);
-      },0)/qte;
-      _products['cr_'+d.id] = {
-        id:'cr_'+d.id, nom:p.nom, categorie:p.categorie||'', emoji:p.emoji||'📦',
-        source:'cout-revient',
-        pv: parseFloat(p.prixVente)||0,
-        qte: parseFloat(p.quantiteProduites)||1,
-        mp, mo, emb, liv,
-        cfTotal: cfTotal,
-        cle: {type:'temps',produit:0,total:0},
-        sim: {pv:0,mp:0,mo:0,cf:0,vol:0}
-      };
-    });
-  }catch(e){console.warn(e);}
-
-  // 2. Charger depuis module Marges (saisie directe)
-  try{
-    const snap = await window._getDocs(window._collection(window._db,'marges',window._uid,'produits'));
-    snap.forEach(d=>{
-      const raw = d.data();
-      // Normaliser les champs des produits importés (coutMP→mp, coutMain→mo, etc.)
-      const normalized = {
-        ...raw,
-        id:'mg_'+d.id,   // APRÈS ...raw pour ne pas être écrasé
-        source:'marges',
-        mp:  parseFloat(raw.mp||raw.coutMP||0),
-        mo:  parseFloat(raw.mo||raw.coutMain||0),
-        emb: parseFloat(raw.emb||0),
-        liv: parseFloat(raw.liv||0),
-        pv:  parseFloat(raw.pv||raw.prixVente||0),
-        qte: parseFloat(raw.qte||raw.quantiteProduites||1)||1,
-      };
-      _products['mg_'+d.id] = normalized;
-    });
-  }catch(e){console.warn(e);}
-
-  // 3. Charger les paramètres sauvegardés (clé répartition + simulateur) pour produits CR
-  try{
-    const paramSnap = await window._getDocs(window._collection(window._db,'marges',window._uid,'params'));
-    paramSnap.forEach(d=>{
-      const data = d.data();
-      if(_products[d.id]){
-        if(data.cle) _products[d.id].cle = data.cle;
-        if(data.sim) _products[d.id].sim = data.sim;
-      }
-    });
-  }catch(e){console.warn('Params load:',e);}
-
-  renderList();
-}
-
-// ── CALCULS ──
-function calcMB(p){
+function _calcMB(p) {
   if(!p) return {cv:0, mb:0, txMB:0};
-  const cv = (parseFloat(p.mp||p.coutMP)||0)+(parseFloat(p.mo||p.coutMain)||0)+(parseFloat(p.emb)||0)+(parseFloat(p.liv)||0);
-  const pv = parseFloat(p.pv||p.prixVente)||0;
-  const mb = pv - cv;
-  const txMB = pv>0 ? mb/pv*100 : 0;
-  return {cv, mb, txMB};
+  var cv = (parseFloat(p.mp)||0) + (parseFloat(p.mo)||0) + (parseFloat(p.emb)||0) + (parseFloat(p.liv)||0);
+  var pv = parseFloat(p.pv)||0;
+  var mb = pv - cv;
+  var txMB = pv > 0 ? mb/pv*100 : 0;
+  return {cv:cv, mb:mb, txMB:txMB};
 }
 
-function calcCleRep(p){
-  const cle = p.cle||{type:'temps',produit:0,total:0};
-  const prod = parseFloat(cle.produit)||0;
-  const total = parseFloat(cle.total)||1;
-  const ratio = total>0 ? Math.min(prod/total,1) : 0;
-  const cf = p.cfTotal>0 ? p.cfTotal : 0;
-  // Si clé configurée, utiliser le ratio, sinon utiliser cfTotal déjà calculé par unité
-  const cfImpute = p.cfTotal>0 && prod>0 ? cf * ratio / Math.max(parseFloat(p.qte)||1,1) : cf;
-  return {ratio, cfImpute, cle};
+function _calcCleRep(p) {
+  var cle = p.cle || {type:'temps', produit:0, total:0};
+  var prod = parseFloat(cle.produit)||0;
+  var total = parseFloat(cle.total)||1;
+  var ratio = total > 0 ? Math.min(prod/total, 1) : 0;
+  var cf = p.cfTotal > 0 ? p.cfTotal : 0;
+  var cfImpute = p.cfTotal > 0 && prod > 0 ? cf * ratio / Math.max(parseFloat(p.qte)||1, 1) : cf;
+  return {ratio:ratio, cfImpute:cfImpute};
 }
 
-function calcMN(p){
+function _calcMN(p) {
   if(!p) return {cv:0, mb:0, txMB:0, cfImpute:0, mn:0, txMN:0};
-  const {cv,mb,txMB} = calcMB(p);
-  const {cfImpute} = calcCleRep(p);
-  const mn = mb - cfImpute;
-  const pv = parseFloat(p.pv||p.prixVente)||0;
-  const txMN = pv>0 ? mn/pv*100 : 0;
-  return {cv, mb, txMB, cfImpute, mn, txMN};
+  var r = _calcMB(p);
+  var rep = _calcCleRep(p);
+  var mn = r.mb - rep.cfImpute;
+  var pv = parseFloat(p.pv)||0;
+  var txMN = pv > 0 ? mn/pv*100 : 0;
+  return {cv:r.cv, mb:r.mb, txMB:r.txMB, cfImpute:rep.cfImpute, mn:mn, txMN:txMN};
 }
 
-function calcSim(p, sim){
-  const _pv = parseFloat(p.pv||p.prixVente)||0;
-  const _mp = parseFloat(p.mp||p.coutMP)||0;
-  const _mo = parseFloat(p.mo||p.coutMain)||0;
-  const pvSim = _pv*(1+(parseFloat(sim.pv)||0)/100);
-  const mpSim = _mp*(1-(parseFloat(sim.mp)||0)/100);
-  const moSim = _mo*(1-(parseFloat(sim.mo)||0)/100);
-  const cfSim = (p.cfTotal||0)*(1-(parseFloat(sim.cf)||0)/100);
-  const volSim = parseFloat(sim.vol)||parseFloat(p.qte)||1;
-  const cvSim = mpSim + moSim + (parseFloat(p.emb)||0) + (parseFloat(p.liv)||0);
-  const mbSim = pvSim - cvSim;
-  const txMBSim = pvSim>0 ? mbSim/pvSim*100 : 0;
-  const {ratio} = calcCleRep(p);
-  const cfImputeSim = cfSim * ratio / Math.max(volSim,1);
-  const mnSim = mbSim - cfImputeSim;
-  const txMNSim = pvSim>0 ? mnSim/pvSim*100 : 0;
-  const margeTotSim = mbSim * volSim;
-  const margeNetTotSim = mnSim * volSim;
-  return {pvSim,cvSim,mbSim,txMBSim,cfImputeSim,mnSim,txMNSim,margeTotSim,margeNetTotSim,volSim};
+function _calcSim(p, sim) {
+  var pv0 = parseFloat(p.pv)||0;
+  var mp0 = parseFloat(p.mp)||0;
+  var mo0 = parseFloat(p.mo)||0;
+  var pvSim = pv0 * (1 + (parseFloat(sim.pv)||0)/100);
+  var mpSim = mp0 * (1 - (parseFloat(sim.mp)||0)/100);
+  var moSim = mo0 * (1 - (parseFloat(sim.mo)||0)/100);
+  var cfSim = (p.cfTotal||0) * (1 - (parseFloat(sim.cf)||0)/100);
+  var volSim = parseFloat(sim.vol) || parseFloat(p.qte) || 1;
+  var cvSim = mpSim + moSim + (parseFloat(p.emb)||0) + (parseFloat(p.liv)||0);
+  var mbSim = pvSim - cvSim;
+  var txMBSim = pvSim > 0 ? mbSim/pvSim*100 : 0;
+  var rep = _calcCleRep(p);
+  var cfImputeSim = cfSim * rep.ratio / Math.max(volSim, 1);
+  var mnSim = mbSim - cfImputeSim;
+  var txMNSim = pvSim > 0 ? mnSim/pvSim*100 : 0;
+  return {pvSim:pvSim, cvSim:cvSim, mbSim:mbSim, txMBSim:txMBSim,
+          cfImputeSim:cfImputeSim, mnSim:mnSim, txMNSim:txMNSim,
+          margeTotSim:mbSim*volSim, margeNetTotSim:mnSim*volSim, volSim:volSim};
 }
 
-// ── RENDER LIST ──
-function renderList(filter=''){
-  const list = document.getElementById('productList');
-  const items = Object.values(_products).filter(p=>
-    p && p.nom && (!filter || p.nom.toLowerCase().includes(filter.toLowerCase()) || (p.categorie||'').toLowerCase().includes(filter.toLowerCase()))
-  );
-  if(items.length===0){
-    list.innerHTML=`<div style="padding:24px;text-align:center;color:var(--muted);font-size:12px"><div style="font-size:32px;margin-bottom:8px">📦</div>Aucun produit.<br>Créez-en un ou saisissez dans<br>le Coût de revient.</div>`;
-    return;
-  }
-  list.innerHTML = items.map(p=>{
-    const {mb,txMB}=calcMB(p);
-    const cls=txMB>=30?'mb-good':txMB>=10?'mb-warn':'mb-bad';
-    const sel=_selected.has(p.id);
-    return `<div class="product-item ${_currentId===p.id?'active':''} ${sel?'selected':''}" onclick="handleItemClick(event,'${p.id}')">
-      <input type="checkbox" class="product-cb" ${sel?'checked':''} onclick="event.stopPropagation();toggleSelect('${p.id}',this.checked)"/>
-      <span class="product-emoji">${p.emoji||'📦'}</span>
-      <div class="product-info">
-        <div class="product-name">${p.nom}</div>
-        <div class="product-cat">${p.categorie||'—'} ${p.source==='cout-revient'?'<span style="color:#4f7ef8;font-size:9px;font-weight:700">●CR</span>':''}</div>
-      </div>
-      <div class="product-mb ${cls}">${p.pv>0?txMB.toFixed(1)+'%':''}</div>
-    </div>`;
-  }).join('');
-}
-
-function filterProducts(v){renderList(v);}
-
-// ── OPEN PRODUCT ──
-function openProduct(id){
-  _currentId = id;
-  renderList();
-  renderProduct(_products[id]);
-}
-
-function renderProduct(p){
-  if(!p) return;
-  // Normaliser les champs au cas où p vient directement de Firestore
+// ═══ NORMALISER UN PRODUIT (compat ancien format Firestore) ═══
+function _normalize(p) {
   p.pv  = parseFloat(p.pv||p.prixVente)||0;
   p.mp  = parseFloat(p.mp||p.coutMP)||0;
   p.mo  = parseFloat(p.mo||p.coutMain)||0;
   p.emb = parseFloat(p.emb)||0;
   p.liv = parseFloat(p.liv)||0;
   p.qte = parseFloat(p.qte||p.quantiteProduites)||1;
-  if(!p.sim) p.sim = {pv:0,mp:0,mo:0,cf:0,vol:p.qte};
-  if(!p.cle) p.cle = {type:'temps',produit:0,total:0};
-  const {cv,mb,txMB,cfImpute,mn,txMN} = calcMN(p);
-  const sim = p.sim||{pv:0,mp:0,mo:0,cf:0,vol:parseFloat(p.qte)||1};
-  const s = calcSim(p,sim);
-  const cle = p.cle||{type:'temps',produit:0,total:0};
-  const cleLabels={temps:['⏱ Temps','Heures ce produit','Heures totales prod.'],superficie:['📐 Superficie','m² utilisés','m² total atelier'],volume:['📦 Volume','Unités produit','Unités totales'],ca:['💰 CA','CA ce produit (€)','CA total (€)']};
-  const cl=cleLabels[cle.type]||cleLabels['temps'];
-
-  const right = document.getElementById('rightPanel');
-  right.innerHTML = `
-    <!-- HEADER -->
-    <div class="marge-header">
-      <div style="display:flex;align-items:center;justify-content:space-between">
-        <div>
-          <div class="marge-product-name">${p.emoji||'📦'} ${p.nom}</div>
-          <div class="marge-meta">
-            <span class="meta-badge">${p.categorie||'Sans catégorie'}</span>
-            ${p.source==='cout-revient'?'<span class="meta-badge" style="background:#f0fdf4;color:#10b981">📥 Importé du Coût de revient</span>':''}
-            <span style="font-size:12px;color:var(--muted)">PV : <b>${fmtE(p.pv)}</b> HT · Qté : <b>${p.qte||1}</b> unités/période</span>
-          </div>
-        </div>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-outline btn-sm" onclick="editProduct('${p.id}')">✏️ Modifier</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteProduct('${p.id}')">🗑</button>
-        </div>
-      </div>
-
-      <!-- KPI ROW -->
-      <div class="kpi-row" id="kpi-row-live">
-        <div class="kpi-box blue">
-          <div class="kpi-label">Prix vente <span style="font-size:9px;background:#e0f2fe;color:#0369a1;padding:1px 5px;border-radius:4px;font-weight:700">HT</span></div>
-          <div class="kpi-val blue" id="kpi-pv">${fmtE(p.pv)}</div>
-          <div class="kpi-sub">Par unité</div>
-        </div>
-        <div class="kpi-box ${txMB>=30?'green':txMB>=10?'orange':'red'}" id="kpi-box-mb">
-          <div class="kpi-label">Marge brute <span style="font-size:9px;background:#dcfce7;color:#166534;padding:1px 5px;border-radius:4px;font-weight:700">HT</span></div>
-          <div class="kpi-val ${txMB>=30?'pos':txMB>=10?'':'neg'}" id="kpi-mb">${fmtE(mb)}</div>
-          <div class="kpi-sub" id="kpi-mb-sub">${txMB.toFixed(1)}% du PV</div>
-        </div>
-        <div class="kpi-box ${txMN>=20?'green':txMN>=5?'orange':'red'}" id="kpi-box-mn">
-          <div class="kpi-label">Marge nette <span style="font-size:9px;background:#dcfce7;color:#166534;padding:1px 5px;border-radius:4px;font-weight:700">HT</span></div>
-          <div class="kpi-val ${txMN>=20?'pos':txMN>=5?'':'neg'}" id="kpi-mn">${fmtE(mn)}</div>
-          <div class="kpi-sub" id="kpi-mn-sub">${txMN.toFixed(1)}% du PV</div>
-        </div>
-        <div class="kpi-box">
-          <div class="kpi-label">Coûts variables <span style="font-size:9px;background:#fef9c3;color:#854d0e;padding:1px 5px;border-radius:4px;font-weight:700">HT</span></div>
-          <div class="kpi-val" id="kpi-cv">${fmtE(cv)}</div>
-          <div class="kpi-sub">${p.pv>0?(cv/p.pv*100).toFixed(1)+'% du PV':'—'}</div>
-        </div>
-        <div class="kpi-box purple" id="kpi-box-cf">
-          <div class="kpi-label">CF imputées <span style="font-size:9px;background:#f3e8ff;color:#6b21a8;padding:1px 5px;border-radius:4px;font-weight:700">HT</span></div>
-          <div class="kpi-val" id="kpi-cf">${fmtE(cfImpute)}</div>
-          <div class="kpi-sub">Par unité (clé répart.)</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- DÉCOMPOSITION -->
-    <div class="decomp-grid">
-      <div class="decomp-card">
-        <div class="decomp-head">
-          <div class="decomp-title">🟢 Marge Brute <span style="font-size:10px;color:var(--muted);font-weight:400;margin-left:4px">= PV − Coûts variables</span></div>
-          <div class="decomp-total ${txMB>=30?'':''}"> ${fmtE(mb)} <span style="font-size:11px;color:var(--muted)">(${txMB.toFixed(1)}%)</span></div>
-        </div>
-        <div class="decomp-body">
-          ${renderDecompRow('Prix de vente HT','#1a3dce',p.pv,p.pv,true)}
-          ${renderDecompRow('Matières premières','#ef4444',p.mp||0,p.pv,false)}
-          ${renderDecompRow('Main d\'œuvre','#f59e0b',p.mo||0,p.pv,false)}
-          ${renderDecompRow('Emballages','#14b8a6',p.emb||0,p.pv,false)}
-          ${renderDecompRow('Livraison','#8b5cf6',p.liv||0,p.pv,false)}
-          <div style="margin-top:12px;padding-top:10px;border-top:2px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:12px;font-weight:700">= Marge brute</span>
-            <span style="font-size:16px;font-weight:800;color:${txMB>=30?'var(--green)':txMB>=10?'var(--orange)':'var(--red)'}">${fmtE(mb)} <span style="font-size:12px">(${txMB.toFixed(1)}%)</span></span>
-          </div>
-        </div>
-      </div>
-      <div class="decomp-card">
-        <div class="decomp-head">
-          <div class="decomp-title">🔵 Marge Nette <span style="font-size:10px;color:var(--muted);font-weight:400;margin-left:4px">= MB − Charges fixes imputées</span></div>
-          <div class="decomp-total">${fmtE(mn)} <span style="font-size:11px;color:var(--muted)">(${txMN.toFixed(1)}%)</span></div>
-        </div>
-        <div class="decomp-body">
-          ${renderDecompRow('Marge brute','#10b981',mb,p.pv,true)}
-          ${renderDecompRow('Charges fixes imputées','#6366f1',cfImpute,p.pv,false)}
-          <div style="margin-top:8px;padding:8px 10px;background:var(--purple-light);border-radius:8px;font-size:11px;color:var(--purple)">
-            🔑 Clé : <b>${cl[0]}</b> · Produit : <b>${cle.produit||'?'}</b> / Total : <b>${cle.total||'?'}</b> = <b>${cle.total>0?((parseFloat(cle.produit)||0)/(parseFloat(cle.total)||1)*100).toFixed(1)+'%':'—'}</b>
-          </div>
-          <div style="margin-top:12px;padding-top:10px;border-top:2px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:12px;font-weight:700">= Marge nette</span>
-            <span style="font-size:16px;font-weight:800;color:${txMN>=20?'var(--green)':txMN>=5?'var(--orange)':'var(--red)'}">${fmtE(mn)} <span style="font-size:12px">(${txMN.toFixed(1)}%)</span></span>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- BARRE VISUELLE -->
-    <div class="marge-viz">
-      <div class="viz-title">📊 Décomposition visuelle du prix de vente</div>
-      <div class="viz-bar-wrap">
-        <div class="viz-bar">
-          ${p.pv>0?`
-          <div class="viz-seg" style="width:${((p.mp||0)/p.pv*100).toFixed(1)}%;background:#ef4444" title="MP">${(p.mp||0)/p.pv>0.05?'MP':''}</div>
-          <div class="viz-seg" style="width:${((p.mo||0)/p.pv*100).toFixed(1)}%;background:#f59e0b" title="MO">${(p.mo||0)/p.pv>0.05?'MO':''}</div>
-          <div class="viz-seg" style="width:${((p.emb||0)/p.pv*100).toFixed(1)}%;background:#14b8a6" title="Emb.">${(p.emb||0)/p.pv>0.05?'Emb.':''}</div>
-          <div class="viz-seg" style="width:${((p.liv||0)/p.pv*100).toFixed(1)}%;background:#8b5cf6" title="Liv.">${(p.liv||0)/p.pv>0.05?'Liv.':''}</div>
-          <div class="viz-seg" style="width:${(cfImpute/p.pv*100).toFixed(1)}%;background:#6366f1" title="CF">CF</div>
-          <div class="viz-seg" style="flex:1;background:${mn>=0?'#10b981':'#ef4444'}" title="Marge nette">${mn>=0?'✓ Marge':'Perte'}</div>
-          `:'<div class="viz-seg" style="flex:1;background:#e2e8f0;color:var(--muted)">Saisissez un prix de vente</div>'}
-        </div>
-      </div>
-      <div class="viz-legend">
-        <div class="viz-leg-item"><div class="viz-leg-dot" style="background:#ef4444"></div>Matières premières</div>
-        <div class="viz-leg-item"><div class="viz-leg-dot" style="background:#f59e0b"></div>Main d'œuvre</div>
-        <div class="viz-leg-item"><div class="viz-leg-dot" style="background:#14b8a6"></div>Emballages</div>
-        <div class="viz-leg-item"><div class="viz-leg-dot" style="background:#8b5cf6"></div>Livraison</div>
-        <div class="viz-leg-item"><div class="viz-leg-dot" style="background:#6366f1"></div>Charges fixes</div>
-        <div class="viz-leg-item"><div class="viz-leg-dot" style="background:#10b981"></div>Marge nette</div>
-      </div>
-    </div>
-
-    <!-- CAMEMBERT -->
-    <div class="marge-viz" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:center">
-      <div>
-        <div class="viz-title">🥧 Répartition du prix de vente</div>
-        <div style="position:relative;height:200px"><canvas id="chartCamembert"></canvas></div>
-      </div>
-      <div>
-        <div class="viz-title" style="margin-bottom:12px">📋 Détail par poste</div>
-        <div id="camembert-legend" style="display:flex;flex-direction:column;gap:8px"></div>
-      </div>
-    </div>
-
-    <!-- CLÉ DE RÉPARTITION -->
-    <div class="cle-card">
-      <div class="cle-title">🔑 Clé de répartition des charges fixes <span style="font-size:11px;font-weight:400;color:var(--muted)">— Comment allouer les charges fixes à ce produit ?</span></div>
-      <div class="cle-grid">
-        ${['temps','superficie','volume','ca'].map(k=>`
-          <button class="cle-btn ${(p.cle||{type:'temps'}).type===k?'active':''}" onclick="setCle('${p.id}','${k}',this)">
-            <div class="cle-icon">${{temps:'⏱',superficie:'📐',volume:'📦',ca:'💰'}[k]}</div>
-            <div class="cle-label">${{temps:'Temps',superficie:'Superficie',volume:'Volume',ca:'CA'}[k]}</div>
-          </button>`).join('')}
-      </div>
-      <div class="cle-inputs">
-        <div class="cle-field">
-          <label>${cl[1]}</label>
-          <input class="cle-input" type="number" id="cle-produit" placeholder="Ex: 120" value="${cle.produit||''}" oninput="updateCle('${p.id}','produit',this.value)"/>
-        </div>
-        <div class="cle-field">
-          <label>${cl[2]}</label>
-          <input class="cle-input" type="number" id="cle-total" placeholder="Ex: 800" value="${cle.total||''}" oninput="updateCle('${p.id}','total',this.value)"/>
-        </div>
-        <div class="cle-field">
-          <label>Total charges fixes (€)</label>
-          <input class="cle-input" type="number" id="cle-cf" placeholder="Ex: 5000" value="${p.cfTotal||''}" oninput="updateCleTotal('${p.id}',this.value)"/>
-        </div>
-      </div>
-      <div class="cle-result" id="cle-result">
-        ${cle.total>0&&cle.produit>0?`✅ Quote-part : <b>${((parseFloat(cle.produit)||0)/(parseFloat(cle.total)||1)*100).toFixed(1)}%</b> → <b>${fmtE(cfImpute)}</b> de charges fixes imputées par unité`:'⚠️ Renseignez les valeurs pour calculer la quote-part de charges fixes'}
-      </div>
-    </div>
-
-    <!-- SIMULATEUR -->
-    <div class="sim-card">
-      <div class="sim-head">
-        <div class="sim-title">🔮 Simulateur de scénarios <span style="font-size:11px;opacity:0.7;font-weight:400">— Testez l'impact sur vos marges</span></div>
-        <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3)" onclick="resetSim('${p.id}')">↺ Réinitialiser</button>
-      </div>
-      <div class="sim-body">
-        <div class="sim-levers">
-
-          <!-- LEVER PV -->
-          <div class="sim-lever">
-            <div class="sim-lever-label">💰 Prix de vente <span class="sim-lever-tag">HT</span></div>
-            <div class="sim-fields-row">
-              <div class="sim-field-group">
-                <div class="sim-field-lbl">Nouveau prix HT</div>
-                <div class="sim-field-wrap">
-                  <input type="number" class="sim-field-input" id="sn-pv-eur" min="0" step="0.1" value="${p.pv>0?p.pv:''}" oninput="updateSimEur('${p.id}','pv',this.value,${p.pv})" onchange="updateSimEur('${p.id}','pv',this.value,${p.pv})" placeholder="${p.pv||'0'}"/>
-                  <span class="sim-field-unit">€</span>
-                </div>
-              </div>
-              <div class="sim-sep">ou</div>
-              <div class="sim-field-group">
-                <div class="sim-field-lbl">Augmentation</div>
-                <div class="sim-field-wrap">
-                  <input type="number" class="sim-field-input" id="sn-pv" min="0" max="100" step="1" value="${parseFloat(sim.pv)||0}" oninput="updateSimNum('${p.id}','pv',this.value)" onchange="updateSimNum('${p.id}','pv',this.value)" placeholder="0"/>
-                  <span class="sim-field-unit">%</span>
-                </div>
-              </div>
-            </div>
-            <div class="sim-slider-wrap">
-              <input type="range" class="sim-slider" id="sr-pv" min="0" max="100" step="1" value="${parseFloat(sim.pv)||0}" oninput="updateSim('${p.id}','pv',this.value)"/>
-              <div class="sim-range-labels"><span>0%</span><span>+100%</span></div>
-            </div>
-          </div>
-
-          <!-- LEVER MP -->
-          <div class="sim-lever">
-            <div class="sim-lever-label">🧪 Matières premières <span class="sim-lever-tag">HT</span></div>
-            <div class="sim-fields-row">
-              <div class="sim-field-group">
-                <div class="sim-field-lbl">Nouveau coût HT</div>
-                <div class="sim-field-wrap">
-                  <input type="number" class="sim-field-input" id="sn-mp-eur" min="0" step="0.01" value="${p.mp>0?p.mp:''}" oninput="updateSimEur('${p.id}','mp',this.value,${p.mp||0})" onchange="updateSimEur('${p.id}','mp',this.value,${p.mp||0})" placeholder="${p.mp||'0'}"/>
-                  <span class="sim-field-unit">€</span>
-                </div>
-              </div>
-              <div class="sim-sep">ou</div>
-              <div class="sim-field-group">
-                <div class="sim-field-lbl">Réduction</div>
-                <div class="sim-field-wrap">
-                  <input type="number" class="sim-field-input" id="sn-mp" min="0" max="100" step="1" value="${parseFloat(sim.mp)||0}" oninput="updateSimNum('${p.id}','mp',this.value)" onchange="updateSimNum('${p.id}','mp',this.value)" placeholder="0"/>
-                  <span class="sim-field-unit">%</span>
-                </div>
-              </div>
-            </div>
-            <div class="sim-slider-wrap">
-              <input type="range" class="sim-slider" id="sr-mp" min="0" max="100" step="1" value="${parseFloat(sim.mp)||0}" oninput="updateSim('${p.id}','mp',this.value)"/>
-              <div class="sim-range-labels"><span>0%</span><span>−100%</span></div>
-            </div>
-          </div>
-
-          <!-- LEVER MO -->
-          <div class="sim-lever">
-            <div class="sim-lever-label">👷 Main d'œuvre <span class="sim-lever-tag">HT</span></div>
-            <div class="sim-fields-row">
-              <div class="sim-field-group">
-                <div class="sim-field-lbl">Nouveau coût HT</div>
-                <div class="sim-field-wrap">
-                  <input type="number" class="sim-field-input" id="sn-mo-eur" min="0" step="0.01" value="${p.mo>0?p.mo:''}" oninput="updateSimEur('${p.id}','mo',this.value,${p.mo||0})" onchange="updateSimEur('${p.id}','mo',this.value,${p.mo||0})" placeholder="${p.mo||'0'}"/>
-                  <span class="sim-field-unit">€</span>
-                </div>
-              </div>
-              <div class="sim-sep">ou</div>
-              <div class="sim-field-group">
-                <div class="sim-field-lbl">Réduction</div>
-                <div class="sim-field-wrap">
-                  <input type="number" class="sim-field-input" id="sn-mo" min="0" max="100" step="1" value="${parseFloat(sim.mo)||0}" oninput="updateSimNum('${p.id}','mo',this.value)" onchange="updateSimNum('${p.id}','mo',this.value)" placeholder="0"/>
-                  <span class="sim-field-unit">%</span>
-                </div>
-              </div>
-            </div>
-            <div class="sim-slider-wrap">
-              <input type="range" class="sim-slider" id="sr-mo" min="0" max="100" step="1" value="${parseFloat(sim.mo)||0}" oninput="updateSim('${p.id}','mo',this.value)"/>
-              <div class="sim-range-labels"><span>0%</span><span>−100%</span></div>
-            </div>
-          </div>
-
-          <!-- LEVER CF -->
-          <div class="sim-lever">
-            <div class="sim-lever-label">🏗️ Charges fixes <span class="sim-lever-tag">HT</span></div>
-            <div class="sim-fields-row">
-              <div class="sim-field-group">
-                <div class="sim-field-lbl">Nouveau total HT</div>
-                <div class="sim-field-wrap">
-                  <input type="number" class="sim-field-input" id="sn-cf-eur" min="0" step="1" value="${p.cfTotal>0?p.cfTotal:''}" oninput="updateSimEur('${p.id}','cf',this.value,${p.cfTotal||0})" onchange="updateSimEur('${p.id}','cf',this.value,${p.cfTotal||0})" placeholder="${p.cfTotal||'0'}"/>
-                  <span class="sim-field-unit">€</span>
-                </div>
-              </div>
-              <div class="sim-sep">ou</div>
-              <div class="sim-field-group">
-                <div class="sim-field-lbl">Réduction</div>
-                <div class="sim-field-wrap">
-                  <input type="number" class="sim-field-input" id="sn-cf" min="0" max="100" step="1" value="${parseFloat(sim.cf)||0}" oninput="updateSimNum('${p.id}','cf',this.value)" onchange="updateSimNum('${p.id}','cf',this.value)" placeholder="0"/>
-                  <span class="sim-field-unit">%</span>
-                </div>
-              </div>
-            </div>
-            <div class="sim-slider-wrap">
-              <input type="range" class="sim-slider" id="sr-cf" min="0" max="100" step="1" value="${parseFloat(sim.cf)||0}" oninput="updateSim('${p.id}','cf',this.value)"/>
-              <div class="sim-range-labels"><span>0%</span><span>−100%</span></div>
-            </div>
-          </div>
-
-        </div>
-
-        <!-- LEVER VOLUME -->
-        <div class="sim-lever-full">
-          <div class="sim-lever-label">📈 Volume de ventes (unités / période) <span class="sim-lever-tag">HT</span></div>
-          <div class="sim-fields-row" style="margin-bottom:10px">
-            <div class="sim-field-group">
-              <div class="sim-field-lbl">Nombre d'unités</div>
-              <div class="sim-field-wrap" style="min-width:100px">
-                <input type="number" class="sim-field-input" style="width:70px" id="sn-vol" min="1" step="1" value="${parseFloat(sim.vol)||parseFloat(p.qte)||1}" oninput="updateSimNum('${p.id}','vol',this.value)" onchange="updateSimNum('${p.id}','vol',this.value)" placeholder="1"/>
-                <span class="sim-field-unit">unités</span>
-              </div>
-            </div>
-            <div style="flex:1;margin-top:18px">
-              <input type="range" class="sim-slider" id="sr-vol" min="1" max="${Math.max((parseFloat(p.qte)||1)*10,500)}" step="1" value="${parseFloat(sim.vol)||parseFloat(p.qte)||1}" oninput="updateSim('${p.id}','vol',this.value)" style="width:100%"/>
-              <div class="sim-range-labels"><span>1</span><span>${Math.max((parseFloat(p.qte)||1)*10,500)} unités</span></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- RÉSULTAT SIMULATION -->
-        <div class="sim-result">
-          <div class="sim-result-title">📊 Résultat simulé vs situation actuelle</div>
-          <div class="sim-result-grid" id="sim-result-grid">${renderSimResult(p,s,calcMN(p))}</div>
-        </div>
-
-        <!-- TABLEAU COMPARATIF -->
-        <div style="margin-top:16px;border:1px solid rgba(255,255,255,0.1);border-radius:10px;overflow:hidden">
-          <table class="comp-table" id="comp-table">${renderCompTable(p,s,calcMN(p))}</table>
-        </div>
-      </div>
-    </div>
-
-    <!-- SAUVEGARDE -->
-    <div style="display:flex;justify-content:flex-end;gap:10px;padding-bottom:20px">
-      <button class="btn btn-success" onclick="saveProduct('${p.id}')">💾 Sauvegarder les paramètres</button>
-    </div>
-  `;
-  // Render camembert après injection DOM
-  const {cfImpute:_cfi,mn:_mn}=calcMN(p);
-  setTimeout(()=>renderCamembert(p,_cfi,_mn),50);
+  if(!p.cfTotal) p.cfTotal = 0;
+  if(!p.sim) p.sim = {pv:0, mp:0, mo:0, cf:0, vol:p.qte};
+  if(!p.cle) p.cle = {type:'temps', produit:0, total:0};
+  // Ensure sim values are numbers
+  p.sim.pv  = parseFloat(p.sim.pv)||0;
+  p.sim.mp  = parseFloat(p.sim.mp)||0;
+  p.sim.mo  = parseFloat(p.sim.mo)||0;
+  p.sim.cf  = parseFloat(p.sim.cf)||0;
+  p.sim.vol = parseFloat(p.sim.vol) || p.qte;
+  p.cle.produit = parseFloat(p.cle.produit)||0;
+  p.cle.total   = parseFloat(p.cle.total)||0;
+  return p;
 }
 
-function renderDecompRow(label,color,val,pv,isRevenu){
-  const pct = pv>0?(val/pv*100).toFixed(1):0;
-  return `<div class="decomp-row">
-    <div class="decomp-label"><span class="decomp-dot" style="background:${color}"></span>${label}</div>
-    <div class="decomp-val" style="color:${isRevenu?'var(--green)':'var(--red)'}">
-      ${isRevenu?'+':'-'}${fmtE(val)} <span class="decomp-pct">(${pct}%)</span>
-    </div>
-  </div>
-  <div class="decomp-bar-wrap"><div class="decomp-bar-fill" style="width:${Math.min(pct,100)}%;background:${color}"></div></div>`;
+// ═══ CHARGER PRODUITS DEPUIS FIRESTORE (standalone, bridge vers Alpine) ═══
+async function loadProducts() {
+  if(!window._uid) { setTimeout(loadProducts, 500); return; }
+  var products = {};
+
+  // 1. Depuis module Coût de revient
+  try {
+    var snap = await window._getDocs(window._collection(window._db,'produits',window._uid,'items'));
+    snap.forEach(function(d) {
+      var p = d.data();
+      var qte = parseFloat(p.quantiteProduites)||1;
+      var mp = (p.ingredients||[]).reduce(function(s,r){return (parseFloat(r.qte)||0)*(parseFloat(r.prixUnitaire)||0)+s;},0)/qte;
+      var mo = (p.mainOeuvre||[]).reduce(function(s,r){return (parseFloat(r.heures)||0)*(parseFloat(r.tauxHoraire)||0)+s;},0)/qte;
+      var emb = (p.emballages||[]).reduce(function(s,r){return (parseFloat(r.qte)||0)*(parseFloat(r.prixUnit)||0)+s;},0)/qte;
+      var liv = (p.livraison||[]).reduce(function(s,r){return s+(parseFloat(r.montant)||0);},0)/qte;
+      var cfTotal = (p.chargesFixes||[]).reduce(function(s,r){
+        var m=parseFloat(r.montant)||0, rep=parseFloat(r.repartition)||0;
+        return s+(rep>0?m*rep/100:m);
+      },0)/qte;
+      products['cr_'+d.id] = _normalize({
+        id:'cr_'+d.id, nom:p.nom, categorie:p.categorie||'', emoji:p.emoji||'📦',
+        source:'cout-revient', pv:parseFloat(p.prixVente)||0, qte:qte,
+        mp:mp, mo:mo, emb:emb, liv:liv, cfTotal:cfTotal
+      });
+    });
+  } catch(e) { console.warn(e); }
+
+  // 2. Depuis module Marges (saisie directe)
+  try {
+    var snap2 = await window._getDocs(window._collection(window._db,'marges',window._uid,'produits'));
+    snap2.forEach(function(d) {
+      var raw = d.data();
+      products['mg_'+d.id] = _normalize({
+        ...raw, id:'mg_'+d.id, source:'marges',
+        mp:parseFloat(raw.mp||raw.coutMP||0), mo:parseFloat(raw.mo||raw.coutMain||0),
+        emb:parseFloat(raw.emb||0), liv:parseFloat(raw.liv||0),
+        pv:parseFloat(raw.pv||raw.prixVente||0), qte:parseFloat(raw.qte||raw.quantiteProduites||1)||1,
+      });
+    });
+  } catch(e) { console.warn(e); }
+
+  // 3. Charger params sauvegardés (clé + sim) pour produits CR
+  try {
+    var snap3 = await window._getDocs(window._collection(window._db,'marges',window._uid,'params'));
+    snap3.forEach(function(d) {
+      var data = d.data();
+      if(products[d.id]) {
+        if(data.cle) { products[d.id].cle = data.cle; _normalize(products[d.id]); }
+        if(data.sim) { products[d.id].sim = data.sim; _normalize(products[d.id]); }
+      }
+    });
+  } catch(e) { console.warn('Params load:', e); }
+
+  // Bridge vers Alpine
+  if(window._alpineSetProducts) window._alpineSetProducts(products);
+  else window._pendingProducts = products;
 }
+window.loadProducts = loadProducts;
 
-function renderSimResult(p,s,cur){
-  const items=[
-    {label:'Prix vente HT', cur:p.pv, sim:s.pvSim},
-    {label:'Marge brute', cur:cur.mb, sim:s.mbSim, pct:true, curPct:cur.txMB, simPct:s.txMBSim},
-    {label:'Marge nette', cur:cur.mn, sim:s.mnSim, pct:true, curPct:cur.txMN, simPct:s.txMNSim},
-    {label:'Marge brute totale', cur:cur.mb*(parseFloat(p.qte)||1), sim:s.margeTotSim},
-    {label:'Marge nette totale', cur:cur.mn*(parseFloat(p.qte)||1), sim:s.margeNetTotSim},
-  ];
-  return items.map(item=>{
-    const delta=item.sim-item.cur;
-    const deltaPos=delta>=0;
-    // Couleur valeur simulée : vert si positif, rouge si négatif (valeur absolue)
-    const simPos=item.sim>=0;
-    const simCls=simPos?'pos':'neg';
-    const fmt=item.pct?(v=>`${fmtE(v)} (${item.simPct!==undefined?item.simPct.toFixed(1):0}%)`):fmtE;
-    return `<div class="sim-res-box">
-      <div class="sim-res-label">${item.label}</div>
-      <div class="sim-res-current" style="color:${item.cur>=0?'rgba(255,255,255,0.5)':'#f87171'}">${fmtE(item.cur)}${item.pct?` (${item.curPct!==undefined?item.curPct.toFixed(1):0}%)`:''}
-      </div>
-      <div class="sim-res-new ${simCls}">${fmtE(item.sim)}${item.pct?` (${item.simPct!==undefined?item.simPct.toFixed(1):0}%)`:''}
-      </div>
-      <div class="sim-res-delta ${deltaPos?'pos':'neg'}">${deltaPos?'▲':'▼'} ${fmtE(Math.abs(delta))}</div>
-    </div>`;
-  }).join('');
-}
-
-function renderCompTable(p,s,cur){
-  const qte=parseFloat(p.qte)||1;
-  return `<thead><tr>
-    <th>Indicateur</th><th>Situation actuelle</th><th>Simulation</th><th>Écart</th><th>Évolution</th>
-  </tr></thead>
-  <tbody>
-    ${compRow('Prix de vente HT',p.pv,s.pvSim)}
-    ${compRow('Coûts variables',cur.cv,s.cvSim,true)}
-    ${compRow('Marge brute / unité',cur.mb,s.mbSim)}
-    ${compRow('Taux marge brute',cur.txMB,s.txMBSim,false,true)}
-    ${compRow('Charges fixes imputées',cur.cfImpute,s.cfImputeSim,true)}
-    ${compRow('Marge nette / unité',cur.mn,s.mnSim)}
-    ${compRow('Taux marge nette',cur.txMN,s.txMNSim,false,true)}
-    ${compRow('Marge totale (×'+s.volSim+'u)',cur.mb*qte,s.margeTotSim)}
-    ${compRow('Marge nette totale',cur.mn*qte,s.margeNetTotSim)}
-  </tbody>`;
-}
-
-function compRow(label,cur,sim,inversed=false,isPct=false){
-  const delta=sim-cur;
-  const deltaGood=inversed?(delta<=0):(delta>=0);
-  const simNeg=sim<0;
-  const fmt=isPct?(v=>v.toFixed(1)+'%'):fmtE;
-  // Couleur valeur sim : rouge si valeur négative OU si delta mauvais
-  const simCls=simNeg?'td-neg':(deltaGood?'td-pos':'td-neg');
-  const curCls=cur<0?'td-neg':'';
-  return `<tr>
-    <td style="font-weight:600">${label}</td>
-    <td class="${curCls}">${fmt(cur)}</td>
-    <td class="${simCls}">${fmt(sim)}</td>
-    <td class="${deltaGood?'td-pos':'td-neg'}">${delta>=0?'+':''}${fmt(delta)}</td>
-    <td class="${deltaGood?'td-arrow-pos':'td-arrow-neg'}">${deltaGood?'▲ Mieux':'▼ Moins bien'}</td>
-  </tr>`;
-}
-
-// ── ACTIONS CLÉ ──
-function setCle(id,type,btn){
-  if(!_products[id])return;
-  if(!_products[id].cle)_products[id].cle={type,produit:0,total:0};
-  _products[id].cle.type=type;
-  document.querySelectorAll('.cle-btn').forEach(b=>b.classList.remove('active'));
-  btn.classList.add('active');
-  const labels={temps:['⏱ Temps','Heures ce produit','Heures totales prod.'],superficie:['📐 Superficie','m² utilisés','m² total atelier'],volume:['📦 Volume','Unités produit','Unités totales'],ca:['💰 CA','CA ce produit (€)','CA total (€)']};
-  const cl=labels[type];
-  const inputs=document.querySelectorAll('.cle-field label');
-  if(inputs[0])inputs[0].textContent=cl[1];
-  if(inputs[1])inputs[1].textContent=cl[2];
-  refreshMarge(id);
-}
-
-function updateCle(id,field,value){
-  if(!_products[id])return;
-  if(!_products[id].cle)_products[id].cle={type:'temps',produit:0,total:0};
-  _products[id].cle[field]=parseFloat(value)||0;
-  refreshMarge(id);
-}
-
-function updateCleTotal(id,value){
-  if(!_products[id])return;
-  _products[id].cfTotal=parseFloat(value)||0;
-  refreshMarge(id);
-}
-
-function refreshMarge(id){
-  const p=_products[id];
-  const {cv,mb,txMB,cfImpute,mn,txMN}=calcMN(p);
-  const sim=p.sim||{pv:0,mp:0,mo:0,cf:0,vol:parseFloat(p.qte)||1};
-  const s=calcSim(p,sim);
-  const cle=p.cle||{type:'temps',produit:0,total:0};
-
-  // ── MISE À JOUR KPI BOXES DU HAUT ──
-  const set=(eid,val)=>{const el=document.getElementById(eid);if(el)el.textContent=val;};
-  const setCls=(eid,...cls)=>{const el=document.getElementById(eid);if(el){el.className=el.className.replace(/\b(pos|neg)\b/g,'');if(cls[0])el.classList.add(cls[0]);}};
-
-  set('kpi-mn', fmtE(mn));
-  set('kpi-mn-sub', txMN.toFixed(1)+'% du PV');
-  set('kpi-cf', fmtE(cfImpute));
-  set('kpi-mb', fmtE(mb));
-  set('kpi-mb-sub', txMB.toFixed(1)+'% du PV');
-  set('kpi-cv', fmtE(cv));
-
-  // Couleur marge nette
-  const boxMN=document.getElementById('kpi-box-mn');
-  if(boxMN){boxMN.className='kpi-box '+(txMN>=20?'green':txMN>=5?'orange':'red');}
-  const valMN=document.getElementById('kpi-mn');
-  if(valMN){valMN.className='kpi-val '+(txMN>=20?'pos':txMN>=5?'':'neg');}
-
-  // Couleur marge brute
-  const boxMB=document.getElementById('kpi-box-mb');
-  if(boxMB){boxMB.className='kpi-box '+(txMB>=30?'green':txMB>=10?'orange':'red');}
-  const valMB=document.getElementById('kpi-mb');
-  if(valMB){valMB.className='kpi-val '+(txMB>=30?'pos':txMB>=10?'':'neg');}
-
-  // Re-render simulateur + table
-  const srg=document.getElementById('sim-result-grid');
-  if(srg)srg.innerHTML=renderSimResult(p,s,{mb,txMB,mn,txMN,cfImpute});
-  const ct=document.getElementById('comp-table');
-  if(ct)ct.innerHTML=renderCompTable(p,s,{cv,mb,txMB,cfImpute,mn,txMN});
-
-  // Update clé result
-  const cr=document.getElementById('cle-result');
-  if(cr)cr.innerHTML=cle.total>0&&cle.produit>0?
-    `✅ Quote-part : <b>${((parseFloat(cle.produit)||0)/(parseFloat(cle.total)||1)*100).toFixed(1)}%</b> → <b>${fmtE(cfImpute)}</b> de charges fixes imputées par unité`:
-    '⚠️ Renseignez les valeurs pour calculer la quote-part de charges fixes';
-
-  // Mise à jour camembert
-  setTimeout(()=>renderCamembert(p,cfImpute,mn),20);
-}
-
-// ── SIMULATEUR ──
-function updateSim(id,lever,value){
-  if(!_products[id])return;
-  if(!_products[id].sim)_products[id].sim={pv:0,mp:0,mo:0,cf:0,vol:parseFloat(_products[id].qte)||1};
-  _products[id].sim[lever]=parseFloat(value)||0;
-  // Sync input numérique
-  const numInput=document.getElementById('sn-'+lever);
-  if(numInput)numInput.value=parseFloat(value)||0;
-  const p=_products[id];
-  const sim=p.sim;
-  const s=calcSim(p,sim);
-  const cur=calcMN(p);
-  const srg=document.getElementById('sim-result-grid');
-  if(srg)srg.innerHTML=renderSimResult(p,s,cur);
-  const ct=document.getElementById('comp-table');
-  if(ct)ct.innerHTML=renderCompTable(p,s,cur);
-}
-
-function resetSim(id){
-  if(!_products[id])return;
-  _products[id].sim={pv:0,mp:0,mo:0,cf:0,vol:parseFloat(_products[id].qte)||1};
-  ['pv','mp','mo','cf'].forEach(k=>{
-    const sr=document.getElementById(`sr-${k}`);const sl=document.getElementById(`sl-${k}`);
-    if(sr)sr.value=0;
-    if(sl)sl.textContent=k==='pv'?'+0%':'−0%';
-  });
-  const svol=document.getElementById('sr-vol');const slvol=document.getElementById('sl-vol');
-  const qte=parseFloat(_products[id].qte)||1;
-  if(svol)svol.value=qte;if(slvol)slvol.textContent=`${qte} unités`;
-  const s=calcSim(_products[id],_products[id].sim);
-  const cur=calcMN(_products[id]);
-  const srg=document.getElementById('sim-result-grid');
-  if(srg)srg.innerHTML=renderSimResult(_products[id],s,cur);
-  const ct=document.getElementById('comp-table');
-  if(ct)ct.innerHTML=renderCompTable(_products[id],s,cur);
-}
-
-// ── SAVE / DELETE ──
-
-async function saveProduct(id){
-  if(!window._uid)return;
-  const p=_products[id];
-  if(p.source==='cout-revient'){
-    // Sauvegarder les paramètres marge (cle, sim) séparément
-    try{
-      await window._setDoc(window._doc(window._db,'marges',window._uid,'params',id),{cle:p.cle||{},sim:p.sim||{}});
-      showToast('✅ Paramètres sauvegardés !','success');
-    }catch(e){showToast('Erreur','warning');console.error(e);}
-  } else {
-    try{
-      await window._setDoc(window._doc(window._db,'marges',window._uid,'produits',id.replace('mg_','')),p);
-      showToast('✅ Produit sauvegardé !','success');
-    }catch(e){showToast('Erreur','warning');console.error(e);}
-  }
-}
-
-// ── SÉLECTION MULTIPLE ──
-function handleItemClick(e, id){
-  if(e.target.classList.contains('product-cb')) return;
-  openProduct(id);
-}
-
-function toggleSelect(id, checked){
-  if(checked) _selected.add(id);
-  else _selected.delete(id);
-  updateBulkBar();
-  renderList();
-}
-
-function updateBulkBar(){
-  const bar = document.getElementById('bulkBar');
-  const count = _selected.size;
-  bar.classList.toggle('hidden', count===0);
-  if(count>0) document.getElementById('bulk-count').textContent = count+' sélectionné(s)';
-  const visibleIds = Object.values(_products).filter(p=>p&&p.nom).map(p=>p.id);
-  const btn = document.getElementById('select-all-btn');
-  if(btn) btn.textContent = (visibleIds.length>0 && visibleIds.every(id=>_selected.has(id))) ? '☑' : '☐';
-}
-
-function clearSelection(){
-  _selected.clear();
-  updateBulkBar();
-  renderList();
-}
-
-function toggleSelectAll(){
-  // Sélectionner uniquement les produits valides et visibles
-  const visibleIds = Object.values(_products)
-    .filter(p => p && p.nom)
-    .map(p => p.id);
-  const allSelected = visibleIds.length>0 && visibleIds.every(id=>_selected.has(id));
-  if(allSelected) _selected.clear();
-  else visibleIds.forEach(id=>_selected.add(id));
-  updateBulkBar();
-  renderList();
-}
-
-async function _deleteOneProduct(id){
-  const p = _products[id];
-  if(!p) { console.warn('_deleteOneProduct: product not found', id); return; }
-  
-  console.log('Deleting:', id, 'source:', p.source, 'nom:', p.nom);
-  
-  if(p.source==='cout-revient'){
-    const fsId = id.replace('cr_','');
-    console.log('→ produits/items/', fsId);
-    await window._deleteDoc(window._doc(window._db,'produits',window._uid,'items',fsId));
-  } else {
-    // Produits saisis dans Marges : ID Firestore = tout ce qui suit 'mg_prod_' ou 'mg_'
-    // Le vrai ID Firestore est stocké dans p.id ou extrait du prefixe
-    let fsId;
-    if(id.startsWith('mg_prod_')) fsId = id.slice(3); // garde 'prod_TIMESTAMP'
-    else if(id.startsWith('mg_')) fsId = id.slice(3);
-    else fsId = id;
-    console.log('→ marges/produits/', fsId);
-    await window._deleteDoc(window._doc(window._db,'marges',window._uid,'produits',fsId));
-  }
-  delete _products[id];
-}
-
-async function deleteSelected(){
-  const ids=[..._selected];
-  if(!ids.length) return;
-  if(!confirm(`Supprimer ${ids.length} produit(s) ?`)) return;
-  const btn=document.querySelector('.btn-bulk-del');
-  if(btn){btn.disabled=true;btn.textContent='⏳...';}
-  let ok=0,err=0;
-  for(const id of ids){
-    try{ await _deleteOneProduct(id); ok++; }
-    catch(e){ console.error(e); err++; }
-  }
-  _selected.clear();
-  if(_currentId && !_products[_currentId]){
-    _currentId=null;
-    document.getElementById('rightPanel').innerHTML=`<div class="empty-state"><div class="empty-icon">🗑</div><h3 style="font-size:16px;font-weight:700;color:var(--text)">${ok} produit(s) supprimé(s)</h3></div>`;
-  }
-  updateBulkBar();
-  renderList();
-  showToast(err>0?`${ok} supprimé(s), ${err} erreur(s)`:`${ok} produit(s) supprimé(s)`, err>0?'warning':'ok');
-}
-
-async function deleteProduct(id){
-  if(!confirm('Supprimer ce produit ?'))return;
-  try{
-    await _deleteOneProduct(id);
-    _selected.delete(id);
-    _currentId=null;
-    updateBulkBar();
-    renderList();
-    document.getElementById('rightPanel').innerHTML=`<div class="empty-state"><div class="empty-icon">🗑</div><h3 style="font-size:16px;font-weight:700;color:var(--text)">Produit supprimé</h3></div>`;
-    showToast('Produit supprimé','ok');
-  }catch(e){showToast('Erreur : '+e.message,'err');console.error(e);}
-}
-
-// ── MODAL ──
-let _editId = null;
-
-function openNewProductModal(){
-  _editId = null;
-  document.getElementById('modal-title').textContent = '➕ Nouveau produit / service';
-  document.getElementById('modal-cta').textContent = 'Créer & Analyser →';
-  ['mn-nom','mn-cat','mn-pv','mn-qte','mn-mp','mn-mo','mn-emb','mn-liv','mn-cf','mn-emoji'].forEach(id=>{
-    const el=document.getElementById(id); if(el) el.value='';
-  });
-  document.getElementById('newProductModal').classList.add('show');
-}
-
-function closeModal(){
-  _editId = null;
-  document.getElementById('newProductModal').classList.remove('show');
-}
-
-function editProduct(id){
-  const p = _products[id];
-  if(!p) return;
-  _editId = id;
-  document.getElementById('modal-title').textContent = '✏️ Modifier : ' + (p.nom||'');
-  document.getElementById('modal-cta').textContent = 'Sauvegarder →';
-  document.getElementById('mn-nom').value = p.nom||'';
-  document.getElementById('mn-cat').value = p.categorie||'';
-  document.getElementById('mn-pv').value = p.pv||'';
-  document.getElementById('mn-qte').value = p.qte||'';
-  document.getElementById('mn-mp').value = p.mp||'';
-  document.getElementById('mn-mo').value = p.mo||'';
-  document.getElementById('mn-emb').value = p.emb||'';
-  document.getElementById('mn-liv').value = p.liv||'';
-  document.getElementById('mn-cf').value = p.cfTotal||'';
-  document.getElementById('mn-emoji').value = p.emoji||'📦';
-  document.getElementById('newProductModal').classList.add('show');
-}
-
-function createProduct(){
-  const nom=document.getElementById('mn-nom').value.trim();
-  if(!nom){document.getElementById('mn-nom').focus();return;}
-
-  const data = {
-    nom, categorie:document.getElementById('mn-cat').value,
-    emoji:document.getElementById('mn-emoji').value||'📦',
-    pv:parseFloat(document.getElementById('mn-pv').value)||0,
-    qte:parseFloat(document.getElementById('mn-qte').value)||1,
-    mp:parseFloat(document.getElementById('mn-mp').value)||0,
-    mo:parseFloat(document.getElementById('mn-mo').value)||0,
-    emb:parseFloat(document.getElementById('mn-emb').value)||0,
-    liv:parseFloat(document.getElementById('mn-liv').value)||0,
-    cfTotal:parseFloat(document.getElementById('mn-cf').value)||0,
-  };
-
-  if(_editId && _products[_editId]){
-    // Mode édition → mettre à jour le produit existant
-    Object.assign(_products[_editId], data);
-    closeModal();
-    renderList();
-    openProduct(_editId);
-  } else {
-    // Mode création → nouveau produit
-    const id='mg_prod_'+Date.now();
-    _products[id]={
-      id, source:'marges', ...data,
-      cle:{type:'temps',produit:0,total:0},
-      sim:{pv:0,mp:0,mo:0,cf:0,vol:data.qte}
-    };
-    closeModal();
-    renderList();
-    openProduct(id);
-  }
-}
-
-// ── UTILS ──
-function fmtE(n){return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
-function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');setTimeout(()=>t.className='toast',3200);}
-
-// ── SYNC INPUT NUMÉRIQUE → SLIDER ──
-function updateSimNum(id, lever, value){
-  const v = Math.max(0, parseFloat(value)||0);
-  const sr = document.getElementById('sr-'+lever);
-  if(sr) sr.value = v;
-  // Sync input € si existe
-  const p = _products[id];
-  if(p && lever !== 'vol'){
-    const baseVals = {pv: parseFloat(p.pv)||0, mp: parseFloat(p.mp)||0, mo: parseFloat(p.mo)||0, cf: parseFloat(p.cfTotal)||0};
-    const base = baseVals[lever]||0;
-    const eurInput = document.getElementById('sn-'+lever+'-eur');
-    if(eurInput && base > 0){
-      const mult = lever==='pv' ? (1+v/100) : (1-v/100);
-      eurInput.value = (base * mult).toFixed(2);
-    }
-  }
-  updateSim(id, lever, v);
-}
-
-// ── SAISIE EN EUROS → calcule le % ──
-function updateSimEur(id, lever, eurValue, baseValue){
-  const eur = parseFloat(eurValue)||0;
-  const base = parseFloat(baseValue)||0;
-  if(base <= 0) return;
-  let pct = 0;
-  if(lever === 'pv') pct = Math.max(0, (eur - base) / base * 100);
-  else pct = Math.max(0, (base - eur) / base * 100);
-  pct = Math.min(pct, 100);
-  // Sync slider + input %
-  const sr = document.getElementById('sr-'+lever);
-  const sn = document.getElementById('sn-'+lever);
-  if(sr) sr.value = pct.toFixed(1);
-  if(sn) sn.value = pct.toFixed(1);
-  updateSim(id, lever, pct);
-}
-
-// ── CAMEMBERT ──
-let _chartCamembert = null;
-function renderCamembert(p, cfImpute, mn){
-  const ctx = document.getElementById('chartCamembert');
-  if(!ctx) return;
-  if(_chartCamembert){ try{_chartCamembert.destroy();}catch(e){} }
-
-  const data = [
+// ═══ CHART (hors Alpine, manipule canvas directement) ═══
+var _chartCamembert = null;
+function renderCamembert(p, cfImpute, mn, canvasEl) {
+  if(!canvasEl) return;
+  if(_chartCamembert) { try { _chartCamembert.destroy(); } catch(e) {} }
+  var data = [
     {label:'Matières premières', val:parseFloat(p.mp)||0, color:'#ef4444'},
     {label:"Main d'œuvre",       val:parseFloat(p.mo)||0, color:'#f59e0b'},
     {label:'Emballages',         val:parseFloat(p.emb)||0, color:'#14b8a6'},
     {label:'Livraison',          val:parseFloat(p.liv)||0, color:'#8b5cf6'},
     {label:'Charges fixes',      val:cfImpute||0,          color:'#6366f1'},
     {label:'Marge nette',        val:Math.max(mn,0)||0,    color:'#10b981'},
-  ].filter(d=>d.val>0);
-
-  const pv = parseFloat(p.pv)||1;
-  _chartCamembert = new Chart(ctx, {
+  ].filter(function(d) { return d.val > 0; });
+  var pv = parseFloat(p.pv)||1;
+  _chartCamembert = new Chart(canvasEl, {
     type:'doughnut',
-    data:{
-      labels: data.map(d=>d.label),
-      datasets:[{
-        data: data.map(d=>d.val),
-        backgroundColor: data.map(d=>d.color),
-        borderWidth:2, borderColor:'white', hoverOffset:6
-      }]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      cutout:'60%',
-      plugins:{
-        legend:{display:false},
-        tooltip:{callbacks:{label:ctx=>{
-          const v=ctx.raw;
-          const pct=(v/pv*100).toFixed(1);
-          return ` ${fmtE(v)} (${pct}%)`;
+    data:{ labels:data.map(function(d){return d.label;}), datasets:[{
+      data:data.map(function(d){return d.val;}),
+      backgroundColor:data.map(function(d){return d.color;}),
+      borderWidth:2, borderColor:'white', hoverOffset:6
+    }]},
+    options:{ responsive:true, maintainAspectRatio:false, cutout:'60%',
+      plugins:{ legend:{display:false},
+        tooltip:{callbacks:{label:function(ctx){
+          return ' '+(parseFloat(ctx.raw)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' € ('+(ctx.raw/pv*100).toFixed(1)+'%)';
         }}}
       }
     }
   });
-
-  // Légende custom
-  const leg = document.getElementById('camembert-legend');
-  if(leg) leg.innerHTML = data.map(d=>{
-    const pct=(d.val/pv*100).toFixed(1);
-    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border-radius:6px;background:#f8faff">
-      <div style="display:flex;align-items:center;gap:8px">
-        <div style="width:10px;height:10px;border-radius:3px;background:${d.color};flex-shrink:0"></div>
-        <span style="font-size:12px;color:var(--text)">${d.label}</span>
-      </div>
-      <span style="font-size:12px;font-weight:700;color:var(--text)">${fmtE(d.val)} <span style="font-size:10px;color:var(--muted)">(${pct}%)</span></span>
-    </div>`;
-  }).join('');
 }
 
+// ═══ UTILS ═══
+function fmtE(n) { return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'; }
+function showToast(msg,type) { var t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');setTimeout(function(){t.className='toast';},3200); }
+
+// ═══════════════════════════════════════════════════════════
+//  ALPINE COMPONENT
+// ═══════════════════════════════════════════════════════════
+function margesApp() {
+  return {
+    // ── State ──
+    products: {},
+    currentId: null,
+    selected: [],
+    search: '',
+    loading: true,
+    showModal: false,
+    modalEdit: null, // null=new, id=edit
+    modal: { nom:'', categorie:'', emoji:'📦', pv:'', qte:'', mp:'', mo:'', emb:'', liv:'', cfTotal:'' },
+
+    // ── Current product (reactive shortcut) ──
+    get p() { return this.currentId && this.products[this.currentId] ? this.products[this.currentId] : null; },
+
+    // ── Filtered product list ──
+    get filteredProducts() {
+      var self = this;
+      return Object.values(this.products).filter(function(p) {
+        if(!p || !p.nom) return false;
+        if(!self.search) return true;
+        var q = self.search.toLowerCase();
+        return p.nom.toLowerCase().includes(q) || (p.categorie||'').toLowerCase().includes(q);
+      });
+    },
+
+    get allSelected() {
+      var vis = this.filteredProducts.map(function(p){return p.id;});
+      return vis.length > 0 && vis.every(id => this.selected.includes(id));
+    },
+
+    // ── Calculations (reactive!) ──
+    get calc() { return _calcMN(this.p); },
+    get sim()  { return this.p ? _calcSim(this.p, this.p.sim) : null; },
+
+    // ── Clé labels ──
+    cleLabels: {
+      temps:      ['⏱ Temps',      'Heures ce produit',   'Heures totales prod.'],
+      superficie: ['📐 Superficie', 'm² utilisés',         'm² total atelier'],
+      volume:     ['📦 Volume',     'Unités produit',      'Unités totales'],
+      ca:         ['💰 CA',         'CA ce produit (€)',   'CA total (€)']
+    },
+
+    // ── Decomp brute rows ──
+    get decompBrute() {
+      if(!this.p) return [];
+      return [
+        {label:'Prix de vente HT',    color:'#1a3dce', val:this.p.pv,  isRevenu:true},
+        {label:'Matières premières',   color:'#ef4444', val:this.p.mp,  isRevenu:false},
+        {label:"Main d'œuvre",         color:'#f59e0b', val:this.p.mo,  isRevenu:false},
+        {label:'Emballages',           color:'#14b8a6', val:this.p.emb, isRevenu:false},
+        {label:'Livraison',            color:'#8b5cf6', val:this.p.liv, isRevenu:false},
+      ];
+    },
+
+    // ── Chart data ──
+    get chartParts() {
+      if(!this.p) return [];
+      var c = this.calc;
+      var pv = this.p.pv || 1;
+      return [
+        {label:'Matières premières', val:this.p.mp,  color:'#ef4444'},
+        {label:"Main d'œuvre",       val:this.p.mo,  color:'#f59e0b'},
+        {label:'Emballages',         val:this.p.emb, color:'#14b8a6'},
+        {label:'Livraison',          val:this.p.liv, color:'#8b5cf6'},
+        {label:'Charges fixes',      val:c.cfImpute, color:'#6366f1'},
+        {label:'Marge nette',        val:Math.max(c.mn,0), color:'#10b981'},
+      ].filter(function(d){return d.val>0;}).map(function(d){
+        d.pct = (d.val/pv*100).toFixed(1);
+        return d;
+      });
+    },
+
+    // ── Sim boxes (résultat visuel) ──
+    get simBoxes() {
+      if(!this.p || !this.sim) return [];
+      var c = this.calc, s = this.sim;
+      return [
+        {label:'Prix vente HT',     cur:this.p.pv,             sim:s.pvSim},
+        {label:'Marge brute',        cur:c.mb, sim:s.mbSim,    curPct:c.txMB, simPct:s.txMBSim},
+        {label:'Marge nette',        cur:c.mn, sim:s.mnSim,    curPct:c.txMN, simPct:s.txMNSim},
+        {label:'Marge brute totale', cur:c.mb*(this.p.qte||1), sim:s.margeTotSim},
+        {label:'Marge nette totale', cur:c.mn*(this.p.qte||1), sim:s.margeNetTotSim},
+      ];
+    },
+
+    // ── Comparison table rows ──
+    get compRows() {
+      if(!this.p || !this.sim) return [];
+      var c = this.calc, s = this.sim, qte = this.p.qte||1;
+      return [
+        {label:'Prix de vente HT',      cur:this.p.pv,   sim:s.pvSim},
+        {label:'Coûts variables',        cur:c.cv,        sim:s.cvSim,        inversed:true},
+        {label:'Marge brute / unité',    cur:c.mb,        sim:s.mbSim},
+        {label:'Taux marge brute',       cur:c.txMB,      sim:s.txMBSim,      isPct:true},
+        {label:'Charges fixes imputées', cur:c.cfImpute,  sim:s.cfImputeSim,  inversed:true},
+        {label:'Marge nette / unité',    cur:c.mn,        sim:s.mnSim},
+        {label:'Taux marge nette',       cur:c.txMN,      sim:s.txMNSim,      isPct:true},
+        {label:'Marge totale (×'+s.volSim+'u)', cur:c.mb*qte, sim:s.margeTotSim},
+        {label:'Marge nette totale',     cur:c.mn*qte,    sim:s.margeNetTotSim},
+      ];
+    },
+
+    deltaGood(row) {
+      var d = row.sim - row.cur;
+      return row.inversed ? d <= 0 : d >= 0;
+    },
+
+    // ── Init ──
+    init() {
+      var self = this;
+      // Bridge Firebase → Alpine
+      window._alpineSetProducts = function(prods) { self.products = prods; self.loading = false; };
+      if(window._pendingProducts) {
+        this.products = window._pendingProducts;
+        this.loading = false;
+        delete window._pendingProducts;
+      }
+      // Update chart when product or relevant values change
+      this.$watch(function() {
+        if(!self.p) return '';
+        var c = _calcMN(self.p);
+        return self.currentId + '_' + self.p.mp + '_' + self.p.mo + '_' + self.p.emb + '_' + self.p.liv + '_' + c.cfImpute + '_' + c.mn;
+      }, function() {
+        self.$nextTick(function() { self._updateChart(); });
+      });
+    },
+
+    // ── Helpers ──
+    fmtE: fmtE,
+    calcMB: _calcMB,
+
+    mbCls(prod) {
+      var tx = _calcMB(prod).txMB;
+      return tx >= 30 ? 'mb-good' : tx >= 10 ? 'mb-warn' : 'mb-bad';
+    },
+
+    // ── Simulator euro ↔ % ──
+    simEur(lever) {
+      if(!this.p) return 0;
+      var bases = {pv:this.p.pv, mp:this.p.mp, mo:this.p.mo, cf:this.p.cfTotal};
+      var base = bases[lever]||0;
+      var pct = this.p.sim[lever]||0;
+      return lever === 'pv' ? base*(1+pct/100) : base*(1-pct/100);
+    },
+    setSimFromEur(lever, val) {
+      if(!this.p) return;
+      var eur = parseFloat(val)||0;
+      var bases = {pv:this.p.pv, mp:this.p.mp, mo:this.p.mo, cf:this.p.cfTotal};
+      var base = bases[lever]||0;
+      if(base <= 0) return;
+      var pct = lever === 'pv' ? Math.max(0,(eur-base)/base*100) : Math.max(0,(base-eur)/base*100);
+      this.p.sim[lever] = Math.min(Math.round(pct*10)/10, 100);
+    },
+    resetSim() {
+      if(!this.p) return;
+      this.p.sim = {pv:0, mp:0, mo:0, cf:0, vol:this.p.qte||1};
+    },
+
+    // ── Selection ──
+    toggleSelect(id) {
+      var idx = this.selected.indexOf(id);
+      if(idx >= 0) this.selected.splice(idx, 1);
+      else this.selected.push(id);
+    },
+    toggleSelectAll() {
+      var vis = this.filteredProducts.map(function(p){return p.id;});
+      if(this.allSelected) this.selected = [];
+      else this.selected = vis.slice();
+    },
+
+    // ── CRUD ──
+    async saveProduct() {
+      if(!window._uid || !this.p) return;
+      var p = this.p;
+      if(p.source === 'cout-revient') {
+        try {
+          await window._setDoc(window._doc(window._db,'marges',window._uid,'params',p.id), {cle:p.cle||{}, sim:p.sim||{}});
+          showToast('✅ Paramètres sauvegardés !','success');
+        } catch(e) { showToast('Erreur','warning'); console.error(e); }
+      } else {
+        try {
+          await window._setDoc(window._doc(window._db,'marges',window._uid,'produits',p.id.replace('mg_','')), JSON.parse(JSON.stringify(p)));
+          showToast('✅ Produit sauvegardé !','success');
+        } catch(e) { showToast('Erreur','warning'); console.error(e); }
+      }
+    },
+
+    async _deleteOne(id) {
+      var p = this.products[id];
+      if(!p) return;
+      if(p.source === 'cout-revient') {
+        await window._deleteDoc(window._doc(window._db,'produits',window._uid,'items',id.replace('cr_','')));
+      } else {
+        var fsId = id.startsWith('mg_prod_') ? id.slice(3) : id.startsWith('mg_') ? id.slice(3) : id;
+        await window._deleteDoc(window._doc(window._db,'marges',window._uid,'produits',fsId));
+      }
+      delete this.products[id];
+      // Force Alpine reactivity
+      this.products = Object.assign({}, this.products);
+    },
+
+    async deleteProduct(id) {
+      if(!confirm('Supprimer ce produit ?')) return;
+      try {
+        await this._deleteOne(id);
+        this.selected = this.selected.filter(function(s){return s!==id;});
+        if(this.currentId === id) this.currentId = null;
+        showToast('Produit supprimé','ok');
+      } catch(e) { showToast('Erreur : '+e.message,'err'); console.error(e); }
+    },
+
+    async deleteSelected() {
+      var ids = this.selected.slice();
+      if(!ids.length) return;
+      if(!confirm('Supprimer '+ids.length+' produit(s) ?')) return;
+      var ok=0, err=0;
+      for(var i=0; i<ids.length; i++) {
+        try { await this._deleteOne(ids[i]); ok++; } catch(e) { console.error(e); err++; }
+      }
+      this.selected = [];
+      if(this.currentId && !this.products[this.currentId]) this.currentId = null;
+      showToast(err>0 ? ok+' supprimé(s), '+err+' erreur(s)' : ok+' produit(s) supprimé(s)', err>0?'warning':'ok');
+    },
+
+    // ── Modal ──
+    openModal(editId) {
+      if(editId && this.products[editId]) {
+        var p = this.products[editId];
+        this.modalEdit = editId;
+        this.modal = {nom:p.nom||'',categorie:p.categorie||'',emoji:p.emoji||'📦',
+          pv:p.pv||'',qte:p.qte||'',mp:p.mp||'',mo:p.mo||'',emb:p.emb||'',liv:p.liv||'',cfTotal:p.cfTotal||''};
+      } else {
+        this.modalEdit = null;
+        this.modal = {nom:'',categorie:'',emoji:'📦',pv:'',qte:'',mp:'',mo:'',emb:'',liv:'',cfTotal:''};
+      }
+      this.showModal = true;
+    },
+
+    submitModal() {
+      var m = this.modal;
+      if(!m.nom.trim()) return;
+      var data = {
+        nom:m.nom.trim(), categorie:m.categorie, emoji:m.emoji||'📦',
+        pv:parseFloat(m.pv)||0, qte:parseFloat(m.qte)||1,
+        mp:parseFloat(m.mp)||0, mo:parseFloat(m.mo)||0,
+        emb:parseFloat(m.emb)||0, liv:parseFloat(m.liv)||0,
+        cfTotal:parseFloat(m.cfTotal)||0
+      };
+      if(this.modalEdit && this.products[this.modalEdit]) {
+        Object.assign(this.products[this.modalEdit], data);
+        _normalize(this.products[this.modalEdit]);
+        this.currentId = this.modalEdit;
+      } else {
+        var id = 'mg_prod_' + Date.now();
+        this.products[id] = _normalize({
+          id:id, source:'marges', ...data,
+          cle:{type:'temps',produit:0,total:0},
+          sim:{pv:0,mp:0,mo:0,cf:0,vol:data.qte}
+        });
+        // Force reactivity
+        this.products = Object.assign({}, this.products);
+        this.currentId = id;
+      }
+      this.showModal = false;
+    },
+
+    // ── Chart ──
+    _updateChart() {
+      if(!this.p || !this.$refs.chartCamembert) return;
+      renderCamembert(this.p, this.calc.cfImpute, this.calc.mn, this.$refs.chartCamembert);
+    },
+  };
+}
+
+// ═══ LEGACY WINDOW EXPORTS (nav.js compat) ═══
+function toggleMenu(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('open');}
+async function handleLogout(){await window._signOut(window._auth);window.location.href='index.html';}
 window.toggleMenu=toggleMenu;window.handleLogout=handleLogout;
-window.openProduct=openProduct;window.filterProducts=filterProducts;
-window.openNewProductModal=openNewProductModal;window.closeModal=closeModal;
-window.createProduct=createProduct;window.editProduct=editProduct;window.deleteProduct=deleteProduct;window.deleteSelected=deleteSelected;window.clearSelection=clearSelection;window.toggleSelectAll=toggleSelectAll;window.toggleSelect=toggleSelect;window.handleItemClick=handleItemClick;
-window.setCle=setCle;window.updateCle=updateCle;window.updateCleTotal=updateCleTotal;
-window.updateSim=updateSim;window.updateSimNum=updateSimNum;window.updateSimEur=updateSimEur;window.resetSim=resetSim;window.saveProduct=saveProduct;
 </script>
 
 <script>
+// Nav compat
 function toggleNav(subId, el) {
-  const sub = document.getElementById(subId);
-  const isOpen = sub.classList.contains('open');
+  var sub = document.getElementById(subId);
+  var isOpen = sub.classList.contains('open');
   sub.classList.toggle('open');
-  // rotate chevron
-  const chevId = subId === 'kpis-sub' ? 'chev-kpis' : 'chev-pil';
-  const chev = document.getElementById(chevId);
+  var chevId = subId === 'kpis-sub' ? 'chev-kpis' : 'chev-pil';
+  var chev = document.getElementById(chevId);
   if (chev) chev.style.transform = isOpen ? '' : 'rotate(90deg)';
 }
 function activatePage(pageId, openSub) {
-  const el = document.getElementById(pageId);
+  var el = document.getElementById(pageId);
   if (el) el.classList.add('on');
   if (openSub) {
-    const sub = document.getElementById(openSub);
+    var sub = document.getElementById(openSub);
     if (sub) sub.classList.add('open');
-    const chevId = openSub === 'kpis-sub' ? 'chev-kpis' : 'chev-pil';
-    const chev = document.getElementById(chevId);
+    var chevId = openSub === 'kpis-sub' ? 'chev-kpis' : 'chev-pil';
+    var chev = document.getElementById(chevId);
     if (chev) chev.style.transform = 'rotate(90deg)';
   }
 }
-</script>
-<script>document.addEventListener('DOMContentLoaded',()=>activatePage('nav-marges','kpis-sub'));</script>
+document.addEventListener('DOMContentLoaded',function(){activatePage('nav-marges','kpis-sub');});
 
-
-
-<script>
 function toggleFidNav(el){
   var sub=el.nextElementSibling;
   var chev=el.querySelector('.nav-chev');
