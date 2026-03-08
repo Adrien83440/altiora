@@ -3,7 +3,7 @@
 async function firestoreGetPublic(path) {
   // Lecture publique via REST sans auth (fonctionne si rules = allow read: if true pour sms_credits)
   // Sinon on utilise le token client passé en header
-  const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'alteore-dev';
   const res = await fetch(
     'https://firestore.googleapis.com/v1/projects/' + projectId + '/databases/(default)/documents/' + path
   );
@@ -11,7 +11,7 @@ async function firestoreGetPublic(path) {
 }
 
 async function firestorePatchWithToken(clientToken, path, fields) {
-  const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'alteore-dev';
   const firestoreFields = {};
   for (const [key, value] of Object.entries(fields)) {
     if (typeof value === 'number') firestoreFields[key] = { integerValue: value.toString() };

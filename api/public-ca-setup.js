@@ -2,8 +2,8 @@
 // Utilise l'API REST Firestore avec x-goog-api-key (pas de Firebase Admin)
 // Les règles Firestore autorisent request.auth == null pour les champs apiKey uniquement
 
-const FB_PROJECT = 'altiora-70599';
-const FB_KEY     = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+const FB_PROJECT = 'alteore-dev';
+const FB_KEY     = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
 const FS_BASE    = `https://firestore.googleapis.com/v1/projects/${FB_PROJECT}/databases/(default)/documents`;
 
 function generateApiKey() {

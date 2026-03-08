@@ -8,7 +8,7 @@
 //   invoice.payment_succeeded         → paiement ok → confirmer plan actif
 //   invoice.payment_failed            → échec paiement → plan = 'past_due'
 
-const FIREBASE_PROJECT = 'altiora-70599';
+const FIREBASE_PROJECT = 'alteore-dev';
 
 // ── Déterminer le plan depuis le priceId Stripe ──
 const PRICE_TO_PLAN = {
@@ -27,7 +27,7 @@ function getPlanFromSubscription(subscription) {
 
 // ── Mise à jour Firestore via REST API ──
 async function updateFirestore(uid, fields) {
-  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/users/${uid}?updateMask.fieldPaths=${Object.keys(fields).join('&updateMask.fieldPaths=')}`;
 
   // Convertir les champs en format Firestore
@@ -55,7 +55,7 @@ async function updateFirestore(uid, fields) {
 
 // ── Récupérer uid depuis customerId (via Firestore query) ──
 async function getUidFromCustomer(customerId) {
-  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents:runQuery?key=${fbKey}`;
 
   const res = await fetch(url, {
@@ -85,7 +85,7 @@ async function getUidFromCustomer(customerId) {
 
 // ── Lecture Firestore REST ──
 async function fsGet(path) {
-  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}?key=${fbKey}`;
   const res = await fetch(url);
   if (res.status === 404) return null;
@@ -109,7 +109,7 @@ async function fsIncrement(path, field, delta) {
 async function rewardParrain(parrainUid, filleulUid, referralCode, stripeKey) {
   try {
     // 1. Récupérer le stripeCustomerId du parrain
-    const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+    const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
     const parrainDoc = await fsGet(`users/${parrainUid}`);
     const customerId = fv(parrainDoc, 'stripeCustomerId');
     const subscriptionId = fv(parrainDoc, 'stripeSubscriptionId');
@@ -173,7 +173,7 @@ async function rewardParrain(parrainUid, filleulUid, referralCode, stripeKey) {
     await updateFirestore(`referrals/${referralCode}/uses/${filleulUid}`.replace('users/', ''), {});
     // Note : updateFirestore cible users/{uid}, on utilise fsSet direct
     const fsSetDirect = async (path, fields) => {
-      const fbKeyVal = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+      const fbKeyVal = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
       const firestoreFields = {};
       for (const [k, v] of Object.entries(fields)) {
         if (typeof v === 'string')      firestoreFields[k] = { stringValue: v };

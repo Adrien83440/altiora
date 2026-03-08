@@ -2,11 +2,11 @@
 // Retourne les vraies factures Stripe de l'utilisateur connecté
 // Sécurisé par token Firebase ID (POST)
 
-const FIREBASE_PROJECT = 'altiora-70599';
+const FIREBASE_PROJECT = 'alteore-dev';
 
 // Vérifier le token Firebase et retourner l'uid
 async function verifyFirebaseToken(idToken) {
-  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
   const res = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${fbKey}`,
     {
@@ -21,7 +21,7 @@ async function verifyFirebaseToken(idToken) {
 }
 
 async function getStripeCustomerId(uid) {
-  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/users/${uid}?key=${fbKey}`;
   const res = await fetch(url);
   if (!res.ok) return null;

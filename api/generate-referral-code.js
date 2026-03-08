@@ -2,8 +2,8 @@
 // Génère (ou récupère) le code de parrainage unique d'un utilisateur
 // Requiert un Firebase ID token dans le header Authorization: Bearer <idToken>
 
-const FIREBASE_PROJECT = 'altiora-70599';
-const FB_KEY_DEFAULT   = 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+const FIREBASE_PROJECT = 'alteore-dev';
+const FB_KEY_DEFAULT   = 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
 
 function fbKey() {
   return process.env.FIREBASE_API_KEY || FB_KEY_DEFAULT;

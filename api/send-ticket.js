@@ -19,7 +19,7 @@ export default async function handler(req, res) {
 
     // 1. Sauvegarder dans Firestore
     try {
-      const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
+      const projectId = process.env.FIREBASE_PROJECT_ID || 'alteore-dev';
       const authRes = await fetch(
         'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + process.env.FIREBASE_API_KEY,
         { method: 'POST', headers: { 'Content-Type': 'application/json' },

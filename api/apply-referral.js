@@ -2,8 +2,8 @@
 // Valide un code de parrainage et enregistre la relation parrain/filleul
 // Appelé côté client avant le checkout pour vérifier que le code existe
 
-const FIREBASE_PROJECT = 'altiora-70599';
-const FB_KEY_DEFAULT   = 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+const FIREBASE_PROJECT = 'alteore-dev';
+const FB_KEY_DEFAULT   = 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
 
 function fbKey() {
   return process.env.FIREBASE_API_KEY || FB_KEY_DEFAULT;

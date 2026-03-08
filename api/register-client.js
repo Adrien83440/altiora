@@ -3,8 +3,8 @@
 // L'API vérifie que le commerçant a un plan fid valide avant d'écrire
 
 async function firestoreGet(path) {
-  const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
-  const apiKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'alteore-dev';
+  const apiKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
   const res = await fetch(
     `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/${path}?key=${apiKey}`
   );
@@ -12,7 +12,7 @@ async function firestoreGet(path) {
 }
 
 async function firestoreSet(path, fields, token) {
-  const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
+  const projectId = process.env.FIREBASE_PROJECT_ID || 'alteore-dev';
   const firestoreFields = {};
   for (const [k, v] of Object.entries(fields)) {
     if (v === null || v === undefined) continue;
@@ -36,7 +36,7 @@ async function firestoreSet(path, fields, token) {
 async function getFirebaseToken() {
   const email = process.env.FIREBASE_API_EMAIL;
   const password = process.env.FIREBASE_API_PASSWORD;
-  const apiKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const apiKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
   if (!email || !password) return null;
   try {
     const res = await fetch(

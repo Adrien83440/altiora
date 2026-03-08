@@ -13,8 +13,8 @@ module.exports = async (req, res) => {
 
   const stripeKey = process.env.STRIPE_SECRET_KEY;
   const baseUrl = process.env.APP_URL || 'https://altiora-theta.vercel.app';
-  const fbProject = 'altiora-70599';
-  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const fbProject = 'alteore-dev';
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyA2jBMDhmMwd5KROvutxhsmM4SMOEqdLF4';
 
   try {
     // 1. Récupérer le stripeCustomerId depuis Firestore
