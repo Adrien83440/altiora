@@ -7,6 +7,7 @@
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
+  [x-cloak]{display:none!important}
   :root{
     --blue-main:#4f7ef8;--blue-dark:#1a2f6e;--blue-ghost:rgba(79,126,248,.08);
     --bg:#f0f2f8;--card:#fff;--border:#e5e8f0;--muted:#8a94ad;
@@ -372,7 +373,59 @@
         <div class="sum-sub" x-text="t.tvaDue >= 0 ? '🔴 À payer' : '🟢 Crédit TVA'"></div>
       </div>
     </div>
-    <!-- Contenu tableaux rendu dynamiquement -->
+    <!-- ════ CA JOURNALIER — Alpine.js réactif ══════════════════════ -->
+    <div class="section-card full" style="margin-bottom:16px" x-show="loaded" x-cloak>
+      <div class="section-head">
+        <div class="section-title">📅 CA Journalier HT
+          <span class="section-title-badge badge-blue" x-text="monthLabel"></span>
+        </div>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th style="color:#10b981">HT 5,5%</th>
+            <th style="color:#f97316">HT 10%</th>
+            <th style="color:#4f7ef8">HT 20%</th>
+            <th>Total HT</th>
+            <th>Total TTC</th>
+            <th>TVA collectée</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="(row, i) in ca" :key="i">
+            <tr>
+              <td><span style="font-size:11px;color:var(--muted)" x-text="row.date"></span></td>
+              <td><input class="cell-input" style="width:72px" type="number" placeholder="0.00"
+                   x-model="row.ht055" @input="onCAInput(i)"/></td>
+              <td><input class="cell-input" style="width:72px" type="number" placeholder="0.00"
+                   x-model="row.ht10" @input="onCAInput(i)"/></td>
+              <td><input class="cell-input" style="width:72px" type="number" placeholder="0.00"
+                   x-model="row.ht20" @input="onCAInput(i)"/></td>
+              <td><span class="cell-readonly blue"
+                   x-text="caRowHT(row) ? fmtN(caRowHT(row)) : '—'"></span></td>
+              <td><span class="cell-readonly blue"
+                   x-text="caRowTTC(row) ? fmtN(caRowTTC(row)) : '—'"></span></td>
+              <td><span class="cell-readonly green"
+                   x-text="caRowTVA(row) ? fmtN(caRowTVA(row)) : '—'"></span></td>
+            </tr>
+          </template>
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>TOTAL</td>
+            <td style="color:#10b981;font-weight:700" x-text="fmtN(totCA055) + ' €'"></td>
+            <td style="color:#f97316;font-weight:700" x-text="fmtN(totCA10) + ' €'"></td>
+            <td style="color:#4f7ef8;font-weight:700" x-text="fmtN(totCA20) + ' €'"></td>
+            <td x-text="fmtN(totCAHT) + ' €'"></td>
+            <td x-text="fmtN(totCATTC) + ' €'"></td>
+            <td x-text="fmtN(totCATVA) + ' €'"></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <!-- Contenu tableaux rendu dynamiquement (sections non encore migrées) -->
     <div id="mainContentInner">
       <div class="loader"><div class="spin"></div> Connexion en cours...</div>
     </div>
@@ -647,6 +700,34 @@ function pilotageApp() {
     monthLabel: 'Chargement...',
     selectedMonth: new Date().getMonth().toString(),
 
+    // ═══ CA JOURNALIER — état réactif ═══
+    ca: [],
+    loaded: false,
+
+    // Totaux CA (getters réactifs)
+    get totCA055() { return this.ca.reduce((s, r) => s + (parseFloat(r.ht055) || 0), 0); },
+    get totCA10()  { return this.ca.reduce((s, r) => s + (parseFloat(r.ht10)  || 0), 0); },
+    get totCA20()  { return this.ca.reduce((s, r) => s + (parseFloat(r.ht20)  || 0), 0); },
+    get totCAHT()  { return this.totCA055 + this.totCA10 + this.totCA20; },
+    get totCATTC() { return this.totCA055 * 1.055 + this.totCA10 * 1.10 + this.totCA20 * 1.20; },
+    get totCATVA() { return this.totCA055 * 0.055 + this.totCA10 * 0.10 + this.totCA20 * 0.20; },
+
+    // Calculs par ligne
+    caRowHT(r)  { return (parseFloat(r.ht055)||0) + (parseFloat(r.ht10)||0) + (parseFloat(r.ht20)||0); },
+    caRowTTC(r) { return (parseFloat(r.ht055)||0)*1.055 + (parseFloat(r.ht10)||0)*1.10 + (parseFloat(r.ht20)||0)*1.20; },
+    caRowTVA(r) { return (parseFloat(r.ht055)||0)*0.055 + (parseFloat(r.ht10)||0)*0.10 + (parseFloat(r.ht20)||0)*0.20; },
+
+    // Input CA → sync _data + sauvegarde
+    onCAInput(i) {
+      if (typeof _data !== 'undefined' && _data.ca && _data.ca[i]) {
+        _data.ca[i].ht055 = this.ca[i].ht055;
+        _data.ca[i].ht10  = this.ca[i].ht10;
+        _data.ca[i].ht20  = this.ca[i].ht20;
+      }
+      if (typeof refreshTotals === 'function') refreshTotals();
+      if (typeof scheduleSave  === 'function') scheduleSave();
+    },
+
     init() {
       // Sync initial vers le select legacy
       var legacy = document.getElementById('monthSelect');
@@ -658,6 +739,12 @@ function pilotageApp() {
         if (label) this.monthLabel = label;
       };
 
+      // Exposer la mise à jour du CA Alpine sur window
+      window._alpineSetCA = (caArray) => {
+        this.ca = caArray;
+        this.loaded = true;
+      };
+
       // Sync selectedMonth → select legacy à chaque changement
       this.$watch('selectedMonth', (val) => {
         var leg = document.getElementById('monthSelect');
@@ -666,6 +753,8 @@ function pilotageApp() {
     },
 
     onMonthChange() {
+      // Reset loaded pour masquer le CA pendant le chargement
+      this.loaded = false;
       // Sync vers le select legacy puis appel loadMonth()
       var legacy = document.getElementById('monthSelect');
       if (legacy) legacy.value = this.selectedMonth;
@@ -673,6 +762,7 @@ function pilotageApp() {
     },
 
     fmtE(n)      { return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €'; },
+    fmtN(n)      { return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}); },
     fmtSigned(n) { var v = parseFloat(n)||0; return (v>=0?'+':'') + v.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €'; }
   };
 }
@@ -810,6 +900,13 @@ async function loadMonth() {
   }
 
   _data = data;
+
+  // ═══ Alimenter Alpine avec les données CA ═══
+  if (window._alpineSetCA) {
+    // Deep clone pour que Alpine ait sa propre copie réactive
+    window._alpineSetCA(JSON.parse(JSON.stringify(data.ca)));
+  }
+
   renderPage(data, m);
 }
 
@@ -1012,26 +1109,16 @@ function renderPage(data, month) {
 
     '<div class="sections-grid">' +
       '<div class="section-card">' +
-        '<div class="section-head"><div class="section-title">📅 CA Journalier HT <span class="section-title-badge badge-blue">' + MONTHS[month] + ' ' + window._year + '</span></div></div>' +
-        '<table class="data-table">' +
-          '<thead><tr><th>Date</th><th style="color:#10b981">HT 5,5%</th><th style="color:#f97316">HT 10%</th><th style="color:#4f7ef8">HT 20%</th><th>Total HT</th><th>Total TTC</th><th>TVA collectée</th></tr></thead>' +
-          '<tbody id="ca-tbody">' + renderCARows(data.ca) + '</tbody>' +
-          '<tfoot><tr><td>TOTAL</td><td style="color:#10b981;font-weight:700"><span id="tot-ca055">' + fmtN(t.caHT055) + '</span> €</td><td style="color:#f97316;font-weight:700"><span id="tot-ca10">' + fmtN(t.caHT10) + '</span> €</td><td style="color:#4f7ef8;font-weight:700"><span id="tot-ca20">' + fmtN(t.caHT20) + '</span> €</td><td><span id="tot-caHT">' + fmtN(t.caHT_j) + '</span> €</td><td><span id="tot-caTTC">' + fmtN(t.caHT055*1.055+t.caHT10*1.10+t.caHT20*1.20) + '</span> €</td><td><span id="tot-tvaC">' + fmtN(t.caHT055*0.055+t.caHT10*0.10+t.caHT20*0.20) + '</span> €</td></tr></tfoot>' +
-        '</table>' +
+        '<div class="section-head"><div class="section-title">💸 Rentrées supplémentaires</div><button class="btn btn-outline btn-sm" onclick="addRentree()">+ Ajouter</button></div>' +
+        '<table class="data-table"><thead><tr><th>Type</th><th>Montant</th><th></th></tr></thead>' +
+        '<tbody id="rsupp-tbody">' + renderRentrees(data.rentreesSupp) + '</tbody>' +
+        '<tfoot><tr><td>TOTAL NET</td><td><span id="tot-rsupp">' + fmtN(t.rentreesSupp) + '</span> €</td><td></td></tr></tfoot></table>' +
       '</div>' +
-      '<div style="display:flex;flex-direction:column;gap:16px;">' +
-        '<div class="section-card">' +
-          '<div class="section-head"><div class="section-title">💸 Rentrées supplémentaires</div><button class="btn btn-outline btn-sm" onclick="addRentree()">+ Ajouter</button></div>' +
-          '<table class="data-table"><thead><tr><th>Type</th><th>Montant</th><th></th></tr></thead>' +
-          '<tbody id="rsupp-tbody">' + renderRentrees(data.rentreesSupp) + '</tbody>' +
-          '<tfoot><tr><td>TOTAL NET</td><td><span id="tot-rsupp">' + fmtN(t.rentreesSupp) + '</span> €</td><td></td></tr></tfoot></table>' +
-        '</div>' +
-        '<div class="section-card">' +
-          '<div class="section-head"><div class="section-title">🎯 Prévision CA du mois</div><button class="btn btn-outline btn-sm" onclick="addPrevLine()">+ Ligne</button></div>' +
-          '<table class="data-table"><thead><tr><th>Type / Source</th><th>Montant prévu</th><th>CA réel</th><th>Écart</th></tr></thead>' +
-          '<tbody id="prev-tbody">' + renderPrevCA(data.previsionCA, t.caHT) + '</tbody>' +
-          '<tfoot><tr><td>Total</td><td><span id="tot-prev">' + fmtN(t.prevCA) + '</span> €</td><td style="font-weight:700;color:var(--blue-main)" id="tot-prev-reel">' + fmtN(t.caHT) + ' €</td><td id="tot-prev-ecart" style="font-weight:700"></td></tr></tfoot></table>' +
-        '</div>' +
+      '<div class="section-card">' +
+        '<div class="section-head"><div class="section-title">🎯 Prévision CA du mois</div><button class="btn btn-outline btn-sm" onclick="addPrevLine()">+ Ligne</button></div>' +
+        '<table class="data-table"><thead><tr><th>Type / Source</th><th>Montant prévu</th><th>CA réel</th><th>Écart</th></tr></thead>' +
+        '<tbody id="prev-tbody">' + renderPrevCA(data.previsionCA, t.caHT) + '</tbody>' +
+        '<tfoot><tr><td>Total</td><td><span id="tot-prev">' + fmtN(t.prevCA) + '</span> €</td><td style="font-weight:700;color:var(--blue-main)" id="tot-prev-reel">' + fmtN(t.caHT) + ' €</td><td id="tot-prev-ecart" style="font-weight:700"></td></tr></tfoot></table>' +
       '</div>' +
     '</div>' +
 
@@ -1128,25 +1215,7 @@ function renderPage(data, month) {
 }
 
 /* ─── RENDERERS ─── */
-function renderCARows(rows) {
-  return rows.map(function(r, i) {
-    var h055 = parseFloat(r.ht055) || 0;
-    var h10  = parseFloat(r.ht10)  || 0;
-    var h20  = parseFloat(r.ht20)  || 0;
-    var totalHT  = h055 + h10 + h20;
-    var totalTTC = h055*1.055 + h10*1.10 + h20*1.20;
-    var totalTVA = h055*0.055 + h10*0.10  + h20*0.20;
-    return '<tr>' +
-      '<td><span style="font-size:11px;color:var(--muted)">' + r.date + '</span></td>' +
-      '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + (r.ht055||'') + '" oninput="updateCA(' + i + ',\'ht055\',this.value)"/></td>' +
-      '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + (r.ht10||'') + '" oninput="updateCA(' + i + ',\'ht10\',this.value)"/></td>' +
-      '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + (r.ht20||'') + '" oninput="updateCA(' + i + ',\'ht20\',this.value)"/></td>' +
-      '<td><span class="cell-readonly blue">' + (totalHT  ? fmtN(totalHT)  : '—') + '</span></td>' +
-      '<td><span class="cell-readonly blue">' + (totalTTC ? fmtN(totalTTC) : '—') + '</span></td>' +
-      '<td><span class="cell-readonly green">' + (totalTVA ? fmtN(totalTVA) : '—') + '</span></td>' +
-    '</tr>';
-  }).join('');
-}
+// renderCARows() → supprimé : géré par Alpine.js (template x-for dans le HTML)
 
 function renderFacturesPro(rows) {
   if (!rows || rows.length === 0) rows = [{client:'', description:'', ht055:'', ht10:'', ht20:''}];
@@ -1325,24 +1394,7 @@ function renderCredits(rows) {
 }
 
 
-function updateCA(i, field, value) {
-  _data.ca[i][field] = value;
-  scheduleSave();
-  var h055 = parseFloat(_data.ca[i].ht055) || 0;
-  var h10  = parseFloat(_data.ca[i].ht10)  || 0;
-  var h20  = parseFloat(_data.ca[i].ht20)  || 0;
-  var totalHT  = h055 + h10 + h20;
-  var totalTTC = h055*1.055 + h10*1.10 + h20*1.20;
-  var totalTVA = h055*0.055 + h10*0.10  + h20*0.20;
-  var row = document.querySelector('#ca-tbody tr:nth-child(' + (i+1) + ')');
-  if (row) {
-    var spans = row.querySelectorAll('.cell-readonly');
-    if (spans[0]) spans[0].textContent = totalHT  ? fmtN(totalHT)  : '—';
-    if (spans[1]) spans[1].textContent = totalTTC ? fmtN(totalTTC) : '—';
-    if (spans[2]) spans[2].textContent = totalTVA ? fmtN(totalTVA) : '—';
-  }
-  refreshTotals();
-}
+// updateCA() → supprimé : géré par Alpine.js (x-model + onCAInput)
 
 
 /* ─── PROPAGATION CRÉDIT / LEASING ─── */
@@ -1703,11 +1755,8 @@ function refreshTotals() {
   if (window._alpineUpdateKPIs) window._alpineUpdateKPIs(t);
 
   function s(id,v,cls){var el=document.getElementById(id);if(!el)return;el.textContent=typeof v==='string'?v:fmtN(v);if(cls){el.className=el.className.replace(/positive|negative/g,'').trim();el.classList.add(cls);}}
-  s('tot-ca055',t.caHT055);s('tot-ca10',t.caHT10);s('tot-ca20',t.caHT20);
-  // Footer tableau CA journalier = journalier SEULEMENT (sans factures pro)
-  s('tot-caHT', t.caHT_j);
-  s('tot-caTTC', t.caHT055*1.055 + t.caHT10*1.10 + t.caHT20*1.20);
-  s('tot-tvaC',  t.caHT055*0.055 + t.caHT10*0.10 + t.caHT20*0.20);
+  // CA journalier totaux → gérés par Alpine (getters réactifs)
+  var fpR = _data.facturesPro || [];
   var fp055=fpR.reduce(function(s,r){return s+(parseFloat(r.ht055)||0);},0);
   var fp10=fpR.reduce(function(s,r){return s+(parseFloat(r.ht10)||0);},0);
   var fp20=fpR.reduce(function(s,r){return s+(parseFloat(r.ht20)||0);},0);
