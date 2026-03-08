@@ -810,8 +810,149 @@ async function loadMonth() {
   }
 
   _data = data;
+
+  // Auto-sync : injecter les crédits/leasings depuis Dettes si absents ce mois
+  await syncDettesToMonth(data, key);
+
   renderPage(data, m);
   renderHiddenCredits();
+}
+
+// ── SYNC DETTES → PILOTAGE (par mois) ──
+async function syncDettesToMonth(data, monthKey) {
+  if (!window._uid || !window._getDoc || !window._db) return;
+  try {
+    var snap = await window._getDoc(window._doc(window._db, 'dettes', window._uid, 'data', 'all'));
+    if (!snap.exists() || !snap.data().list) return;
+    var dettes = snap.data().list;
+    var changed = false;
+
+    dettes.forEach(function(d) {
+      if (d.active === false) return;
+      var montant = parseFloat(d.montant) || 0;
+      var duree = parseInt(d.duree) || 0;
+      if (!montant || !d.debut) return;
+
+      // Vérifier que ce mois est dans la plage de la dette
+      var debutDate = new Date(d.debut);
+      if (isNaN(debutDate.getTime())) return;
+      var debutKey = debutDate.getFullYear() + '-' + String(debutDate.getMonth() + 1).padStart(2, '0');
+      var finDate = duree > 0 ? new Date(debutDate.getFullYear(), debutDate.getMonth() + duree, 1) : null;
+      var finKey = finDate ? finDate.getFullYear() + '-' + String(finDate.getMonth() + 1).padStart(2, '0') : '9999-12';
+      if (monthKey < debutKey || monthKey >= finKey) return;
+
+      var nom = (d.nom || '').trim();
+      if (!nom) return;
+
+      if (d.type === 'leasing') {
+        // Vérifier si une ligne leasing avec ce nom existe déjà
+        var exists = data.leasing.some(function(l) {
+          return (l.fournisseur || '').trim().toLowerCase() === nom.toLowerCase()
+            && parseFloat(l.montantHT) > 0;
+        });
+        if (!exists) {
+          var loyer = parseFloat(d.loyer) || 0;
+          if (loyer <= 0) return;
+          var debutM = debutDate.getFullYear() + '-' + String(debutDate.getMonth() + 1).padStart(2, '0');
+          var finM = finDate ? (finDate.getFullYear() + '-' + String(finDate.getMonth() + 1).padStart(2, '0')) : '';
+          // Remplacer la ligne vide si c'est la seule
+          if (data.leasing.length === 1 && !data.leasing[0].fournisseur && !parseFloat(data.leasing[0].montantHT)) {
+            data.leasing[0] = { fournisseur: nom, type: '', montantHT: String(loyer), tvaRate: 20, deductible: 'Oui', pointe: 'Non', dateDebut: debutM, dateFin: finM };
+          } else {
+            data.leasing.push({ fournisseur: nom, type: '', montantHT: String(loyer), tvaRate: 20, deductible: 'Oui', pointe: 'Non', dateDebut: debutM, dateFin: finM });
+          }
+          changed = true;
+        }
+      } else if (d.type === 'emprunt') {
+        var exists2 = data.credits.some(function(c) {
+          return ((c.fournisseur || '').trim().toLowerCase() === nom.toLowerCase()
+            || (c.nom || '').trim().toLowerCase() === nom.toLowerCase())
+            && parseFloat(c.montant) > 0;
+        });
+        if (!exists2) {
+          var mensualite = duree > 0 ? montant / duree : montant;
+          var taux = parseFloat(d.taux) || 0;
+          var debutM2 = debutDate.getFullYear() + '-' + String(debutDate.getMonth() + 1).padStart(2, '0');
+          var finM2 = finDate ? (finDate.getFullYear() + '-' + String(finDate.getMonth() + 1).padStart(2, '0')) : '';
+          var creditLine = { fournisseur: nom, nom: nom, ligneType: 'principal', montant: String(mensualite.toFixed(2)), tvaRate: 20, tvaAuto: false, tauxInteret: taux ? String(taux) : '', pointe: 'Non', dateDebut: debutM2, dateFin: finM2, amort: d.amort || 'constant' };
+          if (data.credits.length === 1 && !data.credits[0].fournisseur && !parseFloat(data.credits[0].montant)) {
+            data.credits[0] = creditLine;
+          } else {
+            data.credits.push(creditLine);
+          }
+          changed = true;
+        }
+      }
+    });
+
+    if (changed) {
+      _data = data;
+      scheduleSave();
+    }
+  } catch(e) { console.warn('syncDettesToMonth error:', e); }
+
+  // Scan : vérifier le mois précédent pour des crédits/leasings propagés qui manquent ce mois
+  try {
+    var parts = monthKey.split('-'), curY = parseInt(parts[0]), curM = parseInt(parts[1]);
+    var prevM = curM === 1 ? 12 : curM - 1;
+    var prevY = curM === 1 ? curY - 1 : curY;
+    var prevKey = prevY + '-' + String(prevM).padStart(2, '0');
+
+    var prevSnap = await window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', prevKey));
+    if (prevSnap.exists()) {
+      var prevData = prevSnap.data();
+      var changed2 = false;
+
+      // Crédits propagés
+      (prevData.credits || []).forEach(function(c) {
+        if (!c.fournisseur || !c.fournisseur.trim() || !parseFloat(c.montant)) return;
+        if (!c.dateDebut || !c.dateFin) return;
+        var deb = c.dateDebut.slice(0, 7), fin = c.dateFin.slice(0, 7);
+        if (monthKey < deb || monthKey > fin) return;
+        // Ce crédit devrait être sur ce mois — vérifier s'il existe
+        var nom = c.fournisseur.trim().toLowerCase();
+        var exists = data.credits.some(function(cr) {
+          return ((cr.fournisseur || '').trim().toLowerCase() === nom || (cr.nom || '').trim().toLowerCase() === nom)
+            && parseFloat(cr.montant) > 0;
+        });
+        if (!exists) {
+          var copy = JSON.parse(JSON.stringify(c));
+          if (data.credits.length === 1 && !data.credits[0].fournisseur && !parseFloat(data.credits[0].montant)) {
+            data.credits[0] = copy;
+          } else {
+            data.credits.push(copy);
+          }
+          changed2 = true;
+        }
+      });
+
+      // Leasings propagés
+      (prevData.leasing || []).forEach(function(l) {
+        if (!l.fournisseur || !l.fournisseur.trim() || !parseFloat(l.montantHT)) return;
+        if (!l.dateDebut || !l.dateFin) return;
+        var deb = l.dateDebut.slice(0, 7), fin = l.dateFin.slice(0, 7);
+        if (monthKey < deb || monthKey > fin) return;
+        var nom = l.fournisseur.trim().toLowerCase();
+        var exists = data.leasing.some(function(le) {
+          return (le.fournisseur || '').trim().toLowerCase() === nom && parseFloat(le.montantHT) > 0;
+        });
+        if (!exists) {
+          var copy = JSON.parse(JSON.stringify(l));
+          if (data.leasing.length === 1 && !data.leasing[0].fournisseur && !parseFloat(data.leasing[0].montantHT)) {
+            data.leasing[0] = copy;
+          } else {
+            data.leasing.push(copy);
+          }
+          changed2 = true;
+        }
+      });
+
+      if (changed2) {
+        _data = data;
+        scheduleSave();
+      }
+    }
+  } catch(e) { console.warn('syncFromPrevMonth error:', e); }
 }
 
 /* ─── SAUVEGARDE ─── */
