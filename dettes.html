@@ -1552,6 +1552,22 @@ async function tryFirebase(){
     const u=window._auth?.currentUser;
     if(u){const n=u.displayName||u.email?.split('@')[0]||'';document.getElementById('uname').textContent=n;document.getElementById('av').textContent=n[0]?.toUpperCase()||'A';}
   }catch(e){}
+
+  // Nettoyage : supprimer les anciennes copies de forceSyncDettes (pilotage→dettes)
+  var beforeCount = _dettes.length;
+  _dettes = _dettes.filter(function(d) {
+    // Supprimer les entrées créées par l'ancien forceSyncDettes qui ont _pilotageRef
+    // Elles seront remplacées par les items virtuels de loadFromPilotage
+    if(d._pilotageRef) return false;
+    // Supprimer aussi les entrées avec id commençant par pil_ (ancien format)
+    if(d.id && String(d.id).startsWith('pil_')) return false;
+    return true;
+  });
+  if(_dettes.length < beforeCount) {
+    // Sauvegarder le nettoyage
+    if(window.saveFirebase) window.saveFirebase();
+  }
+
   // Charger les leasings + crédits depuis Pilotage (lecture seule)
   await loadFromPilotage();
   renderAll();
@@ -1575,7 +1591,7 @@ async function loadFromPilotage(){
       (d.credits||[]).forEach(function(c){
         if(c.ligneType&&c.ligneType!=='principal')return;
         if(!c.fournisseur||!c.fournisseur.trim()||!parseFloat(c.montant))return;
-        var ref=c.fournisseur.trim();
+        var ref=c.fournisseur.trim() + '||' + (c.nom||'').trim();
         if(!credMap[ref]) credMap[ref]=c;
       });
     });
@@ -1687,10 +1703,10 @@ onAuthStateChanged(auth,user=>{
   if(!user){location.href='index.html';return;}
   window._uid=user.uid;
   window._firebaseReady = true;
+  // Save Firebase (défini AVANT tryFirebase pour que le nettoyage puisse sauver)
+  window.saveFirebase=()=>{if(window._setDoc)window._setDoc(window._doc(db,'dettes',user.uid,'data','all'),{list:_dettes},{merge:true}).catch(()=>{});};
   // Charger les données depuis Firebase (source unique de vérité)
   window.tryFirebase();
-  // Save Firebase
-  window.saveFirebase=()=>{if(window._setDoc)window._setDoc(window._doc(db,'dettes',user.uid,'data','all'),{list:_dettes},{merge:true}).catch(()=>{});};
   // Màj nom utilisateur
   const n=user.displayName||user.email?.split('@')[0]||'';
   const av=document.getElementById('av'); if(av)av.textContent=n[0]?.toUpperCase()||'A';
