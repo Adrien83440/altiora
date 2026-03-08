@@ -831,11 +831,12 @@ async function syncDettesToMonth(data, monthKey) {
       if (d.active === false) return;
       var montant = parseFloat(d.montant) || 0;
       var duree = parseInt(d.duree) || 0;
+      if (duree > 600) return; // données corrompues
       if (!montant || !d.debut) return;
 
       // Vérifier que ce mois est dans la plage de la dette
       var debutDate = new Date(d.debut);
-      if (isNaN(debutDate.getTime())) return;
+      if (isNaN(debutDate.getTime()) || debutDate.getFullYear() < 2000) return;
       var debutKey = debutDate.getFullYear() + '-' + String(debutDate.getMonth() + 1).padStart(2, '0');
       var finDate = duree > 0 ? new Date(debutDate.getFullYear(), debutDate.getMonth() + duree, 1) : null;
       var finKey = finDate ? finDate.getFullYear() + '-' + String(finDate.getMonth() + 1).padStart(2, '0') : '9999-12';
@@ -891,25 +892,28 @@ async function syncDettesToMonth(data, monthKey) {
     }
   } catch(e) { console.warn('syncDettesToMonth error:', e); }
 
-  // Scan : vérifier le mois précédent pour des crédits/leasings propagés qui manquent ce mois
+  // Scan : vérifier les mois précédents pour des crédits/leasings propagés manquants
   try {
     var parts = monthKey.split('-'), curY = parseInt(parts[0]), curM = parseInt(parts[1]);
-    var prevM = curM === 1 ? 12 : curM - 1;
-    var prevY = curM === 1 ? curY - 1 : curY;
-    var prevKey = prevY + '-' + String(prevM).padStart(2, '0');
+    var changed2 = false;
 
-    var prevSnap = await window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', prevKey));
-    if (prevSnap.exists()) {
-      var prevData = prevSnap.data();
-      var changed2 = false;
+    // Chercher dans les 6 derniers mois pour trouver des lignes propagées
+    for (var back = 1; back <= 6; back++) {
+      var scanM = curM - back;
+      var scanY = curY;
+      while (scanM < 1) { scanM += 12; scanY--; }
+      var scanKey = scanY + '-' + String(scanM).padStart(2, '0');
+
+      var scanSnap = await window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', scanKey));
+      if (!scanSnap.exists()) continue;
+      var scanData = scanSnap.data();
 
       // Crédits propagés
-      (prevData.credits || []).forEach(function(c) {
+      (scanData.credits || []).forEach(function(c) {
         if (!c.fournisseur || !c.fournisseur.trim() || !parseFloat(c.montant)) return;
         if (!c.dateDebut || !c.dateFin) return;
         var deb = c.dateDebut.slice(0, 7), fin = c.dateFin.slice(0, 7);
         if (monthKey < deb || monthKey > fin) return;
-        // Ce crédit devrait être sur ce mois — vérifier s'il existe
         var nom = c.fournisseur.trim().toLowerCase();
         var exists = data.credits.some(function(cr) {
           return ((cr.fournisseur || '').trim().toLowerCase() === nom || (cr.nom || '').trim().toLowerCase() === nom)
@@ -927,7 +931,7 @@ async function syncDettesToMonth(data, monthKey) {
       });
 
       // Leasings propagés
-      (prevData.leasing || []).forEach(function(l) {
+      (scanData.leasing || []).forEach(function(l) {
         if (!l.fournisseur || !l.fournisseur.trim() || !parseFloat(l.montantHT)) return;
         if (!l.dateDebut || !l.dateFin) return;
         var deb = l.dateDebut.slice(0, 7), fin = l.dateFin.slice(0, 7);
@@ -946,13 +950,13 @@ async function syncDettesToMonth(data, monthKey) {
           changed2 = true;
         }
       });
-
-      if (changed2) {
-        _data = data;
-        scheduleSave();
-      }
     }
-  } catch(e) { console.warn('syncFromPrevMonth error:', e); }
+
+    if (changed2) {
+      _data = data;
+      scheduleSave();
+    }
+  } catch(e) { console.warn('syncFromPrevMonths error:', e); }
 }
 
 /* ─── SAUVEGARDE ─── */

@@ -1553,22 +1553,25 @@ async function tryFirebase(){
     if(u){const n=u.displayName||u.email?.split('@')[0]||'';document.getElementById('uname').textContent=n;document.getElementById('av').textContent=n[0]?.toUpperCase()||'A';}
   }catch(e){}
 
-  // Nettoyage : supprimer les anciennes copies de forceSyncDettes (pilotage→dettes)
+  // Validation : nettoyer les entrées corrompues (dates invalides, durées impossibles)
   var beforeCount = _dettes.length;
   _dettes = _dettes.filter(function(d) {
-    // Supprimer les entrées créées par l'ancien forceSyncDettes qui ont _pilotageRef
-    // Elles seront remplacées par les items virtuels de loadFromPilotage
-    if(d._pilotageRef) return false;
-    // Supprimer aussi les entrées avec id commençant par pil_ (ancien format)
-    if(d.id && String(d.id).startsWith('pil_')) return false;
+    // Vérifier la date de début — supprimer si année < 2000 (date malformée)
+    if(d.debut) {
+      var y = parseInt(String(d.debut).slice(0,4));
+      if(isNaN(y) || y < 2000) return false;
+    }
+    // Supprimer si durée > 600 mois (50 ans — données corrompues)
+    if(d.duree && parseInt(d.duree) > 600) return false;
+    // Supprimer si montant absurde (> 100M€ — probablement un bug de calcul)
+    if(d.montant && parseFloat(d.montant) > 100000000) return false;
     return true;
   });
   if(_dettes.length < beforeCount) {
-    // Sauvegarder le nettoyage
     if(window.saveFirebase) window.saveFirebase();
   }
 
-  // Charger les leasings + crédits depuis Pilotage (lecture seule)
+  // Charger les leasings + crédits depuis Pilotage (lecture seule, dédupliqués)
   await loadFromPilotage();
   renderAll();
 }
@@ -1585,12 +1588,17 @@ async function loadFromPilotage(){
       var d=doc.data();
       (d.leasing||[]).forEach(function(l){
         if(!l.fournisseur||!l.fournisseur.trim()||!parseFloat(l.montantHT))return;
+        if(l.dateDebut){var yr=parseInt(l.dateDebut.slice(0,4));if(yr<2000||isNaN(yr))return;}
+        if(l.dateFin){var yr2=parseInt(l.dateFin.slice(0,4));if(yr2<2000||isNaN(yr2))return;}
         var ref=l.fournisseur.trim();
         if(!leasMap[ref]) leasMap[ref]=l;
       });
       (d.credits||[]).forEach(function(c){
         if(c.ligneType&&c.ligneType!=='principal')return;
         if(!c.fournisseur||!c.fournisseur.trim()||!parseFloat(c.montant))return;
+        // Skip entrées avec dates corrompues (année < 2000)
+        if(c.dateDebut){var yr=parseInt(c.dateDebut.slice(0,4));if(yr<2000||isNaN(yr))return;}
+        if(c.dateFin){var yr2=parseInt(c.dateFin.slice(0,4));if(yr2<2000||isNaN(yr2))return;}
         var ref=c.fournisseur.trim() + '||' + (c.nom||'').trim();
         if(!credMap[ref]) credMap[ref]=c;
       });
