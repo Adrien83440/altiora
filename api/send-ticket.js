@@ -43,13 +43,18 @@ export default async function handler(req, res) {
     // 2. Envoyer email via Resend
     const RESEND_API_KEY = process.env.RESEND_API_KEY;
     let emailSent = false;
-    if (RESEND_API_KEY) {
+    let emailError = null;
+
+    if (!RESEND_API_KEY) {
+      console.error('[send-ticket] ❌ RESEND_API_KEY non configurée dans les env vars Vercel');
+      emailError = 'RESEND_API_KEY missing';
+    } else {
       try {
         const r = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${RESEND_API_KEY}` },
           body: JSON.stringify({
-            from: 'ALTEORE Support <tickets@alteore.com>',
+            from: 'ALTEORE Support <onboarding@resend.dev>',
             to: ['contact@adrienemily.com'],
             subject: `Ticket ALTEORE - ${id}`,
             html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f8faff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0">
@@ -65,11 +70,21 @@ export default async function handler(req, res) {
               <div style="padding:12px 28px;background:#f1f5f9;text-align:center;font-size:11px;color:#94a3b8">ALTEORE - Systeme de tickets support</div></div>`
           })
         });
+        const resendData = await r.json();
         emailSent = r.ok;
-      } catch (e) { console.error('Email error:', e.message); }
+        if (!r.ok) {
+          emailError = resendData.message || resendData.error || JSON.stringify(resendData);
+          console.error('[send-ticket] ❌ Resend error:', r.status, emailError);
+        } else {
+          console.log('[send-ticket] ✅ Email envoyé:', resendData.id);
+        }
+      } catch (e) {
+        emailError = e.message;
+        console.error('[send-ticket] ❌ Email exception:', e.message);
+      }
     }
 
-    return res.status(200).json({ success: true, ticketId: id, emailSent });
+    return res.status(200).json({ success: true, ticketId: id, emailSent, emailError });
   } catch (error) {
     console.error('send-ticket error:', error);
     return res.status(500).json({ error: 'Erreur serveur' });
