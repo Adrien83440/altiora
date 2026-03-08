@@ -1319,6 +1319,8 @@ function margesApp() {
     // ── Init ──
     init() {
       var self = this;
+      this._saveTimer = null;
+
       // Bridge Firebase → Alpine
       window._alpineSetProducts = function(prods) { self.products = prods; self.loading = false; };
       if(window._pendingProducts) {
@@ -1326,6 +1328,7 @@ function margesApp() {
         this.loading = false;
         delete window._pendingProducts;
       }
+
       // Update chart when product or relevant values change
       this.$watch(function() {
         if(!self.p) return '';
@@ -1334,6 +1337,31 @@ function margesApp() {
       }, function() {
         self.$nextTick(function() { self._updateChart(); });
       });
+
+      // Auto-save clé + cfTotal + simulateur (debounce 1.5s)
+      this.$watch(function() {
+        if(!self.p) return '';
+        var s = self.p.sim;
+        return self.currentId + '_' + self.p.cle.type + '_' + self.p.cle.produit + '_' + self.p.cle.total + '_' + self.p.cfTotal + '_' + s.pv + '_' + s.mp + '_' + s.mo + '_' + s.cf + '_' + s.vol;
+      }, function(val, oldVal) {
+        if(!oldVal || !self.p || !window._uid) return; // skip initial
+        clearTimeout(self._saveTimer);
+        self._saveTimer = setTimeout(function() { self._autoSave(); }, 1500);
+      });
+    },
+
+    // ── Auto-save (clé + cfTotal) ──
+    async _autoSave() {
+      if(!this.p || !window._uid) return;
+      var p = this.p;
+      try {
+        if(p.source === 'cout-revient') {
+          await window._setDoc(window._doc(window._db,'marges',window._uid,'params',p.id), {cle:p.cle||{}, sim:p.sim||{}});
+        } else {
+          await window._setDoc(window._doc(window._db,'marges',window._uid,'produits',p.id.replace('mg_','')), JSON.parse(JSON.stringify(p)));
+        }
+        showToast('💾 Sauvegardé','success');
+      } catch(e) { console.error('Auto-save error:', e); }
     },
 
     // ── Helpers ──
