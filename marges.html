@@ -567,7 +567,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 <div class="modal-overlay" id="newProductModal">
   <div class="modal">
     <div class="modal-head">
-      <h3>➕ Nouveau produit / service</h3>
+      <h3 id="modal-title">➕ Nouveau produit / service</h3>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
     <div class="modal-body">
@@ -629,7 +629,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
     </div>
     <div class="modal-foot">
       <button class="btn btn-outline" onclick="closeModal()">Annuler</button>
-      <button class="btn btn-primary" onclick="createProduct()">Créer & Analyser →</button>
+      <button class="btn btn-primary" id="modal-cta" onclick="createProduct()">Créer & Analyser →</button>
     </div>
   </div>
 </div>
@@ -729,6 +729,18 @@ async function loadProducts(){
       _products['mg_'+d.id] = normalized;
     });
   }catch(e){console.warn(e);}
+
+  // 3. Charger les paramètres sauvegardés (clé répartition + simulateur) pour produits CR
+  try{
+    const paramSnap = await window._getDocs(window._collection(window._db,'marges',window._uid,'params'));
+    paramSnap.forEach(d=>{
+      const data = d.data();
+      if(_products[d.id]){
+        if(data.cle) _products[d.id].cle = data.cle;
+        if(data.sim) _products[d.id].sim = data.sim;
+      }
+    });
+  }catch(e){console.warn('Params load:',e);}
 
   renderList();
 }
@@ -1448,15 +1460,47 @@ async function deleteProduct(id){
 }
 
 // ── MODAL ──
-function openNewProductModal(){document.getElementById('newProductModal').classList.add('show');}
-function closeModal(){document.getElementById('newProductModal').classList.remove('show');}
+let _editId = null;
+
+function openNewProductModal(){
+  _editId = null;
+  document.getElementById('modal-title').textContent = '➕ Nouveau produit / service';
+  document.getElementById('modal-cta').textContent = 'Créer & Analyser →';
+  ['mn-nom','mn-cat','mn-pv','mn-qte','mn-mp','mn-mo','mn-emb','mn-liv','mn-cf','mn-emoji'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.value='';
+  });
+  document.getElementById('newProductModal').classList.add('show');
+}
+
+function closeModal(){
+  _editId = null;
+  document.getElementById('newProductModal').classList.remove('show');
+}
+
+function editProduct(id){
+  const p = _products[id];
+  if(!p) return;
+  _editId = id;
+  document.getElementById('modal-title').textContent = '✏️ Modifier : ' + (p.nom||'');
+  document.getElementById('modal-cta').textContent = 'Sauvegarder →';
+  document.getElementById('mn-nom').value = p.nom||'';
+  document.getElementById('mn-cat').value = p.categorie||'';
+  document.getElementById('mn-pv').value = p.pv||'';
+  document.getElementById('mn-qte').value = p.qte||'';
+  document.getElementById('mn-mp').value = p.mp||'';
+  document.getElementById('mn-mo').value = p.mo||'';
+  document.getElementById('mn-emb').value = p.emb||'';
+  document.getElementById('mn-liv').value = p.liv||'';
+  document.getElementById('mn-cf').value = p.cfTotal||'';
+  document.getElementById('mn-emoji').value = p.emoji||'📦';
+  document.getElementById('newProductModal').classList.add('show');
+}
 
 function createProduct(){
   const nom=document.getElementById('mn-nom').value.trim();
   if(!nom){document.getElementById('mn-nom').focus();return;}
-  const id='mg_prod_'+Date.now();
-  _products[id]={
-    id,source:'marges',
+
+  const data = {
     nom, categorie:document.getElementById('mn-cat').value,
     emoji:document.getElementById('mn-emoji').value||'📦',
     pv:parseFloat(document.getElementById('mn-pv').value)||0,
@@ -1466,15 +1510,27 @@ function createProduct(){
     emb:parseFloat(document.getElementById('mn-emb').value)||0,
     liv:parseFloat(document.getElementById('mn-liv').value)||0,
     cfTotal:parseFloat(document.getElementById('mn-cf').value)||0,
-    cle:{type:'temps',produit:0,total:0},
-    sim:{pv:0,mp:0,mo:0,cf:0,vol:parseFloat(document.getElementById('mn-qte').value)||1}
   };
-  closeModal();
-  renderList();
-  openProduct(id);
-}
 
-function editProduct(id){openNewProductModal();}
+  if(_editId && _products[_editId]){
+    // Mode édition → mettre à jour le produit existant
+    Object.assign(_products[_editId], data);
+    closeModal();
+    renderList();
+    openProduct(_editId);
+  } else {
+    // Mode création → nouveau produit
+    const id='mg_prod_'+Date.now();
+    _products[id]={
+      id, source:'marges', ...data,
+      cle:{type:'temps',produit:0,total:0},
+      sim:{pv:0,mp:0,mo:0,cf:0,vol:data.qte}
+    };
+    closeModal();
+    renderList();
+    openProduct(id);
+  }
+}
 
 // ── UTILS ──
 function fmtE(n){return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}

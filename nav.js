@@ -562,7 +562,7 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
       handleProfilParams();
     } catch (e) {
       if (mainEl) mainEl.style.visibility = 'visible';
-      applyNavPlan('pro');
+      applyNavPlan('free');
     }
   });
 
