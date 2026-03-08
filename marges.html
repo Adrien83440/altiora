@@ -1447,7 +1447,7 @@ function margesApp() {
       this.showModal = true;
     },
 
-    submitModal() {
+    async submitModal() {
       var m = this.modal;
       if(!m.nom.trim()) return;
       var data = {
@@ -1461,16 +1461,36 @@ function margesApp() {
         Object.assign(this.products[this.modalEdit], data);
         _normalize(this.products[this.modalEdit]);
         this.currentId = this.modalEdit;
+        // Sauvegarder dans Firestore
+        if(window._uid) {
+          var p = this.products[this.modalEdit];
+          try {
+            if(p.source === 'cout-revient') {
+              await window._setDoc(window._doc(window._db,'marges',window._uid,'params',p.id), {cle:p.cle||{}, sim:p.sim||{}});
+            } else {
+              await window._setDoc(window._doc(window._db,'marges',window._uid,'produits',p.id.replace('mg_','')), JSON.parse(JSON.stringify(p)));
+            }
+            showToast('✅ Produit modifié','success');
+          } catch(e) { console.error(e); showToast('Erreur sauvegarde','warning'); }
+        }
       } else {
         var id = 'mg_prod_' + Date.now();
-        this.products[id] = _normalize({
+        var prod = _normalize({
           id:id, source:'marges', ...data,
           cle:{type:'temps',produit:0,total:0},
           sim:{pv:0,mp:0,mo:0,cf:0,vol:data.qte}
         });
-        // Force reactivity
+        this.products[id] = prod;
         this.products = Object.assign({}, this.products);
         this.currentId = id;
+        // Sauvegarder dans Firestore
+        if(window._uid) {
+          try {
+            var fsId = id.replace('mg_','');
+            await window._setDoc(window._doc(window._db,'marges',window._uid,'produits',fsId), JSON.parse(JSON.stringify(prod)));
+            showToast('✅ Produit créé','success');
+          } catch(e) { console.error(e); showToast('Erreur sauvegarde','warning'); }
+        }
       }
       this.showModal = false;
     },
