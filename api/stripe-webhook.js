@@ -1,5 +1,5 @@
 // api/stripe-webhook.js
-// Vercel parse automatiquement le body JSON — pas de vérification de signature
+// Webhook Stripe SMS — avec vérification de signature HMAC-SHA256
 
 async function getFirebaseToken() {
   const res = await fetch(
@@ -50,7 +50,59 @@ async function firestorePatch(token, path, fields) {
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const event = req.body;
+  // ── Lire le body brut (bodyParser désactivé) ──
+  let rawBody = '';
+  try {
+    rawBody = await new Promise((resolve, reject) => {
+      let data = '';
+      req.on('data', chunk => data += chunk);
+      req.on('end', () => resolve(data));
+      req.on('error', reject);
+    });
+  } catch (e) {
+    return res.status(400).json({ error: 'Cannot read body' });
+  }
+
+  // ── Vérification signature Stripe ──
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (webhookSecret) {
+    const sigHeader = req.headers['stripe-signature'];
+    if (!sigHeader) return res.status(400).json({ error: 'Signature manquante' });
+
+    try {
+      const crypto = require('crypto');
+      const parts = sigHeader.split(',').reduce((acc, part) => {
+        const [k, v] = part.split('=');
+        acc[k] = v;
+        return acc;
+      }, {});
+
+      const timestamp = parts.t;
+      const signature = parts.v1;
+      const payload   = timestamp + '.' + rawBody;
+      const expected  = crypto.createHmac('sha256', webhookSecret).update(payload).digest('hex');
+
+      if (expected !== signature) {
+        return res.status(400).json({ error: 'Signature invalide' });
+      }
+
+      // Rejeter les événements trop vieux (> 5 min)
+      if (Math.abs(Date.now() / 1000 - parseInt(timestamp)) > 300) {
+        return res.status(400).json({ error: 'Événement trop ancien' });
+      }
+    } catch (e) {
+      return res.status(400).json({ error: 'Erreur vérification signature: ' + e.message });
+    }
+  }
+
+  // ── Parser l'événement ──
+  let event;
+  try {
+    event = JSON.parse(rawBody);
+  } catch (e) {
+    return res.status(400).json({ error: 'JSON invalide' });
+  }
+
   console.log('Webhook reçu — type:', event && event.type);
 
   if (!event || !event.type) {
@@ -107,4 +159,9 @@ module.exports = async (req, res) => {
     console.error('Erreur Firebase:', err.message);
     return res.status(500).json({ error: err.message });
   }
+};
+
+// ── Vercel : désactiver le bodyParser pour lire le rawBody (signature Stripe) ──
+module.exports.config = {
+  api: { bodyParser: false }
 };

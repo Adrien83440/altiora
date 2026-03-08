@@ -457,3 +457,8 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: e.message });
   }
 };
+
+// ── Vercel : désactiver le bodyParser pour lire le rawBody (signature Stripe) ──
+module.exports.config = {
+  api: { bodyParser: false }
+};
