@@ -300,7 +300,7 @@ async function send(){
   try{
     if(isTicket(t)){hideTyp();isLoading=false;ticketForm();return;}
     var r=await callAPI(t);hideTyp();botMsg(r);
-  }catch(e){hideTyp();console.error(e);botMsg("Désolé, problème technique. Contactez support@alteore.com ou réessayez.");}
+  }catch(e){hideTyp();console.error(e);botMsg("Désolé, problème technique. Tapez **\"ouvrir un ticket\"** pour que notre équipe vous aide, ou réessayez.");}
   isLoading=false;
 }
 
@@ -317,9 +317,28 @@ function ticketForm(){
 async function submitTicket(){
   var tp=document.getElementById('cb-tk-t')?.value,ds=document.getElementById('cb-tk-d')?.value?.trim(),em=document.getElementById('cb-tk-e')?.value?.trim();
   if(!tp||!ds){alert('Remplissez le sujet et la description.');return;}
-  try{if(window._uid&&window._db&&window._setDoc&&window._doc){await window._setDoc(window._doc(window._db,'tickets',window._uid,'list','ticket_'+Date.now()),{type:tp,description:ds,email:em||'',page:location.pathname,userAgent:navigator.userAgent,createdAt:new Date().toISOString(),status:'open'});}}catch(e){console.warn(e);}
+  var btn=document.getElementById('cb-tk-s');if(btn){btn.disabled=true;btn.textContent='⏳ Envoi...';}
+  var ticketId='TK-'+Date.now();
+  var userName='';try{userName=document.getElementById('uname')?.textContent||'';}catch(e){}
+  var userEmail=em||'';try{if(!userEmail&&window._auth?.currentUser?.email)userEmail=window._auth.currentUser.email;}catch(e){}
+
+  // 1. Sauvegarder dans Firestore
+  try{if(window._uid&&window._db&&window._setDoc&&window._doc){await window._setDoc(window._doc(window._db,'tickets',window._uid,'list',ticketId),{ticketId:ticketId,type:tp,description:ds,email:userEmail,page:location.pathname,userAgent:navigator.userAgent,createdAt:new Date().toISOString(),status:'open'});}}catch(e){console.warn('Firestore ticket:',e);}
+
+  // 2. Envoyer email via /api/send-ticket
+  try{
+    var parts=(userName||'Utilisateur').split(' ');
+    var prenom=parts[0]||'Utilisateur';
+    var nom=parts.slice(1).join(' ')||'—';
+    await fetch('/api/send-ticket',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      ticketId:ticketId,nom:nom,prenom:prenom,telephone:'',email:userEmail||'chatbot@alteore.com',
+      sujet:'[Chatbot] '+({bug:'Bug technique',question:'Question',suggestion:'Suggestion',billing:'Facturation',other:'Autre'}[tp]||tp),
+      description:ds,page:location.pathname,uid:window._uid||''
+    })});
+  }catch(e){console.warn('Email ticket:',e);}
+
   var f=document.getElementById('cb-tkf');if(f)f.remove();
-  botMsg('✅ **Ticket envoyé !** Notre équipe vous recontactera rapidement. Autre chose ?');
+  botMsg('✅ **Ticket #'+ticketId+' envoyé !** Vous recevrez une réponse à '+(userEmail||'votre adresse')+'.\n\nAutre chose ?');
 }
 
 async function callAPI(userMessage){
