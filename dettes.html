@@ -1580,7 +1580,19 @@ async function loadFromPilotage(){
       });
     });
 
+    // Helper: check if a pilotage item already exists in manual dettes
+    function alreadyInDettes(pilRef, nom) {
+      return _dettes.some(function(d) {
+        return d._pilotageRef === pilRef || d.id === pilRef
+          || (nom && d.nom && d.nom.toLowerCase() === nom.toLowerCase());
+      });
+    }
+
     Object.values(leasMap).forEach(function(l){
+      var fournTrim = l.fournisseur.trim();
+      var pilRef = 'pil_leas_' + fournTrim.replace(/\s+/g,'_');
+      var nom = (l.type ? l.type + ' — ' : '') + fournTrim;
+      if(alreadyInDettes(pilRef, nom)) return;
       var loyer=parseFloat(l.montantHT)||0;
       var duree=0;
       if(l.dateDebut&&l.dateFin){
@@ -1588,9 +1600,9 @@ async function loadFromPilotage(){
         duree=Math.max(0, Math.round((d2-d1)/(1000*60*60*24*30.44)));
       }
       _pilotageItems.push({
-        id:'_pil_leas_'+l.fournisseur.trim().replace(/\s+/g,'_'),
+        id:'_pil_leas_'+fournTrim.replace(/\s+/g,'_'),
         type:'leasing', _virtual:true,
-        nom:(l.type?l.type+' — ':'')+l.fournisseur.trim(),
+        nom:nom,
         montant:duree>0?loyer*duree:loyer,
         loyer:loyer, debut:l.dateDebut?l.dateDebut+'-01':'',
         duree:duree, dureeLea:duree,
@@ -1599,6 +1611,10 @@ async function loadFromPilotage(){
     });
 
     Object.values(credMap).forEach(function(c){
+      var fournTrim = c.fournisseur.trim();
+      var pilRef = 'pil_cred_' + fournTrim.replace(/\s+/g,'_');
+      var nom = (c.nom&&c.nom.trim()) ? c.nom.trim() : fournTrim;
+      if(alreadyInDettes(pilRef, nom)) return;
       var mensualite=parseFloat(c.montant)||0;
       var taux=parseFloat(c.tauxInteret)||0;
       var duree=0;
@@ -1607,9 +1623,9 @@ async function loadFromPilotage(){
         duree=Math.max(0, Math.round((d2-d1)/(1000*60*60*24*30.44)));
       }
       _pilotageItems.push({
-        id:'_pil_cred_'+c.fournisseur.trim().replace(/\s+/g,'_'),
+        id:'_pil_cred_'+fournTrim.replace(/\s+/g,'_'),
         type:'emprunt', _virtual:true,
-        nom:(c.nom&&c.nom.trim())?c.nom.trim():c.fournisseur.trim(),
+        nom:nom,
         montant:duree>0?mensualite*duree:mensualite,
         debut:c.dateDebut?c.dateDebut+'-01':'',
         taux:taux, duree:duree, amort:c.amort||'constant',
