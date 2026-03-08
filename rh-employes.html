@@ -1,0 +1,3447 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+  <title>ALTEORE — Employés</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --rh-dark:#052e16;--rh-main:#059669;--rh-mid:#10b981;--rh-bright:#34d399;
+      --rh-ghost:#f0fdf4;--rh-border:#d1fae5;
+      --text:#1a1f36;--muted:#6b7280;--border:#e2e8f0;--bg:#f0fdf7;--radius:12px;
+      --red:#ef4444;--red-light:#fee2e2;--orange:#f59e0b;--orange-light:#fef3c7;
+      --blue:#1a3dce;--purple:#6366f1;--sidebar-w:250px;
+    }
+    body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;font-size:13px;}
+    .main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;min-width:0;}
+
+    /* TOPBAR */
+    .topbar{background:white;border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
+    .topbar-left h1{font-size:17px;font-weight:700;}
+    .topbar-left p{font-size:12px;color:var(--muted);margin-top:2px;}
+    .topbar-right{display:flex;align-items:center;gap:8px;}
+    .btn{padding:7px 14px;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:all .18s;display:inline-flex;align-items:center;gap:6px;}
+    .btn-rh{background:linear-gradient(135deg,var(--rh-main),var(--rh-mid));color:white;box-shadow:0 3px 10px rgba(5,150,105,.25);}
+    .btn-rh:hover{opacity:.9;transform:translateY(-1px);}
+    .btn-outline{background:white;color:var(--rh-main);border:1.5px solid var(--rh-border);}
+    .btn-outline:hover{background:var(--rh-ghost);}
+    .btn-danger{background:#fee2e2;color:#991b1b;border:1px solid #fecaca;}
+    .btn-danger:hover{background:#fecaca;}
+    .btn-sm{padding:5px 11px;font-size:12px;}
+    .btn-xs{padding:3px 8px;font-size:11px;}
+
+    /* LAYOUT 2 PANNEAUX */
+    .workspace{display:flex;flex:1;overflow:hidden;height:calc(100vh - 57px);}
+
+    /* PANEL GAUCHE */
+    .left-panel{width:300px;flex-shrink:0;border-right:1px solid var(--border);background:white;display:flex;flex-direction:column;overflow:hidden;}
+    .lp-head{padding:12px 14px;border-bottom:1px solid var(--border);}
+    .search-wrap{display:flex;gap:7px;margin-bottom:8px;}
+    .search-input{flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;outline:none;color:var(--text);}
+    .search-input:focus{border-color:var(--rh-main);}
+    .filter-row{display:flex;gap:6px;}
+    .filter-sel{flex:1;padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;color:var(--text);outline:none;background:white;cursor:pointer;}
+    .filter-sel:focus{border-color:var(--rh-main);}
+    .emp-list{flex:1;overflow-y:auto;}
+    .emp-item{display:flex;align-items:center;gap:9px;padding:10px 14px;cursor:pointer;border-left:3px solid transparent;transition:all .15s;}
+    .emp-item[draggable="true"]{user-select:none;}
+    .emp-item.drag-over{background:#e0f2fe;border-left-color:#0ea5e9;transform:scale(1.01);}
+    .emp-item.dragging{opacity:0.4;background:#f0fdf4;}
+    .drag-handle{font-size:14px;color:#d1d5db;cursor:grab;flex-shrink:0;padding:0 2px;transition:color .15s;}
+    .drag-handle:hover{color:#6b7280;}
+    .drag-handle:active{cursor:grabbing;}
+    .emp-item:hover{background:#fafffe;}
+    .emp-item.active{background:var(--rh-ghost);border-left-color:var(--rh-main);}
+    .emp-av{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:white;flex-shrink:0;position:relative;}
+    .emp-av img{width:34px;height:34px;border-radius:10px;object-fit:cover;}
+    .emp-av-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:10px;font-size:13px;font-weight:700;color:white;}
+    .emp-info{flex:1;min-width:0;}
+    .emp-name{font-size:12px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .emp-sub{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .emp-badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:20px;white-space:nowrap;flex-shrink:0;}
+    .b-cdi{background:#d1fae5;color:#065f46;}
+    .b-cdd{background:#fef3c7;color:#92400e;}
+    .b-stage{background:#e0f2fe;color:#075985;}
+    .b-alternance{background:#eef2ff;color:#3730a3;}
+    .b-freelance{background:#fce7f3;color:#9d174d;}
+    .b-expire{background:#fee2e2;color:#991b1b;}
+    .lp-footer{padding:10px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;}
+
+    /* PANEL DROIT */
+    .right-panel{flex:1;overflow-y:auto;background:var(--bg);}
+    .empty-fiche{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--muted);text-align:center;padding:40px;}
+    .empty-fiche .icon{font-size:52px;margin-bottom:16px;}
+
+    /* FICHE */
+    .fiche{padding:22px 26px;display:flex;flex-direction:column;gap:18px;}
+
+    /* HERO FICHE */
+    .fiche-hero{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:22px 24px;}
+    .fiche-hero-top{display:flex;align-items:flex-start;gap:18px;margin-bottom:16px;}
+    .fiche-big-av{width:72px;height:72px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;color:white;flex-shrink:0;position:relative;cursor:pointer;overflow:hidden;}
+    .fiche-big-av:hover .av-overlay{opacity:1;}
+    .av-overlay{position:absolute;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;opacity:0;transition:.2s;border-radius:16px;font-size:18px;color:white;}
+    .fiche-big-av img{width:72px;height:72px;object-fit:cover;border-radius:16px;}
+    .fiche-hero-info{flex:1;}
+    .fiche-hero-name{font-size:22px;font-weight:800;line-height:1.1;margin-bottom:4px;}
+    .fiche-hero-poste{font-size:14px;color:var(--muted);margin-bottom:10px;}
+    .fiche-hero-badges{display:flex;flex-wrap:wrap;gap:6px;}
+    .hbadge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;}
+    .fiche-hero-actions{display:flex;gap:8px;align-items:flex-start;flex-shrink:0;}
+    .fiche-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+    .fkpi{padding:11px 14px;border-radius:9px;background:var(--rh-ghost);border:1px solid var(--rh-border);}
+    .fkpi.orange{background:#fef9c3;border-color:#fde68a;}
+    .fkpi.red{background:#fee2e2;border-color:#fecaca;}
+    .fkpi-label{font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;}
+    .fkpi-val{font-size:15px;font-weight:800;color:var(--text);}
+    .fkpi-sub{font-size:10px;color:var(--muted);margin-top:2px;}
+
+    /* TABS */
+    .tabs{display:flex;gap:2px;background:#f1f5f9;border-radius:10px;padding:3px;}
+    .tab{padding:7px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);transition:.15s;border:none;background:transparent;font-family:'Plus Jakarta Sans',sans-serif;}
+    .tab.active{background:white;color:var(--rh-main);box-shadow:0 1px 4px rgba(0,0,0,.08);}
+
+    /* SECTIONS FICHE */
+    .fiche-section{background:white;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+    .sec-head{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;background:#fafffe;border-bottom:1px solid var(--border);}
+    .sec-title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:7px;}
+    .sec-body{padding:16px 18px;}
+    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    .info-field{display:flex;flex-direction:column;gap:3px;}
+    .info-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+    .info-val{font-size:13px;font-weight:600;color:var(--text);}
+    .info-val.muted{color:var(--muted);font-weight:400;}
+
+    /* DOCUMENTS */
+    .doc-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;margin-bottom:8px;transition:.15s;}
+    .doc-item:last-child{margin-bottom:0;}
+    .doc-item:hover{background:#fafffe;border-color:var(--rh-border);}
+    .doc-ico{width:34px;height:34px;border-radius:8px;background:var(--rh-ghost);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;}
+    .doc-name{font-size:12px;font-weight:600;flex:1;}
+    .doc-date{font-size:11px;color:var(--muted);}
+    .doc-actions{display:flex;gap:5px;}
+
+    /* ÉVALUATIONS */
+    .eval-item{padding:12px 14px;border:1px solid var(--border);border-radius:9px;margin-bottom:8px;}
+    .eval-item:last-child{margin-bottom:0;}
+    .eval-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+    .eval-date{font-size:11px;color:var(--muted);}
+    .eval-note{display:flex;align-items:center;gap:4px;}
+    .eval-note-val{font-size:14px;font-weight:800;color:var(--rh-main);}
+    .eval-comment{font-size:12px;color:var(--text);line-height:1.5;}
+    .eval-by{font-size:10px;color:var(--muted);margin-top:4px;}
+    .stars{display:flex;gap:1px;}
+    .star-on{color:#f59e0b;font-size:13px;}
+    .star-off{color:#e2e8f0;font-size:13px;}
+
+    /* UPLOAD ZONE */
+    .upload-zone{border:2px dashed var(--rh-border);border-radius:10px;padding:16px;text-align:center;cursor:pointer;transition:.15s;color:var(--muted);font-size:12px;}
+    .upload-zone:hover{border-color:var(--rh-main);background:var(--rh-ghost);}
+    .upload-zone input{display:none;}
+
+    /* BOUTONS MODE SALAIRE */
+    .sal-mode-btn{padding:6px 11px;border:1.5px solid var(--rh-border);border-radius:7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:600;cursor:pointer;background:white;color:var(--muted);transition:.15s;}
+    .sal-mode-btn:hover{border-color:var(--rh-main);color:var(--rh-main);}
+    .sal-mode-btn.active{background:var(--rh-ghost);border-color:var(--rh-main);color:var(--rh-main);}
+
+    /* PÉRIODE D'ESSAI */
+    #pe-bloc{transition:opacity .2s;}
+    #pe-bloc.disabled{opacity:.4;pointer-events:none;}
+
+    /* MODAL */
+    .modal-overlay{position:fixed;inset:0;background:rgba(5,46,22,.4);backdrop-filter:blur(4px);z-index:300;display:none;align-items:center;justify-content:center;padding:16px;}
+    .modal-overlay.show{display:flex;}
+    .modal{background:white;border-radius:16px;width:100%;max-width:600px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(5,46,22,.2);}
+    .modal-head{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:linear-gradient(135deg,#f0fdf4,#dcfce7);flex-shrink:0;}
+    .modal-head h3{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px;}
+    .modal-close{background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted);padding:2px;}
+    .modal-body{padding:20px 22px;overflow-y:auto;flex:1;}
+    .modal-foot{padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;flex-shrink:0;}
+    .mfield{margin-bottom:14px;}
+    .mfield label{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px;}
+    .minput{width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;color:var(--text);outline:none;transition:.15s;}
+    .minput:focus{border-color:var(--rh-main);box-shadow:0 0 0 3px rgba(5,150,105,.08);}
+    .mrow{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+    .mrow-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+    .msep{font-size:12px;font-weight:700;color:var(--text);padding:8px 0 4px;border-top:1px solid var(--border);margin-top:4px;}
+
+    /* TOAST */
+    .toast{position:fixed;bottom:24px;right:24px;background:#052e16;color:white;padding:11px 18px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;transform:translateY(80px);opacity:0;transition:all .3s;}
+    .toast.show{transform:translateY(0);opacity:1;}
+    .toast.ok{background:#065f46;}
+    .toast.err{background:#991b1b;}
+
+    .loader{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--muted);gap:8px;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .spin{width:16px;height:16px;border:2px solid var(--rh-border);border-top-color:var(--rh-main);border-radius:50%;animation:spin .7s linear infinite;}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+    .fiche{animation:fadeIn .2s ease both;}
+
+    /* ARCHIVÉ */
+    .emp-item.archived{opacity:.5;}
+    .emp-item.archived .emp-name{text-decoration:line-through;}
+
+    /* HAMBURGER MOBILE */
+    .hamburger{display:none;}
+    @media(max-width:768px){
+      .main{margin-left:0!important;}
+      .hamburger{display:flex!important;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#052e16;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;}
+      .hamburger span{display:block;width:20px;height:2.5px;background:#fff;border-radius:2px;}
+      .workspace{flex-direction:column;height:auto;}
+      .left-panel{width:100%;height:auto;border-right:none;border-bottom:1px solid var(--border);}
+      .emp-list{max-height:280px;}
+      .topbar{padding:10px 10px 10px 62px!important;flex-wrap:wrap;gap:6px;}
+      .topbar-right{width:100%;flex-wrap:wrap;}
+      .topbar-right .btn{flex:1;font-size:11px;padding:6px 8px;}
+      .fiche-kpis{grid-template-columns:1fr 1fr!important;}
+      .mrow,.mrow-3{grid-template-columns:1fr!important;}
+      .info-grid{grid-template-columns:1fr!important;}
+      .fiche-hero-top{flex-direction:column;align-items:flex-start;}
+      .fiche-hero-actions{width:100%;justify-content:flex-start;}
+      .modal{max-width:100%;margin:0;border-radius:18px 18px 0 0;max-height:92vh;}
+      .modal-overlay{align-items:flex-end;padding:0;}
+    }
+    @media(max-width:420px){
+      .fiche-kpis{grid-template-columns:1fr!important;}
+    }
+  </style>
+</head>
+<body>
+
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>👤 Employés</h1>
+      <p id="emp-count-top">Gestion des fiches employés</p>
+    </div>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="location.href='rh-dashboard.html'">← Dashboard RH</button>
+      <button class="btn btn-outline btn-sm" id="btn-show-archived" onclick="toggleArchived()">👁 Archivés</button>
+      <button class="btn btn-rh btn-sm" onclick="openModalNouvelEmploye()">+ Nouvel employé</button>
+    </div>
+  </div>
+
+  <div class="workspace">
+    <!-- LISTE -->
+    <div class="left-panel">
+      <div class="lp-head">
+        <div class="search-wrap">
+          <input class="search-input" id="search-emp" placeholder="🔍 Rechercher..." oninput="filterEmployes()"/>
+        </div>
+        <div class="filter-row">
+          <select class="filter-sel" id="filter-contrat" onchange="filterEmployes()">
+            <option value="">Tous contrats</option>
+            <option value="CDI">CDI</option>
+            <option value="CDD">CDD</option>
+            <option value="Stage">Stage</option>
+            <option value="Alternance">Alternance</option>
+            <option value="Apprentissage">Apprentissage</option>
+            <option value="Freelance">Freelance</option>
+          </select>
+          <select class="filter-sel" id="filter-dept" onchange="filterEmployes()">
+            <option value="">Tous départements</option>
+          </select>
+          <select class="filter-sel" id="filter-statut" onchange="filterEmployes()">
+            <option value="actif">Actifs</option>
+            <option value="all">Tous</option>
+            <option value="archive">Archivés</option>
+          </select>
+        </div>
+      </div>
+      <div class="emp-list" id="emp-list">
+        <div class="loader"><div class="spin"></div></div>
+      </div>
+      <div class="lp-footer">
+        <span id="emp-list-count">0 employé(s)</span>
+        <button class="btn btn-rh btn-xs" onclick="openModalNouvelEmploye()">+ Nouveau</button>
+      </div>
+    </div>
+
+    <!-- FICHE DROITE -->
+    <div class="right-panel" id="right-panel">
+      <div class="empty-fiche">
+        <div class="icon">👤</div>
+        <h3 style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px">Sélectionnez un employé</h3>
+        <p style="font-size:13px;line-height:1.7;max-width:300px;color:var(--muted)">Cliquez sur un employé dans la liste pour afficher sa fiche complète.</p>
+        <button class="btn btn-rh" style="margin-top:16px" onclick="openModalNouvelEmploye()">+ Créer un employé</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     MODAL NOUVEL EMPLOYÉ / ÉDITION
+═══════════════════════════════════════════ -->
+<div class="modal-overlay" id="modalEmploye">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-emp-title">👤 Nouvel employé</h3>
+      <button class="modal-close" onclick="closeModal('modalEmploye')">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Identité -->
+      <div class="msep">👤 Identité</div>
+      <div class="mrow">
+        <div class="mfield"><label>Prénom *</label><input class="minput" id="f-prenom" placeholder="Marie"/></div>
+        <div class="mfield"><label>Nom *</label><input class="minput" id="f-nom" placeholder="DUPONT"/></div>
+      </div>
+      <div class="mrow">
+        <div class="mfield"><label>Date de naissance</label><input class="minput" id="f-naissance" type="date"/></div>
+        <div class="mfield"><label>Nationalité</label><input class="minput" id="f-nationalite" placeholder="Française"/></div>
+      </div>
+      <div class="mfield"><label>Adresse</label><input class="minput" id="f-adresse" placeholder="12 rue des Fleurs, 75001 Paris"/></div>
+      <div class="mrow">
+        <div class="mfield"><label>Téléphone</label><input class="minput" id="f-tel" placeholder="06 12 34 56 78"/></div>
+        <div class="mfield"><label>Email</label><input class="minput" id="f-email" type="email" placeholder="marie@email.com"/></div>
+      </div>
+      <div class="mfield"><label>N° Sécurité sociale</label><input class="minput" id="f-nss" placeholder="1 85 05 75 001 001 01"/></div>
+
+      <!-- Contrat -->
+      <div class="msep">📋 Contrat</div>
+      <div class="mrow">
+        <div class="mfield"><label>Type de contrat *</label>
+          <select class="minput" id="f-contrat" onchange="onContratChange()">
+            <option value="CDI">CDI</option><option value="CDD">CDD</option>
+            <option value="Stage">Stage</option><option value="Alternance">Alternance</option><option value="Apprentissage">Apprentissage</option>
+            <option value="Freelance">Freelance</option>
+          </select>
+        </div>
+        <div class="mfield"><label>Catégorie *</label>
+          <select class="minput" id="f-categorie" onchange="onContratChange()">
+            <option value="employe">👷 Employé / Ouvrier</option>
+            <option value="agent_maitrise">🔧 Agent de maîtrise / Technicien</option>
+            <option value="cadre">💼 Cadre</option>
+          </select>
+        </div>
+      </div>
+      <div class="mrow">
+        <div class="mfield"><label>Poste / Intitulé *</label><input class="minput" id="f-poste" placeholder="Développeur, Vendeur..."/></div>
+        <div class="mfield"><label>Département</label><input class="minput" id="f-dept" placeholder="Vente, Production..."/></div>
+      </div>
+      <div class="mrow">
+        <div class="mfield"><label>Date d'entrée *</label><input class="minput" id="f-entree" type="date" oninput="onContratChange()"/></div>
+        <div class="mfield"><label>Date de fin (CDD/Stage)</label><input class="minput" id="f-fin" type="date" oninput="onContratChange()"/></div>
+      </div>
+
+      <!-- PÉRIODE D'ESSAI (affichage conditionnel) -->
+      <div id="pe-bloc" style="background:#f0fdf4;border:1.5px solid #d1fae5;border-radius:10px;padding:14px 16px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-size:12px;font-weight:700;color:#059669;display:flex;align-items:center;gap:6px">⏳ Période d'essai</div>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text)">
+            <input type="checkbox" id="pe-active" onchange="onPEChange()" style="accent-color:#059669;width:15px;height:15px;cursor:pointer"/>
+            Activer
+          </label>
+        </div>
+        <div id="pe-details" style="display:none">
+          <div class="mrow" style="margin-bottom:10px">
+            <div class="mfield">
+              <label>Durée légale suggérée</label>
+              <div id="pe-legal-info" style="padding:7px 10px;background:white;border:1.5px solid #d1fae5;border-radius:8px;font-size:12px;font-weight:700;color:#059669">—</div>
+            </div>
+            <div class="mfield">
+              <label>Durée choisie</label>
+              <div style="display:flex;align-items:center;gap:6px">
+                <input class="minput" id="pe-duree" type="text" inputmode="decimal" placeholder="2" style="width:60px;text-align:center;font-weight:700" oninput="calcPEFin()"/>
+                <select class="minput" id="pe-unite" onchange="calcPEFin()" style="flex:1">
+                  <option value="jours">jours</option>
+                  <option value="semaines">semaines</option>
+                  <option value="mois" selected>mois</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="mrow">
+            <div class="mfield">
+              <label>Renouvellement</label>
+              <select class="minput" id="pe-renouv">
+                <option value="non">Non prévu</option>
+                <option value="oui">Oui (× 1)</option>
+              </select>
+            </div>
+            <div class="mfield">
+              <label>Date de fin estimée</label>
+              <div id="pe-fin-info" style="padding:7px 10px;background:white;border:1.5px solid #d1fae5;border-radius:8px;font-size:12px;font-weight:700;color:var(--text)">—</div>
+            </div>
+          </div>
+          <div id="pe-warn" style="display:none;margin-top:8px;padding:7px 10px;background:#fef3c7;border:1px solid #fde68a;border-radius:7px;font-size:11px;color:#92400e"></div>
+        </div>
+      </div>
+
+      <div class="mfield"><label>Statut</label>
+        <select class="minput" id="f-statut">
+          <option value="actif">Actif</option><option value="essai">En période d'essai</option>
+          <option value="archive">Archivé</option>
+        </select>
+      </div>
+
+      <!-- Salaire -->
+      <div class="msep">💶 Rémunération <span style="font-size:10px;font-weight:400;color:var(--muted)">— Saisissez l'un des montants, les autres se calculent automatiquement</span></div>
+
+      <!-- Sélecteur mode de saisie -->
+      <div style="display:flex;gap:6px;margin-bottom:12px" id="sal-mode-btns">
+        <button type="button" class="sal-mode-btn active" data-mode="brut" onclick="setSalMode('brut')">💰 Brut → Net</button>
+        <button type="button" class="sal-mode-btn" data-mode="net" onclick="setSalMode('net')">💳 Net → Brut</button>
+        <button type="button" class="sal-mode-btn" data-mode="superbrut" onclick="setSalMode('superbrut')">🏢 Super-brut → Brut</button>
+      </div>
+
+      <!-- Les 3 cases toujours visibles -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+        <div class="mfield">
+          <label style="display:flex;align-items:center;justify-content:space-between">
+            <span>Super-brut (coût employeur)</span>
+            <span style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 5px;border-radius:4px;font-weight:600">≈ brut × 1,42</span>
+          </label>
+          <div style="position:relative">
+            <input class="minput" id="f-superbrut" type="text" inputmode="decimal" placeholder="3 550" oninput="calcSalaire('superbrut')"/>
+            <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--muted);pointer-events:none">€</span>
+          </div>
+        </div>
+        <div class="mfield">
+          <label style="display:flex;align-items:center;justify-content:space-between">
+            <span>Salaire brut *</span>
+            <span style="font-size:9px;background:#d1fae5;color:#065f46;padding:1px 5px;border-radius:4px;font-weight:600">Référence</span>
+          </label>
+          <div style="position:relative">
+            <input class="minput" id="f-brut" type="text" inputmode="decimal" placeholder="2 500" oninput="calcSalaire('brut')" style="border-color:#d1fae5;background:#f0fdf4"/>
+            <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--muted);pointer-events:none">€</span>
+          </div>
+        </div>
+        <div class="mfield">
+          <label style="display:flex;align-items:center;justify-content:space-between">
+            <span>Salaire net</span>
+            <span style="font-size:9px;background:#e0f2fe;color:#075985;padding:1px 5px;border-radius:4px;font-weight:600">≈ brut × 0,77</span>
+          </label>
+          <div style="position:relative">
+            <input class="minput" id="f-net" type="text" inputmode="decimal" placeholder="1 925" oninput="calcSalaire('net')"/>
+            <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--muted);pointer-events:none">€</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Récapitulatif dynamique des cotisations -->
+      <div id="sal-recap" style="display:none;background:#1e293b;border-radius:10px;padding:14px 16px;margin-bottom:12px;color:white">
+        <div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">📊 Détail des cotisations 2025 — <span id="sal-recap-statut" style="color:#34d399"></span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+          <div style="text-align:center">
+            <div style="font-size:9px;color:rgba(255,255,255,.4);margin-bottom:2px">COTIS. SALARIALES</div>
+            <div id="rc-sal" style="font-size:15px;font-weight:800;color:#f87171">—</div>
+            <div id="rc-sal-pct" style="font-size:10px;color:rgba(255,255,255,.4)">~22–23%</div>
+          </div>
+          <div style="text-align:center;border-left:1px solid rgba(255,255,255,.1);border-right:1px solid rgba(255,255,255,.1)">
+            <div style="font-size:9px;color:rgba(255,255,255,.4);margin-bottom:2px">COTIS. PATRONALES</div>
+            <div id="rc-pat" style="font-size:15px;font-weight:800;color:#fb923c">—</div>
+            <div id="rc-pat-pct" style="font-size:10px;color:rgba(255,255,255,.4)">~40–42%</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:9px;color:rgba(255,255,255,.4);margin-bottom:2px">NET PERÇU</div>
+            <div id="rc-net" style="font-size:15px;font-weight:800;color:#34d399">—</div>
+            <div id="rc-net-pct" style="font-size:10px;color:rgba(255,255,255,.4)">~77% du brut</div>
+          </div>
+        </div>
+        <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);font-size:10px;color:rgba(255,255,255,.35)">
+          ⚠️ Estimation indicative basée sur les taux légaux 2025 (URSSAF). Hors réduction Fillon, convention collective, mutuelle obligatoire et prélèvement à la source.
+        </div>
+      </div>
+
+      <!-- Ligne du bas : fréquence + heures + IBAN -->
+      <div class="mrow-3">
+        <div class="mfield"><label>Fréquence</label>
+          <select class="minput" id="f-freq">
+            <option value="mensuel">Mensuel</option><option value="annuel">Annuel</option>
+            <option value="horaire">Horaire</option>
+          </select>
+        </div>
+        <div class="mfield"><label>Heures / semaine</label><input class="minput" id="f-heures" type="text" inputmode="decimal" placeholder="35"/></div>
+        <div class="mfield"><label>IBAN</label><input class="minput" id="f-iban" placeholder="FR76 ..."/></div>
+      </div>
+
+      <!-- Administratif & Conformité -->
+      <div class="msep">🏦 Administratif &amp; Conformité</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px;padding:7px 10px;background:#f0fdf4;border-radius:8px;border:1px solid #d1fae5">
+        🔒 Ces champs alimentent les vérifications de conformité RH.
+      </div>
+      <div class="mrow">
+        <div class="mfield">
+          <label>Mutuelle (nom + n° adhérent)</label>
+          <input class="minput" id="f-mutuelle" placeholder="Ex : Harmonie Mutuelle — N° 123456"/>
+        </div>
+        <div class="mfield">
+          <label>Date DPAE effectuée</label>
+          <input class="minput" id="f-dpae" type="date"/>
+          <div style="font-size:10px;color:var(--muted);margin-top:3px">Déclaration Préalable à l'Embauche (URSSAF)</div>
+        </div>
+      </div>
+      <div class="mrow">
+        <div class="mfield">
+          <label>Visite médicale d'embauche</label>
+          <input class="minput" id="f-visite-embauche" type="date"/>
+        </div>
+        <div class="mfield">
+          <label>Prochaine visite médicale</label>
+          <input class="minput" id="f-visite-prochaine" type="date"/>
+        </div>
+      </div>
+      <div class="mfield">
+        <label>Documents reçus à l'embauche</label>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;padding:10px 12px;border:1.5px solid var(--border);border-radius:8px;background:#fafbff">
+          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;font-weight:500;color:var(--text);text-transform:none;letter-spacing:0;min-width:160px">
+            <input type="checkbox" id="f-doc-cni" style="accent-color:#059669;width:15px;height:15px"/> 🪪 CNI / Passeport
+          </label>
+          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;font-weight:500;color:var(--text);text-transform:none;letter-spacing:0;min-width:160px">
+            <input type="checkbox" id="f-doc-rib" style="accent-color:#059669;width:15px;height:15px"/> 🏦 RIB original
+          </label>
+          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;font-weight:500;color:var(--text);text-transform:none;letter-spacing:0;min-width:160px">
+            <input type="checkbox" id="f-doc-vitale" style="accent-color:#059669;width:15px;height:15px"/> 💚 Carte Vitale
+          </label>
+          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:12px;font-weight:500;color:var(--text);text-transform:none;letter-spacing:0;min-width:160px">
+            <input type="checkbox" id="f-doc-contrat" style="accent-color:#059669;width:15px;height:15px"/> 📋 Contrat signé
+          </label>
+        </div>
+      </div>
+
+      <!-- Convention collective -->
+      <div class="msep">⚖️ Convention collective <span style="font-size:10px;font-weight:400;color:var(--muted)">— Laisser vide pour utiliser le défaut entreprise</span></div>
+      <div class="mrow">
+        <div class="mfield" style="grid-column:1/-1">
+          <label>Convention collective applicable</label>
+          <!-- Recherche par code IDCC ou nom -->
+          <div style="display:flex;gap:8px;margin-bottom:6px">
+            <div style="position:relative;flex:1">
+              <input type="text" class="minput" id="f-ccn-search" placeholder="🔍 Rechercher par nom ou code IDCC… (ex: 1979, CHR, restauration)" 
+                oninput="searchCCN(this.value)" autocomplete="off"
+                style="padding-right:32px"/>
+              <span id="f-ccn-search-clear" onclick="clearCCNSearch()" style="display:none;position:absolute;right:10px;top:50%;transform:translateY(-50%);cursor:pointer;color:var(--muted);font-size:14px">✕</span>
+            </div>
+            <div style="display:flex;flex-direction:column;justify-content:center;font-size:10px;color:var(--muted);text-align:center;flex-shrink:0">
+              <div>Code IDCC</div>
+              <input type="text" class="minput" id="f-ccn-idcc-direct" placeholder="Ex: 1979" 
+                oninput="searchCCNByIDCC(this.value)"
+                style="width:80px;font-size:12px;font-weight:700;text-align:center;padding:6px 8px"/>
+            </div>
+          </div>
+          <!-- Résultats de recherche (dropdown) -->
+          <div id="f-ccn-search-results" style="display:none;background:white;border:1.5px solid var(--border);border-radius:8px;max-height:220px;overflow-y:auto;margin-bottom:6px;box-shadow:0 4px 16px rgba(0,0,0,0.1)"></div>
+          <!-- Select complet (fallback / navigation manuelle) -->
+          <select class="minput" id="f-ccn" onchange="onCCNChange()" style="font-size:12px">
+            <option value="">— Défaut entreprise —</option>
+          </select>
+          <div id="f-ccn-note" style="display:none;font-size:11px;color:var(--muted);padding:8px 10px;background:#f8faff;border:1px solid var(--border);border-radius:6px;margin-top:6px;line-height:1.6"></div>
+        </div>
+      </div>
+
+      <!-- Divers -->
+      <div class="msep">📝 Divers</div>
+      <div class="mrow">
+        <div class="mfield"><label>Note de bienvenue</label><input class="minput" id="f-note" type="text" inputmode="decimal" placeholder="Note /5"/></div>
+        <div class="mfield"><label>Emoji / couleur</label>
+          <select class="minput" id="f-couleur">
+            <option value="#059669">🟢 Vert</option><option value="#0891b2">🔵 Bleu</option>
+            <option value="#7c3aed">🟣 Violet</option><option value="#db2777">🩷 Rose</option>
+            <option value="#ea580c">🟠 Orange</option><option value="#ca8a04">🟡 Jaune</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeModal('modalEmploye')">Annuler</button>
+      <button class="btn btn-rh" onclick="saveEmploye()">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════
+     MODAL NOUVELLE ÉVALUATION
+═══════════════════════════════════════════ -->
+<div class="modal-overlay" id="modalEval">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-head">
+      <h3>⭐ Nouvelle évaluation</h3>
+      <button class="modal-close" onclick="closeModal('modalEval')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="mfield">
+        <label>Note (1 à 5)</label>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <input class="minput" id="eval-note" type="text" inputmode="decimal" placeholder="4.5" style="width:80px"/>
+          <div id="eval-stars-preview" style="display:flex;gap:2px;font-size:18px;color:#f59e0b">☆☆☆☆☆</div>
+        </div>
+      </div>
+      <div class="mfield"><label>Date</label><input class="minput" id="eval-date" type="date"/></div>
+      <div class="mfield"><label>Commentaire</label><textarea class="minput" id="eval-comment" rows="3" placeholder="Points forts, axes d'amélioration..."></textarea></div>
+      <div class="mfield"><label>Évaluateur</label><input class="minput" id="eval-by" placeholder="Nom du responsable"/></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeModal('modalEval')">Annuler</button>
+      <button class="btn btn-rh" onclick="saveEval()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL UPLOAD DOC -->
+<div class="modal-overlay" id="modalDoc">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-head">
+      <h3>📎 Ajouter un document</h3>
+      <button class="modal-close" onclick="closeModal('modalDoc')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="mfield"><label>Nom du document *</label><input class="minput" id="doc-nom" placeholder="Contrat de travail, CNI..."/></div>
+      <div class="mfield"><label>Type</label>
+        <select class="minput" id="doc-type">
+          <option value="contrat">📋 Contrat de travail</option>
+          <option value="cni">🪪 Pièce d'identité</option>
+          <option value="rib">🏦 RIB</option>
+          <option value="diplome">🎓 Diplôme</option>
+          <option value="medical">🏥 Certificat médical</option>
+          <option value="autre">📄 Autre</option>
+        </select>
+      </div>
+      <div class="mfield"><label>Date du document</label><input class="minput" id="doc-date" type="date"/></div>
+      <div class="mfield">
+        <label>Fichier (référence)</label>
+        <input class="minput" id="doc-ref" placeholder="Nom du fichier ou lien Drive"/>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">💡 Renseignez le nom ou le lien vers le document stocké dans votre espace.</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeModal('modalDoc')">Annuler</button>
+      <button class="btn btn-rh" onclick="saveDoc()">Ajouter</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL PHOTO -->
+<div class="modal-overlay" id="modalPhoto">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-head">
+      <h3>📸 Photo de profil</h3>
+      <button class="modal-close" onclick="closeModal('modalPhoto')">✕</button>
+    </div>
+    <div class="modal-body" style="text-align:center">
+      <div id="photo-preview" style="width:100px;height:100px;border-radius:20px;margin:0 auto 16px;overflow:hidden;background:var(--rh-ghost);display:flex;align-items:center;justify-content:center;font-size:32px"></div>
+      <label class="upload-zone">
+        <input type="file" id="photo-input" accept="image/*" onchange="previewPhoto(this)"/>
+        <div style="font-size:22px;margin-bottom:6px">📷</div>
+        <div style="font-weight:600">Cliquez pour choisir une photo</div>
+        <div style="font-size:11px;margin-top:3px">JPG, PNG – max 2Mo</div>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeModal('modalPhoto')">Annuler</button>
+      <button class="btn btn-danger btn-sm" onclick="removePhoto()">Supprimer</button>
+      <button class="btn btn-rh" onclick="savePhoto()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ARCHIVAGE -->
+<div class="modal-overlay" id="modalArchive">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-head">
+      <h3 id="modal-arch-title">📦 Archiver l'employé</h3>
+      <button class="modal-close" onclick="closeModal('modalArchive')">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;line-height:1.7;color:var(--muted)">L'employé sera marqué comme archivé et masqué par défaut. Les données sont conservées.</p>
+      <div class="mfield" style="margin-top:14px"><label>Motif de départ</label>
+        <select class="minput" id="arch-motif">
+          <option value="fin_cdd">Fin de CDD</option>
+          <option value="demission">Démission</option>
+          <option value="licenciement">Licenciement</option>
+          <option value="retraite">Retraite</option>
+          <option value="rupture">Rupture conventionnelle</option>
+          <option value="autre">Autre</option>
+        </select>
+      </div>
+      <div class="mfield"><label>Date de sortie</label><input class="minput" id="arch-date" type="date"/></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeModal('modalArchive')">Annuler</button>
+      <button class="btn btn-danger" onclick="confirmArchive()">📦 Archiver</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ═══════════════════════════════════════ FIREBASE ═══ -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getFirestore, initializeFirestore, doc, setDoc, getDoc, collection, getDocs, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const app = initializeApp({
+    apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain:"altiora-70599.firebaseapp.com",
+    projectId:"altiora-70599",
+    storageBucket:"altiora-70599.firebasestorage.app",
+    messagingSenderId:"120905555746",
+    appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+  });
+  const auth = getAuth(app);
+  // experimentalAutoDetectLongPolling : corrige l'erreur CORS sur Safari/WebKit
+  const db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+  window._auth=auth; window._db=db;
+  window._doc=doc; window._setDoc=setDoc; window._getDoc=getDoc;
+  window._collection=collection; window._getDocs=getDocs;
+  window._deleteDoc=deleteDoc; window._updateDoc=updateDoc;
+
+  onAuthStateChanged(auth, user => {
+    if (!user) { window.location.href='index.html'; return; }
+    window._uid = user.uid;
+    window._firebaseReady = true;
+    window.initEmployes();
+  });
+</script>
+
+<!-- ═══════════════════════════════════════ APP JS ═══ -->
+<script>
+// ══════════════════════════
+// ÉTAT
+// ══════════════════════════
+let _employes    = {};   // { id: {...data} }
+let _currentId   = null;
+let _editId      = null; // null = nouveau, sinon ID
+let _showArchived = false;
+let _photoDataURL = null;
+let _photoFile    = null;
+
+const COLORS = ['#059669','#0891b2','#7c3aed','#db2777','#ea580c','#ca8a04'];
+
+// ══════════════════════════
+// INIT
+// ══════════════════════════
+window.initEmployes = async function() {
+  await loadRHParams();
+  await loadEmployes();
+};
+
+// Charger les paramètres RH entreprise (CCN défaut, etc.)
+async function loadRHParams() {
+  try {
+    const snap = await window._getDoc(window._doc(window._db,'rh_params',window._uid));
+    if(snap.exists()) {
+      const d = snap.data();
+      if(d.ccnDefault) _ccnDefaultEntreprise = d.ccnDefault;
+    }
+  } catch(e) { console.warn('Params RH non chargés', e); }
+}
+
+async function loadEmployes() {
+  try {
+    const snap = await window._getDocs(window._collection(window._db,'rh',window._uid,'employes'));
+    _employes = {};
+    snap.forEach(d => { _employes[d.id] = { id:d.id, ...d.data() }; });
+    buildDeptFilter();
+    renderList();
+  } catch(e) {
+    console.error(e);
+    showToast('Erreur chargement','err');
+  }
+}
+
+// ══════════════════════════
+// LISTE
+// ══════════════════════════
+function buildDeptFilter() {
+  const depts = [...new Set(Object.values(_employes).map(e=>e.departement).filter(Boolean))];
+  const sel = document.getElementById('filter-dept');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Tous départements</option>' +
+    depts.map(d=>`<option value="${d}" ${d===cur?'selected':''}>${d}</option>`).join('');
+}
+
+function filterEmployes() { renderList(); }
+
+function renderList() {
+  const search  = (document.getElementById('search-emp')?.value||'').toLowerCase();
+  const contrat = document.getElementById('filter-contrat')?.value||'';
+  const dept    = document.getElementById('filter-dept')?.value||'';
+  const statut  = document.getElementById('filter-statut')?.value||'actif';
+
+  let items = Object.values(_employes).filter(e => {
+    const nom = `${e.prenom||''} ${e.nom||''}`.toLowerCase();
+    const matchSearch = !search || nom.includes(search) || (e.poste||'').toLowerCase().includes(search);
+    const matchContrat = !contrat || e.typeContrat === contrat;
+    const matchDept = !dept || e.departement === dept;
+    const matchStatut = statut==='all' ? true : statut==='archive' ? e.statut==='archive' : e.statut!=='archive';
+    return matchSearch && matchContrat && matchDept && matchStatut;
+  });
+
+  // Trier : actifs d'abord, puis alphabétique
+  items.sort((a,b)=>{
+    if (a.statut==='archive' && b.statut!=='archive') return 1;
+    if (a.statut!=='archive' && b.statut==='archive') return -1;
+    return `${a.prenom} ${a.nom}`.localeCompare(`${b.prenom} ${b.nom}`);
+  });
+
+  const list = document.getElementById('emp-list');
+  const count = document.getElementById('emp-list-count');
+  const topCount = document.getElementById('emp-count-top');
+  const total = Object.values(_employes).filter(e=>e.statut!=='archive').length;
+  count.textContent = `${items.length} employé(s)`;
+  topCount.textContent = `${total} employé${total>1?'s':''} actif${total>1?'s':''}`;
+
+  if (items.length === 0) {
+    list.innerHTML = `<div style="padding:24px;text-align:center;color:var(--muted);font-size:12px">
+      <div style="font-size:28px;margin-bottom:8px">👤</div>Aucun employé trouvé.<br>
+      <button class="btn btn-rh btn-sm" style="margin-top:12px" onclick="openModalNouvelEmploye()">+ Ajouter</button></div>`;
+    return;
+  }
+
+  list.innerHTML = items.map(e => {
+    const nom = `${e.prenom||''} ${e.nom||''}`.trim()||'Employé';
+    const init = nom.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    const color = e.couleur || COLORS[0];
+    const badgeCls = getBadgeCls(e.typeContrat);
+    const archived = e.statut==='archive';
+
+    // CDD expirant ?
+    let expireSoon = false;
+    if (e.typeContrat==='CDD' && e.dateFinContrat) {
+      const j = Math.ceil((new Date(e.dateFinContrat)-Date.now())/86400000);
+      if (j>=0 && j<=30) expireSoon = true;
+    }
+
+    return `<div class="emp-item ${_currentId===e.id?'active':''} ${archived?'archived':''}"
+      draggable="true"
+      data-id="${e.id}"
+      onclick="handleEmpItemClick(event,'${e.id}')"
+      ondragstart="onDragStart(event,'${e.id}')"
+      ondragover="onDragOver(event)"
+      ondragleave="onDragLeave(event)"
+      ondrop="onDrop(event,'${e.id}')">
+      <span class="drag-handle" title="Déplacer" onclick="event.stopPropagation()">⠿</span>
+      <div class="emp-av" style="background:${color}">
+        ${e.photoURL ? `<img src="${e.photoURL}" alt="${nom}" onerror="this.style.display='none'"/>` : ''}
+        <div class="emp-av-fallback" style="background:${color}">${init}</div>
+      </div>
+      <div class="emp-info">
+        <div class="emp-name">${nom}</div>
+        <div class="emp-sub">${e.poste||'—'}${e.departement?' · '+e.departement:''}</div>
+      </div>
+      <span class="emp-badge ${expireSoon?'b-expire':badgeCls}">${expireSoon?'⚠️ CDD':e.typeContrat||'CDI'}</span>
+    </div>`;
+  }).join('');
+}
+
+function getBadgeCls(type) {
+  return {CDI:'b-cdi',CDD:'b-cdd',Stage:'b-stage',Alternance:'b-alternance',Apprentissage:'b-alternance',Freelance:'b-freelance'}[type]||'b-cdi';
+}
+
+function toggleArchived() {
+  _showArchived = !_showArchived;
+  const sel = document.getElementById('filter-statut');
+  sel.value = _showArchived ? 'all' : 'actif';
+  document.getElementById('btn-show-archived').style.background = _showArchived ? 'var(--rh-ghost)' : '';
+  renderList();
+}
+
+// ══════════════════════════
+// FICHE
+// ══════════════════════════
+// ── DRAG & DROP ──────────────────────────────────────────────────────────────
+let _dragId = null;
+let _dragOrder = []; // ordre personnalisé [{id, order}]
+
+function handleEmpItemClick(e, id) {
+  if (e.target.classList.contains('drag-handle')) return;
+  openFiche(id);
+}
+
+function onDragStart(e, id) {
+  _dragId = id;
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', id);
+}
+
+function onDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const item = e.currentTarget;
+  if (!item.classList.contains('dragging')) {
+    item.classList.add('drag-over');
+  }
+}
+
+function onDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function onDrop(e, targetId) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  if (!_dragId || _dragId === targetId) { _dragId = null; return; }
+
+  // Réorganiser l'ordre dans _employes
+  const list = document.getElementById('emp-list');
+  const allItems = [...list.querySelectorAll('.emp-item[data-id]')];
+  const ids = allItems.map(el => el.dataset.id);
+
+  const fromIdx = ids.indexOf(_dragId);
+  const toIdx   = ids.indexOf(targetId);
+  if (fromIdx === -1 || toIdx === -1) { _dragId = null; return; }
+
+  // Appliquer le nouvel ordre
+  ids.splice(fromIdx, 1);
+  ids.splice(toIdx, 0, _dragId);
+
+  // Persister l'ordre localement + mettre à jour l'affichage
+  _empOrder = ids;
+  _dragId = null;
+
+  // Re-render avec le nouvel ordre
+  renderListOrdered(ids);
+}
+
+// Ordre personnalisé (stocké en mémoire — reset au reload)
+let _empOrder = null;
+
+function renderListOrdered(orderedIds) {
+  const list = document.getElementById('emp-list');
+  const ordered = orderedIds.map(id => _employes[id]).filter(Boolean);
+
+  // Recréer les items dans le nouvel ordre
+  list.innerHTML = ordered.map(e => {
+    const nom = `${e.prenom||''} ${e.nom||''}`.trim()||'Employé';
+    const init = nom.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    const color = e.couleur || COLORS[0];
+    const badgeCls = getBadgeCls(e.typeContrat);
+    const archived = e.statut==='archive';
+    let expireSoon = false;
+    if (e.typeContrat==='CDD' && e.dateFinContrat) {
+      const j = Math.ceil((new Date(e.dateFinContrat)-Date.now())/86400000);
+      if (j>=0 && j<=30) expireSoon = true;
+    }
+    return `<div class="emp-item ${_currentId===e.id?'active':''} ${archived?'archived':''}"
+      draggable="true" data-id="${e.id}"
+      onclick="handleEmpItemClick(event,'${e.id}')"
+      ondragstart="onDragStart(event,'${e.id}')"
+      ondragover="onDragOver(event)"
+      ondragleave="onDragLeave(event)"
+      ondrop="onDrop(event,'${e.id}')">
+      <span class="drag-handle" title="Déplacer" onclick="event.stopPropagation()">⠿</span>
+      <div class="emp-av" style="background:${color}">
+        ${e.photoURL ? `<img src="${e.photoURL}" alt="${nom}" onerror="this.style.display='none'"/>` : ''}
+        <div class="emp-av-fallback" style="background:${color}">${init}</div>
+      </div>
+      <div class="emp-info">
+        <div class="emp-name">${nom}</div>
+        <div class="emp-sub">${e.poste||'—'}${e.departement?' · '+e.departement:''}</div>
+      </div>
+      <span class="emp-badge ${expireSoon?'b-expire':badgeCls}">${expireSoon?'⚠️ CDD':e.typeContrat||'CDI'}</span>
+    </div>`;
+  }).join('');
+
+  // Réactiver fin de drag
+  list.querySelectorAll('.emp-item[draggable]').forEach(el => {
+    el.addEventListener('dragend', () => el.classList.remove('dragging'));
+  });
+}
+
+window.handleEmpItemClick = handleEmpItemClick;
+window.onDragStart = onDragStart;
+window.onDragOver = onDragOver;
+window.onDragLeave = onDragLeave;
+window.onDrop = onDrop;
+
+
+
+// ── TOGGLE DOC REÇU (clic direct sur badge) ──
+async function toggleDocRecu(empId, field, currentVal) {
+  if (!window._uid || !window._updateDoc || !window._doc || !window._db) return;
+  const newVal = !currentVal;
+  try {
+    await window._updateDoc(
+      window._doc(window._db, 'rh', window._uid, 'employes', empId),
+      { [field]: newVal }
+    );
+    // Mettre à jour l'état local et re-render en conservant l'onglet actif
+    if (_employes[empId]) {
+      _employes[empId][field] = newVal;
+      // Mémoriser l'onglet actif avant re-render
+      const activeTab = document.querySelector('#fiche-tabs .tab.active');
+      const activeTabName = activeTab ? (activeTab.getAttribute('onclick')||'').match(/showTab\('(\w+)'/)?.[1] : null;
+      renderFiche(_employes[empId]);
+      // Restaurer l'onglet actif
+      if (activeTabName) {
+        const btn = document.querySelector(`#fiche-tabs .tab[onclick*="showTab('${activeTabName}'"]`);
+        if (btn) showTab(activeTabName, btn);
+      }
+    }
+  } catch(e) {
+    console.error('toggleDocRecu error:', e);
+  }
+}
+window.toggleDocRecu = toggleDocRecu;
+
+function openFiche(id) {
+  _currentId = id;
+  renderList(); // update active state
+  const e = _employes[id];
+  if (!e) return;
+  renderFiche(e);
+}
+
+function renderFiche(e) {
+  const nom = `${e.prenom||''} ${e.nom||''}`.trim()||'Employé';
+  const init = nom.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+  const color = e.couleur || COLORS[0];
+  const badgeCls = getBadgeCls(e.typeContrat);
+
+  // Ancienneté
+  const anc = e.dateEntree ? calcAnciennete(e.dateEntree) : '—';
+
+  // Jours avant fin CDD
+  let cddWarning = '';
+  if (e.typeContrat==='CDD' && e.dateFinContrat) {
+    const j = Math.ceil((new Date(e.dateFinContrat)-Date.now())/86400000);
+    if (j>=0 && j<=30) cddWarning = `<span style="background:#fee2e2;color:#991b1b;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px">⚠️ Expire dans ${j}j</span>`;
+  }
+
+  // Note moyenne
+  const evals = e.evaluations||[];
+  const noteMoy = evals.length>0 ? (evals.reduce((s,ev)=>s+(parseFloat(ev.note)||0),0)/evals.length).toFixed(1) : null;
+
+  const rp = document.getElementById('right-panel');
+  rp.innerHTML = `
+  <div class="fiche" id="fiche-content">
+
+    <!-- HERO -->
+    <div class="fiche-hero">
+      <div class="fiche-hero-top">
+        <div class="fiche-big-av" style="background:${color}" onclick="openModalPhoto('${e.id}')">
+          ${e.photoURL ? `<img src="${e.photoURL}" alt="${nom}" onerror="this.style.display='none'"/>` : ''}
+          <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;color:white;${e.photoURL?'opacity:0':''};" id="av-initiales">${init}</div>
+          <div class="av-overlay">📷</div>
+        </div>
+        <div class="fiche-hero-info">
+          <div class="fiche-hero-name">${nom}</div>
+          <div class="fiche-hero-poste">${e.poste||'Poste non renseigné'}${e.departement?' · '+e.departement:''}</div>
+          <div class="fiche-hero-badges">
+            <span class="hbadge ${badgeCls}">${e.typeContrat||'CDI'}</span>
+            ${e.statut==='essai'?'<span class="hbadge" style="background:#e0f2fe;color:#075985">Période d\'essai</span>':''}
+            ${e.statut==='archive'?'<span class="hbadge" style="background:#f1f5f9;color:#64748b">Archivé</span>':''}
+            ${cddWarning}
+            ${noteMoy?`<span class="hbadge" style="background:#fef9c3;color:#92400e">⭐ ${noteMoy}/5</span>`:''}
+          </div>
+        </div>
+        <div class="fiche-hero-actions">
+          <button class="btn btn-outline btn-sm" onclick="openModalEdit('${e.id}')">✏️ Modifier</button>
+          <button class="btn btn-outline btn-sm" onclick="exportPDF('${e.id}')">📄 PDF</button>
+          <button class="btn btn-danger btn-sm" onclick="${e.statut==='archive'?`restoreEmploye('${e.id}')`:`openModalArchive('${e.id}')`}">${e.statut==='archive'?'♻️ Restaurer':'📦 Archiver'}</button>
+        </div>
+      </div>
+
+      <!-- KPIs RAPIDES -->
+      <div class="fiche-kpis">
+        <div class="fkpi">
+          <div class="fkpi-label">Salaire net</div>
+          <div class="fkpi-val">${e.salaireNet?fmtE(e.salaireNet):'—'}</div>
+          <div class="fkpi-sub">${e.frequence||'mensuel'}</div>
+        </div>
+        <div class="fkpi">
+          <div class="fkpi-label">Coût employeur</div>
+          <div class="fkpi-val">${e.salaireSuperBrut?fmtE(e.salaireSuperBrut):'—'}</div>
+          <div class="fkpi-sub">Super-brut</div>
+        </div>
+        <div class="fkpi ${e.typeContrat==='CDD'&&e.dateFinContrat?'orange':''}">
+          <div class="fkpi-label">Fin de contrat</div>
+          <div class="fkpi-val">${e.dateFinContrat||'CDI'}</div>
+          <div class="fkpi-sub">${e.typeContrat||'—'} · ${e.categoriePoste==='cadre'?'Cadre':e.categoriePoste==='agent_maitrise'?'Agent maîtrise':'Employé'}</div>
+        </div>
+        <div class="fkpi ${e.periodeEssai?.active?'orange':''}">
+          <div class="fkpi-label">Période d'essai</div>
+          <div class="fkpi-val">${e.periodeEssai?.active?`${e.periodeEssai.duree} ${e.periodeEssai.unite}`:'—'}</div>
+          <div class="fkpi-sub">${e.periodeEssai?.active?`Fin : ${e.periodeEssai.finEstimee||'—'}`:'Non configurée'}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TABS -->
+    <div class="tabs" id="fiche-tabs">
+      <button class="tab active" onclick="showTab('infos',this)">👤 Infos</button>
+      <button class="tab" onclick="showTab('contrat',this)">📋 Contrat</button>
+      <button class="tab" onclick="showTab('docs',this)">📎 Documents</button>
+      <button class="tab" onclick="showTab('evals',this)">⭐ Évaluations</button>
+      <button class="tab" onclick="showTab('entretiens',this);loadEntretiensTab('${e.id}')">🎯 Entretiens</button>
+    </div>
+
+    <!-- TAB INFOS -->
+    <div class="fiche-section" id="tab-infos">
+      <div class="sec-head"><div class="sec-title">👤 Informations personnelles</div><button class="btn btn-outline btn-xs" onclick="openModalEdit('${e.id}')">✏️</button></div>
+      <div class="sec-body">
+        <div class="info-grid">
+          ${infoField('Prénom',e.prenom)}
+          ${infoField('Nom',e.nom)}
+          ${infoField('Date de naissance',fmtDate(e.dateNaissance))}
+          ${infoField('Nationalité',e.nationalite)}
+          ${infoField('Téléphone',e.telephone)}
+          ${infoField('Email',e.email)}
+          ${infoField('Adresse',e.adresse,true)}
+          ${infoField('N° Sécurité sociale',e.nss ? maskNSS(e.nss) : null)}
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB CONTRAT -->
+    <div class="fiche-section" id="tab-contrat" style="display:none">
+      <div class="sec-head"><div class="sec-title">📋 Informations contractuelles</div><button class="btn btn-outline btn-xs" onclick="openModalEdit('${e.id}')">✏️</button></div>
+      <div class="sec-body">
+        <div class="info-grid">
+          ${infoField('Type de contrat',e.typeContrat)}
+          ${infoField('Statut',e.statut)}
+          ${infoField('Poste',e.poste)}
+          ${infoField('Département',e.departement)}
+          ${infoField('Date d\'entrée',fmtDate(e.dateEntree))}
+          ${infoField('Date de fin',fmtDate(e.dateFinContrat))}
+          ${e.ccn && CCN_RULES[e.ccn] ? infoField('Convention collective','<span style="font-size:11px">'+CCN_RULES[e.ccn].label+(CCN_RULES[e.ccn].idcc?' <span style=\'color:var(--muted);font-weight:400\'>(IDCC '+CCN_RULES[e.ccn].idcc+')</span>':'')+'</span>') : infoField('Convention collective','— Défaut entreprise —')}
+        </div>
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+          <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">💶 Rémunération</div>
+          <div class="info-grid">
+            ${infoField('Salaire brut',e.salaireBrut?fmtE(e.salaireBrut):null)}
+            ${infoField('Salaire net',e.salaireNet?fmtE(e.salaireNet):null)}
+            ${infoField('Fréquence',e.frequence||'mensuel')}
+            ${infoField('Heures hebdo',(e.heuresHebdo||35)+'h')}
+            ${infoField('IBAN',e.iban ? maskIBAN(e.iban) : null)}
+          </div>
+        </div>
+        <!-- Administratif & Conformité -->
+        <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+          <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🏦 Administratif &amp; Conformité</div>
+          <div class="info-grid">
+            ${infoField('Mutuelle', e.mutuelle)}
+            ${infoField('DPAE effectuée', e.dpaeDate ? fmtDate(e.dpaeDate) : null)}
+            ${infoField('Visite médicale embauche', e.dateVisiteMedicale ? fmtDate(e.dateVisiteMedicale) : null)}
+            ${infoField('Prochaine visite', e.prochaineSuiviMedical ? fmtDate(e.prochaineSuiviMedical) : null)}
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px">
+            ${[
+              {key:'docCniRecu',   src:'cni',     icon:'🪪', label:'CNI'},
+              {key:'docRibRecu',   src:'rib',     icon:'🏦', label:'RIB'},
+              {key:'docVitaleRecu',src:'vitale',  icon:'💚', label:'Carte Vitale'},
+              {key:'docContratRecu',src:'contrat',icon:'📋', label:'Contrat signé'},
+            ].map(d => {
+              const ok = e[d.key] || (e.documents||[]).some(doc=>doc.type===d.src);
+              return '<button onclick="event.stopPropagation();toggleDocRecu(\'' + e.id + '\',\'' + d.key + '\',' + (ok?'true':'false') + ')" title="Cliquer pour '+(ok?'marquer comme non reçu':'marquer comme reçu')+'" style="font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;background:'+(ok?'#dcfce7':'#fef2f2')+';color:'+(ok?'#166534':'#991b1b')+';border:1.5px solid '+(ok?'#6ee7b7':'#fca5a5')+';cursor:pointer;transition:all .15s" onmouseover="this.style.opacity=.75" onmouseout="this.style.opacity=1">'+(ok?'✅':'❌')+' '+d.icon+' '+d.label+'</button>';
+            }).join('')}
+          </div>
+          </div>
+        </div>
+
+        <!-- LIEN PORTAIL SALARIÉ -->
+        <div style="margin-top:14px;padding:13px 15px;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px">
+          <div style="font-size:11px;font-weight:700;color:#065f46;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🔗 Portail salarié — Espace congés</div>
+          ${e.publicId ? `
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <code id="lien-sal-${e.id}" style="font-size:11px;background:white;border:1px solid #d1fae5;padding:5px 9px;border-radius:6px;color:#047857;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">https://alteore.com/espace-salarie.html?id=${e.publicId}</code>
+              <button class="btn btn-rh btn-xs" style="flex-shrink:0" onclick="copyLienSalarie('${e.id}','${e.publicId}')">📋 Copier</button>
+            </div>
+            <div style="font-size:10px;color:#6b7280;margin-top:5px">Envoyez ce lien à l\'employé · Il accède à ses soldes et peut faire ses demandes de congés.</div>
+          ` : `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+              <div style="font-size:12px;color:#6b7280">Cet employé n\'a pas encore de lien portail (créé avant la mise à jour).</div>
+              <button class="btn btn-rh btn-xs" style="flex-shrink:0" onclick="genererLienSalarie('${e.id}')">🔗 Générer le lien</button>
+            </div>
+          `}
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB DOCUMENTS -->
+    <div class="fiche-section" id="tab-docs" style="display:none">
+      <div class="sec-head">
+        <div class="sec-title">📎 Documents RH</div>
+        <button class="btn btn-rh btn-xs" onclick="openModalDoc('${e.id}')">+ Ajouter</button>
+      </div>
+      <div class="sec-body" id="docs-body-${e.id}">
+        ${renderDocs(e)}
+      </div>
+    </div>
+
+    <!-- TAB ÉVALUATIONS -->
+    <div class="fiche-section" id="tab-evals" style="display:none">
+      <div class="sec-head">
+        <div class="sec-title">⭐ Évaluations <span style="font-size:10px;font-weight:400;color:var(--muted)">${evals.length} entrée${evals.length>1?'s':''}</span></div>
+        <button class="btn btn-rh btn-xs" onclick="openModalEval('${e.id}')">+ Évaluer</button>
+      </div>
+      <div class="sec-body" id="evals-body-${e.id}">
+        ${renderEvals(e)}
+      </div>
+    </div>
+
+    <!-- TAB ENTRETIENS ANNUELS -->
+    <div class="fiche-section" id="tab-entretiens" style="display:none">
+      <div class="sec-head">
+        <div class="sec-title">🎯 Entretiens annuels</div>
+        <div style="display:flex;gap:6px">
+          <a href="rh-entretiens.html" class="btn btn-outline btn-xs" style="text-decoration:none">📂 Module entretiens</a>
+          <button class="btn btn-rh btn-xs" onclick="createEntretienFromFiche('${e.id}')">+ Nouvel entretien</button>
+        </div>
+      </div>
+      <div class="sec-body" id="entretiens-body-${e.id}">
+        <div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">
+          <div style="font-size:24px;margin-bottom:6px">⏳</div>Chargement...
+        </div>
+      </div>
+    </div>
+
+  </div>`;
+}
+
+function showTab(tab, btn) {
+  ['infos','contrat','docs','evals','entretiens'].forEach(t => {
+    const el = document.getElementById('tab-'+t);
+    if (el) el.style.display = t===tab ? '' : 'none';
+  });
+  document.querySelectorAll('#fiche-tabs .tab').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+
+function infoField(label, val, full=false) {
+  return `<div class="info-field${full?' style="grid-column:1/-1"':''}">
+    <div class="info-label">${label}</div>
+    <div class="info-val ${!val?'muted':''}">${val||'Non renseigné'}</div>
+  </div>`;
+}
+
+function renderDocs(e) {
+  const docs = e.documents||[];
+  if (docs.length===0) return `<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">
+    <div style="font-size:24px;margin-bottom:6px">📎</div>Aucun document.<br>
+    <button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="openModalDoc('${e.id}')">+ Ajouter un document</button></div>`;
+
+  const docIcons = {contrat:'📋',cni:'🪪',rib:'🏦',diplome:'🎓',medical:'🏥',autre:'📄'};
+  return docs.map((d,i)=>`
+    <div class="doc-item">
+      <div class="doc-ico">${docIcons[d.type]||'📄'}</div>
+      <div style="flex:1;min-width:0">
+        <div class="doc-name">${d.nom||'Document'}</div>
+        <div class="doc-date">${d.date?fmtDate(d.date):''} ${d.ref?'· '+d.ref:''}</div>
+      </div>
+      <div class="doc-actions">
+        <button class="btn btn-danger btn-xs" onclick="deleteDoc('${e.id}',${i})">🗑</button>
+      </div>
+    </div>`).join('');
+}
+
+function renderEvals(e) {
+  const evals = (e.evaluations||[]).slice().reverse();
+  if (evals.length===0) return `<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">
+    <div style="font-size:24px;margin-bottom:6px">⭐</div>Aucune évaluation.<br>
+    <button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="openModalEval('${e.id}')">+ Évaluer</button></div>`;
+
+  return evals.map((ev,i)=>`
+    <div class="eval-item">
+      <div class="eval-header">
+        <span class="eval-date">${ev.date?fmtDate(ev.date):'—'}</span>
+        <div class="eval-note">
+          ${renderStars(parseFloat(ev.note)||0)}
+          <span class="eval-note-val">${parseFloat(ev.note)||0}/5</span>
+        </div>
+      </div>
+      ${ev.commentaire?`<div class="eval-comment">"${ev.commentaire}"</div>`:''}
+      <div class="eval-by">Par ${ev.evaluateur||'—'}</div>
+    </div>`).join('');
+}
+
+function renderStars(note) {
+  let html = '<div class="stars">';
+  for (let i=1;i<=5;i++) {
+    html += `<span class="${i<=note?'star-on':'star-off'}">★</span>`;
+  }
+  return html+'</div>';
+}
+
+// ══════════════════════════
+// MODAL EMPLOYÉ
+// ══════════════════════════
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONVENTIONS COLLECTIVES — Sources : IDCC légaux, Légifrance, fiches pratiques
+// Champs : jourMax (h), hebdoMax (h), hebdoMoyMax (h/12sem), reposMin (h),
+//          pauseApres (h → déclenchement pause), pauseMin (min), note (info clé)
+// ─────────────────────────────────────────────────────────────────────────────
+const CCN_RULES = {
+  // ─── CODE DU TRAVAIL ───
+  "droit_commun": {
+    label:"Code du travail (droit commun)", idcc:null,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"Art. L3121-18 : 10h/j max · Art. L3121-20 : 48h/sem · Art. L3121-33 : pause 20 min après 6h",
+    primes:[], anciennete:[], treizieme:false, mutuelle:"Selon accord", congesPayes:25, rtts:0
+  },
+  // ─── HÔTELLERIE / RESTAURATION ───
+  "chr": {
+    label:"Hôtels-Cafés-Restaurants (CHR)", idcc:1979,
+    jourMax:11.5, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1979 · Amplitude 13h max · HS majorées 10% dès 36h · Repos hebdo 2j consécutifs",
+    primes:[
+      {nom:"Indemnité nourriture", montant:"4,10 €/repas", obligatoire:true, note:"En nature ou compensatrice (1 à 2 repas/jour selon poste)"},
+      {nom:"Majoration nuit", montant:"+10% min", obligatoire:true, note:"Travail entre 22h et 7h"},
+      {nom:"Prime dimanche", montant:"+10% min", obligatoire:true, note:"Si travail habituel le dimanche"},
+      {nom:"Prime ancienneté", montant:"Voir grille CCN", obligatoire:true, note:"Dès 1 an : +1% du SMIC · 2 ans : +2% · etc."}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:4},{annees:10,pct:6},{annees:15,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire (OCIANE, MUTEX…)", congesPayes:25, rtts:0
+  },
+  "restauration_rapide": {
+    label:"Restauration rapide", idcc:1501,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1501 · Modulation annuelle possible · Temps partiel fréquent (plannings variables)",
+    primes:[
+      {nom:"Indemnité nourriture", montant:"3,88 €/repas", obligatoire:true, note:"Si pas de repas gratuit fourni"},
+      {nom:"Prime habillage", montant:"~1% du salaire mensuel", obligatoire:false, note:"Si tenue obligatoire imposée par l'employeur"},
+      {nom:"Majoration heures de nuit", montant:"+10%", obligatoire:true, note:"Entre 21h et 6h"}
+    ],
+    anciennete:[{annees:3,pct:1},{annees:5,pct:2},{annees:8,pct:3},{annees:12,pct:4}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "traiteurs": {
+    label:"Traiteurs et organisateurs de réceptions", idcc:1266,
+    jourMax:11.5, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1266 · Travail le week-end et jours fériés courant · Heures supplémentaires fréquentes",
+    primes:[
+      {nom:"Majoration dimanche et jours fériés", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche/férié travaillé"},
+      {nom:"Indemnité repas", montant:"Selon barème", obligatoire:true, note:"Repas fourni ou compensatoire"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"Progression par paliers"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── COMMERCE / DISTRIBUTION ───
+  "commerce": {
+    label:"Commerce de détail non alimentaire", idcc:1517,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1517 · Modulation · Dimanche exceptionnel possible",
+    primes:[
+      {nom:"Prime ancienneté", montant:"3% dès 3 ans", obligatoire:true, note:"3% à 3 ans · 6% à 6 ans · 9% à 9 ans · +1%/an"},
+      {nom:"Prime de dimanche", montant:"+25%", obligatoire:true, note:"Si travail habituel le dimanche"},
+      {nom:"Prime de panier", montant:"Selon accord", obligatoire:false, note:"Si plus de 6h de travail effectif"}
+    ],
+    anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9},{annees:12,pct:12},{annees:15,pct:15}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "commerce_alimentaire": {
+    label:"Commerce alimentaire (épicerie, supérette)", idcc:2216,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2216 · Travail dominical fréquent · Pause payée 20 min après 6h",
+    primes:[
+      {nom:"Prime de dimanche", montant:"+25% ou +30%", obligatoire:true, note:"Selon avenant ou accord d'entreprise"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de vacances", montant:"1/10e des congés", obligatoire:true, note:"Versée avec le salaire de juin"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8},{annees:15,pct:10}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "grande_distribution": {
+    label:"Grande distribution (hypermarchés, supermarchés)", idcc:2216,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2216 · Amplitude max 12h · Repos hebdo dimanche si possible",
+    primes:[
+      {nom:"Prime de dimanche", montant:"+25% ou +30%", obligatoire:true, note:"Selon accord d'entreprise"},
+      {nom:"Prime ancienneté", montant:"+2% à +10%", obligatoire:true, note:"Progression par paliers de 3 ans"},
+      {nom:"13e mois", montant:"1 mois de salaire brut", obligatoire:true, note:"Généralement versé en novembre/décembre"},
+      {nom:"Prime de vacances", montant:"1/10e masse congés", obligatoire:true, note:"Versée en juin"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8},{annees:15,pct:10}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "textile_habillement": {
+    label:"Textile — Habillement", idcc:1483,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1483 · Chômage partiel fréquent (saisonnalité) · Classifications A à G",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+3% dès 3 ans", obligatoire:true, note:"3% à 3 ans · 6% à 6 ans · 9% à 9 ans"},
+    ],
+    anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "sport": {
+    label:"Sport — Activités physiques et sportives", idcc:2511,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2511 · Spécificités animateurs sportifs · Contrats courts fréquents (CDD, saisons)",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2% dès 5 ans", obligatoire:false, note:"Selon accord d'entreprise"},
+      {nom:"Indemnité spécifique", montant:"Variable", obligatoire:false, note:"Frais kilométriques, matériel"}
+    ],
+    anciennete:[{annees:5,pct:2},{annees:10,pct:4}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── ALIMENTATION ARTISANALE ───
+  "boulangerie": {
+    label:"Boulangerie-Pâtisserie artisanale", idcc:843,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 843 · Travail de nuit courant · Majoration nuit +25% · Repos hebdo lundi fréquent",
+    primes:[
+      {nom:"Prime de nuit", montant:"+25% min", obligatoire:true, note:"Travail avant 5h ou après 21h"},
+      {nom:"Prime dimanche et jours fériés", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche/férié travaillé"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Indemnité repas", montant:"5,12 €/repas", obligatoire:true, note:"Si repas pris sur le lieu de travail"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire (PROBTP ou autre)", congesPayes:25, rtts:0
+  },
+  "patisserie": {
+    label:"Pâtisserie (entreprises artisanales)", idcc:1267,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1267 · Nuit possible · Dimanche travaillé majoré",
+    primes:[
+      {nom:"Prime de nuit", montant:"+25%", obligatoire:true, note:"Travail de nuit (avant 6h ou après 20h)"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Indemnité repas", montant:"Selon CCN", obligatoire:true, note:"En nature ou compensatrice"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "boucherie": {
+    label:"Boucherie-Charcuterie artisanale", idcc:953,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 953 · Horaires tôt le matin · Dimanche matin courant",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime dimanche", montant:"+25%", obligatoire:true, note:"Dimanche travaillé majoré 25%"},
+      {nom:"Indemnité habillement", montant:"Selon accord", obligatoire:false, note:"Si tenue de travail obligatoire"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "poissonnerie": {
+    label:"Poissonnerie artisanale", idcc:1504,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1504 · Travail tôt le matin · Dimanche matin fréquent",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression conventionnelle"},
+      {nom:"Prime dimanche", montant:"+25%", obligatoire:true, note:"Si travail le dimanche"},
+      {nom:"Indemnité froid/humidité", montant:"Selon accord", obligatoire:false, note:"Conditions de travail particulières"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "charcuterie": {
+    label:"Charcuterie de détail (industrielle)", idcc:1586,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1586 · Modulation possible · Conditions frigorifiques",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans"},
+      {nom:"Prime froid", montant:"Variable", obligatoire:false, note:"Selon conditions de travail réfrigéré"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "epicerie_fine": {
+    label:"Épicerie fine — Chocolaterie artisanale", idcc:1518,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1518 · CCN du négoce et distribution de combustibles applicable en l'absence d'accord sectoriel spécifique",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:false, note:"Selon accord d'entreprise"},
+      {nom:"Prime de fin d'année", montant:"Selon accord", obligatoire:false, note:"Variable selon entreprise"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4}],
+    treizieme:false, mutuelle:"Selon accord", congesPayes:25, rtts:0
+  },
+  // ─── BTP ───
+  "btp": {
+    label:"Bâtiment — Ouvriers", idcc:1597,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1597 · Modulation annuelle · Intempéries · Grand déplacement",
+    primes:[
+      {nom:"Indemnité trajet/déplacement", montant:"Variable (grille zonale)", obligatoire:true, note:"Petit ou grand déplacement selon distance chantier"},
+      {nom:"Prime ancienneté", montant:"+3% à +10%", obligatoire:true, note:"3% à 3 ans · 5% à 5 ans · 7% à 7 ans · 10% à 10 ans"},
+      {nom:"Prime de panier", montant:"10,30 € min/jour", obligatoire:true, note:"Si repas pris hors domicile sur chantier"},
+      {nom:"Indemnité intempéries", montant:"Prise en charge FNTP", obligatoire:true, note:"Chômage intempéries : cotisation CNETP"},
+      {nom:"Congés payés BTP", montant:"Gérés par la CIBTP", obligatoire:true, note:"Taux 18% du brut congés payés BTP"}
+    ],
+    anciennete:[{annees:3,pct:3},{annees:5,pct:5},{annees:7,pct:7},{annees:10,pct:10}],
+    treizieme:false, mutuelle:"Obligatoire (PRO BTP)", congesPayes:30, rtts:0
+  },
+  "btp_etam": {
+    label:"BTP — ETAM (techniciens, agents de maîtrise)", idcc:2609,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2609 · Forfait jours possible pour cadres · RTT",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+3% à +12%", obligatoire:true, note:"3% à 5 ans · 6% à 10 ans · 9% à 15 ans · 12% à 20 ans"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:true, note:"Versé en fin d'année"},
+      {nom:"Prime de vacances", montant:"30% masse CP", obligatoire:true, note:"Obligation conventionnelle ETAM BTP"}
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:6},{annees:15,pct:9},{annees:20,pct:12}],
+    treizieme:true, mutuelle:"Obligatoire (PRO BTP)", congesPayes:25, rtts:10
+  },
+  "electricite_batiment": {
+    label:"Électricité — installateurs du bâtiment", idcc:5035,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 5035 · Convention nationale des ouvriers électriciens",
+    primes:[
+      {nom:"Indemnités de déplacement", montant:"Grille zonale", obligatoire:true, note:"Selon éloignement chantier"},
+      {nom:"Prime ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"Progression par paliers de 5 ans"},
+      {nom:"Prime de panier", montant:"Selon accord", obligatoire:false, note:"Si repas sur chantier"}
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:6},{annees:15,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:30, rtts:0
+  },
+  "travaux_publics": {
+    label:"Travaux publics — Ouvriers", idcc:1702,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1702 · Conditions de chantier · Déplacements fréquents",
+    primes:[
+      {nom:"Indemnité de grand déplacement", montant:"Variable", obligatoire:true, note:"Si nuit hors domicile"},
+      {nom:"Prime de panier", montant:"10,30 € min/jour", obligatoire:true, note:"Repas sur chantier"},
+      {nom:"Prime ancienneté", montant:"+3% dès 3 ans", obligatoire:true, note:"3% à 3 ans · 6% à 6 ans · 9% à 9 ans"}
+    ],
+    anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire (BTP PRÉVOYANCE)", congesPayes:30, rtts:0
+  },
+  // ─── COIFFURE / ESTHÉTIQUE ───
+  "coiffure": {
+    label:"Coiffure", idcc:2596,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2596 · Travail le samedi courant · Repos hebdo lundi ou mardi",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"3% dès 3 ans", obligatoire:true, note:"3% à 3 ans · 6% à 6 ans · 9% à 9 ans"},
+      {nom:"Prime de qualité/résultat", montant:"Variable", obligatoire:false, note:"Selon CA réalisé ou objectifs"},
+      {nom:"Indemnité entretien tenue", montant:"Selon accord", obligatoire:false, note:"Si tenue professionnelle imposée"}
+    ],
+    anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "esthetique": {
+    label:"Esthétique-Cosmétique et Enseignement technique", idcc:5045,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 5045 · Samedi travaillé courant · Formations continues fréquentes",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de commission", montant:"Variable", obligatoire:false, note:"Sur vente de produits/soins"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── SANTÉ / MÉDICO-SOCIAL ───
+  "sante": {
+    label:"Établissements privés non lucratifs (FEHAP/UNIFED)", idcc:51,
+    jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 51 · Travail en 3×8 · Week-end et jours fériés courants",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+1%/an jusqu'à 30%", obligatoire:true, note:"1% par an, plafond 30%"},
+      {nom:"Prime de dimanche", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche travaillé"},
+      {nom:"Prime de nuit", montant:"+8% à +15%", obligatoire:true, note:"Pour travail entre 21h et 6h"},
+      {nom:"Congés trimestriels", montant:"6 jours/an", obligatoire:true, note:"En plus des 25 jours légaux"},
+      {nom:"Prime de sujétion spéciale", montant:"7,5% du salaire", obligatoire:true, note:"Liée aux conditions de travail spécifiques"}
+    ],
+    anciennete:(()=>{let a=[];for(let i=1;i<=30;i++)a.push({annees:i,pct:i});return a;})(),
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:31, rtts:0
+  },
+  "sante_prive_lucratif": {
+    label:"Cliniques et hôpitaux privés à but lucratif", idcc:2264,
+    jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2264 · 3×8 · Week-end · Nuit courant",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+1%/an jusqu'à 20%", obligatoire:true, note:"1% par an, plafond 20%"},
+      {nom:"Prime de dimanche", montant:"+25%", obligatoire:true, note:"Pour dimanche travaillé"},
+      {nom:"Prime de nuit", montant:"+10%", obligatoire:true, note:"Entre 21h et 6h"},
+      {nom:"Prime de sujétion", montant:"~7% du salaire", obligatoire:true, note:"Pour les postes à contraintes spécifiques"}
+    ],
+    anciennete:(()=>{let a=[];for(let i=1;i<=20;i++)a.push({annees:i,pct:i});return a;})(),
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "cabinet_medical": {
+    label:"Cabinets médicaux, paramédicaux et vétérinaires", idcc:1948,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1948 · Travail le samedi courant · Consultations urgences",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:false, note:"Selon accord d'entreprise ou usage"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "pharmacie": {
+    label:"Pharmacies d'officine", idcc:1996,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1996 · Garde semaine et week-end · Amplitude variable",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+3% dès 3 ans", obligatoire:true, note:"3% à 3 ans · 6% à 6 ans · 9% à 9 ans"},
+      {nom:"Indemnité de garde", montant:"Selon accord", obligatoire:false, note:"Garde du dimanche et jours fériés"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon accord d'entreprise ou d'établissement"}
+    ],
+    anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "aide_domicile": {
+    label:"Aide à domicile (SSIAD, services d'aide)", idcc:2941,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2941 · Éléments complémentaires de rémunération (ECR) · Modulation annuelle",
+    primes:[
+      {nom:"ECR — Ancienneté", montant:"Variables selon filière", obligatoire:true, note:"Éléments Complémentaires de Rémunération selon la BAD"},
+      {nom:"Remboursement frais kilométriques", montant:"0,38 €/km", obligatoire:true, note:"Déplacements entre bénéficiaires"},
+      {nom:"Prime de dimanche", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche travaillé"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:5},{annees:8,pct:8},{annees:10,pct:10}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "sap": {
+    label:"Services à la personne (mandataire/prestataire)", idcc:3127,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 3127 · Temps partiel courant · Modulation · Frais kilométriques",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"Remboursement km", montant:"0,38 €/km", obligatoire:true, note:"Entre chaque bénéficiaire"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "crèche_privée": {
+    label:"Crèches et structures d'accueil petite enfance (privé)", idcc:2691,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2691 · Amplitude en fonction des horaires d'accueil",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de fin d'année", montant:"Selon accord", obligatoire:false, note:"Variable selon établissement"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── NETTOYAGE / PROPRETÉ ───
+  "proprete": {
+    label:"Propreté et services associés", idcc:3043,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 3043 · Amplitude 13h possible · Horaires décalés (matin/soir)",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans · 8% à 12 ans"},
+      {nom:"Prime de salissure", montant:"~15-20 €/mois", obligatoire:false, note:"Si travaux particulièrement salissants"},
+      {nom:"Prime de nuit", montant:"+20%", obligatoire:true, note:"Entre 21h et 6h"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "nettoyage": {
+    label:"Entreprises de nettoyage industriel", idcc:3043,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 3043 · Même convention que Propreté · Temps partiel imposé fréquent",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"Prime de nuit", montant:"+20%", obligatoire:true, note:"Travail entre 21h et 6h"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── TRANSPORT ───
+  "transport_routier": {
+    label:"Transports routiers (marchandises et voyageurs)", idcc:16,
+    jourMax:10, hebdoMax:56, hebdoMoyMax:48, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 16 · Règlement CE 561/2006 · Dérogations hebdomadaires · Repos compensateurs",
+    primes:[
+      {nom:"Indemnité de repas", montant:"15,20 €/repas", obligatoire:true, note:"Barème national transport routier"},
+      {nom:"Indemnité de découcher (nuit)", montant:"40,50 €/nuit", obligatoire:true, note:"Si nuitée en dehors du domicile"},
+      {nom:"Prime de bilan/sécurité", montant:"Variable", obligatoire:false, note:"Selon accord d'entreprise"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "transport_voyageurs": {
+    label:"Transports routiers de voyageurs (autocars)", idcc:16,
+    jourMax:10, hebdoMax:56, hebdoMoyMax:48, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 16 · Conducteurs de tourisme · Horaires irréguliers · Jours fériés courants",
+    primes:[
+      {nom:"Indemnité de repas", montant:"15,20 €/repas", obligatoire:true, note:"Barème national"},
+      {nom:"Indemnité de découcher", montant:"40,50 €/nuit", obligatoire:true, note:"Nuitée hors domicile"},
+      {nom:"Prime dimanche et jours fériés", montant:"+20%", obligatoire:true, note:"Pour chaque dimanche/férié travaillé"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "transport_aerien": {
+    label:"Transport aérien (personnel au sol)", idcc:275,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 275 · Horaires atypiques · Week-end et jours fériés fréquents",
+    primes:[
+      {nom:"Prime de nuit", montant:"+25%", obligatoire:true, note:"Travail de nuit entre 22h et 5h"},
+      {nom:"Prime de dimanche et jours fériés", montant:"+100%", obligatoire:true, note:"Doublement du salaire légal"},
+      {nom:"Prime d'ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"3% à 5 ans · 6% à 10 ans"},
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:6},{annees:15,pct:9}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "logistique_entreposage": {
+    label:"Logistique — Entreposage et magasinage", idcc:1564,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1564 · 3×8 possible · Travail de nuit · Modulation annuelle",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de nuit", montant:"+15% à +25%", obligatoire:true, note:"Selon plages horaires et accord"},
+      {nom:"Prime de panier", montant:"~7 €/jour", obligatoire:false, note:"Selon accord d'entreprise"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── AUTOMOBILE ───
+  "automobile": {
+    label:"Services de l'automobile (garages, VN, VO)", idcc:1090,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1090 · Heures réelles : pointage souvent requis · Samedi courant",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"3% à 5 ans · 5% à 10 ans · 7% à 15 ans"},
+      {nom:"Prime de rendement / résultat", montant:"Variable", obligatoire:false, note:"Atteinte des objectifs de vente ou d'atelier"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Prévu dans de nombreux accords d'entreprise"}
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:5},{annees:15,pct:7},{annees:20,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "deux_roues": {
+    label:"Commerce réparation cycle et motocycle", idcc:1090,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1090 · Même CCN que l'automobile · Petites structures fréquentes",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"Même grille que automobile"},
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:5},{annees:15,pct:7}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── IMMOBILIER ───
+  "immobilier": {
+    label:"Immobilier (agents, gestionnaires de biens)", idcc:1527,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1527 · Forfait-jours cadres · Commissions variables · RTT",
+    primes:[
+      {nom:"Commission sur transactions", montant:"Variable (% CA)", obligatoire:false, note:"Prévue dans le contrat — réglementée par la CCN"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans · 8% à 12 ans"},
+      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:true, note:"Prévu dans de nombreux accords d'entreprise du secteur"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:12
+  },
+  "copropriete": {
+    label:"Gardiens d'immeubles et employés d'immeubles", idcc:1043,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1043 · Astreintes · Logement de fonction souvent fourni",
+    primes:[
+      {nom:"Avantage en nature logement", montant:"Selon valeur locative", obligatoire:false, note:"Si logement fourni par l'employeur"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── SÉCURITÉ ───
+  "securite": {
+    label:"Entreprises de sécurité privée (gardiennage)", idcc:1351,
+    jourMax:12, hebdoMax:48, hebdoMoyMax:44, reposMin:12, pauseApres:6, pauseMin:20,
+    note:"IDCC 1351 · Amplitude 12h · Cycles de garde · Vacation longue",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+1%/an jusqu'à 7%", obligatoire:true, note:"1% par an, plafond 7% à 7 ans"},
+      {nom:"Prime de nuit", montant:"+10% min", obligatoire:true, note:"Travail entre 21h et 6h"},
+      {nom:"Prime dimanches et jours fériés", montant:"+10% min", obligatoire:true, note:"Pour chaque dimanche/férié travaillé"},
+      {nom:"Prime de tenue", montant:"~20 €/mois", obligatoire:false, note:"Entretien de la tenue obligatoire"},
+      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:false, note:"Prévu dans certains accords d'entreprise"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:4,pct:4},{annees:5,pct:5},{annees:6,pct:6},{annees:7,pct:7}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── AGRICULTURE ───
+  "agriculture": {
+    label:"Production agricole (grandes cultures, élevage)", idcc:7252,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 7252 · Saisons · Modulation annuelle · Travail saisonnier courant",
+    primes:[
+      {nom:"Prime de fin de saison", montant:"Selon accord", obligatoire:false, note:"Variable selon culture et région"},
+      {nom:"Indemnité repas", montant:"4,40 € min", obligatoire:true, note:"Si repas non fourni sur le lieu de travail"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:false, note:"2% à 3 ans · 4% à 6 ans (accord de branche)"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4}],
+    treizieme:false, mutuelle:"Obligatoire (CCMSA)", congesPayes:25, rtts:0
+  },
+  "viticulture": {
+    label:"Viticulture et vinification", idcc:7363,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 7363 · Vendanges · Modulation forte · Saisonniers fréquents",
+    primes:[
+      {nom:"Prime de vendanges", montant:"Selon accord territorial", obligatoire:false, note:"Versée en fin de campagne"},
+      {nom:"Indemnité repas", montant:"4,40 € min", obligatoire:true, note:"Si repas non fourni"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:5,pct:4}],
+    treizieme:false, mutuelle:"Obligatoire (CCMSA)", congesPayes:25, rtts:0
+  },
+  "fleurs_plants": {
+    label:"Jardineries et graineteries", idcc:1760,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1760 · Travail le samedi et dimanche fréquent · Saisonnalité forte (printemps)",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"Prime de dimanche", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche travaillé"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── CONSEIL / BUREAUX / TECH ───
+  "syntec": {
+    label:"Syntec (ingénieurs, informatique, conseil)", idcc:1486,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1486 · Forfait-jours cadres · 218j/an max · RTT nombreux",
+    primes:[
+      {nom:"Prime de vacances", montant:"30% de la masse CP", obligatoire:true, note:"Versée avec les congés payés (art. 23 de la CCN)"},
+      {nom:"Prime ancienneté ETAM", montant:"+1%/an jusqu'à 7%", obligatoire:true, note:"Pour les ETAM : +1% par an, plafonné à 7%"},
+      {nom:"Ticket restaurant", montant:"60% pris en charge min", obligatoire:false, note:"Pratique quasi-systématique dans la branche"},
+      {nom:"Mutuelle + prévoyance", montant:"50% employeur", obligatoire:true, note:"Minimum légal + surcomplémentaire fréquente"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:4,pct:4},{annees:5,pct:5},{annees:6,pct:6},{annees:7,pct:7}],
+    treizieme:false, mutuelle:"Obligatoire (50% employeur)", congesPayes:25, rtts:15
+  },
+  "bureaux_entreprise": {
+    label:"Bureaux d'études techniques (BET/INERIS)", idcc:1486,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1486 · Identique Syntec pour les BET · 218 jours forfait cadres",
+    primes:[
+      {nom:"Prime de vacances", montant:"30% masse CP", obligatoire:true, note:"Obligation conventionnelle Syntec/BET"},
+      {nom:"Prime ancienneté ETAM", montant:"+1%/an jusqu'à 7%", obligatoire:true, note:"Plafonnée à 7% pour ETAM"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:5},{annees:7,pct:7}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:15
+  },
+  "banque": {
+    label:"Banque (AFB — banques et établissements financiers)", idcc:2120,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2120 · Forfait-jours cadres · RTT nombreux · Congés bonifiés selon ancienneté",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+1%/an jusqu'à 15%", obligatoire:true, note:"1% par an, plafond 15%"},
+      {nom:"13e mois", montant:"1 mois de salaire", obligatoire:true, note:"Versé en fin d'année"},
+      {nom:"Intéressement/participation", montant:"Variable", obligatoire:false, note:"Selon résultats et accord d'entreprise"}
+    ],
+    anciennete:(()=>{let a=[];for(let i=1;i<=15;i++)a.push({annees:i,pct:i});return a;})(),
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:20
+  },
+  "assurance": {
+    label:"Assurance (agents généraux et salariés)", idcc:1672,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1672 · Forfait-jours possible · RTT · Commissions commerciales",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"Variable selon classification", obligatoire:true, note:"Grille conventionnelle"},
+      {nom:"Commission sur primes d'assurance", montant:"Variable", obligatoire:false, note:"Sur production commerciale"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:true, note:"Versé en décembre"},
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:5},{annees:15,pct:8},{annees:20,pct:12}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "cabinet_comptable": {
+    label:"Cabinets comptables et commissaires aux comptes", idcc:787,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 787 · Périodes de surcharge mars-avril · RTT fréquents",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+2%/5 ans", obligatoire:true, note:"2% à 5 ans · 4% à 10 ans · 6% à 15 ans"},
+      {nom:"Prime de bilan", montant:"Variable", obligatoire:false, note:"Versée pendant la période fiscale"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon accord d'entreprise"},
+    ],
+    anciennete:[{annees:5,pct:2},{annees:10,pct:4},{annees:15,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "avocats": {
+    label:"Cabinets d'avocats", idcc:1000,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1000 · Charge de travail variable (plaidoiries) · Forfait-jours possible",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"3% à 5 ans · 6% à 10 ans · 9% à 15 ans"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon accord ou usage"},
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:6},{annees:15,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "architecture": {
+    label:"Architectes (cabinets d'architecture)", idcc:2332,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2332 · Forfait-jours pour les architectes · Concours et appels d'offres",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de résultat", montant:"Variable", obligatoire:false, note:"Selon chiffre d'affaires et résultats"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "notariat": {
+    label:"Notariat", idcc:31,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 31 · Charge importante fin d'année · Confidentialité stricte",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"Grille conventionnelle", obligatoire:true, note:"Progression par tranches d'ancienneté"},
+      {nom:"Gratification de fin d'année", montant:"Variable", obligatoire:false, note:"Selon politique de l'étude"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── INDUSTRIE ───
+  "metallurgie": {
+    label:"Métallurgie (nouvelle CCN 2024 — IDCC 1672)", idcc:1672,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1672 · Nouvelle CCN 2024 (fusion) · Forfait-jours · Classifications A à H",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+1%/an jusqu'à 7%", obligatoire:true, note:"1% par an, plafond 7% (art. 67 de la CCN 2024)"},
+      {nom:"Prime de nuit", montant:"+10% à +25%", obligatoire:true, note:"Selon accord d'entreprise"},
+      {nom:"Prime d'équipe", montant:"Variable", obligatoire:false, note:"Travail en équipe 3×8"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Très répandu dans les accords d'entreprise"},
+      {nom:"Prime de vacances", montant:"30% des CP", obligatoire:true, note:"Versée avec les congés (art. 23 de la CCN)"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:4,pct:4},{annees:5,pct:5},{annees:6,pct:6},{annees:7,pct:7}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "chimie": {
+    label:"Industries chimiques", idcc:44,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 44 · 3×8 courant · Travail de nuit · Primes de risques",
+    primes:[
+      {nom:"Prime de nuit", montant:"+20% min", obligatoire:true, note:"Travail entre 21h et 5h"},
+      {nom:"Prime de risque / nuisance", montant:"Variable", obligatoire:false, note:"Postes exposés à des produits dangereux"},
+      {nom:"Prime ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"Progression par paliers de 5 ans"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:true, note:"Conventionnel"}
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:6},{annees:15,pct:9},{annees:20,pct:12}],
+    treizieme:true, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "plasturgie": {
+    label:"Plasturgie et composites", idcc:292,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 292 · Production en continu · 3×8 fréquent",
+    primes:[
+      {nom:"Prime de nuit", montant:"+20%", obligatoire:true, note:"Travail de nuit"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "imprimerie": {
+    label:"Imprimerie de labeur et industries graphiques", idcc:184,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 184 · 3×8 possible · Secteur en mutation numérique",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/5 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"Prime de nuit", montant:"+15% min", obligatoire:true, note:"Travail de nuit"},
+    ],
+    anciennete:[{annees:5,pct:2},{annees:10,pct:4},{annees:15,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "agroalimentaire": {
+    label:"Industries alimentaires diverses (IAA)", idcc:1043,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1043 · Modulation annuelle · 3×8 courant dans les grandes unités",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de nuit", montant:"+15%", obligatoire:true, note:"Si travail de nuit habituel"},
+      {nom:"Prime de panier", montant:"~7 €/jour", obligatoire:false, note:"Selon accord d'entreprise"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── ÉDUCATION / FORMATION ───
+  "enseignement_prive": {
+    label:"Enseignement privé non lucratif (EPNL / ECLAT)", idcc:1516,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1516 · Vacances scolaires · Annualisation du temps de travail",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+1%/an jusqu'à 15%", obligatoire:true, note:"1% par an, plafonné à 15%"},
+    ],
+    anciennete:(()=>{let a=[];for(let i=1;i<=15;i++)a.push({annees:i,pct:i});return a;})(),
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "formation_professionnelle": {
+    label:"Formation professionnelle (organismes de formation)", idcc:1516,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1516 · Activité modulée selon les sessions · CDD de mission fréquents",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+1%/an jusqu'à 15%", obligatoire:true, note:"Progression annuelle"},
+    ],
+    anciennete:(()=>{let a=[];for(let i=1;i<=15;i++)a.push({annees:i,pct:i});return a;})(),
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── MÉDIAS / CULTURE ───
+  "journalistes": {
+    label:"Journalistes et presse écrite (Charte Pigiste)", idcc:1480,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1480 · Mensualisation · Abattement fiscal 30% · Pigistes",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"Variable selon titre", obligatoire:true, note:"Selon accord d'entreprise"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon titre de presse"},
+    ],
+    anciennete:[{annees:3,pct:3},{annees:6,pct:6},{annees:9,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "spectacle": {
+    label:"Spectacle vivant (techniciens, artistes — GUSO)", idcc:1285,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1285 · CDDU (CDD d'usage) fréquents · Cachet ou salaire · GUSO disponible",
+    primes:[
+      {nom:"Indemnité de fin de CDDU", montant:"10% brut", obligatoire:true, note:"Pour les CDD d'usage (précaires)"},
+    ],
+    anciennete:[],
+    treizieme:false, mutuelle:"Selon accord", congesPayes:10, rtts:0
+  },
+  "edition": {
+    label:"Édition (livres, numérique)", idcc:2121,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2121 · Forfait-jours cadres · Période chargée (rentrée littéraire)",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon accord d'entreprise"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── AUTRES SECTEURS ───
+  "interim": {
+    label:"Travail temporaire (agences d'intérim)", idcc:1413,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1413 · IFM 10% + CP 10% · Portage salarial · Qualification spécifique",
+    primes:[
+      {nom:"Indemnité de fin de mission (IFM)", montant:"10% du brut", obligatoire:true, note:"Versée à la fin de chaque mission"},
+      {nom:"Congés payés (ICCP)", montant:"10% du brut + IFM", obligatoire:true, note:"Indemnité compensatrice de congés payés"},
+    ],
+    anciennete:[],
+    treizieme:false, mutuelle:"Obligatoire si > 400h/trimestre", congesPayes:10, rtts:0
+  },
+  "informatique": {
+    label:"Informatique (SSII, ESN)", idcc:1486,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1486 (Syntec) · Forfait-jours courant · RTT · Astreintes possibles",
+    primes:[
+      {nom:"Prime de vacances", montant:"30% masse CP", obligatoire:true, note:"Art. 23 CCN Syntec"},
+      {nom:"Prime ancienneté ETAM", montant:"+1%/an jusqu'à 7%", obligatoire:true, note:"+1%/an pour les ETAM"},
+      {nom:"Prime d'astreinte", montant:"Variable", obligatoire:false, note:"Si astreintes techniques planifiées"}
+    ],
+    anciennete:[{annees:1,pct:1},{annees:2,pct:2},{annees:3,pct:3},{annees:5,pct:5},{annees:7,pct:7}],
+    treizieme:false, mutuelle:"Obligatoire (50% employeur)", congesPayes:25, rtts:15
+  },
+  "garderie_periscolaire": {
+    label:"Animation et ALSH (périscolaire, centres de loisirs)", idcc:1518,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1518 (ECLAT) · Modulation annuelle · CDD saisonniers · Temps partiels",
+    primes:[
+      {nom:"Prime d'ancienneté", montant:"+1%/an jusqu'à 15%", obligatoire:true, note:"Progression annuelle ECLAT"},
+    ],
+    anciennete:(()=>{let a=[];for(let i=1;i<=15;i++)a.push({annees:i,pct:i});return a;})(),
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "fleuriste": {
+    label:"Commerce de détail de fleurs, plantes et graines", idcc:1978,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1978 · Travail le dimanche matin · Fêtes (Fête des mères, Toussaint)",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de dimanche", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche travaillé"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "optique": {
+    label:"Optique-Lunetterie de détail", idcc:1431,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1431 · Samedi travaillé · Ouvertures commerciales",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de résultat / commission", montant:"Variable", obligatoire:false, note:"Sur ventes et chiffre d'affaires"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "location_voiture": {
+    label:"Location de voitures et véhicules automobiles", idcc:1951,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1951 · Amplitude variable · Week-end et jours fériés fréquents",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"Prime de résultat", montant:"Variable", obligatoire:false, note:"Sur locations réalisées"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "pressing_blanchisserie": {
+    label:"Blanchisserie, laverie, teinturerie, pressing", idcc:2002,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2002 · Conditions thermiques particulières · Travail debout",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime chaleur / conditions de travail", montant:"Variable", obligatoire:false, note:"Selon accord d'entreprise"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "funeral": {
+    label:"Pompes funèbres et marbriers", idcc:759,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 759 · Astreintes · Disponibilité 24h/24 · Conditions psychologiques particulières",
+    primes:[
+      {nom:"Prime d'astreinte", montant:"Variable", obligatoire:false, note:"Selon accord d'entreprise"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon usage dans la structure"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "tourisme": {
+    label:"Agences de voyages et de tourisme", idcc:1710,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1710 · Saisonnalité forte · Commissions sur ventes",
+    primes:[
+      {nom:"Commission sur voyages vendus", montant:"Variable", obligatoire:false, note:"Selon politique commerciale"},
+      {nom:"Prime ancienneté", montant:"+2%/3 ans", obligatoire:true, note:"Progression par paliers"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "commerce_gros": {
+    label:"Commerce de gros (négoce)", idcc:573,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 573 · Commis voyageurs représentants · VRP possibles",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+3%/5 ans", obligatoire:true, note:"3% à 5 ans · 6% à 10 ans"},
+      {nom:"Commission VRP", montant:"Variable", obligatoire:false, note:"Pour les représentants commerciaux"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Répandu dans le secteur"}
+    ],
+    anciennete:[{annees:5,pct:3},{annees:10,pct:6},{annees:15,pct:9}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── COMMERCE ALIMENTAIRE SPÉCIALISÉ ───
+  "epicerie_fruits_legumes": {
+    label:"Commerce de détail fruits, légumes, épicerie, produits laitiers", idcc:1505,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1505 · Travail le samedi et dimanche matin fréquent · Marchés · Ouvertures tôt",
+    primes:[
+      {nom:"Prime dimanche", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche travaillé"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Indemnité de repas", montant:"Selon accord", obligatoire:false, note:"Si repas pris sur lieu de travail"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "alimentation_specialisee": {
+    label:"Commerce de détail alimentaire spécialisé (bio, surgelés, diététique)", idcc:2412,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2412 · Regroupe les commerces spécialisés en alimentation (bio, surgelés, épicerie fine, diététique) · Samedi et dimanche fréquents",
+    primes:[
+      {nom:"Prime dimanche", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche travaillé"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Prime de vacances", montant:"Selon accord", obligatoire:false, note:"Variable selon entreprise"},
+      {nom:"13e mois", montant:"1 mois brut", obligatoire:false, note:"Selon accord d'entreprise"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "cavistes_vins": {
+    label:"Commerce de détail de vins, cidres, spiritueux (cavistes)", idcc:1505,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 1505 · Même convention que épicerie/fruits-légumes · Samedi courant · Fêtes de fin d'année très chargées",
+    primes:[
+      {nom:"Prime dimanche", montant:"+25%", obligatoire:true, note:"Si travail le dimanche"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"Progression par paliers"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  "surgelés": {
+    label:"Commerce de détail de produits surgelés", idcc:2412,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 2412 · Conditions de froid · Même CCN que l'alimentation spécialisée",
+    primes:[
+      {nom:"Prime de froid", montant:"Variable", obligatoire:false, note:"Selon conditions de travail en chambre froide"},
+      {nom:"Prime dimanche", montant:"+25%", obligatoire:true, note:"Pour chaque dimanche travaillé"},
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"Progression conventionnelle"}
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6}],
+    treizieme:false, mutuelle:"Obligatoire", congesPayes:25, rtts:0
+  },
+  // ─── PARTICULIERS EMPLOYEURS ───
+  "particuliers_employeurs": {
+    label:"Particuliers employeurs et emploi à domicile (PEEAV)", idcc:3239,
+    jourMax:10, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 3239 · Salariés employés directement par des particuliers · Ménage, jardinage, baby-sitting, cuisine, chauffeur… · Assistantes maternelles : CCN spécifique IDCC 3317",
+    primes:[
+      {nom:"Prime ancienneté", montant:"+2% dès 3 ans", obligatoire:true, note:"2% à 3 ans · 4% à 6 ans · 6% à 9 ans"},
+      {nom:"Indemnité de licenciement", montant:"Selon ancienneté", obligatoire:true, note:"Calcul spécifique à la convention"},
+    ],
+    anciennete:[{annees:3,pct:2},{annees:6,pct:4},{annees:9,pct:6},{annees:12,pct:8}],
+    treizieme:false, mutuelle:"Non obligatoire (particulier)", congesPayes:25, rtts:0
+  },
+  "assistantes_maternelles": {
+    label:"Assistants maternels du particulier employeur", idcc:3317,
+    jourMax:13, hebdoMax:48, hebdoMoyMax:44, reposMin:11, pauseApres:6, pauseMin:20,
+    note:"IDCC 3317 · Agrément PMI obligatoire · Rémunération à la journée d'accueil · Indemnités entretien et repas · PAJEMPLOI",
+    primes:[
+      {nom:"Indemnité d'entretien", montant:"Min. 3,86 €/jour/enfant", obligatoire:true, note:"Couvre les dépenses liées à l'accueil de l'enfant"},
+      {nom:"Indemnité de repas", montant:"Min. 3,86 €/repas", obligatoire:false, note:"Si repas fourni par l'assistante maternelle"},
+      {nom:"Indemnité de déplacement", montant:"0,38 €/km", obligatoire:false, note:"Si déplacements pour l'enfant requis"},
+    ],
+    anciennete:[],
+    treizieme:false, mutuelle:"Non obligatoire (particulier)", congesPayes:25, rtts:0
+  },
+};
+
+// Groupes pour affichage dans les selects
+const CCN_GROUPS = [
+  { label: '📄 Droit commun', keys: ['droit_commun'] },
+  { label: '🍽️ Hôtellerie / Restauration', keys: ['chr','restauration_rapide','traiteurs'] },
+  { label: '🛒 Commerce / Distribution', keys: ['commerce','commerce_alimentaire','grande_distribution','epicerie_fruits_legumes','alimentation_specialisee','cavistes_vins','surgelés','textile_habillement','sport'] },
+  { label: '🥖 Alimentation artisanale', keys: ['boulangerie','patisserie','boucherie','poissonnerie','charcuterie','epicerie_fine'] },
+  { label: '🏗️ BTP / Artisanat du bâtiment', keys: ['btp','btp_etam','electricite_batiment','travaux_publics'] },
+  { label: '💇 Coiffure / Esthétique', keys: ['coiffure','esthetique'] },
+  { label: '🏥 Santé / Médico-social', keys: ['sante','sante_prive_lucratif','cabinet_medical','pharmacie','aide_domicile','sap','crèche_privée'] },
+  { label: '🏠 Particuliers employeurs', keys: ['particuliers_employeurs','assistantes_maternelles'] },
+  { label: '🧹 Nettoyage / Propreté', keys: ['proprete','nettoyage'] },
+  { label: '🚛 Transport / Logistique', keys: ['transport_routier','transport_voyageurs','transport_aerien','logistique_entreposage'] },
+  { label: '🚗 Automobile', keys: ['automobile','deux_roues','location_voiture'] },
+  { label: '🏠 Immobilier / Gardiennage', keys: ['immobilier','copropriete'] },
+  { label: '🔒 Sécurité privée', keys: ['securite'] },
+  { label: '🌾 Agriculture / Nature', keys: ['agriculture','viticulture','fleurs_plants'] },
+  { label: '💼 Conseil / Bureaux / Tech', keys: ['syntec','bureaux_entreprise','informatique','cabinet_comptable','avocats','architecture','notariat'] },
+  { label: '🏦 Banque / Finance / Assurance', keys: ['banque','assurance'] },
+  { label: '🏭 Industrie / Production', keys: ['metallurgie','chimie','plasturgie','imprimerie','agroalimentaire'] },
+  { label: '📚 Éducation / Formation', keys: ['enseignement_prive','formation_professionnelle','garderie_periscolaire'] },
+  { label: '🎭 Médias / Culture / Spectacle', keys: ['journalistes','spectacle','edition'] },
+  { label: '🛠️ Services divers', keys: ['interim','fleuriste','optique','pressing_blanchisserie','funeral','tourisme','commerce_gros'] },
+];
+
+// Convention par défaut entreprise (chargée depuis Firestore)
+let _ccnDefaultEntreprise = '';
+
+// Peupler le select CCN
+function populateCCNSelect(selId, currentVal) {
+  const el = document.getElementById(selId);
+  if(!el) return;
+  const firstOpt = el.querySelector('option[value=""]');
+  // Vider sauf option vide
+  el.innerHTML = '<option value="">— Défaut entreprise' + (_ccnDefaultEntreprise && CCN_RULES[_ccnDefaultEntreprise] ? ' (' + CCN_RULES[_ccnDefaultEntreprise].label + ')' : '') + ' —</option>';
+  CCN_GROUPS.forEach(g => {
+    const og = document.createElement('optgroup');
+    og.label = g.label;
+    g.keys.forEach(k => {
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = CCN_RULES[k]?.label || k;
+      if(k === currentVal) opt.selected = true;
+      og.appendChild(opt);
+    });
+    el.appendChild(og);
+  });
+}
+
+// Afficher la note de la CCN sélectionnée
+function onCCNChange() {
+  const sel = document.getElementById("f-ccn");
+  const note = document.getElementById("f-ccn-note");
+  if(!sel || !note) return;
+  const key = sel.value;
+  const rule = CCN_RULES[key];
+  if(!rule) { note.style.display="none"; return; }
+
+  // Primes HTML
+  let primesHtml = "";
+  if((rule.primes||[]).length > 0) {
+    const items = rule.primes.map(p => {
+      const bg = p.obligatoire ? "#f0fdf4" : "#fafafa";
+      const border = p.obligatoire ? "#d1fae5" : "#f1f5f9";
+      const icon = p.obligatoire ? "✅" : "ℹ️";
+      return `<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;padding:7px 9px;background:${bg};border:1px solid ${border};border-radius:7px">
+        <span style="flex-shrink:0;font-size:12px">${icon}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;font-weight:700;color:#111827">${p.nom} <span style="font-weight:600;color:#059669">— ${p.montant}</span></div>
+          <div style="font-size:10px;color:#6b7280;margin-top:2px">${p.note}</div>
+        </div>
+      </div>`;
+    }).join("");
+    primesHtml = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0">
+      <div style="font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">💶 Primes &amp; Indemnités obligatoires</div>
+      ${items}
+    </div>`;
+  }
+
+  // Ancienneté HTML
+  let ancHtml = "";
+  if((rule.anciennete||[]).length > 0) {
+    const badges = rule.anciennete.map(a =>
+      `<span style="font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe">${a.annees}an${a.annees>1?"s":""} : +${a.pct}%</span>`
+    ).join("");
+    ancHtml = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0">
+      <div style="font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📈 Grille d'ancienneté</div>
+      <div style="display:flex;flex-wrap:wrap;gap:5px">${badges}</div>
+    </div>`;
+  }
+
+  // Badges infos complémentaires
+  const treizBadge = rule.treizieme ? `<span style="font-size:11px;font-weight:700;padding:4px 10px;background:#fefce8;border:1px solid #fde047;border-radius:20px;color:#713f12">🎁 13e mois obligatoire</span>` : "";
+  const cpBadge = `<span style="font-size:11px;font-weight:600;padding:4px 10px;background:#f0f4ff;border:1px solid #c7d2fe;border-radius:20px;color:#3730a3">🏖 ${rule.congesPayes||25} jours CP/an</span>`;
+  const rttBadge = rule.rtts > 0 ? `<span style="font-size:11px;font-weight:600;padding:4px 10px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:20px;color:#065f46">⏳ ${rule.rtts} RTT/an</span>` : "";
+  const mutBadge = rule.mutuelle ? `<span style="font-size:11px;font-weight:600;padding:4px 10px;background:#fdf4ff;border:1px solid #e9d5ff;border-radius:20px;color:#6b21a8">🏥 ${rule.mutuelle}</span>` : "";
+  const infosHtml = `<div style="margin-top:10px;padding-top:10px;border-top:1px solid #e2e8f0;display:flex;flex-wrap:wrap;gap:6px">${treizBadge}${cpBadge}${rttBadge}${mutBadge}</div>`;
+
+  const idccBadge = rule.idcc ? `<span style="font-size:11px;font-weight:600;padding:2px 8px;background:#f0f4ff;border-radius:20px;color:#4f46e5">IDCC ${rule.idcc}</span>` : "";
+
+  note.style.display = "";
+  note.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <strong style="font-size:13px">${rule.label}</strong>
+      ${idccBadge}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+      <span style="font-size:11px;font-weight:700;padding:3px 9px;background:#f1f5f9;border-radius:6px">⏱ Jour max : ${rule.jourMax}h</span>
+      <span style="font-size:11px;font-weight:700;padding:3px 9px;background:#f1f5f9;border-radius:6px">📅 Hebdo max : ${rule.hebdoMax}h</span>
+      <span style="font-size:11px;font-weight:700;padding:3px 9px;background:#f1f5f9;border-radius:6px">☕ Pause : ${rule.pauseMin} min / ${rule.pauseApres}h</span>
+      <span style="font-size:11px;font-weight:700;padding:3px 9px;background:#f1f5f9;border-radius:6px">🌙 Repos : ${rule.reposMin}h</span>
+    </div>
+    <div style="font-size:11px;color:#6b7280;font-style:italic">${rule.note||""}</div>
+    ${infosHtml}
+    ${primesHtml}
+    ${ancHtml}
+    <div style="margin-top:12px;padding-top:10px;border-top:1px dashed #e2e8f0">
+      <div style="font-size:10px;font-weight:700;color:#374151;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">✏️ Notes personnalisées (modifications manuelles)</div>
+      <textarea id="ccn-custom-note" rows="3" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:12px;color:#374151;resize:vertical;outline:none" placeholder="Ex : Prime ancienneté négociée à +4% dès 2 ans · Accord d'entreprise sur 13e mois...">${window._ccnCustomNotes && window._ccnCustomNotes[key] ? window._ccnCustomNotes[key] : ""}</textarea>
+      <div style="display:flex;justify-content:flex-end;margin-top:4px">
+        <button onclick="saveCCNCustomNote('${key}')" style="font-size:11px;font-weight:700;padding:5px 12px;background:#1a3dce;color:white;border:none;border-radius:7px;cursor:pointer">💾 Sauvegarder ma note</button>
+      </div>
+    </div>
+  `;
+}
+window.onCCNChange = onCCNChange;
+// ── RECHERCHE CCN PAR NOM OU CODE IDCC ──
+function searchCCN(query) {
+  const q = (query||'').trim().toLowerCase();
+  const clearBtn = document.getElementById('f-ccn-search-clear');
+  const resultsDiv = document.getElementById('f-ccn-search-results');
+  if(clearBtn) clearBtn.style.display = q ? 'block' : 'none';
+  if(!q || q.length < 2) { if(resultsDiv) resultsDiv.style.display = 'none'; return; }
+
+  const results = Object.entries(CCN_RULES).filter(([k, v]) => {
+    const label = (v.label||'').toLowerCase();
+    const idcc = String(v.idcc||'');
+    return label.includes(q) || idcc.startsWith(q) || k.includes(q);
+  }).slice(0, 12);
+
+  if(!resultsDiv) return;
+  if(!results.length) {
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--muted);text-align:center">Aucune convention trouvée — essayez un code IDCC</div>';
+    return;
+  }
+  resultsDiv.style.display = 'block';
+  resultsDiv.innerHTML = results.map(([k,v]) => {
+    const idccBadge = v.idcc ? `<span style="font-size:10px;background:#e0f2fe;color:#0369a1;padding:1px 6px;border-radius:4px;font-weight:700;flex-shrink:0">IDCC ${v.idcc}</span>` : '';
+    return `<div onclick="selectCCN('${k}')" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 14px;cursor:pointer;border-bottom:1px solid #f1f5f9;transition:background .1s" onmouseover="this.style.background='#f0f4ff'" onmouseout="this.style.background='white'">
+      <span style="font-size:12px;font-weight:600;color:var(--text)">${v.label}</span>
+      ${idccBadge}
+    </div>`;
+  }).join('');
+}
+window.searchCCN = searchCCN;
+
+function searchCCNByIDCC(idccCode) {
+  const code = parseInt(idccCode);
+  if(!code || idccCode.length < 2) return;
+  const match = Object.entries(CCN_RULES).find(([k,v]) => v.idcc === code);
+  const resultsDiv = document.getElementById('f-ccn-search-results');
+  if(match) {
+    selectCCN(match[0]);
+    const searchInput = document.getElementById('f-ccn-search');
+    if(searchInput) { searchInput.value = match[1].label; }
+    if(resultsDiv) resultsDiv.style.display = 'none';
+  } else if(idccCode.length >= 3) {
+    // Recherche partielle
+    searchCCN(idccCode);
+  }
+}
+window.searchCCNByIDCC = searchCCNByIDCC;
+
+function selectCCN(key) {
+  const sel = document.getElementById('f-ccn');
+  if(sel) sel.value = key;
+  const resultsDiv = document.getElementById('f-ccn-search-results');
+  if(resultsDiv) resultsDiv.style.display = 'none';
+  const clearBtn = document.getElementById('f-ccn-search-clear');
+  if(clearBtn) clearBtn.style.display = 'none';
+  const searchInput = document.getElementById('f-ccn-search');
+  if(searchInput && CCN_RULES[key]) {
+    const rule = CCN_RULES[key];
+    searchInput.value = rule.label + (rule.idcc ? ' (IDCC '+rule.idcc+')' : '');
+  }
+  const idccInput = document.getElementById('f-ccn-idcc-direct');
+  if(idccInput && CCN_RULES[key]?.idcc) idccInput.value = CCN_RULES[key].idcc;
+  onCCNChange();
+}
+window.selectCCN = selectCCN;
+
+function clearCCNSearch() {
+  const searchInput = document.getElementById('f-ccn-search');
+  const resultsDiv = document.getElementById('f-ccn-search-results');
+  const clearBtn = document.getElementById('f-ccn-search-clear');
+  const idccInput = document.getElementById('f-ccn-idcc-direct');
+  if(searchInput) searchInput.value = '';
+  if(resultsDiv) resultsDiv.style.display = 'none';
+  if(clearBtn) clearBtn.style.display = 'none';
+  if(idccInput) idccInput.value = '';
+}
+window.clearCCNSearch = clearCCNSearch;
+
+
+
+// Stockage notes personnalisées CCN (en mémoire + Firestore)
+window._ccnCustomNotes = {};
+
+async function saveCCNCustomNote(ccnKey) {
+  const textarea = document.getElementById("ccn-custom-note");
+  if(!textarea) return;
+  const val = textarea.value.trim();
+  window._ccnCustomNotes[ccnKey] = val;
+  // Persister en Firestore si uid dispo
+  if(window._uid && window._setDoc && window._doc && window._db) {
+    try {
+      await window._setDoc(
+        window._doc(window._db, "rh", window._uid, "ccn_notes", "custom"),
+        window._ccnCustomNotes,
+        {merge:true}
+      );
+      // Feedback visuel
+      const btn = document.querySelector("[onclick*='saveCCNCustomNote']");
+      if(btn) { btn.textContent = "✅ Sauvegardé"; setTimeout(()=>{ btn.textContent = "💾 Sauvegarder ma note"; }, 2000); }
+    } catch(e) { console.warn("Erreur sauvegarde CCN note:", e); }
+  }
+}
+window.saveCCNCustomNote = saveCCNCustomNote;
+
+// Charger les notes custom au démarrage
+async function loadCCNCustomNotes() {
+  if(!window._uid || !window._getDoc || !window._doc || !window._db) return;
+  try {
+    const snap = await window._getDoc(window._doc(window._db, "rh", window._uid, "ccn_notes", "custom"));
+    if(snap.exists()) window._ccnCustomNotes = snap.data() || {};
+  } catch(e) { /* ignore */ }
+}
+
+window.openModalNouvelEmploye = function() {
+  _editId = null;
+  _photoDataURL = null;
+  document.getElementById('modal-emp-title').textContent = '👤 Nouvel employé';
+  populateCCNSelect('f-ccn', '');
+  // Vider les champs de recherche CCN
+  const si = document.getElementById('f-ccn-search'); if(si) si.value='';
+  const ii = document.getElementById('f-ccn-idcc-direct'); if(ii) ii.value='';
+  const rd = document.getElementById('f-ccn-search-results'); if(rd) rd.style.display='none';
+  ['prenom','nom','naissance','nationalite','adresse','tel','email','nss',
+   'poste','dept','entree','fin','brut','net','heures','iban','note','superbrut'].forEach(k => {
+    const el = document.getElementById('f-'+k);
+    if (el) el.value = '';
+  });
+  document.getElementById('f-contrat').value   = 'CDI';
+  document.getElementById('f-categorie').value  = 'employe';
+  document.getElementById('f-statut').value    = 'actif';
+  document.getElementById('f-freq').value      = 'mensuel';
+  document.getElementById('f-couleur').value   = COLORS[0];
+  document.getElementById('f-entree').value    = new Date().toISOString().slice(0,10);
+  // Reset PE
+  const peActive = document.getElementById('pe-active');
+  const peDetails = document.getElementById('pe-details');
+  const peDuree = document.getElementById('pe-duree');
+  if (peActive) { peActive.checked = false; }
+  if (peDetails) peDetails.style.display = 'none';
+  if (peDuree) peDuree.value = '';
+  clearSalRecap();
+  setTimeout(()=>onContratChange(), 50);
+  openModal('modalEmploye');
+};
+
+window.openModalEdit = function(id) {
+  const e = _employes[id];
+  if (!e) return;
+  _editId = id;
+  _photoDataURL = null;
+  document.getElementById('modal-emp-title').textContent = `✏️ Modifier — ${e.prenom||''} ${e.nom||''}`;
+  const set = (fid, val) => { const el=document.getElementById('f-'+fid); if(el) el.value=val||''; };
+  set('prenom',e.prenom); set('nom',e.nom); set('naissance',e.dateNaissance);
+  set('nationalite',e.nationalite); set('adresse',e.adresse); set('tel',e.telephone);
+  set('email',e.email); set('nss',e.nss); set('poste',e.poste); set('dept',e.departement);
+  set('entree',e.dateEntree); set('fin',e.dateFinContrat);
+  set('brut',e.salaireBrut); set('net',e.salaireNet); set('heures',e.heuresHebdo||35);
+  set('iban',e.iban); set('note',e.noteMoyenne||'');
+  // Champs Administratif & Conformité
+  const setEl = (id, val) => { const el=document.getElementById(id); if(el) el.value=val||''; };
+  const setChk = (id, val) => { const el=document.getElementById(id); if(el) el.checked=!!val; };
+  setEl('f-mutuelle', e.mutuelle);
+  setEl('f-dpae', e.dpaeDate);
+  setEl('f-visite-embauche', e.dateVisiteMedicale);
+  setEl('f-visite-prochaine', e.prochaineSuiviMedical);
+  const _docs = e.documents||[];
+  setChk('f-doc-cni',     e.docCniRecu     || _docs.some(d=>d.type==='cni'));
+  setChk('f-doc-rib',     e.docRibRecu     || _docs.some(d=>d.type==='rib'));
+  setChk('f-doc-vitale',  e.docVitaleRecu  || _docs.some(d=>d.type==='vitale'));
+  setChk('f-doc-contrat', e.docContratRecu || _docs.some(d=>d.type==='contrat'));
+  const sbEl = document.getElementById('f-superbrut');
+  if (sbEl) sbEl.value = e.salaireSuperBrut||'';
+  document.getElementById('f-contrat').value  = e.typeContrat||'CDI';
+  document.getElementById('f-categorie').value= e.categoriePoste||'employe';
+  document.getElementById('f-statut').value   = e.statut||'actif';
+  document.getElementById('f-freq').value     = e.frequence||'mensuel';
+  document.getElementById('f-couleur').value  = e.couleur||COLORS[0];
+  // CCN
+  populateCCNSelect('f-ccn', e.ccn||'');
+  // Pré-remplir le champ de recherche avec le nom de la CCN de l'employé
+  const searchInput = document.getElementById('f-ccn-search');
+  const idccInput = document.getElementById('f-ccn-idcc-direct');
+  if(searchInput) {
+    if(e.ccn && CCN_RULES[e.ccn]) {
+      const rule = CCN_RULES[e.ccn];
+      searchInput.value = rule.label + (rule.idcc ? ' (IDCC '+rule.idcc+')' : '');
+      if(idccInput && rule.idcc) idccInput.value = rule.idcc;
+    } else {
+      searchInput.value = '';
+      if(idccInput) idccInput.value = '';
+    }
+  }
+  onCCNChange();
+  // Période d'essai
+  const pe = e.periodeEssai||{active:false};
+  const peActive = document.getElementById('pe-active');
+  const peDetails = document.getElementById('pe-details');
+  if (peActive) { peActive.checked = !!pe.active; if(peDetails) peDetails.style.display = pe.active?'':'none'; }
+  if (pe.active) {
+    const d=document.getElementById('pe-duree'); if(d) d.value=pe.duree||'';
+    const u=document.getElementById('pe-unite'); if(u) u.value=pe.unite||'mois';
+    const r=document.getElementById('pe-renouv'); if(r) r.value=pe.renouvelable?'oui':'non';
+  }
+  // Afficher recap salaire si brut renseigné
+  if (e.salaireBrut) setTimeout(()=>calcSalaire('brut'), 50);
+  // Déclencher recalcul PE
+  setTimeout(()=>onContratChange(), 50);
+  openModal('modalEmploye');
+};
+
+window.saveEmploye = async function() {
+  const prenom = document.getElementById('f-prenom').value.trim();
+  const nom    = document.getElementById('f-nom').value.trim();
+  if (!prenom||!nom) { showToast('Prénom et nom obligatoires','err'); return; }
+
+  const data = {
+    prenom, nom,
+    dateNaissance:   document.getElementById('f-naissance').value||null,
+    nationalite:     document.getElementById('f-nationalite').value.trim()||null,
+    adresse:         document.getElementById('f-adresse').value.trim()||null,
+    telephone:       document.getElementById('f-tel').value.trim()||null,
+    email:           document.getElementById('f-email').value.trim()||null,
+    nss:             document.getElementById('f-nss').value.trim()||null,
+    typeContrat:     document.getElementById('f-contrat').value,
+    categoriePoste:  document.getElementById('f-categorie').value,
+    statut:          document.getElementById('f-statut').value,
+    poste:           document.getElementById('f-poste').value.trim()||null,
+    departement:     document.getElementById('f-dept').value.trim()||null,
+    dateEntree:      document.getElementById('f-entree').value||null,
+    dateFinContrat:  document.getElementById('f-fin').value||null,
+    salaireBrut:     parseFloat(document.getElementById('f-brut').value.replace(',','.'))||null,
+    salaireNet:      parseFloat(document.getElementById('f-net').value.replace(',','.'))||null,
+    salaireSuperBrut:parseFloat(document.getElementById('f-superbrut').value.replace(',','.'))||null,
+    frequence:       document.getElementById('f-freq').value,
+    heuresHebdo:     parseFloat(document.getElementById('f-heures').value)||35,
+    iban:            document.getElementById('f-iban').value.trim()||null,
+    mutuelle:        document.getElementById('f-mutuelle')?.value.trim()||null,
+    dpaeDate:        document.getElementById('f-dpae')?.value||null,
+    dateVisiteMedicale:    document.getElementById('f-visite-embauche')?.value||null,
+    prochaineSuiviMedical: document.getElementById('f-visite-prochaine')?.value||null,
+    docCniRecu:      document.getElementById('f-doc-cni')?.checked||false,
+    docRibRecu:      document.getElementById('f-doc-rib')?.checked||false,
+    docVitaleRecu:   document.getElementById('f-doc-vitale')?.checked||false,
+    docContratRecu:  document.getElementById('f-doc-contrat')?.checked||false,
+    ccn:             document.getElementById('f-ccn').value||null,
+    couleur:         document.getElementById('f-couleur').value,
+    // Période d'essai
+    periodeEssai: document.getElementById('pe-active')?.checked ? {
+      active:    true,
+      duree:     parseFloat(document.getElementById('pe-duree')?.value)||0,
+      unite:     document.getElementById('pe-unite')?.value||'mois',
+      renouvelable: document.getElementById('pe-renouv')?.value === 'oui',
+      finEstimee: document.getElementById('pe-fin-info')?.textContent||null,
+    } : { active: false },
+    updatedAt:       Date.now()
+  };
+
+  const id = _editId || ('emp_'+Date.now());
+  if (!_editId) data.createdAt = Date.now();
+
+  // Conserver les données existantes (docs, evals, photo, publicId)
+  if (_editId && _employes[_editId]) {
+    data.documents  = _employes[_editId].documents  || [];
+    data.evaluations= _employes[_editId].evaluations|| [];
+    data.photoURL   = _employes[_editId].photoURL   || null;
+    data.noteMoyenne= _employes[_editId].noteMoyenne|| null;
+    data.publicId   = _employes[_editId].publicId   || null;
+  }
+
+  // Générer un publicId unique à la création
+  if (!data.publicId) {
+    data.publicId = 'emp_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+  }
+
+  // Données publiques minimales (portail salarié)
+  const publicData = {
+    uid:           window._uid,
+    empId:         id,
+    prenom:        data.prenom        || '',
+    nom:           data.nom           || '',
+    poste:         data.poste         || '',
+    departement:   data.departement   || '',
+    typeContrat:   data.typeContrat   || '',
+    couleur:       data.couleur       || '#059669',
+    dateEntree:    data.dateEntree    || '',
+    cpAjustAcquis: data.cpAjustAcquis || 0,
+    rttAjust:      data.rttAjust      || 0,
+    recupHeures:   data.recupHeures   || 0,
+  };
+
+  try {
+    // Écriture fiche privée
+    await window._setDoc(window._doc(window._db,'rh',window._uid,'employes',id), data);
+    // Écriture / mise à jour fiche publique (portail salarié)
+    await window._setDoc(window._doc(window._db,'rh_employes_public',data.publicId), publicData);
+    _employes[id] = { id, ...data };
+    closeModal('modalEmploye');
+    buildDeptFilter();
+    renderList();
+    openFiche(id);
+    showToast(_editId?'✅ Employé modifié':'✅ Employé créé','ok');
+  } catch(e) {
+    showToast('Erreur : '+e.message,'err');
+  }
+};
+
+// ══════════════════════════
+// PHOTO
+// ══════════════════════════
+window.openModalPhoto = function(id) {
+  _editId = id;
+  const e = _employes[id];
+  const preview = document.getElementById('photo-preview');
+  if (e?.photoURL) {
+    preview.innerHTML = `<img src="${e.photoURL}" style="width:100%;height:100%;object-fit:cover;border-radius:20px"/>`;
+  } else {
+    const nom = `${e?.prenom||''} ${e?.nom||''}`.trim();
+    const init = nom.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    preview.innerHTML = `<div style="font-size:32px;color:${e?.couleur||COLORS[0]}">${init}</div>`;
+  }
+  openModal('modalPhoto');
+};
+
+window.previewPhoto = function(input) {
+  if (!input.files[0]) return;
+  _photoFile = input.files[0];
+  const reader = new FileReader();
+  reader.onload = e => {
+    _photoDataURL = e.target.result;
+    document.getElementById('photo-preview').innerHTML =
+      `<img src="${_photoDataURL}" style="width:100%;height:100%;object-fit:cover;border-radius:20px"/>`;
+  };
+  reader.readAsDataURL(input.files[0]);
+};
+
+window.savePhoto = async function() {
+  if (!_editId || !_photoDataURL) { closeModal('modalPhoto'); return; }
+  try {
+    // Stocker en base64 directement (attention taille) — pour production : Firebase Storage
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',_editId), { photoURL: _photoDataURL });
+    _employes[_editId].photoURL = _photoDataURL;
+    closeModal('modalPhoto');
+    renderList();
+    openFiche(_editId);
+    showToast('✅ Photo enregistrée','ok');
+  } catch(e) { showToast('Erreur photo','err'); }
+};
+
+window.removePhoto = async function() {
+  if (!_editId) return;
+  try {
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',_editId), { photoURL: null });
+    _employes[_editId].photoURL = null;
+    closeModal('modalPhoto');
+    renderList();
+    openFiche(_editId);
+    showToast('Photo supprimée','ok');
+  } catch(e) { showToast('Erreur','err'); }
+};
+
+// ══════════════════════════
+// DOCUMENTS
+// ══════════════════════════
+let _docEmpId = null;
+window.openModalDoc = function(id) { _docEmpId=id; openModal('modalDoc'); };
+
+window.saveDoc = async function() {
+  const nom = document.getElementById('doc-nom').value.trim();
+  if (!nom||!_docEmpId) return;
+  const e = _employes[_docEmpId];
+  if (!e) return;
+  const doc = {
+    nom, type: document.getElementById('doc-type').value,
+    date: document.getElementById('doc-date').value||null,
+    ref:  document.getElementById('doc-ref').value.trim()||null,
+    addedAt: Date.now()
+  };
+  const docs = [...(e.documents||[]), doc];
+  try {
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',_docEmpId),{documents:docs});
+    _employes[_docEmpId].documents = docs;
+    closeModal('modalDoc');
+    document.getElementById('doc-nom').value='';
+    document.getElementById('doc-ref').value='';
+    // Rafraîchir docs tab si visible
+    const body = document.getElementById(`docs-body-${_docEmpId}`);
+    if (body) body.innerHTML = renderDocs(_employes[_docEmpId]);
+    showToast('✅ Document ajouté','ok');
+  } catch(err) { showToast('Erreur','err'); }
+};
+
+window.deleteDoc = async function(empId, idx) {
+  if (!confirm('Supprimer ce document ?')) return;
+  const docs = [...(_employes[empId].documents||[])];
+  docs.splice(idx,1);
+  try {
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',empId),{documents:docs});
+    _employes[empId].documents = docs;
+    const body = document.getElementById(`docs-body-${empId}`);
+    if (body) body.innerHTML = renderDocs(_employes[empId]);
+    showToast('Document supprimé','ok');
+  } catch(e) { showToast('Erreur','err'); }
+};
+
+// ══════════════════════════
+// ÉVALUATIONS
+// ══════════════════════════
+let _evalEmpId = null;
+window.openModalEval = function(id) {
+  _evalEmpId = id;
+  document.getElementById('eval-date').value = new Date().toISOString().slice(0,10);
+  document.getElementById('eval-note').value = '';
+  document.getElementById('eval-comment').value = '';
+  document.getElementById('eval-by').value = '';
+  document.getElementById('eval-stars-preview').innerHTML = '☆☆☆☆☆';
+  openModal('modalEval');
+};
+
+// Live preview étoiles
+document.addEventListener('input', e => {
+  if (e.target.id==='eval-note') {
+    const n = Math.min(5,Math.max(0,parseFloat(e.target.value)||0));
+    const preview = document.getElementById('eval-stars-preview');
+    if (preview) {
+      let stars='';
+      for (let i=1;i<=5;i++) stars+=`<span style="color:${i<=n?'#f59e0b':'#e2e8f0'}">★</span>`;
+      preview.innerHTML=stars;
+    }
+  }
+});
+
+window.saveEval = async function() {
+  if (!_evalEmpId) return;
+  const note = parseFloat(document.getElementById('eval-note').value)||0;
+  if (!note) { showToast('Note obligatoire','err'); return; }
+  const ev = {
+    note, date: document.getElementById('eval-date').value,
+    commentaire: document.getElementById('eval-comment').value.trim()||null,
+    evaluateur:  document.getElementById('eval-by').value.trim()||null,
+    createdAt: Date.now()
+  };
+  const e = _employes[_evalEmpId];
+  const evals = [...(e.evaluations||[]), ev];
+  const noteMoy = (evals.reduce((s,x)=>s+(parseFloat(x.note)||0),0)/evals.length).toFixed(1);
+  try {
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',_evalEmpId),{evaluations:evals,noteMoyenne:parseFloat(noteMoy)});
+    _employes[_evalEmpId].evaluations = evals;
+    _employes[_evalEmpId].noteMoyenne = parseFloat(noteMoy);
+    closeModal('modalEval');
+    const body = document.getElementById(`evals-body-${_evalEmpId}`);
+    if (body) body.innerHTML = renderEvals(_employes[_evalEmpId]);
+    openFiche(_evalEmpId);
+    showToast(`✅ Évaluation enregistrée · Moy. ${noteMoy}/5`,'ok');
+  } catch(err) { showToast('Erreur','err'); }
+};
+
+// ══════════════════════════════════════════
+// ENTRETIENS ANNUELS (dans la fiche salarié)
+// ══════════════════════════════════════════
+
+// Cache local des entretiens par empId
+var _ficheEntretiens = {};
+
+window.loadEntretiensTab = async function(empId) {
+  const body = document.getElementById('entretiens-body-' + empId);
+  if (!body) return;
+
+  // Si déjà chargé → re-render depuis cache
+  if (_ficheEntretiens[empId]) {
+    body.innerHTML = renderEntretiensTab(empId, _ficheEntretiens[empId]);
+    return;
+  }
+
+  body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px"><div style="font-size:24px;margin-bottom:6px">⏳</div>Chargement...</div>';
+  try {
+    const snap = await window._getDocs(
+      window._collection(window._db, 'rh', window._uid, 'entretiens_annuels', empId, 'sessions')
+    );
+    const list = [];
+    snap.forEach(d => list.push(Object.assign({ id: d.id }, d.data())));
+    list.sort((a, b) => (b.annee || 0) - (a.annee || 0));
+    _ficheEntretiens[empId] = list;
+    body.innerHTML = renderEntretiensTab(empId, list);
+  } catch(err) {
+    console.error(err);
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">Impossible de charger les entretiens.<br><small>' + (err.message||'') + '</small></div>';
+  }
+};
+
+function renderEntretiensTab(empId, list) {
+  if (!list || list.length === 0) {
+    return `<div style="text-align:center;padding:24px;color:var(--muted);font-size:12px">
+      <div style="font-size:32px;margin-bottom:8px">🎯</div>
+      Aucun entretien enregistré pour ce collaborateur.<br>
+      <button class="btn btn-rh btn-sm" style="margin-top:12px" onclick="createEntretienFromFiche('${empId}')">+ Démarrer un entretien</button>
+    </div>`;
+  }
+
+  const typeLabels = {
+    annuel: 'Entretien annuel',
+    'mi-annee': 'Mi-année',
+    professionnel: 'Entretien professionnel',
+    retour: 'Entretien de retour'
+  };
+
+  const apprLabels = {
+    exceptionnel: '⭐⭐⭐ Exceptionnel',
+    tres_bien:    '⭐⭐ Très bien',
+    bien:         '⭐ Bien',
+    ameliorer:    '⚠️ À améliorer',
+    insuffisant:  '❌ Insuffisant'
+  };
+
+  // KPIs synthèse
+  const notes = list.filter(x => x.noteGlobale).map(x => parseFloat(x.noteGlobale) || 0);
+  const moyNote = notes.length > 0 ? (notes.reduce((s, v) => s + v, 0) / notes.length).toFixed(1) : null;
+  const thisYear = new Date().getFullYear();
+  const doneThisYear = list.some(x => x.annee == thisYear);
+  const lastEnt = list[0];
+
+  let html = '';
+
+  // Bandeau KPI
+  html += `<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+    <div style="padding:10px 12px;border-radius:9px;background:var(--rh-ghost);border:1px solid var(--rh-border);text-align:center">
+      <div style="font-size:18px;font-weight:800;color:var(--rh-main)">${list.length}</div>
+      <div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-top:2px">Entretiens</div>
+    </div>
+    <div style="padding:10px 12px;border-radius:9px;background:${moyNote?'var(--rh-ghost)':'#f8faff'};border:1px solid ${moyNote?'var(--rh-border)':'var(--border)'};text-align:center">
+      <div style="font-size:18px;font-weight:800;color:${moyNote?'var(--rh-main)':'var(--muted)'}">${moyNote || '—'}</div>
+      <div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-top:2px">Note moy. /5</div>
+    </div>
+    <div style="padding:10px 12px;border-radius:9px;background:${doneThisYear?'var(--rh-ghost)':'#fef3c7'};border:1px solid ${doneThisYear?'var(--rh-border)':'#fcd34d'};text-align:center">
+      <div style="font-size:18px;font-weight:800;color:${doneThisYear?'var(--rh-main)':'#92400e'}">${doneThisYear ? '✓' : '—'}</div>
+      <div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-top:2px">${thisYear}</div>
+    </div>
+    <div style="padding:10px 12px;border-radius:9px;background:#f8faff;border:1px solid var(--border);text-align:center">
+      <div style="font-size:18px;font-weight:800;color:var(--text)">${lastEnt?.annee || '—'}</div>
+      <div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-top:2px">Dernier</div>
+    </div>
+  </div>`;
+
+  // Liste des entretiens
+  html += list.map(ent => {
+    const note = parseFloat(ent.noteGlobale) || 0;
+    const stars = Array.from({length:5},(_,i)=>`<span style="color:${i<note?'#f59e0b':'#e2e8f0'};font-size:13px">${i<note?'★':'☆'}</span>`).join('');
+    const statutCls = ent.statut === 'finalise'
+      ? 'background:#d1fae5;color:#065f46'
+      : 'background:#fef3c7;color:#92400e';
+    const objCount = (ent.nouveaux_objectifs||[]).filter(o=>o.obj).length;
+    const formationText = ent.besoins_formation ? '🎓 Formation identifiée' : '';
+    const augText = ent.augmentation ? `💰 +${ent.augmentation}%` : '';
+
+    return `<div style="border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px;transition:all .15s;cursor:pointer"
+      onmouseover="this.style.borderColor='var(--rh-border)';this.style.background='var(--rh-ghost)'"
+      onmouseout="this.style.borderColor='var(--border)';this.style.background=''"
+      onclick="window.location.href='rh-entretiens.html'">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span style="font-size:16px;font-weight:800;color:var(--rh-main);min-width:36px">${ent.annee||'—'}</span>
+        <span style="font-size:12px;font-weight:600;color:var(--text)">${typeLabels[ent.type]||ent.type||'Entretien'}</span>
+        <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;${statutCls};margin-left:auto">${ent.statut==='finalise'?'✅ Finalisé':'📝 Brouillon'}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        ${note > 0 ? `<div style="display:flex;align-items:center;gap:4px">${stars}<span style="font-size:12px;font-weight:700;color:var(--rh-main);margin-left:3px">${note}/5</span></div>` : ''}
+        ${ent.appreciation_finale ? `<span style="font-size:11px;color:var(--muted)">${apprLabels[ent.appreciation_finale]||''}</span>` : ''}
+        ${ent.evaluateur ? `<span style="font-size:11px;color:var(--muted)">· Par ${ent.evaluateur}</span>` : ''}
+        ${ent.date ? `<span style="font-size:11px;color:var(--muted)">· ${fmtDate(ent.date)}</span>` : ''}
+      </div>
+      ${(objCount > 0 || formationText || augText) ? `
+      <div style="display:flex;gap:8px;margin-top:7px;flex-wrap:wrap">
+        ${objCount > 0 ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:12px;background:#f0f4ff;color:#1a3dce">${objCount} objectif${objCount>1?'s':''} fixé${objCount>1?'s':''}</span>` : ''}
+        ${formationText ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:12px;background:#fef3c7;color:#92400e">${formationText}</span>` : ''}
+        ${augText ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:12px;background:#d1fae5;color:#065f46">${augText}</span>` : ''}
+      </div>` : ''}
+      ${ent.conclusions ? `<div style="margin-top:7px;font-size:11px;color:var(--muted);line-height:1.5;font-style:italic">"${ent.conclusions.slice(0,120)}${ent.conclusions.length>120?'…':''}"</div>` : ''}
+    </div>`;
+  }).join('');
+
+  html += `<div style="text-align:center;margin-top:8px">
+    <a href="rh-entretiens.html" style="font-size:12px;color:var(--rh-main);font-weight:600;text-decoration:none">
+      Voir tous les entretiens dans le module dédié →
+    </a>
+  </div>`;
+
+  return html;
+}
+
+window.createEntretienFromFiche = function(empId) {
+  // Redirige vers le module entretiens avec l'employé pré-sélectionné via URL param
+  window.location.href = 'rh-entretiens.html?empId=' + empId;
+};
+
+// ══════════════════════════
+// ARCHIVAGE
+// ══════════════════════════
+let _archiveId = null;
+window.openModalArchive = function(id) {
+  _archiveId = id;
+  document.getElementById('arch-date').value = new Date().toISOString().slice(0,10);
+  openModal('modalArchive');
+};
+
+window.confirmArchive = async function() {
+  if (!_archiveId) return;
+  const motif = document.getElementById('arch-motif').value;
+  const date  = document.getElementById('arch-date').value;
+  try {
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',_archiveId),
+      { statut:'archive', motifDepart:motif, dateSortie:date, archivedAt:Date.now() });
+    _employes[_archiveId].statut = 'archive';
+    _employes[_archiveId].motifDepart = motif;
+    closeModal('modalArchive');
+    _currentId = null;
+    renderList();
+    document.getElementById('right-panel').innerHTML = `<div class="empty-fiche"><div class="icon">📦</div><h3 style="font-size:15px;font-weight:700">Employé archivé</h3></div>`;
+    showToast('Employé archivé','ok');
+  } catch(e) { showToast('Erreur','err'); }
+};
+
+window.restoreEmploye = async function(id) {
+  if (!confirm('Restaurer cet employé ?')) return;
+  try {
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',id),{statut:'actif',archivedAt:null});
+    _employes[id].statut = 'actif';
+    renderList();
+    openFiche(id);
+    showToast('✅ Employé restauré','ok');
+  } catch(e) { showToast('Erreur','err'); }
+};
+
+// ══════════════════════════
+// EXPORT PDF
+// ══════════════════════════
+window.exportPDF = function(id) {
+  const e = _employes[id];
+  if (!e) return;
+  const nom = `${e.prenom||''} ${e.nom||''}`.trim();
+  showToast('📄 Génération PDF…');
+
+  // Génération HTML → window.print()
+  const evals = e.evaluations||[];
+  const noteMoy = evals.length>0 ? (evals.reduce((s,ev)=>s+(parseFloat(ev.note)||0),0)/evals.length).toFixed(1) : null;
+  const docs = e.documents||[];
+  const color = e.couleur||COLORS[0];
+  const init  = nom.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+  const anc   = e.dateEntree ? calcAnciennete(e.dateEntree) : '—';
+
+  const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/>
+  <title>Fiche RH — ${nom}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial,sans-serif;font-size:12px;color:#1a1f36;background:white;padding:32px;}
+    h1{font-size:22px;font-weight:700;margin-bottom:4px;}
+    h2{font-size:13px;font-weight:700;margin:18px 0 8px;padding-bottom:4px;border-bottom:2px solid #d1fae5;color:#059669;}
+    .hero{display:flex;align-items:center;gap:18px;margin-bottom:22px;padding-bottom:18px;border-bottom:3px solid #d1fae5;}
+    .av{width:64px;height:64px;border-radius:14px;background:${color};display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:800;color:white;flex-shrink:0;}
+    .kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px;}
+    .kpi{padding:10px 12px;background:#f0fdf4;border:1px solid #d1fae5;border-radius:8px;}
+    .kpi-lbl{font-size:9px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;}
+    .kpi-v{font-size:14px;font-weight:800;}
+    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px 24px;}
+    .field{margin-bottom:8px;}
+    .field-lbl{font-size:9px;font-weight:700;color:#6b7280;text-transform:uppercase;}
+    .field-v{font-size:12px;font-weight:600;}
+    .eval{padding:10px;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:6px;}
+    .doc-row{display:flex;gap:8px;align-items:center;padding:7px;border:1px solid #e2e8f0;border-radius:6px;margin-bottom:5px;}
+    .badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:#d1fae5;color:#065f46;}
+    .footer{margin-top:24px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:10px;color:#6b7280;text-align:center;}
+    @media print{body{padding:16px;}}
+  </style></head><body>
+  <div class="hero">
+    <div class="av">${e.photoURL?`<img src="${e.photoURL}" style="width:64px;height:64px;border-radius:14px;object-fit:cover"/>`:init}</div>
+    <div>
+      <h1>${nom}</h1>
+      <div style="font-size:13px;color:#6b7280;margin-bottom:6px">${e.poste||'—'}${e.departement?' · '+e.departement:''}</div>
+      <span class="badge">${e.typeContrat||'CDI'}</span>
+      ${noteMoy?`<span class="badge" style="background:#fef3c7;color:#92400e;margin-left:6px">⭐ ${noteMoy}/5</span>`:''}
+    </div>
+  </div>
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi-lbl">Salaire net</div><div class="kpi-v">${e.salaireNet?fmtE(e.salaireNet):'—'}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Ancienneté</div><div class="kpi-v">${anc}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Date entrée</div><div class="kpi-v">${fmtDate(e.dateEntree)||'—'}</div></div>
+    <div class="kpi"><div class="kpi-lbl">Heures/sem.</div><div class="kpi-v">${e.heuresHebdo||35}h</div></div>
+  </div>
+  <h2>👤 Informations personnelles</h2>
+  <div class="grid2">
+    ${pdfField('Date de naissance',fmtDate(e.dateNaissance))}
+    ${pdfField('Nationalité',e.nationalite)}
+    ${pdfField('Téléphone',e.telephone)}
+    ${pdfField('Email',e.email)}
+    ${pdfField('Adresse',e.adresse)}
+    ${pdfField('N° SS',e.nss?maskNSS(e.nss):null)}
+  </div>
+  <h2>📋 Contrat & Rémunération</h2>
+  <div class="grid2">
+    ${pdfField('Type',e.typeContrat)} ${pdfField('Statut',e.statut)}
+    ${pdfField('Date entrée',fmtDate(e.dateEntree))} ${pdfField('Fin contrat',fmtDate(e.dateFinContrat)||'—')}
+    ${pdfField('Salaire brut',e.salaireBrut?fmtE(e.salaireBrut):null)}
+    ${pdfField('Salaire net',e.salaireNet?fmtE(e.salaireNet):null)}
+    ${pdfField('Fréquence',e.frequence||'mensuel')} ${pdfField('Heures/sem.',(e.heuresHebdo||35)+'h')}
+  </div>
+  ${docs.length>0?`<h2>📎 Documents RH (${docs.length})</h2>${docs.map(d=>`<div class="doc-row"><b>${d.nom}</b><span style="color:#6b7280;font-size:11px">${d.date?fmtDate(d.date):''}</span></div>`).join('')}`:''}
+  ${evals.length>0?`<h2>⭐ Évaluations (${evals.length})</h2>${evals.map(ev=>`<div class="eval"><b>${parseFloat(ev.note)||0}/5</b> · ${ev.date?fmtDate(ev.date):''} · Par ${ev.evaluateur||'—'}<br>${ev.commentaire?`<i>${ev.commentaire}</i>`:''}</div>`).join('')}`:''}
+  <div class="footer">Document généré le ${new Date().toLocaleDateString('fr-FR')} · ALTEORE — Confidentiel RH</div>
+  </body></html>`;
+
+  const w = window.open('','_blank','width=800,height=900');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(()=>{w.print();},600);
+};
+
+function pdfField(label, val) {
+  return `<div class="field"><div class="field-lbl">${label}</div><div class="field-v">${val||'—'}</div></div>`;
+}
+
+// ══════════════════════════
+// UTILITAIRES
+// ══════════════════════════
+function calcAnciennete(dateEntree) {
+  const diff = Date.now() - new Date(dateEntree).getTime();
+  const ans  = Math.floor(diff / (365.25*86400000));
+  const mois = Math.floor((diff % (365.25*86400000)) / (30.44*86400000));
+  if (ans>0) return `${ans} an${ans>1?'s':''} ${mois>0?mois+'m':''}`.trim();
+  if (mois>0) return `${mois} mois`;
+  return 'Récent';
+}
+function fmtDate(d) {
+  if (!d) return null;
+  try { return new Date(d).toLocaleDateString('fr-FR'); } catch(e) { return d; }
+}
+function fmtE(n) {
+  return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:0,maximumFractionDigits:0})+' €';
+}
+function maskNSS(nss) {
+  if (!nss||nss.length<8) return nss;
+  return nss.slice(0,5)+'•••••'+nss.slice(-2);
+}
+function maskIBAN(iban) {
+  if (!iban||iban.length<8) return iban;
+  return iban.slice(0,4)+' •••• •••• •••• '+iban.slice(-4);
+}
+function showToast(msg, type='') {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className='toast show '+(type||'');
+  setTimeout(()=>t.className='toast',3200);
+}
+function openModal(id) { document.getElementById(id).classList.add('show'); }
+window.closeModal = function(id) { document.getElementById(id).classList.remove('show'); };
+
+window.copyLienSalarie = function(empId, publicId) {
+  const lien = 'https://alteore.com/espace-salarie.html?id=' + publicId;
+  navigator.clipboard.writeText(lien).then(() => {
+    showToast('📋 Lien copié !', 'ok');
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = lien; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('📋 Lien copié !', 'ok');
+  });
+};
+
+// Génère un publicId pour un employé existant qui n'en a pas encore
+window.genererLienSalarie = async function(empId) {
+  if (!window._uid || !_employes[empId]) return;
+  const e = _employes[empId];
+  const publicId = 'emp_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+  const publicData = {
+    uid:           window._uid,
+    empId:         empId,
+    prenom:        e.prenom        || '',
+    nom:           e.nom           || '',
+    poste:         e.poste         || '',
+    departement:   e.departement   || '',
+    typeContrat:   e.typeContrat   || '',
+    couleur:       e.couleur       || '#059669',
+    dateEntree:    e.dateEntree    || '',
+    cpAjustAcquis: e.cpAjustAcquis || 0,
+    rttAjust:      e.rttAjust      || 0,
+    recupHeures:   e.recupHeures   || 0,
+  };
+  try {
+    // Sauvegarder publicId dans la fiche privée
+    await window._updateDoc(window._doc(window._db,'rh',window._uid,'employes',empId), { publicId });
+    // Créer la fiche publique
+    await window._setDoc(window._doc(window._db,'rh_employes_public',publicId), publicData);
+    // Mettre à jour le cache local
+    _employes[empId].publicId = publicId;
+    // Re-render la fiche pour afficher le lien
+    openFiche(empId);
+    showToast('✅ Lien portail généré !', 'ok');
+  } catch(err) {
+    showToast('Erreur : ' + err.message, 'err');
+    console.error(err);
+  }
+};
+
+// Fermer modals au clic overlay
+document.querySelectorAll('.modal-overlay').forEach(o=>{
+  o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('show'); });
+});
+
+// ══════════════════════════════════════════════════
+// PÉRIODE D'ESSAI — durées légales 2025
+// ══════════════════════════════════════════════════
+
+// Règles légales Code du travail (durées en jours)
+// CDI : Employé 60j, AM/Technicien 90j, Cadre 120j (renouvelables 1x → max 120/180/240)
+// CDD ≤6m : 1j/semaine plafond 14j | CDD >6m : plafond 31j
+// Stage : aucune PE légale, en pratique conv. de stage
+// Alternance : 45 premiers jours (apprentissage)
+
+function getPELegal(contrat, categorie, dateEntree, dateFin) {
+  const info = { jours: 0, label: '—', renouvelable: false, maxJours: 0 };
+  if (!contrat) return info;
+
+  if (contrat === 'CDI') {
+    const durees = { employe:60, agent_maitrise:90, cadre:120 };
+    const max    = { employe:120, agent_maitrise:180, cadre:240 };
+    const cat = categorie || 'employe';
+    info.jours = durees[cat] || 60;
+    info.maxJours = max[cat] || 120;
+    info.renouvelable = true;
+    const mois = Math.round(info.jours / 30.44);
+    const maxMois = Math.round(info.maxJours / 30.44);
+    info.label = `${mois} mois légaux (max ${maxMois} m. avec renouvellement)`;
+  } else if (contrat === 'CDD') {
+    if (!dateEntree || !dateFin) {
+      info.label = 'Renseignez les dates du CDD';
+      return info;
+    }
+    const semaines = Math.ceil((new Date(dateFin) - new Date(dateEntree)) / (7 * 86400000));
+    const estCourt = semaines <= 26; // ≤ 6 mois
+    info.jours = estCourt ? Math.min(semaines, 14) : 31;
+    info.maxJours = info.jours;
+    info.renouvelable = false;
+    info.label = estCourt
+      ? `${info.jours} jours (1j/semaine, plafond 2 semaines)`
+      : `1 mois max (CDD > 6 mois)`;
+  } else if (contrat === 'Stage') {
+    info.jours = 0;
+    info.label = 'Aucune PE légale (convention de stage)';
+  } else if (contrat === 'Alternance') {
+    info.jours = 45;
+    info.maxJours = 45;
+    info.renouvelable = false;
+    info.label = '45 premiers jours (apprentissage)';
+  } else {
+    info.label = 'Aucune PE légale';
+  }
+  return info;
+}
+
+window.onContratChange = function() {
+  const contrat  = document.getElementById('f-contrat')?.value;
+  const categorie= document.getElementById('f-categorie')?.value;
+  const entree   = document.getElementById('f-entree')?.value;
+  const fin      = document.getElementById('f-fin')?.value;
+  const active   = document.getElementById('pe-active')?.checked;
+
+  const legal = getPELegal(contrat, categorie, entree, fin);
+
+  // Cacher PE pour Freelance
+  const peBloc = document.getElementById('pe-bloc');
+  if (contrat === 'Freelance') { peBloc.classList.add('disabled'); return; }
+  peBloc.classList.remove('disabled');
+
+  // Mettre à jour l'info légale
+  const infoEl = document.getElementById('pe-legal-info');
+  if (infoEl) infoEl.textContent = legal.label;
+
+  // Pré-remplir la durée suggérée si vide
+  const dureeInput = document.getElementById('pe-duree');
+  const uniteInput = document.getElementById('pe-unite');
+  if (dureeInput && uniteInput && !dureeInput.value) {
+    if (legal.jours > 0) {
+      if (legal.jours % 30 === 0 || legal.jours >= 30) {
+        dureeInput.value = Math.round(legal.jours / 30.44);
+        uniteInput.value = 'mois';
+      } else if (legal.jours >= 7) {
+        dureeInput.value = Math.round(legal.jours / 7);
+        uniteInput.value = 'semaines';
+      } else {
+        dureeInput.value = legal.jours;
+        uniteInput.value = 'jours';
+      }
+    }
+  }
+
+  // Renouvellement
+  const renouvSel = document.getElementById('pe-renouv');
+  if (renouvSel) renouvSel.disabled = !legal.renouvelable;
+
+  calcPEFin();
+};
+
+window.onPEChange = function() {
+  const active = document.getElementById('pe-active')?.checked;
+  const details = document.getElementById('pe-details');
+  if (details) details.style.display = active ? '' : 'none';
+  if (active) onContratChange();
+};
+
+window.calcPEFin = function() {
+  const entree  = document.getElementById('f-entree')?.value;
+  const dureeV  = parseFloat(document.getElementById('pe-duree')?.value) || 0;
+  const unite   = document.getElementById('pe-unite')?.value || 'mois';
+  const contrat = document.getElementById('f-contrat')?.value;
+  const cat     = document.getElementById('f-categorie')?.value || 'employe';
+  const renouv  = document.getElementById('pe-renouv')?.value === 'oui';
+  const finInfo = document.getElementById('pe-fin-info');
+  const warnEl  = document.getElementById('pe-warn');
+  if (!finInfo) return;
+
+  if (!entree || !dureeV) { finInfo.textContent = '—'; return; }
+
+  // Calcul date fin PE
+  const d = new Date(entree);
+  const jourTotal = unite === 'jours' ? dureeV
+    : unite === 'semaines' ? dureeV * 7
+    : dureeV * 30.44;
+  d.setDate(d.getDate() + Math.round(jourTotal * (renouv ? 2 : 1)));
+  finInfo.textContent = d.toLocaleDateString('fr-FR');
+
+  // Vérification dépassement légal
+  const legal = getPELegal(contrat, cat, document.getElementById('f-entree')?.value, document.getElementById('f-fin')?.value);
+  const totalJours = jourTotal * (renouv ? 2 : 1);
+  if (legal.maxJours > 0 && totalJours > legal.maxJours) {
+    warnEl.style.display = '';
+    warnEl.textContent = `⚠️ Durée totale (${Math.round(totalJours)}j) dépasse le maximum légal de ${legal.maxJours} jours pour cette catégorie.`;
+  } else {
+    warnEl.style.display = 'none';
+  }
+};
+
+// ══════════════════════════════════════════════════
+// CALCULATEUR SALAIRE BIDIRECTIONNEL — Taux 2025
+// ══════════════════════════════════════════════════
+
+// Sources : URSSAF 2025, PMSS = 3 925 €/mois, SMIC = 11,88 €/h
+// Cotisations SALARIALES (en % du brut) :
+//   Maladie :       0% (sauf Alsace-Moselle +1.30%)
+//   Vieillesse plaf: 6.90% (sur min(brut, PMSS))
+//   Vieillesse dépl: 0.40% (sur brut total)
+//   Chômage :        0% salarié (supprimé) — intégré côté patronal
+//   CSG déductible : 6.80% (sur 98.25% du brut)
+//   CSG non déduct.: 2.40% (sur 98.25% du brut)
+//   CRDS :           0.50% (sur 98.25% du brut)
+//   Retraite comp T1: 3.15% (sur min(brut, PMSS))
+//   Retraite comp T2: 8.64% (sur brut entre PMSS et 8×PMSS, cadres surtout)
+//   APEC (cadres) :  0.024% (sur min(brut, 4×PMSS))
+// → Total salariales ≈ 22–23%
+
+// Cotisations PATRONALES :
+//   Maladie :        7% (brut ≤ 2.25 SMIC mensuel = 4 363€) ou 13% au-delà
+//   AT/MP :          ~1.5% (variable secteur, on prend taux moyen)
+//   Alloc. familiales: 3.45% (brut ≤ 3.3 SMIC = 6 401€) ou 5.25% au-delà
+//   Vieillesse plaf: 8.55% (sur min(brut, PMSS))
+//   Vieillesse dépl: 2.02% (sur brut)
+//   Chômage :        4.00% (depuis mai 2025, sur brut ≤ 4×PMSS)
+//   AGS :            0.25% (depuis juil 2025)
+//   FNAL :           0.10% (<50 sal.) ou 0.50%
+//   Retraite comp T1: 4.72% (sur min(brut, PMSS))
+//   Retraite comp T2: 12.95% (tranche 2, surtout cadres)
+//   CEG T1 :         1.29% + CEG T2 2.16% (si>PMSS)
+//   APEC patronal (cadres) : 0.036%
+
+const PMSS = 3925; // Plafond mensuel SS 2025
+const SMIC_H = 11.88;
+const SMIC_M = SMIC_H * 35 * 52 / 12; // ≈ 1801.80 €
+
+function calcCotisations(brut, estCadre) {
+  const b = parseFloat(brut) || 0;
+  if (b <= 0) return { sal: 0, pat: 0, net: 0 };
+
+  const assiette_csg = b * 0.9825; // abattement 1.75%
+  const plaf1 = Math.min(b, PMSS);
+
+  // ── SALARIALES ──
+  let sal = 0;
+  sal += plaf1 * 0.0690;          // vieillesse plafonnée
+  sal += b     * 0.0040;          // vieillesse déplafonnée
+  sal += assiette_csg * 0.0680;   // CSG déductible
+  sal += assiette_csg * 0.0240;   // CSG non déductible
+  sal += assiette_csg * 0.0050;   // CRDS
+  sal += plaf1 * 0.0315;          // retraite complémentaire T1
+  if (b > PMSS) sal += Math.min(b - PMSS, 7 * PMSS) * 0.0864; // T2
+  if (estCadre) {
+    sal += Math.min(b, 4 * PMSS) * 0.00024; // APEC
+    if (b > PMSS) sal += Math.min(b - PMSS, 7 * PMSS) * 0.0014; // CET T2
+  }
+
+  // ── PATRONALES ──
+  let pat = 0;
+  const seuil_am   = 2.25 * SMIC_M;  // ~4054€ — taux réduit maladie
+  const seuil_af   = 3.3  * SMIC_M;  // ~5946€ — taux réduit AF
+  pat += b     * (b <= seuil_am ? 0.07 : 0.13);  // maladie
+  pat += b     * 0.015;               // AT/MP (taux moyen)
+  pat += b     * (b <= seuil_af ? 0.0345 : 0.0525); // allocations fam.
+  pat += plaf1 * 0.0855;              // vieillesse plafonnée
+  pat += b     * 0.0202;              // vieillesse déplafonnée
+  pat += Math.min(b, 4 * PMSS) * 0.04; // chômage (mai 2025)
+  pat += Math.min(b, 4 * PMSS) * 0.0025; // AGS (juil 2025)
+  pat += b     * 0.001;               // FNAL (taux <50 sal.)
+  pat += plaf1 * 0.0472;              // retraite comp T1
+  if (b > PMSS) pat += Math.min(b - PMSS, 7 * PMSS) * 0.1295; // T2
+  pat += plaf1 * 0.0129;              // CEG T1
+  if (b > PMSS) pat += Math.min(b - PMSS, 7 * PMSS) * 0.0216; // CEG T2
+  if (estCadre) {
+    pat += Math.min(b, 4 * PMSS) * 0.015;  // prévoyance obligatoire cadre
+    pat += Math.min(b, 4 * PMSS) * 0.00036; // APEC
+    if (b > PMSS) pat += Math.min(b - PMSS, 7 * PMSS) * 0.0021; // CET T2
+  }
+
+  const net = Math.round((b - sal) * 100) / 100;
+  return {
+    sal: Math.round(sal * 100) / 100,
+    pat: Math.round(pat * 100) / 100,
+    superbrut: Math.round((b + pat) * 100) / 100,
+    net
+  };
+}
+
+let _salMode = 'brut';
+window.setSalMode = function(mode) {
+  _salMode = mode;
+  document.querySelectorAll('.sal-mode-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+  // Highlight le champ principal
+  ['f-brut','f-net','f-superbrut'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.borderColor = '';
+    el.style.background  = '';
+  });
+  const mainId = mode === 'brut' ? 'f-brut' : mode === 'net' ? 'f-net' : 'f-superbrut';
+  const mainEl = document.getElementById(mainId);
+  if (mainEl) { mainEl.style.borderColor='#059669'; mainEl.style.background='#f0fdf4'; }
+};
+
+window.calcSalaire = function(source) {
+  const cat = document.getElementById('f-categorie')?.value || 'employe';
+  const estCadre = cat === 'cadre';
+
+  let brut = 0;
+
+  if (source === 'brut') {
+    brut = parseFloat(document.getElementById('f-brut').value.replace(',','.')) || 0;
+  } else if (source === 'net') {
+    // Inversion : net = brut - cotisations_sal → brut ≈ net / (1 - txSal)
+    // On itère pour converger (cotisations dépendent du brut, pas linéaire)
+    const net = parseFloat(document.getElementById('f-net').value.replace(',','.')) || 0;
+    if (!net) { clearSalRecap(); return; }
+    brut = net / 0.77; // amorçage
+    for (let i = 0; i < 10; i++) {
+      const c = calcCotisations(brut, estCadre);
+      brut = net + c.sal;
+    }
+    brut = Math.round(brut * 100) / 100;
+    const brutEl = document.getElementById('f-brut');
+    if (brutEl) brutEl.value = brut.toFixed(2);
+  } else if (source === 'superbrut') {
+    // super-brut = brut + cotisations_pat → itération
+    const sb = parseFloat(document.getElementById('f-superbrut').value.replace(',','.')) || 0;
+    if (!sb) { clearSalRecap(); return; }
+    brut = sb / 1.42; // amorçage
+    for (let i = 0; i < 10; i++) {
+      const c = calcCotisations(brut, estCadre);
+      brut = sb - c.pat;
+    }
+    brut = Math.round(brut * 100) / 100;
+    const brutEl = document.getElementById('f-brut');
+    if (brutEl) brutEl.value = brut.toFixed(2);
+  }
+
+  if (!brut) { clearSalRecap(); return; }
+
+  const c = calcCotisations(brut, estCadre);
+
+  // Remplir les champs non source
+  if (source !== 'net') {
+    const netEl = document.getElementById('f-net');
+    if (netEl) netEl.value = c.net.toFixed(2);
+  }
+  if (source !== 'superbrut') {
+    const sbEl = document.getElementById('f-superbrut');
+    if (sbEl) sbEl.value = c.superbrut.toFixed(2);
+  }
+  if (source !== 'brut') {
+    const bEl = document.getElementById('f-brut');
+    if (bEl) bEl.value = brut.toFixed(2);
+  }
+
+  // Afficher le récap
+  const recap = document.getElementById('sal-recap');
+  if (recap) {
+    recap.style.display = '';
+    const statut = document.getElementById('sal-recap-statut');
+    if (statut) statut.textContent = estCadre ? 'Cadre' : cat === 'agent_maitrise' ? 'Agent de maîtrise' : 'Employé / Ouvrier';
+    const f2 = n => n.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';
+    document.getElementById('rc-sal').textContent = f2(c.sal);
+    document.getElementById('rc-sal-pct').textContent = `${(c.sal/brut*100).toFixed(1)}% du brut`;
+    document.getElementById('rc-pat').textContent = f2(c.pat);
+    document.getElementById('rc-pat-pct').textContent = `${(c.pat/brut*100).toFixed(1)}% du brut`;
+    document.getElementById('rc-net').textContent = f2(c.net);
+    document.getElementById('rc-net-pct').textContent = `${(c.net/brut*100).toFixed(1)}% du brut`;
+  }
+};
+
+function clearSalRecap() {
+  const recap = document.getElementById('sal-recap');
+  if (recap) recap.style.display = 'none';
+}
+
+// Recalculer quand la catégorie change (cadre vs non-cadre impacte les cotisations)
+document.addEventListener('change', e => {
+  if (e.target.id === 'f-categorie') {
+    const brut = parseFloat(document.getElementById('f-brut')?.value) || 0;
+    if (brut > 0) calcSalaire('brut');
+  }
+});
+
+window.setSalMode = window.setSalMode;
+window.calcSalaire = window.calcSalaire;
+window.onContratChange = window.onContratChange;
+window.onPEChange = window.onPEChange;
+window.calcPEFin = window.calcPEFin;
+</script>
+
+<script src="nav.js"></script>
+<script>
+(function openRhNav(){
+  var tries=0;
+  var t=setInterval(function(){
+    var sub=document.getElementById("rh-nav-sub");
+    var nav=document.getElementById("alteore-nav");
+    if(sub&&nav){clearInterval(t);sub.style.maxHeight="2000px";nav.classList.add("rh-mode");}
+    if(++tries>50)clearInterval(t);
+  },50);
+})();
+</script>
+</body>
+</html>

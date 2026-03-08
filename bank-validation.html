@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+  <title>ALTEORE — Validation des transactions</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --blue-dark:#0f1f5c;--blue-main:#1a3dce;--blue-light:#4f7ef8;--blue-ghost:#f0f4ff;
+      --text:#1a1f36;--muted:#6b7280;--border:#e2e8f0;--bg:#f5f7ff;--sidebar-w:252px;--radius:12px;
+      --green:#10b981;--green-light:#d1fae5;--orange:#f59e0b;--orange-light:#fef3c7;
+      --red:#ef4444;--red-light:#fee2e2;--purple:#6366f1;--purple-light:#eef2ff;
+    }
+    body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;font-size:13px;}
+    .sidebar{width:var(--sidebar-w);min-height:100vh;background:linear-gradient(180deg,#0f1f5c 0%,#162366 100%);display:flex;flex-direction:column;position:fixed;left:0;top:0;z-index:100;padding-bottom:24px;overflow-y:auto;}
+    .main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;}
+    .topbar{background:white;border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
+    .topbar-left h1{font-size:17px;font-weight:700;}
+    .topbar-left p{font-size:12px;color:var(--muted);}
+    .topbar-right{display:flex;align-items:center;gap:8px;}
+    .btn{padding:8px 16px;border:none;border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.18s;}
+    .btn-primary{background:linear-gradient(135deg,var(--blue-main),var(--blue-light));color:white;box-shadow:0 3px 10px rgba(26,61,206,0.25);}
+    .btn-primary:hover{opacity:.9;} .btn-primary:disabled{opacity:.45;cursor:not-allowed;}
+    .btn-outline{background:white;color:var(--blue-main);border:1.5px solid var(--border);}
+    .btn-outline:hover{border-color:var(--blue-main);background:var(--blue-ghost);}
+    .btn-success{background:linear-gradient(135deg,#10b981,#34d399);color:white;}
+    .btn-success:disabled{opacity:.45;cursor:not-allowed;}
+    .btn-sm{padding:5px 12px;font-size:12px;} .btn-xs{padding:3px 8px;font-size:11px;}
+    .content{padding:20px 28px;flex:1;display:flex;flex-direction:column;gap:14px;}
+    .stats-row{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;}
+    .stat-box{background:white;border:1px solid var(--border);border-radius:10px;padding:12px 14px;text-align:center;}
+    .stat-val{font-size:18px;font-weight:800;}
+    .stat-val.green{color:var(--green);} .stat-val.red{color:var(--red);}
+    .stat-val.orange{color:var(--orange);} .stat-val.blue{color:var(--blue-main);} .stat-val.muted{color:var(--muted);}
+    .stat-lbl{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-top:3px;}
+    .filters-bar{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+    .filter-btn{padding:5px 13px;border:1.5px solid var(--border);border-radius:20px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;background:white;color:var(--text);transition:all .15s;}
+    .filter-btn:hover{border-color:var(--blue-light);}
+    .filter-btn.active{background:var(--blue-main);color:white;border-color:var(--blue-main);}
+    .filter-btn.f-debit.active{background:var(--red);border-color:var(--red);}
+    .filter-btn.f-credit.active{background:var(--green);border-color:var(--green);}
+    .filter-sep{width:1px;height:20px;background:var(--border);flex-shrink:0;}
+    .search-input{padding:6px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;outline:none;min-width:180px;}
+    .search-input:focus{border-color:var(--blue-main);}
+    .table-card{background:white;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;}
+    .table-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);gap:8px;flex-wrap:wrap;}
+    .table-title{font-size:13px;font-weight:700;}
+    .tx-table{width:100%;border-collapse:collapse;font-size:12px;}
+    .tx-table th{padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;background:#f8faff;border-bottom:1px solid var(--border);white-space:nowrap;}
+    .tx-table th.sortable{cursor:pointer;user-select:none;}
+    .tx-table th.sortable:hover{color:var(--blue-main);background:#eef2ff;}
+    .sort-icon{margin-left:4px;opacity:.4;font-size:10px;}
+    .tx-table th.sort-asc .sort-icon::after{content:'▲';opacity:1;}
+    .tx-table th.sort-desc .sort-icon::after{content:'▼';opacity:1;}
+    .tx-table th:not(.sort-asc):not(.sort-desc) .sort-icon::after{content:'⇅';}
+    .date-input{border:1.5px solid transparent;border-radius:6px;padding:3px 6px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:600;color:var(--muted);background:transparent;width:100px;transition:all .15s;}
+    .date-input:hover{border-color:var(--border);background:white;color:var(--text);}
+    .date-input:focus{border-color:var(--blue-main);background:white;color:var(--text);outline:none;}
+    .date-input:disabled{opacity:.5;pointer-events:none;}
+    .tx-table td{padding:8px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle;}
+    .tx-table tr:last-child td{border-bottom:none;}
+    .tx-table tr:hover td{background:#fafbff;}
+    .tx-table tr.s-imported td{background:#f0fdf4;}
+    .tx-table tr.s-ignored td{opacity:.4;}
+    .type-debit{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--red-light);color:#b91c1c;}
+    .type-credit{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--green-light);color:#065f46;}
+    .amt-debit{color:var(--red);font-weight:700;white-space:nowrap;}
+    .amt-credit{color:var(--green);font-weight:700;white-space:nowrap;}
+    .dest-select{padding:4px 8px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:600;cursor:pointer;outline:none;background:white;max-width:160px;transition:border-color .15s;}
+    .dest-select:focus{border-color:var(--blue-main);}
+    .dest-select:disabled{opacity:.5;cursor:not-allowed;background:#f9fafb;}
+    .dest-select.d-cf{border-color:#6366f1;background:#eef2ff;color:#4338ca;}
+    .dest-select.d-cv{border-color:#f59e0b;background:#fef3c7;color:#92400e;}
+    .dest-select.d-leas{border-color:#14b8a6;background:#f0fdfa;color:#0f766e;}
+    .dest-select.d-ign{border-color:#d1d5db;background:#f9fafb;color:#9ca3af;}
+    .label-input{border:1.5px solid transparent;border-radius:6px;padding:4px 7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;color:var(--text);background:transparent;width:100%;min-width:140px;transition:all .15s;}
+    .label-input:hover{border-color:var(--border);background:white;}
+    .label-input:focus{border-color:var(--blue-main);background:white;outline:none;}
+    .label-input:disabled{opacity:.5;pointer-events:none;}
+    .dbl-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--orange-light);color:#92400e;cursor:pointer;}
+    .dbl-badge:hover{background:#fde68a;}
+    .new-badge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;background:var(--green-light);color:#065f46;}
+    .btn-ign{background:#f1f5f9;color:var(--muted);border:none;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;}
+    .btn-ign:hover{background:#e2e8f0;}
+    .btn-rule{background:#eef2ff;color:#4338ca;border:none;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:600;}
+    .btn-rule:hover{background:#e0e7ff;}
+    .btn-import-one{background:linear-gradient(135deg,#10b981,#34d399);color:white;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:700;transition:opacity .15s;}
+    .btn-import-one:hover{opacity:.85;}
+    .btn-import-one:disabled{opacity:.3;cursor:not-allowed;}
+    .act-row{display:flex;gap:4px;align-items:center;}
+    .import-footer{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;bottom:16px;box-shadow:0 8px 32px rgba(15,31,92,.12);}
+    .footer-info{font-size:13px;color:var(--muted);}
+    .footer-info strong{color:var(--text);}
+    .modal-overlay{position:fixed;inset:0;background:rgba(15,31,92,.45);backdrop-filter:blur(4px);z-index:200;display:none;align-items:center;justify-content:center;}
+    .modal-overlay.show{display:flex;}
+    .modal{background:white;border-radius:16px;width:100%;max-width:520px;box-shadow:0 24px 60px rgba(15,31,92,.2);overflow:hidden;}
+    .modal-head{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+    .modal-head h3{font-size:14px;font-weight:700;}
+    .modal-close{background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted);}
+    .modal-body{padding:18px 20px;max-height:65vh;overflow-y:auto;}
+    .modal-foot{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;}
+    .dbl-compare{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px;}
+    .dbl-side{border:2px solid var(--border);border-radius:10px;padding:12px;}
+    .dbl-side.bank{border-color:#6366f1;background:#eef2ff;}
+    .dbl-side.exist{border-color:#f59e0b;background:#fef3c7;}
+    .dbl-side-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;}
+    .dbl-side-lbl.bank{color:#4338ca;} .dbl-side-lbl.exist{color:#92400e;}
+    .dbl-field{font-size:12px;margin-bottom:4px;}
+    .dbl-field strong{font-weight:700;}
+    .rule-row{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f8faff;border-radius:7px;margin-bottom:5px;}
+    .rules-add{display:flex;gap:8px;margin-top:12px;}
+    .rules-add input,.rules-add select{flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;outline:none;}
+    .rules-add input:focus,.rules-add select:focus{border-color:var(--blue-main);}
+    .loader{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--muted);gap:12px;font-size:14px;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .spin{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--blue-main);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0;}
+    .empty-state{text-align:center;padding:60px;color:var(--muted);}
+    .toast{position:fixed;bottom:24px;right:24px;background:#1a1f36;color:white;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;transform:translateY(80px);opacity:0;transition:all .3s;}
+    .toast.show{transform:translateY(0);opacity:1;}
+    .toast.success{background:#10b981;} .toast.error{background:#ef4444;} .toast.warning{background:#f59e0b;color:#1a1f36;}
+    html,body{overflow-x:hidden;}
+    .hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#0f1f5c;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;}
+    .hamburger span{display:block;width:20px;height:2.5px;background:#fff;border-radius:2px;transition:all .25s;}
+    .nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;}
+    .nav-overlay.show{display:block;}
+    @media(max-width:768px){
+      .hamburger{display:flex!important;}
+      .sidebar{position:fixed!important;transform:translateX(-105%)!important;transition:transform .3s!important;z-index:1001!important;}
+      .sidebar.open{transform:translateX(0)!important;}
+      .main{margin-left:0!important;width:100vw!important;}
+      .topbar{padding:10px 10px 10px 62px!important;flex-wrap:wrap;gap:6px;}
+      .topbar-right{width:100%;flex-wrap:wrap;}
+      .content{padding:10px!important;}
+      .stats-row{grid-template-columns:repeat(3,1fr)!important;}
+      .dbl-compare{grid-template-columns:1fr!important;}
+    }
+  </style>
+</head>
+<body>
+
+<!-- nav.js gère la sidebar, le hamburger et l'overlay mobile -->
+
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>🗂 Transactions bancaires</h1>
+      <p id="topbar-sub">Choisissez la destination de chaque dépense dans Pilotage</p>
+    </div>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="window.location.href='banque.html'">← Banque</button>
+      <button class="btn btn-outline btn-sm" onclick="openRulesModal()">⚙️ Règles auto</button>
+      <button class="btn btn-success btn-sm" id="btn-import" onclick="importSelected()" disabled>⬇️ Importer (0)</button>
+    </div>
+  </div>
+
+  <div class="content" id="main-content">
+    <div class="loader"><div class="spin"></div>Chargement…</div>
+  </div>
+</div>
+
+<!-- MODAL DOUBLON -->
+<div class="modal-overlay" id="dblModal">
+  <div class="modal">
+    <div class="modal-head"><h3>⚠️ Entrée similaire dans Pilotage</h3><button class="modal-close" onclick="closeDblModal()">✕</button></div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--muted)">Une entrée proche existe déjà ce mois-ci. Que faire ?</p>
+      <div class="dbl-compare" id="dbl-compare"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline btn-sm" onclick="closeDblModal()">Annuler</button>
+      <button class="btn btn-outline btn-sm" onclick="dblKeepBoth()">Garder les deux</button>
+      <button class="btn btn-primary btn-sm" onclick="dblReplace()">Remplacer par la banque</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL RÈGLES -->
+<div class="modal-overlay" id="rulesModal">
+  <div class="modal" style="max-width:580px">
+    <div class="modal-head"><h3>⚙️ Règles de catégorisation automatique</h3><button class="modal-close" onclick="closeRulesModal()">✕</button></div>
+    <div class="modal-body" style="max-height:60vh;overflow-y:auto">
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Si le libellé contient le mot-clé → catégorie assignée automatiquement.</p>
+      <div id="rules-list"></div>
+      <div class="rules-add">
+        <input id="rule-kw" placeholder="Mot-clé (ex: EDF, LOYER…)"/>
+        <select id="rule-cat">
+          <option value="chargesFixe">🏗 Charge fixe</option>
+          <option value="chargesVar">📦 Charge variable</option>
+          <option value="leasing">🚗 Leasing</option>
+          <option value="ignore">🚫 Ignorer</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="addRule()">+ Ajouter</button>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn btn-success btn-sm" onclick="saveRulesAndClose()">💾 Sauvegarder</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { getFirestore, doc, setDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  const app = initializeApp({
+    apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain:"altiora-70599.firebaseapp.com",projectId:"altiora-70599",
+    storageBucket:"altiora-70599.firebasestorage.app",messagingSenderId:"120905555746",
+    appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+  });
+  const auth=getAuth(app), db=getFirestore(app);
+  window._auth=auth; window._db=db; window._doc=doc; window._setDoc=setDoc;
+  window._getDoc=getDoc; window._deleteDoc=deleteDoc; window._signOut=signOut;
+  onAuthStateChanged(auth, user => {
+    if(!user){window.location.href='index.html';return;}
+    window._uid=user.uid;
+    const name=user.displayName||user.email.split('@')[0];
+    document.getElementById('uname').textContent=name;
+    document.getElementById('av').textContent=name.charAt(0).toUpperCase();
+    window._firebaseReady=true;
+    window.initPage();
+  });
+</script>
+
+<script>
+const DEFAULT_RULES=[
+  {kw:'LOYER',cat:'chargesFixe'},{kw:'BAIL',cat:'chargesFixe'},{kw:'EDF',cat:'chargesFixe'},
+  {kw:'ENGIE',cat:'chargesFixe'},{kw:'GDF',cat:'chargesFixe'},{kw:'ORANGE',cat:'chargesFixe'},
+  {kw:'SFR',cat:'chargesFixe'},{kw:'BOUYGUES',cat:'chargesFixe'},{kw:'FREE',cat:'chargesFixe'},
+  {kw:'ASSURANCE',cat:'chargesFixe'},{kw:'MAIF',cat:'chargesFixe'},{kw:'AXA',cat:'chargesFixe'},
+  {kw:'URSSAF',cat:'chargesFixe'},{kw:'CIPAV',cat:'chargesFixe'},{kw:'MUTUELLE',cat:'chargesFixe'},
+  {kw:'COMPTABLE',cat:'chargesFixe'},{kw:'ABONNEMENT',cat:'chargesFixe'},{kw:'LOGICIEL',cat:'chargesFixe'},
+  {kw:'LOA',cat:'leasing'},{kw:'LLD',cat:'leasing'},{kw:'LEASING',cat:'leasing'},
+  {kw:'ALD',cat:'leasing'},{kw:'ARVAL',cat:'leasing'},{kw:'CREDIT BAIL',cat:'leasing'},
+  {kw:'RETRAIT',cat:'ignore'},{kw:'DAB',cat:'ignore'},{kw:'VIR EMIS',cat:'ignore'},
+  {kw:'VIREMENT INTERNE',cat:'ignore'},{kw:'SALAIRE',cat:'ignore'},{kw:'REMISE CHEQUE',cat:'ignore'},
+];
+const CAT_LABELS={chargesFixe:'🏗 Charge fixe',chargesVar:'📦 Charge variable',leasing:'🚗 Leasing',ignore:'🚫 Ignorer'};
+const CAT_CLS={chargesFixe:'d-cf',chargesVar:'d-cv',leasing:'d-leas',ignore:'d-ign'};
+
+let _txList=[], _pilData={}, _rules=[], _filter='all', _search='', _dblCtx=null;
+let _sortCol='date', _sortDir='desc'; // tri par défaut : date décroissante
+
+function sortBy(col){
+  if(_sortCol===col) _sortDir=_sortDir==='asc'?'desc':'asc';
+  else{_sortCol=col;_sortDir=col==='date'?'desc':'asc';}
+  renderAll();
+}
+
+function sortedTx(list){
+  return [...list].sort((a,b)=>{
+    let va, vb;
+    if(_sortCol==='date'){
+      // dd/mm/yyyy → sortable
+      const toTs = s => {
+        if(!s) return 0;
+        const p = s.split('/');
+        return p.length===3 ? new Date(`${p[2]}-${p[1]}-${p[0]}`).getTime() : 0;
+      };
+      va=toTs(a.date); vb=toTs(b.date);
+    } else if(_sortCol==='montant'){
+      va=a.montant; vb=b.montant;
+    } else if(_sortCol==='label'){
+      va=(a.customLabel||'').toLowerCase(); vb=(b.customLabel||'').toLowerCase();
+      return _sortDir==='asc'?va.localeCompare(vb):vb.localeCompare(va);
+    } else { return 0; }
+    return _sortDir==='asc'?va-vb:vb-va;
+  });
+}
+
+async function initPage(){
+  await loadRules();
+  await loadPending();
+}
+
+async function loadRules(){
+  try{
+    const snap=await window._getDoc(window._doc(window._db,'bank_rules',window._uid));
+    const custom=snap.exists()?(snap.data().rules||[]):[];
+    _rules=[...custom,...DEFAULT_RULES];
+  }catch(e){_rules=[...DEFAULT_RULES];}
+}
+
+async function loadPending(){
+  showLoader('Chargement des transactions…');
+  try{
+    const snap=await window._getDoc(window._doc(window._db,'bank_pending',window._uid));
+    if(!snap.exists()||!snap.data().transactions?.length){showEmpty();return;}
+    const raw=snap.data();
+    const allTx=raw.transactions||[];
+    const syncedAt=raw.syncedAt;
+
+    // Charger Pilotage existant pour détecter doublons
+    const months=[...new Set(allTx.map(t=>t.monthKey).filter(Boolean))];
+    for(const m of months){
+      const ds=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',m));
+      _pilData[m]=ds.exists()?ds.data():{};
+    }
+
+    _txList=allTx.map((tx,idx)=>{
+      // Déterminer le sens : GoCardless renvoie montant négatif pour débit
+      const raw_amt=parseFloat(tx.montant||0);
+      const isDebit=tx.type==='debit'||raw_amt<0;
+      const montant=Math.abs(raw_amt);
+      const cat=isDebit?applyCat(tx.label):null;
+      return{
+        id:idx, date:tx.date||'', monthKey:tx.monthKey||'',
+        label:tx.label||'', customLabel:tx.label||'',
+        customDate:tx.date||'',
+        montant, type:isDebit?'debit':'credit',
+        accountName:tx.accountName||'', accountIban:tx.accountIban||'',
+        bankTxId:tx.bankTxId||('bk_'+idx),
+        cat, status:'pending',
+        doublonInfo:isDebit?detectDbl(tx,montant):null,
+        replaceMode:false,
+      };
+    });
+
+    if(syncedAt){
+      const d=new Date(syncedAt);
+      document.getElementById('topbar-sub').textContent=
+        `Sync du ${d.toLocaleDateString('fr-FR')} à ${d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})} · ${allTx.length} transactions`;
+    }
+    renderAll();
+  }catch(e){showError('Erreur : '+e.message);}
+}
+
+function applyCat(label){
+  if(!label) return 'chargesVar';
+  const up=label.toUpperCase();
+  for(const r of _rules) if(up.includes(r.kw.toUpperCase())) return r.cat;
+  return 'chargesVar';
+}
+
+function detectDbl(tx,montant){
+  const m=_pilData[tx.monthKey];
+  if(!m) return null;
+  for(const sec of ['chargesFixe','chargesVar','leasing']){
+    for(const r of (m[sec]||[])){
+      const exA=parseFloat(r.montantHT||r.montant||0);
+      const sameAmt=Math.abs(exA-montant)<0.5;
+      const sameLbl=(r.fournisseur||'').toUpperCase().includes((tx.label||'').substring(0,5).toUpperCase())&&tx.label.length>4;
+      if(sameAmt||sameLbl) return{existing:r,section:sec};
+    }
+  }
+  return null;
+}
+
+function renderAll(){
+  const content=document.getElementById('main-content');
+  const debits=_txList.filter(t=>t.type==='debit');
+  const credits=_txList.filter(t=>t.type==='credit');
+  const pending=debits.filter(t=>t.status==='pending');
+  const imported=debits.filter(t=>t.status==='imported');
+  const ignored=debits.filter(t=>t.status==='ignored');
+  const dblCount=debits.filter(t=>t.doublonInfo&&t.status==='pending').length;
+  const readyToImport=debits.filter(t=>t.status==='pending'&&t.cat&&t.cat!=='ignore');
+  const totalDebit=debits.reduce((s,t)=>s+t.montant,0);
+  const totalCredit=credits.reduce((s,t)=>s+t.montant,0);
+
+  const btn=document.getElementById('btn-import');
+  if(btn){btn.disabled=readyToImport.length===0;btn.textContent=`⬇️ Importer (${readyToImport.length})`;}
+
+  let filtered=_txList.filter(t=>{
+    if(_filter==='debit')    return t.type==='debit';
+    if(_filter==='credit')   return t.type==='credit';
+    if(_filter==='pending')  return t.type==='debit'&&t.status==='pending';
+    if(_filter==='imported') return t.type==='debit'&&t.status==='imported';
+    if(_filter==='ignored')  return t.type==='debit'&&t.status==='ignored';
+    if(_filter==='doublon')  return t.doublonInfo&&t.status==='pending';
+    return true;
+  });
+  if(_search){const q=_search.toLowerCase();filtered=filtered.filter(t=>t.customLabel.toLowerCase().includes(q)||(t.accountName||'').toLowerCase().includes(q));}
+
+  // Appliquer tri
+  filtered = sortedTx(filtered);
+
+  const thCls = col => {
+    let c = 'sortable';
+    if(_sortCol===col) c += _sortDir==='asc'?' sort-asc':' sort-desc';
+    return c;
+  };
+
+  content.innerHTML=`
+    <div class="stats-row">
+      <div class="stat-box"><div class="stat-val blue">${_txList.length}</div><div class="stat-lbl">Transactions</div></div>
+      <div class="stat-box"><div class="stat-val red">−${fmt(totalDebit)}</div><div class="stat-lbl">Total dépenses</div></div>
+      <div class="stat-box"><div class="stat-val green">+${fmt(totalCredit)}</div><div class="stat-lbl">Total encaissements</div></div>
+      <div class="stat-box"><div class="stat-val orange">${pending.length}</div><div class="stat-lbl">À traiter</div></div>
+      <div class="stat-box"><div class="stat-val ${dblCount>0?'red':'muted'}">${dblCount}</div><div class="stat-lbl">Doublons</div></div>
+      <div class="stat-box"><div class="stat-val green">${imported.length}</div><div class="stat-lbl">Importées</div></div>
+    </div>
+
+    <div class="filters-bar">
+      <button class="filter-btn ${_filter==='all'?'active':''}" onclick="setFilter('all')">Tout (${_txList.length})</button>
+      <button class="filter-btn f-debit ${_filter==='debit'?'active':''}" onclick="setFilter('debit')">🔴 Dépenses (${debits.length})</button>
+      <button class="filter-btn f-credit ${_filter==='credit'?'active':''}" onclick="setFilter('credit')">🟢 Encaissements (${credits.length})</button>
+      <div class="filter-sep"></div>
+      <button class="filter-btn ${_filter==='pending'?'active':''}" onclick="setFilter('pending')">En attente (${pending.length})</button>
+      <button class="filter-btn ${_filter==='imported'?'active':''}" onclick="setFilter('imported')">✅ Importées (${imported.length})</button>
+      <button class="filter-btn ${_filter==='ignored'?'active':''}" onclick="setFilter('ignored')">Ignorées (${ignored.length})</button>
+      ${dblCount>0?`<button class="filter-btn ${_filter==='doublon'?'active':''}" style="border-color:var(--red);color:var(--red)" onclick="setFilter('doublon')">⚠️ Doublons (${dblCount})</button>`:''}
+      <div class="filter-sep"></div>
+      <input class="search-input" placeholder="🔍 Rechercher…" value="${_search}" oninput="setSearch(this.value)"/>
+      <div style="margin-left:auto;display:flex;gap:6px">
+        <button class="btn btn-outline btn-xs" onclick="autoAll()">🤖 Auto-catégoriser</button>
+        <button class="btn btn-outline btn-xs" onclick="ignoreAllPending()">🚫 Tout ignorer</button>
+      </div>
+    </div>
+
+    <div class="table-card">
+      <div class="table-head">
+        <div class="table-title">📋 ${filtered.length} transaction(s)</div>
+        <div style="font-size:11px;color:var(--muted)">Les encaissements sont visibles mais ne se mappent pas ici (gérés dans Pilotage directement).</div>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="tx-table">
+          <thead><tr>
+            <th class="${thCls('date')}" onclick="sortBy('date')">Date<span class="sort-icon"></span></th>
+            <th class="${thCls('label')}" onclick="sortBy('label')">Libellé banque<span class="sort-icon"></span></th>
+            <th>Libellé Pilotage</th>
+            <th>Compte</th>
+            <th class="${thCls('montant')}" style="text-align:right" onclick="sortBy('montant')">Montant<span class="sort-icon"></span></th>
+            <th>→ Pilotage</th>
+            <th>Statut</th>
+            <th>Actions</th>
+          </tr></thead>
+          <tbody>
+            ${filtered.length===0
+              ?`<tr><td colspan="9" style="text-align:center;padding:32px;color:var(--muted)">Aucune transaction dans ce filtre.</td></tr>`
+              :filtered.map(tx=>renderRow(tx)).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="import-footer">
+      <div class="footer-info">
+        <strong>${readyToImport.length}</strong> dépense(s) prête(s) ·
+        Total : <strong>−${fmt(readyToImport.reduce((s,t)=>s+t.montant,0))}</strong>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-outline btn-sm" onclick="window.location.href='banque.html'">← Annuler</button>
+        <button class="btn btn-success" onclick="importSelected()" ${readyToImport.length===0?'disabled':''}>
+          ⬇️ Importer ${readyToImport.length} transaction(s) dans Pilotage
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderRow(tx){
+  const rowCls=tx.status==='imported'?'s-imported':tx.status==='ignored'?'s-ignored':'';
+  const amtCls=tx.type==='credit'?'amt-credit':'amt-debit';
+  const amtSign=tx.type==='credit'?'+':'−';
+  const typeBadge=tx.type==='credit'
+    ?`<span class="type-credit">Encaissement</span>`
+    :`<span class="type-debit">Dépense</span>`;
+
+  let destHtml='';
+  if(tx.type==='credit'){
+    destHtml=`<span style="font-size:11px;color:var(--muted);font-style:italic">—</span>`;
+  } else {
+    const cls=tx.cat?CAT_CLS[tx.cat]||'':'';
+    const dis=tx.status!=='pending'?'disabled':'';
+    destHtml=`<select class="dest-select ${cls}" id="dest-${tx.id}" onchange="updateCat(${tx.id},this.value)" ${dis}>
+      <option value="">— Choisir —</option>
+      <option value="chargesFixe" ${tx.cat==='chargesFixe'?'selected':''}>🏗 Charge fixe</option>
+      <option value="chargesVar"  ${tx.cat==='chargesVar'?'selected':''}>📦 Charge variable</option>
+      <option value="leasing"     ${tx.cat==='leasing'?'selected':''}>🚗 Leasing</option>
+      <option value="ignore"      ${tx.cat==='ignore'?'selected':''}>🚫 Ignorer</option>
+    </select>`;
+  }
+
+  let statusHtml='';
+  if(tx.type==='credit') statusHtml=`<span style="font-size:11px;color:var(--muted)">—</span>`;
+  else if(tx.status==='imported') statusHtml=`<span style="font-size:11px;font-weight:700;color:var(--green)">✅ Importée</span>`;
+  else if(tx.status==='ignored')  statusHtml=`<span style="font-size:11px;color:var(--muted)">🚫 Ignorée</span>`;
+  else if(tx.doublonInfo) statusHtml=`<span class="dbl-badge" onclick="openDblModal(${tx.id})">⚠️ Doublon</span>`;
+  else statusHtml=`<span class="new-badge">Nouvelle</span>`;
+
+  let actHtml='';
+  if(tx.type==='credit') actHtml=`<span style="color:var(--muted)">—</span>`;
+  else if(tx.status==='imported') actHtml=`<button class="btn-ign" onclick="unimport(${tx.id})" title="Annuler l'import">↩</button>`;
+  else if(tx.status==='ignored')  actHtml=`<button class="btn-ign" onclick="restore(${tx.id})">↩ Rétablir</button>`;
+  else actHtml=`<div class="act-row">
+    <button class="btn-import-one" onclick="importOne(${tx.id})" title="Importer cette ligne dans Pilotage" ${!tx.cat||tx.cat==='ignore'?'disabled':''}>⬇️</button>
+    <button class="btn-ign" onclick="ignoreOne(${tx.id})" title="Ignorer">🚫</button>
+    <button class="btn-rule" onclick="learnRule(${tx.id})" title="Mémoriser règle">🧠</button>
+  </div>`;
+
+  return `<tr class="${rowCls}" id="row-${tx.id}">
+    <td style="white-space:nowrap;color:var(--muted);font-size:11px">${tx.date}</td>
+    <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escHtml(tx.label)}">${typeBadge} <span style="font-size:11px;color:var(--muted)">${escHtml(tx.label)}</span></td>
+    <td><input class="label-input" value="${escHtml(tx.customLabel)}" oninput="updateLabel(${tx.id},this.value)" placeholder="Libellé dans Pilotage" ${tx.status!=='pending'?'disabled':''}/></td>
+    <td style="font-size:11px;color:var(--muted);white-space:nowrap">${tx.accountName||'—'}</td>
+    <td style="text-align:right" class="${amtCls}">${amtSign}${fmt(tx.montant)}</td>
+    <td>${destHtml}</td>
+    <td>${statusHtml}</td>
+    <td>${actHtml}</td>
+  </tr>`;
+}
+
+function updateLabel(id,v){_txList[id].customLabel=v;}
+function updateDate(id,v){
+  _txList[id].customDate=v;
+  // Mettre à jour monthKey si date valide dd/mm/yyyy
+  const p=v.split('/');
+  if(p.length===3&&p[2].length===4){
+    const [d,m,y]=[parseInt(p[0]),parseInt(p[1]),parseInt(p[2])];
+    if(d>0&&m>0&&m<=12&&y>2000){
+      _txList[id].monthKey=`${y}-${String(m).padStart(2,'0')}`;
+    }
+  }
+}
+function updateCat(id,v){
+  _txList[id].cat=v||null;
+  const sel=document.getElementById('dest-'+id);
+  if(sel) sel.className='dest-select '+(v?CAT_CLS[v]||'':'');
+  // Refresh bouton
+  const ready=_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore').length;
+  const btn=document.getElementById('btn-import');
+  if(btn){btn.disabled=ready===0;btn.textContent=`⬇️ Importer (${ready})`;}
+}
+function ignoreOne(id){_txList[id].status='ignored';renderAll();}
+function restore(id){_txList[id].status='pending';renderAll();}
+function unimport(id){_txList[id].status='pending';renderAll();}
+function ignoreAllPending(){_txList.filter(t=>t.type==='debit'&&t.status==='pending').forEach(t=>t.status='ignored');renderAll();}
+function autoAll(){_txList.filter(t=>t.type==='debit'&&t.status==='pending').forEach(t=>t.cat=applyCat(t.customLabel));renderAll();showToast('🤖 Catégorisation appliquée','success');}
+function setFilter(f){_filter=f;renderAll();}
+function setSearch(q){_search=q;renderAll();}
+
+function learnRule(id){
+  const tx=_txList[id];
+  const words=(tx.customLabel||'').split(/\s+/).filter(w=>w.length>3);
+  if(!words.length){showToast('Libellé trop court','warning');return;}
+  const kw=words[0].toUpperCase();
+  _rules=_rules.filter(r=>r.kw.toUpperCase()!==kw);
+  _rules.unshift({kw,cat:tx.cat||'chargesVar',custom:true});
+  _txList.filter(t=>t.type==='debit'&&t.status==='pending').forEach(t=>t.cat=applyCat(t.customLabel));
+  showToast(`🧠 Règle : "${kw}" → ${CAT_LABELS[tx.cat]||tx.cat}`,'success');
+  renderAll();
+}
+
+function openDblModal(id){
+  _dblCtx=id;
+  const tx=_txList[id],dbl=tx.doublonInfo;
+  document.getElementById('dbl-compare').innerHTML=`
+    <div class="dbl-side bank"><div class="dbl-side-lbl bank">🏦 Transaction bancaire</div>
+      <div class="dbl-field"><strong>Date :</strong> ${tx.date}</div>
+      <div class="dbl-field"><strong>Libellé :</strong> ${tx.customLabel}</div>
+      <div class="dbl-field"><strong>Montant :</strong> −${fmt(tx.montant)}</div>
+      <div class="dbl-field"><strong>Destination :</strong> ${CAT_LABELS[tx.cat]||'—'}</div>
+    </div>
+    <div class="dbl-side exist"><div class="dbl-side-lbl exist">📋 Déjà dans Pilotage</div>
+      <div class="dbl-field"><strong>Fournisseur :</strong> ${dbl.existing.fournisseur||'—'}</div>
+      <div class="dbl-field"><strong>Montant HT :</strong> ${fmt(parseFloat(dbl.existing.montantHT||0))}</div>
+      <div class="dbl-field"><strong>Section :</strong> ${CAT_LABELS[dbl.section]||dbl.section}</div>
+    </div>`;
+  document.getElementById('dblModal').classList.add('show');
+}
+function closeDblModal(){document.getElementById('dblModal').classList.remove('show');_dblCtx=null;}
+function dblKeepBoth(){if(_dblCtx===null)return;_txList[_dblCtx].doublonInfo=null;renderAll();closeDblModal();}
+function dblReplace(){if(_dblCtx===null)return;_txList[_dblCtx].replaceMode=true;_txList[_dblCtx].doublonInfo=null;renderAll();closeDblModal();}
+
+async function importOne(id){
+  const tx = _txList[id];
+  if(!tx || tx.type!=='debit' || tx.status!=='pending' || !tx.cat || tx.cat==='ignore') return;
+
+  // Désactiver le bouton pendant l'import
+  const btn = document.querySelector(`#row-${id} .btn-import-one`);
+  if(btn){ btn.disabled=true; btn.textContent='⏳'; }
+
+  try{
+    const mk = tx.monthKey;
+    const docRef = window._doc(window._db,'pilotage',window._uid,'months',mk);
+    const snap   = await window._getDoc(docRef);
+    const data   = snap.exists()?{...snap.data()}:{chargesFixe:[],chargesVar:[],leasing:[],credits:[],ca:[]};
+    const sec    = tx.cat;
+    if(!data[sec]) data[sec]=[];
+
+    // Dédupliquer par bankTxId
+    if(data[sec].some(r=>r.bankTxId===tx.bankTxId)){
+      showToast('⚠️ Déjà importée','warning');
+      if(btn){btn.disabled=false;btn.textContent='⬇️';}
+      return;
+    }
+
+    // Remplacer doublon si demandé
+    if(tx.replaceMode && tx.doublonInfo){
+      data[tx.doublonInfo.section]=(data[tx.doublonInfo.section]||[]).filter(r=>Math.abs(parseFloat(r.montantHT||0)-tx.montant)>=0.5);
+    }
+
+    data[sec].push({
+      fournisseur: tx.customLabel,
+      date:        tx.customDate || tx.date || '',
+      type:        sec==='chargesFixe'?'Charge fixe':sec==='leasing'?'Leasing / LOA':'Charge variable',
+      montantHT:   tx.montant.toFixed(2),
+      tvaRate:20, deductible:'Oui', pointe:'Non',
+      source:'bank_sync', bankTxId:tx.bankTxId,
+      importedAt:  new Date().toISOString()
+    });
+
+    await window._setDoc(docRef, data, {merge:true});
+
+    tx.status = 'imported';
+    // Mettre à jour juste cette ligne sans re-render toute la table
+    const row = document.getElementById('row-'+id);
+    if(row){ row.className='s-imported'; }
+    const actCell = row?.querySelector('.act-row');
+    if(actCell) actCell.outerHTML=`<button class="btn-ign" onclick="unimport(${id})" title="Annuler l'import">↩</button>`;
+    const statCell = row?.cells[6];
+    if(statCell) statCell.innerHTML=`<span style="font-size:11px;font-weight:700;color:var(--green)">✅ Importée</span>`;
+
+    // Mettre à jour compteurs
+    const readyN = _txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore').length;
+    const impN   = _txList.filter(t=>t.status==='imported').length;
+    const btnTop = document.getElementById('btn-import');
+    if(btnTop){btnTop.disabled=readyN===0;btnTop.textContent=`⬇️ Importer (${readyN})`;}
+    // Stats
+    const statImported = document.querySelector('.stat-val.green:last-of-type');
+
+    showToast(`✅ "${tx.customLabel}" importée dans Pilotage`,'success');
+  }catch(e){
+    showToast('❌ Erreur : '+e.message,'error');
+    if(btn){btn.disabled=false;btn.textContent='⬇️';}
+  }
+}
+
+
+async function importSelected(){
+  const toImport=_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore');
+  if(!toImport.length) return;
+  const btn=document.getElementById('btn-import');
+  btn.disabled=true; btn.textContent='⏳ Import…';
+  try{
+    const byMonth={};
+    for(const tx of toImport){
+      if(!byMonth[tx.monthKey]) byMonth[tx.monthKey]=[];
+      byMonth[tx.monthKey].push(tx);
+    }
+    let done=0;
+    for(const[mk,list] of Object.entries(byMonth)){
+      const docRef=window._doc(window._db,'pilotage',window._uid,'months',mk);
+      const snap=await window._getDoc(docRef);
+      const data=snap.exists()?{...snap.data()}:{chargesFixe:[],chargesVar:[],leasing:[],credits:[],ca:[]};
+      for(const tx of list){
+        const sec=tx.cat;
+        if(!data[sec]) data[sec]=[];
+        // Supprimer doublon si remplacement
+        if(tx.replaceMode&&tx.doublonInfo){
+          data[tx.doublonInfo.section]=(data[tx.doublonInfo.section]||[]).filter(r=>Math.abs(parseFloat(r.montantHT||0)-tx.montant)>=0.5);
+        }
+        // Dédupliquer par bankTxId
+        if((data[sec]||[]).some(r=>r.bankTxId===tx.bankTxId)) continue;
+        const entry={
+          fournisseur:tx.customLabel,
+          date: tx.customDate || tx.date || '',
+          type:sec==='chargesFixe'?'Charge fixe':sec==='leasing'?'Leasing / LOA':'Charge variable',
+          montantHT:tx.montant.toFixed(2),
+          tvaRate:20, deductible:'Oui', pointe:'Non',
+          source:'bank_sync', bankTxId:tx.bankTxId,
+          importedAt:new Date().toISOString()
+        };
+        if(sec==='leasing'){entry.dateDebut='';entry.dateFin='';}
+        data[sec].push(entry);
+        tx.status='imported';
+        done++;
+      }
+      await window._setDoc(docRef,data,{merge:true});
+    }
+    // Vider bank_pending
+    await window._deleteDoc(window._doc(window._db,'bank_pending',window._uid));
+    // Sauvegarder règles custom
+    const custom=_rules.filter(r=>r.custom);
+    if(custom.length) await window._setDoc(window._doc(window._db,'bank_rules',window._uid),{rules:custom});
+    showToast(`✅ ${done} transaction(s) importées dans Pilotage !`,'success');
+    renderAll();
+    setTimeout(()=>{if(confirm(`✅ ${done} transactions importées.\nOuvrir Pilotage pour vérifier ?`)) window.location.href='pilotage.html';},1200);
+  }catch(e){
+    showToast('❌ Erreur : '+e.message,'error');
+    btn.disabled=false; btn.textContent=`⬇️ Importer (${_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore').length})`;
+  }
+}
+
+function openRulesModal(){renderRulesList();document.getElementById('rulesModal').classList.add('show');}
+function closeRulesModal(){document.getElementById('rulesModal').classList.remove('show');}
+function renderRulesList(){
+  const el=document.getElementById('rules-list');if(!el)return;
+  const custom=_rules.filter(r=>r.custom),defs=_rules.filter(r=>!r.custom);
+  const clr={chargesFixe:'#4338ca',chargesVar:'#92400e',leasing:'#0f766e',ignore:'#6b7280'};
+  let html='';
+  if(custom.length){
+    html+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Vos règles (${custom.length})</div>`;
+    html+=custom.map((r,i)=>`<div class="rule-row"><span style="flex:1;font-size:12px;font-weight:700">${r.kw}</span><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;background:#eef2ff;color:${clr[r.cat]||'#374151'}">${CAT_LABELS[r.cat]||r.cat}</span><button onclick="removeRule(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></div>`).join('');
+  }
+  html+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:10px 0 8px">Règles par défaut (${defs.length})</div><div style="display:flex;flex-wrap:wrap;gap:5px">${defs.map(r=>`<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:#f1f5f9;color:${clr[r.cat]||'#374151'}">${r.kw}</span>`).join('')}</div>`;
+  el.innerHTML=html;
+}
+function addRule(){
+  const kw=document.getElementById('rule-kw').value.trim().toUpperCase();
+  const cat=document.getElementById('rule-cat').value;
+  if(!kw) return;
+  _rules=_rules.filter(r=>r.kw.toUpperCase()!==kw);
+  _rules.unshift({kw,cat,custom:true});
+  document.getElementById('rule-kw').value='';
+  renderRulesList();
+  _txList.filter(t=>t.type==='debit'&&t.status==='pending').forEach(t=>t.cat=applyCat(t.customLabel));
+  renderAll();
+}
+function removeRule(i){_rules.splice(i,1);renderRulesList();}
+async function saveRulesAndClose(){
+  const custom=_rules.filter(r=>r.custom);
+  await window._setDoc(window._doc(window._db,'bank_rules',window._uid),{rules:custom});
+  showToast('✅ Règles sauvegardées !','success');
+  closeRulesModal();
+}
+
+function fmt(n){return parseFloat(n||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
+function escHtml(s){return(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function showLoader(msg){document.getElementById('main-content').innerHTML=`<div class="loader"><div class="spin"></div>${msg}</div>`;}
+function showError(msg){document.getElementById('main-content').innerHTML=`<div class="empty-state"><div style="font-size:48px">❌</div><p style="color:var(--red);margin-top:12px">${msg}</p><button class="btn btn-outline" style="margin-top:16px" onclick="window.location.href='banque.html'">← Retour</button></div>`;}
+function showEmpty(){document.getElementById('main-content').innerHTML=`<div class="empty-state"><div style="font-size:48px">✅</div><h3 style="font-size:16px;font-weight:700;margin:12px 0 8px">Aucune transaction en attente</h3><p style="font-size:13px;color:var(--muted)">Synchronisez votre banque pour charger les transactions.</p><button class="btn btn-primary" style="margin-top:16px" onclick="window.location.href='banque.html'">← Retour Banque</button></div>`;}
+function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+type;setTimeout(()=>t.className='toast',3500);}
+// nav.js gère le hamburger mobile
+async function handleLogout(){await window._signOut(window._auth);window.location.href='index.html';}
+
+window.initPage=initPage;window.setFilter=setFilter;window.setSearch=setSearch;
+window.updateLabel=updateLabel;window.updateDate=updateDate;window.updateCat=updateCat;
+window.sortBy=sortBy;
+window.importOne=importOne;
+window.ignoreOne=ignoreOne;window.restore=restore;window.unimport=unimport;
+window.ignoreAllPending=ignoreAllPending;window.autoAll=autoAll;
+window.learnRule=learnRule;window.importSelected=importSelected;
+window.openDblModal=openDblModal;window.closeDblModal=closeDblModal;
+window.dblKeepBoth=dblKeepBoth;window.dblReplace=dblReplace;
+window.openRulesModal=openRulesModal;window.closeRulesModal=closeRulesModal;
+window.addRule=addRule;window.removeRule=removeRule;window.saveRulesAndClose=saveRulesAndClose;
+window.handleLogout=handleLogout;
+</script>
+<script src="nav.js"></script>
+</body>
+</html>

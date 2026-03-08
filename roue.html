@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+  <title>🎡 Roue cadeaux</title>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#0a0a12;--card:#13131f;--border:rgba(255,255,255,0.08);
+      --text:#f0f0f8;--muted:rgba(255,255,255,0.4);
+      --gold:#f5c842;--gold2:#ff9f1c;--green:#10b981;--blue:#4f7ef8;--red:#ef4444;
+      --radius:18px;
+    }
+    html,body{min-height:100vh;min-height:100dvh;background:var(--bg);color:var(--text);font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;overflow-x:hidden;}
+
+    /* ── FOND ÉTOILÉ ── */
+    body::before{
+      content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -10%,rgba(245,200,66,0.12),transparent),
+        radial-gradient(ellipse 60% 40% at 80% 80%,rgba(79,126,248,0.08),transparent);
+    }
+    .stars{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden;}
+    .star{position:absolute;width:2px;height:2px;background:rgba(255,255,255,0.6);border-radius:50%;animation:twinkle var(--d,3s) var(--delay,0s) infinite ease-in-out;}
+    @keyframes twinkle{0%,100%{opacity:.2;transform:scale(1)}50%{opacity:1;transform:scale(1.4)}}
+
+    /* ── LAYOUT ── */
+    .page{position:relative;z-index:1;min-height:100dvh;display:flex;flex-direction:column;align-items:center;padding:24px 16px 40px;}
+
+    /* ── SHOP HEADER ── */
+    .shop-header{text-align:center;margin-bottom:28px;animation:fadeDown .5s ease both;}
+    .shop-logo{width:60px;height:60px;border-radius:16px;background:linear-gradient(135deg,var(--gold),var(--gold2));display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto 10px;box-shadow:0 8px 24px rgba(245,200,66,0.3);}
+    .shop-name{font-family:'Baloo 2',sans-serif;font-size:20px;font-weight:800;color:var(--text);}
+    .shop-sub{font-size:12px;color:var(--muted);margin-top:3px;}
+
+    /* ── WHEEL WRAPPER ── */
+    .wheel-section{display:flex;flex-direction:column;align-items:center;gap:0;animation:fadeUp .5s .1s ease both;}
+    .wheel-outer{position:relative;width:min(340px,90vw);height:min(340px,90vw);}
+
+    /* Flèche indicateur */
+    .wheel-arrow{
+      position:absolute;top:-18px;left:50%;transform:translateX(-50%);
+      z-index:10;
+      width:0;height:0;
+      border-left:14px solid transparent;border-right:14px solid transparent;
+      border-top:28px solid var(--gold);
+      filter:drop-shadow(0 4px 12px rgba(245,200,66,0.6));
+    }
+    .wheel-arrow::after{
+      content:'';position:absolute;top:-32px;left:50%;transform:translateX(-50%);
+      width:20px;height:20px;background:var(--gold);border-radius:50%;
+      box-shadow:0 0 16px rgba(245,200,66,0.8);
+    }
+
+    canvas#wheelCanvas{
+      width:100%;height:100%;border-radius:50%;
+      box-shadow:0 0 0 6px rgba(245,200,66,0.15),0 0 0 12px rgba(245,200,66,0.06),0 20px 60px rgba(0,0,0,0.5);
+    }
+
+    /* Bouton central */
+    .spin-btn{
+      position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+      width:68px;height:68px;border-radius:50%;
+      background:linear-gradient(135deg,var(--gold),var(--gold2));
+      border:4px solid var(--bg);
+      display:flex;align-items:center;justify-content:center;
+      font-family:'Baloo 2',sans-serif;font-size:11px;font-weight:900;color:#1a1000;
+      cursor:pointer;z-index:5;
+      box-shadow:0 4px 20px rgba(245,200,66,0.5),inset 0 1px 0 rgba(255,255,255,0.3);
+      transition:transform .15s,box-shadow .15s;
+      text-align:center;line-height:1.2;
+    }
+    .spin-btn:hover:not(:disabled){transform:translate(-50%,-50%) scale(1.06);box-shadow:0 6px 28px rgba(245,200,66,0.7),inset 0 1px 0 rgba(255,255,255,0.3);}
+    .spin-btn:disabled{opacity:.5;cursor:not-allowed;}
+
+    /* ── TOURS RESTANTS ── */
+    .turns-bar{
+      display:flex;align-items:center;gap:10px;
+      margin-top:20px;padding:10px 20px;
+      background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:99px;
+      font-size:13px;
+    }
+    .turn-dot{width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,0.12);border:1.5px solid rgba(255,255,255,0.15);transition:all .3s;}
+    .turn-dot.active{background:var(--gold);border-color:var(--gold);box-shadow:0 0 8px rgba(245,200,66,0.6);}
+    .turns-label{font-size:12px;color:var(--muted);}
+
+    /* ── GOOGLE CTA ── */
+    .google-cta{
+      margin-top:16px;width:100%;max-width:360px;
+      background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:var(--radius);
+      padding:14px 16px;display:flex;align-items:center;gap:12px;cursor:pointer;
+      transition:background .2s,border-color .2s;text-decoration:none;
+      animation:fadeUp .5s .2s ease both;
+    }
+    .google-cta:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.2);}
+    .google-cta.used{opacity:.4;pointer-events:none;}
+    .gcta-icon{width:40px;height:40px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:22px;background:rgba(255,255,255,0.07);border-radius:10px;}
+    .gcta-text{flex:1;}
+    .gcta-title{font-size:13px;font-weight:700;color:var(--text);}
+    .gcta-sub{font-size:11px;color:var(--muted);margin-top:1px;}
+    .gcta-badge{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#1a1000;font-size:11px;font-weight:800;padding:4px 10px;border-radius:99px;flex-shrink:0;}
+
+    /* ── RÉSULTAT ── */
+    .result-overlay{
+      position:fixed;inset:0;z-index:100;
+      background:rgba(0,0,0,0.85);backdrop-filter:blur(8px);
+      display:flex;align-items:center;justify-content:center;padding:20px;
+      opacity:0;pointer-events:none;transition:opacity .3s;
+    }
+    .result-overlay.show{opacity:1;pointer-events:all;}
+    .result-card{
+      background:var(--card);border:1px solid var(--border);border-radius:24px;
+      padding:32px 28px;text-align:center;max-width:340px;width:100%;
+      transform:scale(.85) translateY(20px);transition:transform .4s cubic-bezier(.34,1.56,.64,1);
+    }
+    .result-overlay.show .result-card{transform:scale(1) translateY(0);}
+    .result-emoji{font-size:56px;margin-bottom:12px;display:block;animation:popIn .5s .1s cubic-bezier(.34,1.56,.64,1) both;}
+    @keyframes popIn{from{transform:scale(0) rotate(-20deg)}to{transform:scale(1) rotate(0)}}
+    .result-title{font-family:'Baloo 2',sans-serif;font-size:22px;font-weight:900;margin-bottom:6px;}
+    .result-title.win{color:var(--gold);}
+    .result-title.lose{color:var(--muted);}
+    .result-prize{font-size:18px;font-weight:700;color:var(--text);margin:10px 0;}
+    .result-code{
+      background:rgba(245,200,66,0.1);border:1.5px dashed var(--gold);border-radius:12px;
+      padding:12px 20px;margin:14px 0;
+      font-family:monospace;font-size:22px;font-weight:800;color:var(--gold);letter-spacing:4px;
+    }
+    .result-pts{
+      background:rgba(79,126,248,0.1);border:1px solid rgba(79,126,248,0.3);border-radius:12px;
+      padding:12px 20px;margin:14px 0;font-size:15px;font-weight:700;color:var(--blue);
+    }
+    .result-sub{font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:16px;}
+    .result-close{
+      width:100%;padding:13px;border:none;border-radius:12px;
+      background:linear-gradient(135deg,var(--gold),var(--gold2));
+      font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:700;color:#1a1000;
+      cursor:pointer;transition:opacity .15s;
+    }
+    .result-close:hover{opacity:.9;}
+
+    /* ── CONFETTIS ── */
+    .confetti-wrap{position:fixed;inset:0;pointer-events:none;z-index:99;overflow:hidden;}
+    .confetti-piece{
+      position:absolute;top:-20px;width:10px;height:12px;
+      border-radius:2px;opacity:0;
+      animation:confettiFall var(--dur,3s) var(--del,0s) ease-in both;
+    }
+    @keyframes confettiFall{
+      0%{opacity:1;transform:translateY(0) rotate(0deg);}
+      100%{opacity:0;transform:translateY(110vh) rotate(720deg);}
+    }
+
+    /* ── LOADER ── */
+    .loader-wrap{display:flex;align-items:center;justify-content:center;min-height:60vh;flex-direction:column;gap:14px;}
+    .spinner{width:40px;height:40px;border:3px solid rgba(255,255,255,0.1);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .loader-text{font-size:13px;color:var(--muted);}
+
+    /* ── ERREUR ── */
+    .error-wrap{display:flex;align-items:center;justify-content:center;min-height:60vh;flex-direction:column;gap:12px;text-align:center;padding:20px;}
+    .error-icon{font-size:48px;}
+
+    /* ── PLAYED ALREADY ── */
+    .played-card{
+      background:var(--card);border:1px solid var(--border);border-radius:24px;
+      padding:28px 24px;text-align:center;max-width:340px;width:100%;margin-top:16px;
+      animation:fadeUp .5s ease both;
+    }
+
+    /* ── ANIMATIONS ── */
+    @keyframes fadeDown{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+
+    /* ── HISTORIQUE ── */
+    .history-card{
+      margin-top:20px;width:100%;max-width:360px;
+      background:rgba(255,255,255,0.03);border:1px solid var(--border);border-radius:var(--radius);
+      padding:14px 16px;animation:fadeUp .5s .3s ease both;
+    }
+    .history-title{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;}
+    .history-item{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.05);font-size:12px;}
+    .history-item:last-child{border-bottom:none;}
+  </style>
+</head>
+<body>
+
+<!-- Étoiles -->
+<div class="stars" id="starsWrap"></div>
+
+<div class="page" id="mainPage">
+  <div class="loader-wrap" id="loaderWrap">
+    <div class="spinner"></div>
+    <div class="loader-text">Chargement de votre roue…</div>
+  </div>
+</div>
+
+<!-- Overlay résultat -->
+<div class="result-overlay" id="resultOverlay">
+  <div class="result-card" id="resultCard">
+    <span class="result-emoji" id="resultEmoji">🎁</span>
+    <div class="result-title win" id="resultTitle">Bravo !</div>
+    <div class="result-prize" id="resultPrize"></div>
+    <div id="resultCodeWrap" style="display:none"><div class="result-code" id="resultCode"></div></div>
+    <div id="resultPtsWrap" style="display:none"><div class="result-pts" id="resultPtsText"></div></div>
+    <div class="result-sub" id="resultSub"></div>
+    <button class="result-close" onclick="closeResult()">Parfait, merci ! 🙌</button>
+  </div>
+</div>
+
+<!-- Confettis -->
+<div class="confetti-wrap" id="confettiWrap"></div>
+
+<!-- Firebase -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getFirestore, doc, getDoc, setDoc, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  const app = initializeApp({
+    apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain:"altiora-70599.firebaseapp.com",
+    projectId:"altiora-70599",
+    storageBucket:"altiora-70599.firebasestorage.app",
+    messagingSenderId:"120905555746",
+    appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+  });
+  const db = getFirestore(app);
+  window._db = db;
+  window._fsDoc = doc;
+  window._fsGetDoc = getDoc;
+  window._fsSetDoc = setDoc;
+  window._fsUpdateDoc = updateDoc;
+  window._fsArrayUnion = arrayUnion;
+  window._fbReady = true;
+  window.dispatchEvent(new Event('fbReady'));
+</script>
+
+<script>
+// ─── UTILS ───
+function uid6(){ return Math.random().toString(36).slice(2,8).toUpperCase(); }
+function today(){ return new Date().toISOString().split('T')[0]; }
+function fmt(d){ return new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'short'}); }
+
+// ─── ÉTOILES ───
+function spawnStars(){
+  const wrap = document.getElementById('starsWrap');
+  for(let i=0;i<60;i++){
+    const s = document.createElement('div');
+    s.className='star';
+    s.style.cssText=`left:${Math.random()*100}%;top:${Math.random()*100}%;--d:${2+Math.random()*4}s;--delay:${Math.random()*4}s;opacity:${.2+Math.random()*.6};width:${1+Math.random()*2}px;height:${1+Math.random()*2}px`;
+    wrap.appendChild(s);
+  }
+}
+spawnStars();
+
+// ─── STATE ───
+let _clientId = null;
+let _merchantUid = null;
+let _client = null;
+let _cfg = null;        // config publique commerçant
+let _wheelCfg = null;   // config roue
+let _turns = 0;         // tours restants
+let _googleUsed = false;
+let _spinning = false;
+let _canvasSize = 0;
+let _ctx = null;
+let _currentAngle = 0;
+let _animFrame = null;
+
+// ─── INIT ───
+function waitFbAndInit(){
+  if(window._fbReady){ initPage(); return; }
+  window.addEventListener('fbReady', initPage, {once:true});
+  setTimeout(()=>{ if(!window._fbReady){ showError('Connexion impossible. Rechargez la page.'); } }, 8000);
+}
+
+async function initPage(){
+  const params = new URLSearchParams(location.search);
+  _clientId = params.get('c');
+  _merchantUid = params.get('m');
+
+  if(!_clientId || !_merchantUid){
+    showError('Lien invalide. Demandez un nouveau lien à votre commerçant.');
+    return;
+  }
+
+  try {
+    // Charger client + config en parallèle
+    const [clientSnap, cfgSnap] = await Promise.all([
+      window._fsGetDoc(window._fsDoc(window._db, 'fidelite_public', _clientId)),
+      window._fsGetDoc(window._fsDoc(window._db, 'fidelite_public_cfg', _merchantUid))
+    ]);
+
+    if(!clientSnap.exists()){ showError('Compte client introuvable.'); return; }
+    if(!cfgSnap.exists()){ showError('Programme fidélité introuvable.'); return; }
+
+    _client = clientSnap.data();
+    _cfg = cfgSnap.data();
+    _wheelCfg = _cfg.wheelCfg || null;
+
+    if(!_wheelCfg || !_wheelCfg.enabled){
+      showError('La roue cadeaux n\'est pas encore activée par votre commerçant.');
+      return;
+    }
+
+    // Vérifier si déjà joué aujourd'hui (ou période cooldown)
+    const roueHistory = _client.roueHistory || [];
+    const cooldownDays = _wheelCfg.cooldownDays || 1;
+    const lastPlay = roueHistory.length ? roueHistory[roueHistory.length-1] : null;
+    if(lastPlay){
+      const daysSince = (Date.now() - new Date(lastPlay.date).getTime()) / 86400000;
+      if(daysSince < cooldownDays){
+        const nextDate = new Date(new Date(lastPlay.date).getTime() + cooldownDays*86400000);
+        renderPlayed(lastPlay, nextDate);
+        return;
+      }
+    }
+
+    // Calculer tours : 1 gratuit de base
+    _turns = 1;
+    _googleUsed = false;
+
+    renderWheel();
+  } catch(e){
+    console.error(e);
+    showError('Erreur de chargement : '+e.message);
+  }
+}
+
+// ─── RENDER ROUE ───
+function renderWheel(){
+  const page = document.getElementById('mainPage');
+  const segments = _wheelCfg.segments || defaultSegments();
+  const googleUrl = _wheelCfg.googleUrl || '';
+  const shopName = _cfg.shopName || 'Votre Boutique';
+  const shopEmoji = _cfg.emoji || '🎁';
+
+  page.innerHTML = `
+    <div class="shop-header">
+      <div class="shop-logo">${shopEmoji}</div>
+      <div class="shop-name">${shopName}</div>
+      <div class="shop-sub">Bonjour ${_client.prenom || ''} · Tentez votre chance !</div>
+    </div>
+
+    <div class="wheel-section">
+      <div class="wheel-outer">
+        <div class="wheel-arrow"></div>
+        <canvas id="wheelCanvas"></canvas>
+        <button class="spin-btn" id="spinBtn" onclick="spinWheel()">LANCER</button>
+      </div>
+
+      <div class="turns-bar">
+        <div id="turnDotsWrap" style="display:flex;gap:6px"></div>
+        <span class="turns-label" id="turnsLabel">tour restant</span>
+      </div>
+    </div>
+
+    ${googleUrl ? `
+    <a class="google-cta" id="googleCta" href="${googleUrl}" target="_blank" onclick="handleGoogleClick(event)">
+      <div class="gcta-icon">⭐</div>
+      <div class="gcta-text">
+        <div class="gcta-title">Laissez-nous un avis Google</div>
+        <div class="gcta-sub">Et gagnez 1 tour supplémentaire !</div>
+      </div>
+      <div class="gcta-badge">+1 tour</div>
+    </a>` : ''}
+
+    <div class="history-card" id="historyCard" style="display:none">
+      <div class="history-title">🏆 Vos derniers gains</div>
+      <div id="historyList"></div>
+    </div>
+  `;
+
+  // Render historique
+  const roueHistory = (_client.roueHistory || []).slice(-5).reverse();
+  if(roueHistory.length){
+    document.getElementById('historyCard').style.display='block';
+    document.getElementById('historyList').innerHTML = roueHistory.map(h=>`
+      <div class="history-item">
+        <span>${h.prizeEmoji||'🎁'} ${h.prizeLabel}</span>
+        <span style="color:var(--muted)">${fmt(h.date)}</span>
+      </div>
+    `).join('');
+  }
+
+  // Init canvas
+  _canvasSize = Math.min(340, window.innerWidth*0.9);
+  const canvas = document.getElementById('wheelCanvas');
+  canvas.width = _canvasSize;
+  canvas.height = _canvasSize;
+  _ctx = canvas.getContext('2d');
+  drawWheel(segments, 0);
+  updateTurnDots();
+}
+
+// ─── DESSIN ROUE ───
+const COLORS = [
+  ['#f5c842','#1a1000'],['#4f7ef8','#ffffff'],['#10b981','#ffffff'],
+  ['#ef4444','#ffffff'],['#8b5cf6','#ffffff'],['#f59e0b','#1a1000'],
+  ['#ec4899','#ffffff'],['#14b8a6','#ffffff']
+];
+
+function drawWheel(segments, rotation){
+  const ctx = _ctx;
+  const size = _canvasSize;
+  const cx = size/2, cy = size/2, r = size/2 - 4;
+  const n = segments.length;
+  const arc = (2*Math.PI)/n;
+
+  ctx.clearRect(0,0,size,size);
+
+  // Ombre extérieure
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,0.5)';
+  ctx.shadowBlur=20;
+
+  segments.forEach((seg,i)=>{
+    const startAngle = rotation + i*arc - Math.PI/2;
+    const endAngle = startAngle + arc;
+    const [bg,fg] = COLORS[i % COLORS.length];
+
+    // Secteur
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,r,startAngle,endAngle);
+    ctx.closePath();
+    ctx.fillStyle = bg;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Texte
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.rotate(startAngle + arc/2);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = fg;
+
+    // Emoji
+    ctx.font = `${Math.max(14, r*0.1)}px serif`;
+    ctx.fillText(seg.emoji||'🎁', r*0.85, 5);
+
+    // Label
+    ctx.font = `600 ${Math.max(9, r*0.07)}px 'Plus Jakarta Sans',sans-serif`;
+    const maxW = r*0.55;
+    let label = seg.label || '';
+    if(ctx.measureText(label).width > maxW){
+      while(ctx.measureText(label+'…').width > maxW && label.length>2)
+        label = label.slice(0,-1);
+      label += '…';
+    }
+    ctx.fillText(label, r*0.75, 22);
+    ctx.restore();
+  });
+
+  ctx.restore();
+
+  // Cercle central (trou)
+  ctx.beginPath();
+  ctx.arc(cx,cy,34,0,2*Math.PI);
+  ctx.fillStyle = '#0a0a12';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(245,200,66,0.3)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Anneau doré externe
+  ctx.beginPath();
+  ctx.arc(cx,cy,r,0,2*Math.PI);
+  ctx.strokeStyle = 'rgba(245,200,66,0.4)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+}
+
+// ─── SPIN ───
+async function spinWheel(){
+  if(_spinning || _turns <= 0) return;
+  _spinning = true;
+  _turns--;
+  updateTurnDots();
+  document.getElementById('spinBtn').disabled = true;
+  if(document.getElementById('googleCta')) document.getElementById('googleCta').classList.add('used');
+
+  const segments = _wheelCfg.segments || defaultSegments();
+  const n = segments.length;
+
+  // Déterminer le résultat (pondéré)
+  const totalWeight = segments.reduce((s,seg)=> s+(seg.weight||1), 0);
+  let rand = Math.random()*totalWeight, winIdx = n-1;
+  for(let i=0;i<n;i++){
+    rand -= (segments[i].weight||1);
+    if(rand<=0){ winIdx=i; break; }
+  }
+
+  // Calculer angle cible : 5-8 tours + angle pour atterrir sur winIdx
+  const arc = (2*Math.PI)/n;
+  const targetSegCenter = (winIdx+0.5)*arc;
+  // On veut que la flèche (en haut = -PI/2) pointe sur ce segment
+  const extraTurns = 5 + Math.floor(Math.random()*4);
+  const targetAngle = -targetSegCenter + extraTurns*2*Math.PI;
+
+  // Animation easing
+  const duration = 4000 + Math.random()*1000;
+  const startTime = performance.now();
+  const startAngle = _currentAngle;
+
+  function ease(t){ return t<.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2; }
+
+  function animate(now){
+    const elapsed = now - startTime;
+    const progress = Math.min(elapsed/duration,1);
+    _currentAngle = startAngle + targetAngle*ease(progress);
+    drawWheel(segments, _currentAngle);
+
+    if(progress<1){
+      _animFrame = requestAnimationFrame(animate);
+    } else {
+      _currentAngle = startAngle + targetAngle;
+      drawWheel(segments, _currentAngle);
+      _spinning = false;
+      showResult(segments[winIdx]);
+    }
+  }
+  _animFrame = requestAnimationFrame(animate);
+}
+
+// ─── RÉSULTAT ───
+async function showResult(seg){
+  const overlay = document.getElementById('resultOverlay');
+  const isWin = seg.type !== 'lose';
+
+  document.getElementById('resultEmoji').textContent = seg.emoji||'🎁';
+  document.getElementById('resultTitle').textContent = isWin ? 'Bravo !' : 'Presque…';
+  document.getElementById('resultTitle').className = 'result-title '+(isWin?'win':'lose');
+  document.getElementById('resultPrize').textContent = seg.label||'';
+
+  // Code cadeau ou points
+  let codeVal = '', ptsVal = 0;
+  if(seg.type === 'code'){
+    codeVal = uid6();
+    document.getElementById('resultCodeWrap').style.display='block';
+    document.getElementById('resultPtsWrap').style.display='none';
+    document.getElementById('resultCode').textContent = codeVal;
+    document.getElementById('resultSub').textContent = 'Présentez ce code à la caisse pour obtenir votre cadeau. Valable 30 jours.';
+  } else if(seg.type === 'points'){
+    ptsVal = parseInt(seg.pts)||50;
+    document.getElementById('resultPtsWrap').style.display='block';
+    document.getElementById('resultCodeWrap').style.display='none';
+    document.getElementById('resultPtsText').textContent = `+${ptsVal} points crédités sur votre carte !`;
+    document.getElementById('resultSub').textContent = 'Les points ont été ajoutés automatiquement à votre compte fidélité.';
+  } else {
+    document.getElementById('resultCodeWrap').style.display='none';
+    document.getElementById('resultPtsWrap').style.display='none';
+    document.getElementById('resultSub').textContent = 'Pas de chance cette fois ! Revenez bientôt pour une nouvelle tentative.';
+  }
+
+  overlay.classList.add('show');
+  if(isWin) spawnConfetti();
+
+  // Sauvegarder en Firebase
+  await savePlay(seg, codeVal, ptsVal);
+}
+
+async function savePlay(seg, code, pts){
+  if(!window._db || !_clientId || !_merchantUid) return;
+  try {
+    const entry = {
+      date: new Date().toISOString(),
+      prizeLabel: seg.label||'',
+      prizeEmoji: seg.emoji||'🎁',
+      prizeType: seg.type||'lose',
+      code: code||null,
+      pts: pts||0,
+      googleUsed: _googleUsed
+    };
+
+    // Update client public
+    const clientRef = window._fsDoc(window._db,'fidelite_public',_clientId);
+    const snap = await window._fsGetDoc(clientRef);
+    const data = snap.exists() ? snap.data() : {};
+    const newHistory = [...(data.roueHistory||[]), entry].slice(-20);
+    const newPts = (data.points||0) + (pts||0);
+
+    await window._fsSetDoc(clientRef, {
+      roueHistory: newHistory,
+      points: newPts,
+      ...(code ? {roueCoupons:[...(data.roueCoupons||[]),{code,label:seg.label,date:entry.date,used:false}]} : {})
+    }, {merge:true});
+
+    // Update client privé (pour le commerçant)
+    const privRef = window._fsDoc(window._db,'fidelite',_merchantUid,'clients',_clientId);
+    const privSnap = await window._fsGetDoc(privRef);
+    if(privSnap.exists()){
+      const privData = privSnap.data();
+      const updatedHistory = [...(privData.roueHistory||[]), entry].slice(-20);
+      await window._fsSetDoc(privRef, {
+        roueHistory: updatedHistory,
+        points: newPts,
+        ...(code ? {roueCoupons:[...(privData.roueCoupons||[]),{code,label:seg.label,date:entry.date,used:false}]} : {})
+      }, {merge:true});
+    }
+  } catch(e){ console.warn('savePlay error:', e); }
+}
+
+function closeResult(){
+  document.getElementById('resultOverlay').classList.remove('show');
+  if(_turns > 0){
+    document.getElementById('spinBtn').disabled = false;
+  } else {
+    const btn = document.getElementById('spinBtn');
+    if(btn){
+      btn.textContent = '0 tour';
+      btn.disabled = true;
+      btn.style.background='rgba(255,255,255,0.1)';
+      btn.style.color='rgba(255,255,255,0.3)';
+    }
+  }
+}
+
+// ─── GOOGLE ───
+function handleGoogleClick(e){
+  if(_googleUsed) return;
+  _googleUsed = true;
+  setTimeout(()=>{
+    _turns++;
+    updateTurnDots();
+    document.getElementById('spinBtn').disabled = false;
+    const cta = document.getElementById('googleCta');
+    if(cta){
+      cta.classList.add('used');
+      cta.innerHTML = `<div class="gcta-icon">✅</div><div class="gcta-text"><div class="gcta-title">Merci pour votre avis !</div><div class="gcta-sub">+1 tour ajouté à votre roue</div></div><div class="gcta-badge" style="background:var(--green)">Ajouté !</div>`;
+    }
+  }, 1500);
+}
+
+// ─── TOURS DOTS ───
+function updateTurnDots(){
+  const wrap = document.getElementById('turnDotsWrap');
+  const label = document.getElementById('turnsLabel');
+  if(!wrap) return;
+  const max = _googleUsed ? 2 : 1;
+  let html = '';
+  for(let i=0;i<max;i++){
+    html += `<div class="turn-dot ${i < _turns ? 'active':''}"></div>`;
+  }
+  wrap.innerHTML = html;
+  if(label) label.textContent = _turns <= 1 ? 'tour restant' : 'tours restants';
+}
+
+// ─── CONFETTIS ───
+function spawnConfetti(){
+  const wrap = document.getElementById('confettiWrap');
+  wrap.innerHTML = '';
+  const colors = ['#f5c842','#4f7ef8','#10b981','#ef4444','#8b5cf6','#ec4899'];
+  for(let i=0;i<60;i++){
+    const c = document.createElement('div');
+    c.className='confetti-piece';
+    c.style.cssText=`
+      left:${Math.random()*100}%;
+      background:${colors[Math.floor(Math.random()*colors.length)]};
+      --dur:${2+Math.random()*2}s;
+      --del:${Math.random()*1}s;
+      width:${6+Math.random()*8}px;height:${8+Math.random()*10}px;
+      transform:rotate(${Math.random()*360}deg);
+    `;
+    wrap.appendChild(c);
+  }
+}
+
+// ─── DÉJÀ JOUÉ ───
+function renderPlayed(lastPlay, nextDate){
+  const page = document.getElementById('mainPage');
+  const shopName = _cfg?.shopName || 'Votre Boutique';
+  const shopEmoji = _cfg?.emoji || '🎁';
+  const df = nextDate.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'});
+
+  page.innerHTML = `
+    <div class="shop-header">
+      <div class="shop-logo">${shopEmoji}</div>
+      <div class="shop-name">${shopName}</div>
+      <div class="shop-sub">Bonjour ${_client?.prenom||''} !</div>
+    </div>
+    <div class="played-card">
+      <div style="font-size:48px;margin-bottom:12px">⏳</div>
+      <div style="font-family:'Baloo 2',sans-serif;font-size:18px;font-weight:800;margin-bottom:8px">Déjà joué !</div>
+      <div style="font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:16px">
+        Vous avez tourné la roue le ${fmt(lastPlay.date)}.<br>
+        Revenez le <strong style="color:var(--gold)">${df}</strong> pour une nouvelle tentative.
+      </div>
+      ${lastPlay.code ? `
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">Votre code à utiliser :</div>
+        <div class="result-code" style="font-size:18px">${lastPlay.code}</div>
+      ` : ''}
+    </div>
+    <div class="history-card" style="display:${(_client?.roueHistory||[]).length?'block':'none'}">
+      <div class="history-title">🏆 Vos derniers gains</div>
+      <div>${(_client?.roueHistory||[]).slice(-5).reverse().map(h=>`
+        <div class="history-item">
+          <span>${h.prizeEmoji||'🎁'} ${h.prizeLabel}</span>
+          <span style="color:var(--muted)">${fmt(h.date)}</span>
+        </div>
+      `).join('')}</div>
+    </div>
+  `;
+}
+
+// ─── ERREUR ───
+function showError(msg){
+  document.getElementById('mainPage').innerHTML = `
+    <div class="error-wrap">
+      <div class="error-icon">😕</div>
+      <div style="font-size:16px;font-weight:700">${msg}</div>
+    </div>
+  `;
+}
+
+// ─── SEGMENTS PAR DÉFAUT ───
+function defaultSegments(){
+  return [
+    {label:'Café offert',emoji:'☕',type:'code',weight:2},
+    {label:'+50 points',emoji:'⭐',type:'points',pts:50,weight:3},
+    {label:'-10%',emoji:'🎫',type:'code',weight:2},
+    {label:'Perdu',emoji:'😅',type:'lose',weight:4},
+    {label:'+100 points',emoji:'💫',type:'points',pts:100,weight:2},
+    {label:'Cadeau surprise',emoji:'🎁',type:'code',weight:1},
+    {label:'Perdu',emoji:'😅',type:'lose',weight:4},
+    {label:'+25 points',emoji:'✨',type:'points',pts:25,weight:3},
+  ];
+}
+
+waitFbAndInit();
+</script>
+</body>
+</html>
