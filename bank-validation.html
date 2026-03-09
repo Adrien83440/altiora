@@ -170,6 +170,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-outline btn-sm" onclick="closeDblModal()">Annuler</button>
+      <button class="btn btn-outline btn-sm" onclick="dblIgnore()" style="color:#6b7280">🚫 Ignorer la transaction</button>
       <button class="btn btn-outline btn-sm" onclick="dblKeepBoth()">Garder les deux</button>
       <button class="btn btn-primary btn-sm" onclick="dblReplace()">Remplacer par la banque</button>
     </div>
@@ -337,12 +338,20 @@ function applyCat(label){
 function detectDbl(tx,montant){
   const m=_pilData[tx.monthKey];
   if(!m) return null;
+  var txLabel = (tx.label||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  if(txLabel.length < 3) return null;
   for(const sec of ['chargesFixe','chargesVar','leasing']){
     for(const r of (m[sec]||[])){
       const exA=parseFloat(r.montantHT||r.montant||0);
-      const sameAmt=Math.abs(exA-montant)<0.5;
-      const sameLbl=(r.fournisseur||'').toUpperCase().includes((tx.label||'').substring(0,5).toUpperCase())&&tx.label.length>4;
-      if(sameAmt||sameLbl) return{existing:r,section:sec};
+      if(!exA) continue;
+      var fournLabel = (r.fournisseur||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+      if(!fournLabel) continue;
+      // Match par montant exact (écart < 0.02€) ET nom similaire
+      const sameAmt=Math.abs(exA-montant)<0.02;
+      const sameLbl=fournLabel.length>=3 && txLabel.length>=3 && (txLabel.includes(fournLabel) || fournLabel.includes(txLabel));
+      // OU match par nom très similaire (contenu dans l'autre) avec montant proche (< 20% d'écart)
+      const closeAmt=exA>0 && Math.abs(exA-montant)/exA < 0.2;
+      if((sameAmt && sameLbl) || (sameLbl && closeAmt)) return{existing:r,section:sec};
     }
   }
   return null;
@@ -562,6 +571,7 @@ function openDblModal(id){
   document.getElementById('dblModal').classList.add('show');
 }
 function closeDblModal(){document.getElementById('dblModal').classList.remove('show');_dblCtx=null;}
+function dblIgnore(){if(_dblCtx===null)return;_txList[_dblCtx].status='ignored';_txList[_dblCtx].doublonInfo=null;renderAll();closeDblModal();}
 function dblKeepBoth(){if(_dblCtx===null)return;_txList[_dblCtx].doublonInfo=null;renderAll();closeDblModal();}
 function dblReplace(){if(_dblCtx===null)return;_txList[_dblCtx].replaceMode=true;_txList[_dblCtx].doublonInfo=null;renderAll();closeDblModal();}
 
@@ -735,7 +745,7 @@ window.ignoreOne=ignoreOne;window.restore=restore;window.unimport=unimport;
 window.ignoreAllPending=ignoreAllPending;window.autoAll=autoAll;
 window.learnRule=learnRule;window.importSelected=importSelected;
 window.openDblModal=openDblModal;window.closeDblModal=closeDblModal;
-window.dblKeepBoth=dblKeepBoth;window.dblReplace=dblReplace;
+window.dblKeepBoth=dblKeepBoth;window.dblReplace=dblReplace;window.dblIgnore=dblIgnore;
 window.openRulesModal=openRulesModal;window.closeRulesModal=closeRulesModal;
 window.addRule=addRule;window.removeRule=removeRule;window.saveRulesAndClose=saveRulesAndClose;
 window.handleLogout=handleLogout;
