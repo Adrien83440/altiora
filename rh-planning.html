@@ -799,19 +799,14 @@ body[data-zoom="large"]      { --emp-col-w: 220px; }
         <div id="ferme-dow-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:6px"></div>
       </div>
 
-      <!-- HORAIRES D'OUVERTURE -->
+      <!-- HORAIRES D'OUVERTURE (MULTI-CRÉNEAUX) -->
       <div style="background:#f8faff;border-radius:12px;padding:14px 16px">
-        <div style="font-size:12px;font-weight:800;color:#1a1f36;margin-bottom:10px">🕐 Horaires d'ouverture par défaut</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div>
-            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px">Ouverture</label>
-            <input type="time" id="params-heure-ouv" value="09:00" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:14px;font-weight:700;outline:none"/>
-          </div>
-          <div>
-            <label style="font-size:11px;font-weight:600;color:#6b7280;display:block;margin-bottom:4px">Fermeture</label>
-            <input type="time" id="params-heure-ferm" value="18:00" style="width:100%;padding:8px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:14px;font-weight:700;outline:none"/>
-          </div>
+        <div style="font-size:12px;font-weight:800;color:#1a1f36;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between">
+          <span>🕐 Horaires d'ouverture par défaut</span>
+          <button onclick="addPlageOuverture()" style="padding:4px 12px;background:#6366f1;color:white;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit">+ Créneau</button>
         </div>
+        <div style="font-size:10px;color:#6b7280;margin-bottom:10px">Ex : 09:00–12:00 puis 14:00–19:00 (pause déjeuner)</div>
+        <div id="plages-ouverture-grid" style="display:flex;flex-direction:column;gap:8px"></div>
       </div>
 
       <!-- JOURS FÉRIÉS FRANÇAIS -->
@@ -889,7 +884,7 @@ onAuthStateChanged(auth,u=>{
 let _emps=[], _cr={}, _view='semaine', _disp='gantt';
 let _cur=new Date(), _editId=null, _hidden=new Set(), _aiResult=null;
 let _zoom=localStorage.getItem('rh_zoom')||'normal';
-let _joursFermes={hebdo:[0,6],ponctuels:[],heureOuv:'09:00',heureFerm:'18:00'};
+let _joursFermes={hebdo:[0,6],ponctuels:[],heureOuv:'09:00',heureFerm:'18:00',plagesOuverture:[{deb:'09:00',fin:'18:00'}]};
 function isFerme(d){
   const dow=d.getDay();
   if(_joursFermes.hebdo.includes(dow)) return true;
@@ -1042,13 +1037,27 @@ async function loadRHParams(){
     if(snap.exists()){
       const d=snap.data();
       if(d.ccnDefault) _ccnDefault=d.ccnDefault;
-      if(d.joursFermes) _joursFermes={hebdo:d.joursFermes.hebdo||[0,6],ponctuels:d.joursFermes.ponctuels||[],heureOuv:d.joursFermes.heureOuv||'09:00',heureFerm:d.joursFermes.heureFerm||'18:00'};
+      if(d.joursFermes){
+        const jf=d.joursFermes;
+        _joursFermes={hebdo:jf.hebdo||[0,6],ponctuels:jf.ponctuels||[],heureOuv:jf.heureOuv||'09:00',heureFerm:jf.heureFerm||'18:00',
+          plagesOuverture:jf.plagesOuverture||[{deb:jf.heureOuv||'09:00',fin:jf.heureFerm||'18:00'}]};
+      }
     }
   }catch(e){console.warn(e);}
 }
 async function saveJoursFermes(){
   try{
-    await window._setDoc(window._doc(window._db,'rh_params',window._uid),{joursFermes:_joursFermes},{merge:true});
+    // Sync horaires par jour (pour profil.html)
+    const jourKeys=['lun','mar','mer','jeu','ven','sam','dim'];
+    const jsDays=[1,2,3,4,5,6,0]; // lun=1,...,dim=0
+    const plages=_joursFermes.plagesOuverture||[{deb:'09:00',fin:'18:00'}];
+    const horaires={};
+    jourKeys.forEach(function(j,i){
+      const dow=jsDays[i];
+      const actif=!_joursFermes.hebdo.includes(dow);
+      horaires[j]={actif, deb:plages[0].deb, fin:plages[plages.length-1].fin};
+    });
+    await window._setDoc(window._doc(window._db,'rh_params',window._uid),{joursFermes:_joursFermes,horaires:horaires},{merge:true});
   }catch(e){console.error(e);}
 }
 
@@ -3531,11 +3540,8 @@ function closeFermetureModal(){
 window.closeFermetureModal=closeFermetureModal;
 
 function renderParamsModal(){
-  // Horaires
-  const ouv=document.getElementById('params-heure-ouv');
-  const ferm=document.getElementById('params-heure-ferm');
-  if(ouv) ouv.value=_joursFermes.heureOuv||'09:00';
-  if(ferm) ferm.value=_joursFermes.heureFerm||'18:00';
+  // Plages horaires
+  renderPlagesOuverture();
 
   // Grille jours semaine — Lundi à Dimanche
   const grid=document.getElementById('ferme-dow-grid');
@@ -3683,17 +3689,60 @@ function renderFermeDatesList(){
 }
 
 async function saveFermetures(){
-  // Récupérer horaires
-  const ouv=document.getElementById('params-heure-ouv')?.value||'09:00';
-  const ferm=document.getElementById('params-heure-ferm')?.value||'18:00';
-  _joursFermes.heureOuv=ouv;
-  _joursFermes.heureFerm=ferm;
+  // Récupérer plages horaires depuis les inputs
+  const plages=[];
+  document.querySelectorAll('.plage-ouv-row').forEach(function(row){
+    const deb=row.querySelector('.plage-deb')?.value;
+    const fin=row.querySelector('.plage-fin')?.value;
+    if(deb&&fin) plages.push({deb,fin});
+  });
+  if(!plages.length) plages.push({deb:'09:00',fin:'18:00'});
+  plages.sort(function(a,b){return a.deb.localeCompare(b.deb);});
+  _joursFermes.plagesOuverture=plages;
+  // Backward compat
+  _joursFermes.heureOuv=plages[0].deb;
+  _joursFermes.heureFerm=plages[plages.length-1].fin;
   await saveJoursFermes();
   closeFermetureModal();
   render();
   showToast('✅ Paramètres enregistrés','ok');
 }
 window.saveFermetures=saveFermetures;
+
+// ── PLAGES HORAIRES D'OUVERTURE ──
+function renderPlagesOuverture(){
+  const grid=document.getElementById('plages-ouverture-grid');
+  if(!grid)return;
+  const plages=_joursFermes.plagesOuverture||[{deb:'09:00',fin:'18:00'}];
+  grid.innerHTML=plages.map(function(p,i){
+    const canDel=plages.length>1;
+    return '<div class="plage-ouv-row" style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:white;border:1.5px solid #e0e7ff;border-radius:10px">'
+      +'<span style="font-size:11px;font-weight:700;color:#6366f1;min-width:64px">Créneau '+(i+1)+'</span>'
+      +'<input type="time" class="plage-deb" value="'+(p.deb||'09:00')+'" style="flex:1;padding:7px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:14px;font-weight:700;outline:none;min-width:0"/>'
+      +'<span style="font-size:13px;color:#9ca3af;font-weight:600">→</span>'
+      +'<input type="time" class="plage-fin" value="'+(p.fin||'18:00')+'" style="flex:1;padding:7px 10px;border:1.5px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:14px;font-weight:700;outline:none;min-width:0"/>'
+      +(canDel?'<button onclick="removePlageOuverture('+i+')" style="background:#fef2f2;border:1px solid #fecaca;border-radius:7px;width:30px;height:30px;font-size:14px;cursor:pointer;color:#ef4444;display:flex;align-items:center;justify-content:center;flex-shrink:0" title="Supprimer">×</button>':'')
+      +'</div>';
+  }).join('');
+}
+
+function addPlageOuverture(){
+  const plages=_joursFermes.plagesOuverture||[];
+  const last=plages[plages.length-1];
+  plages.push({deb:last?last.fin:'14:00',fin:'19:00'});
+  _joursFermes.plagesOuverture=plages;
+  renderPlagesOuverture();
+}
+window.addPlageOuverture=addPlageOuverture;
+
+function removePlageOuverture(idx){
+  const plages=_joursFermes.plagesOuverture||[];
+  if(plages.length<=1)return;
+  plages.splice(idx,1);
+  _joursFermes.plagesOuverture=plages;
+  renderPlagesOuverture();
+}
+window.removePlageOuverture=removePlageOuverture;
 
 // ── UTILS ──
 function showToast(m,t=''){const el=document.getElementById('toast');el.textContent=m;el.className='toast show '+(t||'');setTimeout(()=>el.className='toast',3200);}

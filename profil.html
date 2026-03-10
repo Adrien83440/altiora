@@ -1971,6 +1971,26 @@ async function saveRhParams() {
     updatedAt:  new Date().toISOString(),
   };
 
+  // Sync joursFermes depuis horaires (pour rh-planning.html)
+  const jsDayMap = [1,2,3,4,5,6,0]; // profil index → JS getDay()
+  const hebdoClosed = [];
+  const plagesSet = {};
+  RH_JOURS.forEach((j, i) => {
+    if (!horaires[j].actif) hebdoClosed.push(jsDayMap[i]);
+    else {
+      const key = horaires[j].deb + '-' + horaires[j].fin;
+      plagesSet[key] = {deb: horaires[j].deb, fin: horaires[j].fin};
+    }
+  });
+  const plagesArr = Object.values(plagesSet).sort((a,b) => a.deb.localeCompare(b.deb));
+  data.joursFermes = {
+    hebdo: hebdoClosed,
+    ponctuels: (_rhParams.joursFermes && _rhParams.joursFermes.ponctuels) || [],
+    heureOuv: plagesArr.length ? plagesArr[0].deb : '09:00',
+    heureFerm: plagesArr.length ? plagesArr[plagesArr.length-1].fin : '18:00',
+    plagesOuverture: plagesArr.length ? plagesArr : [{deb:'09:00',fin:'18:00'}]
+  };
+
   try {
     await window._setDoc(window._doc(window._db, "rh_params", window._uid), data, {merge:true});
     _rhParams   = data;
