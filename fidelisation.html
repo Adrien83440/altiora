@@ -1950,9 +1950,13 @@ function applyConfig(){
 
 // ═══ INIT ═══
 load();
-seedDemo();
 renderFidCard();
-renderDashboard();
+// Dashboard sera rendu après chargement Firebase (pas de seedDemo ni render prématuré)
+// Afficher un état de chargement en attendant
+(function(){
+  var kg=document.getElementById('kpiGrid');
+  if(kg)kg.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:24px;color:var(--muted);font-size:12px"><div style="font-size:24px;margin-bottom:8px">⏳</div>Chargement des données...</div>';
+})();
 // ═══════════════════════════════════════════
 // ENVOI CAMPAGNE SMS RÉEL
 // ═══════════════════════════════════════════
@@ -2093,12 +2097,12 @@ window.loadSmsCredits = async function loadSmsCredits() {
 <script type="module">
 import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import{getAuth,onAuthStateChanged,signOut}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import{getFirestore,doc,setDoc,getDoc,collection,getDocs,deleteDoc,writeBatch}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import{initializeFirestore,doc,setDoc,getDoc,collection,getDocs,deleteDoc,writeBatch}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const FB = {apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",authDomain:"altiora-70599.firebaseapp.com",projectId:"altiora-70599",storageBucket:"altiora-70599.firebasestorage.app",messagingSenderId:"120905555746",appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"};
 const app=initializeApp(FB);
 const auth=getAuth(app);
-const db=getFirestore(app);
+const db=initializeFirestore(app,{experimentalAutoDetectLongPolling:true});
 
 // ── Expose globalement ──
 window._auth=auth; window._signOut=signOut; window._db=db;
@@ -2190,21 +2194,18 @@ onAuthStateChanged(auth, async user=>{
   document.getElementById('uname').textContent=n;
   document.getElementById('av').textContent=n[0]?.toUpperCase()||'A';
 
-  showSyncBadge('⏳ Connexion Firebase...');
+  showSyncBadge('⏳ Chargement...');
 
-  // ── Test d'accès Firebase en écrivant un doc de test ──
+  // ── Charger les données Firebase ──
   try{
-    // 1. Test écriture simple (config)
-    await setDoc(doc(db,'fidelite',user.uid,'config','main'), {_ping: Date.now()}, {merge:true});
-    
-    // 2. Charger clients
+    // 1. Charger clients
     const snap = await getDocs(collection(db,'fidelite',user.uid,'clients'));
     const fbClients = snap.docs.map(d=>d.data());
     if(fbClients.length > 0){
       clients = fbClients;
     }
 
-    // 3. Charger config
+    // 2. Charger config
     const cfgSnap = await getDoc(doc(db,'fidelite',user.uid,'config','main'));
     if(cfgSnap.exists()){
       const fbCfg = cfgSnap.data();
@@ -2227,17 +2228,14 @@ onAuthStateChanged(auth, async user=>{
     try{
       const tabSnap = await getDocs(collection(db,'fidelite_tablet',user.uid,'clients'));
       const tabClients = tabSnap.docs.map(d=>d.data());
-      // Fusionner les clients créés/modifiés depuis la tablette
       const existingIds = new Set(clients.map(c=>c.id));
       let newFromTablet = 0;
       for(const tc of tabClients){
         if(!existingIds.has(tc.id)){
-          // Nouveau client créé depuis la tablette
           clients.push(tc);
           await setDoc(doc(db,'fidelite',user.uid,'clients',tc.id), tc, {merge:true});
           newFromTablet++;
         } else {
-          // Client existant : sync si la tablette a des données plus récentes
           const local = clients.find(c=>c.id===tc.id);
           if(local && tc.lastVisit && tc.lastVisit > (local.lastVisit||'')){
             Object.assign(local, {points:tc.points, tampons:tc.tampons, lastVisit:tc.lastVisit, history:tc.history||local.history});
@@ -2245,8 +2243,7 @@ onAuthStateChanged(auth, async user=>{
           }
         }
       }
-      if(newFromTablet>0) console.log(`[Tablet sync] ${newFromTablet} nouveau(x) client(s) importé(s) depuis la tablette`);
-      // Miroir initial : s'assurer que tous les clients sont dans fidelite_tablet
+      if(newFromTablet>0) console.log('[Tablet sync] '+newFromTablet+' nouveau(x) client(s)');
       const tabIds = new Set(tabClients.map(c=>c.id));
       for(const c of clients){
         if(!tabIds.has(c.id)){
@@ -2264,9 +2261,11 @@ onAuthStateChanged(auth, async user=>{
     window._firebaseReady = true;
     window.renderDashboard();
     window.renderFidCard();
+    // Re-render l'onglet actif pour afficher les points corrects
+    if(window.renderClients) window.renderClients();
     document.getElementById('badge-clients').textContent=clients.length;
     document.getElementById('badge-coupons').textContent=coupons.filter(c=>c.status==='active').length;
-    showSyncBadge('✅ Firebase connecté');
+    showSyncBadge('✅ Firebase connecté · '+clients.length+' clients');
     setTimeout(()=>hideSyncBadge(),2500);
 
   }catch(e){
