@@ -24,9 +24,9 @@
 <body>
   <div class="card">
     <div class="emoji">🔧</div>
-    <h1>Correction de vos crédits</h1>
-    <p>Cette page va supprimer les lignes <strong>CREDIT MUT 1</strong> et <strong>CREDIT MUT 2</strong> qui reviennent en double sur tous vos mois.<br><br>Cliquez sur le bouton ci-dessous :</p>
-    <button class="btn" id="btn" onclick="run()">🗑️ Supprimer les doublons</button>
+    <h1>Suppression de crédits</h1>
+    <p>Cette page va supprimer les lignes <strong>CREDIT MUT 1</strong> et <strong>CREDIT MUT 2</strong> de tous vos mois.<br><br>Cliquez sur le bouton ci-dessous :</p>
+    <button class="btn" id="btn" onclick="run()">🗑️ Supprimer CREDIT MUT 1 & 2</button>
     <div class="result" id="result"></div>
     <div class="footer">ALTEORE · Page de maintenance</div>
   </div>
@@ -61,6 +61,7 @@
       btn.disabled = true; btn.textContent = '⏳ Nettoyage en cours...';
       res.className='result wait'; res.textContent='⏳ Analyse de vos données...';
       try {
+        // 1. Nettoyer pilotage/months
         var snap = await window._getDocs(window._collection(window._db, 'pilotage', window._uid, 'months'));
         var n = 0;
         for (var i = 0; i < snap.docs.length; i++) {
@@ -76,10 +77,34 @@
             n += before - clean.length;
           }
         }
-        if (n > 0) {
-          res.className='result ok'; res.textContent='✅ Terminé ! ' + n + ' lignes CREDIT MUT supprimées. Vous pouvez fermer cette page et retourner sur Pilotage.';
-        } else {
+
+        // 2. Nettoyer dettes
+        var nd = 0;
+        try {
+          var dSnap = await window._getDocs(window._collection(window._db, 'dettes', window._uid, 'data'));
+          for (var j = 0; j < dSnap.docs.length; j++) {
+            var dd = dSnap.docs[j];
+            var dData = dd.data();
+            if (dData.list && dData.list.length) {
+              var beforeD = dData.list.length;
+              var cleanD = dData.list.filter(function(d) {
+                return !(d.libelle || d.nom || '').toUpperCase().includes('CREDIT MUT');
+              });
+              if (cleanD.length < beforeD) {
+                await window._setDoc(window._doc(window._db, 'dettes', window._uid, 'data', dd.id), {list: cleanD}, {merge: true});
+                nd += beforeD - cleanD.length;
+              }
+            }
+          }
+        } catch(e2) { console.warn('Dettes:', e2.message); }
+
+        var msg = '';
+        if (n > 0) msg += n + ' lignes supprimées dans Pilotage. ';
+        if (nd > 0) msg += nd + ' lignes supprimées dans Dettes. ';
+        if (n === 0 && nd === 0) {
           res.className='result ok'; res.textContent='✅ Aucune ligne CREDIT MUT trouvée. Tout est déjà propre !';
+        } else {
+          res.className='result ok'; res.textContent='✅ Terminé ! ' + msg + 'Vous pouvez fermer cette page et retourner sur Pilotage.';
         }
         btn.textContent = '✅ Terminé !';
       } catch(e) {
