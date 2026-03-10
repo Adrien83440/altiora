@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>ALTEORE — Sync Planning Public</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,sans-serif;background:#f5f7ff;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+    .card{background:#fff;border-radius:20px;padding:40px;max-width:500px;width:100%;text-align:center;box-shadow:0 8px 40px rgba(15,31,92,.1)}
+    .emoji{font-size:56px;margin-bottom:16px}
+    h1{font-size:20px;font-weight:800;color:#1a1f36;margin-bottom:8px}
+    p{font-size:14px;color:#6b7280;line-height:1.6;margin-bottom:24px}
+    .btn{display:inline-block;padding:16px 40px;background:linear-gradient(135deg,#1a3dce,#4f7ef8);color:#fff;font-size:16px;font-weight:700;border:none;border-radius:12px;cursor:pointer;font-family:inherit;transition:.2s}
+    .btn:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(26,61,206,.3)}
+    .btn:disabled{opacity:.5;cursor:wait;transform:none}
+    .result{margin-top:20px;padding:16px;border-radius:12px;font-size:13px;font-weight:600;display:none;text-align:left;max-height:300px;overflow-y:auto}
+    .result.ok{display:block;background:#f0fdf4;color:#059669;border:1px solid #bbf7d0}
+    .result.err{display:block;background:#fef2f2;color:#ef4444;border:1px solid #fca5a5}
+    .result.wait{display:block;background:#eff6ff;color:#1a3dce;border:1px solid #bfdbfe}
+    .footer{margin-top:24px;font-size:11px;color:#9ca3af}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="emoji">📋</div>
+    <h1>Sync Planning → Espace Salarié</h1>
+    <p>Copie toutes les données de planning existantes vers la collection publique pour que les salariés puissent voir leurs horaires.<br><br><strong>À exécuter en étant connecté en tant qu'admin.</strong></p>
+    <button class="btn" id="btn" onclick="run()">🔄 Lancer la synchronisation</button>
+    <div class="result" id="result"></div>
+    <div class="footer">ALTEORE · Page admin</div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getFirestore, doc, setDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    const app = initializeApp({
+      apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+      authDomain:"altiora-70599.firebaseapp.com",
+      projectId:"altiora-70599",
+      storageBucket:"altiora-70599.firebasestorage.app",
+      messagingSenderId:"120905555746",
+      appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+    });
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    window._db = db;
+    window._doc = doc;
+    window._setDoc = setDoc;
+    window._collection = collection;
+    window._getDocs = getDocs;
+    onAuthStateChanged(auth, user => {
+      if (!user) { window.location.href = 'index.html'; return; }
+      window._uid = user.uid;
+      document.getElementById('btn').textContent = '🔄 Lancer la synchronisation';
+    });
+  </script>
+
+  <script>
+    async function run() {
+      var btn = document.getElementById('btn');
+      var res = document.getElementById('result');
+      var uid = window._uid;
+      if (!uid) { res.className='result err'; res.textContent='❌ Non connecté.'; return; }
+
+      btn.disabled = true; btn.textContent = '⏳ Synchronisation en cours...';
+      res.className='result wait'; res.innerHTML='⏳ Recherche des semaines de planning...';
+
+      try {
+        var db = window._db;
+        var logs = [];
+        var totalDocs = 0;
+
+        // Lister les sous-collections rh/{uid}/plan_* 
+        // On scanne les 104 dernières semaines (2 ans)
+        var now = new Date();
+        var monday = new Date(now);
+        var dow = monday.getDay();
+        var diff = (dow === 0) ? -6 : 1 - dow;
+        monday.setDate(monday.getDate() + diff);
+        monday.setHours(12, 0, 0, 0);
+
+        // Remonter 52 semaines en arrière, aller 52 semaines en avant
+        var startMonday = new Date(monday);
+        startMonday.setDate(startMonday.getDate() - 52 * 7);
+
+        var weeksToCheck = [];
+        var cur = new Date(startMonday);
+        for (var w = 0; w < 104; w++) {
+          cur.setHours(12, 0, 0, 0);
+          var wk = cur.getFullYear() + 
+            String(cur.getMonth()+1).padStart(2,'0') + 
+            String(cur.getDate()).padStart(2,'0');
+          weeksToCheck.push(wk);
+          cur.setDate(cur.getDate() + 7);
+        }
+
+        res.innerHTML = '⏳ Vérification de ' + weeksToCheck.length + ' semaines...';
+
+        for (var i = 0; i < weeksToCheck.length; i++) {
+          var wk = weeksToCheck[i];
+          try {
+            // Lire depuis rh/{uid}/plan_{wk} (privé)
+            var snap = await window._getDocs(window._collection(db, 'rh', uid, 'plan_' + wk));
+            if (snap.empty) continue;
+
+            var weekDocs = 0;
+            for (var j = 0; j < snap.docs.length; j++) {
+              var d = snap.docs[j];
+              var data = d.data();
+              // Copier vers rh_planning_public/{uid}/plan_{wk}/{docId}
+              await window._setDoc(
+                window._doc(db, 'rh_planning_public', uid, 'plan_' + wk, d.id),
+                data
+              );
+              weekDocs++;
+              totalDocs++;
+            }
+            if (weekDocs > 0) {
+              logs.push('✅ plan_' + wk + ' : ' + weekDocs + ' doc(s) copiés');
+            }
+          } catch(e) {
+            // Skip silencieusement les semaines vides
+          }
+
+          // Update progress
+          if (i % 10 === 0) {
+            res.innerHTML = '⏳ Progression : ' + (i+1) + '/' + weeksToCheck.length + ' semaines vérifiées, ' + totalDocs + ' documents copiés...';
+          }
+        }
+
+        if (totalDocs > 0) {
+          res.className = 'result ok';
+          res.innerHTML = '✅ Synchronisation terminée !<br><br><strong>' + totalDocs + ' documents</strong> copiés vers la collection publique.<br><br>' + logs.join('<br>') + '<br><br>Les salariés verront maintenant leur planning.';
+        } else {
+          res.className = 'result ok';
+          res.innerHTML = '✅ Aucune donnée de planning trouvée à synchroniser.';
+        }
+        btn.textContent = '✅ Terminé !';
+
+      } catch(e) {
+        res.className = 'result err';
+        res.innerHTML = '❌ Erreur : ' + e.message;
+        btn.disabled = false;
+        btn.textContent = '🔄 Réessayer';
+      }
+    }
+    window.run = run;
+  </script>
+</body>
+</html>
