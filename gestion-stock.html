@@ -218,6 +218,7 @@ tr.row-alerte{background:#fffbeb}
     </div>
     <div class="tb-r">
       <button class="btn btn-outline btn-sm" onclick="openSettings()">⚙️ Paramètres</button>
+      <button class="btn btn-success btn-sm" onclick="openScanModal()">📸 Scan</button>
       <button class="btn btn-ai btn-sm" onclick="openImportModal()">🤖 Import IA</button>
       <button class="btn btn-success btn-sm" onclick="openMovModal()">📥 Mouvement</button>
       <button class="btn btn-primary btn-sm" onclick="openProdModal()">+ Produit</button>
@@ -367,6 +368,54 @@ tr.row-alerte{background:#fffbeb}
     <div class="modal-foot">
       <button class="btn btn-outline" onclick="closeImportModal()">Annuler</button>
       <button class="btn btn-ai" id="import-go-btn" style="display:none" onclick="executeImport()">📥 Importer <span id="import-count"></span> produits</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL SCAN -->
+<div class="overlay" id="scanOverlay">
+  <div class="modal modal-lg">
+    <div class="modal-head" style="background:linear-gradient(135deg,#059669,#10b981);color:white">
+      <h3 style="color:white">📸 Scan & réception stock</h3>
+      <button class="modal-close" onclick="closeScanModal()" style="color:white">✕</button>
+    </div>
+    <div class="modal-body" id="scan-body">
+      <!-- Step 1: Capture -->
+      <div id="scan-step-1">
+        <div style="text-align:center;padding:20px 0">
+          <div style="font-size:48px;margin-bottom:12px">📸</div>
+          <h3 style="font-size:16px;margin-bottom:6px">Scannez un bon de livraison ou une facture</h3>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:20px;max-width:400px;margin-left:auto;margin-right:auto">Prenez en photo ou importez l'image d'un bon de livraison, ticket de réception ou facture fournisseur. L'IA extrait automatiquement les produits, quantités et prix.</p>
+          <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+            <label style="display:inline-flex;align-items:center;gap:8px;padding:14px 24px;background:linear-gradient(135deg,#059669,#34d399);color:white;border-radius:12px;font-weight:700;cursor:pointer;font-size:14px">
+              📷 Prendre une photo
+              <input type="file" accept="image/*" capture="environment" style="display:none" onchange="handleScanFile(this.files[0])"/>
+            </label>
+            <label style="display:inline-flex;align-items:center;gap:8px;padding:14px 24px;background:white;color:var(--text);border:1.5px solid var(--border);border-radius:12px;font-weight:700;cursor:pointer;font-size:14px">
+              📁 Importer une image
+              <input type="file" accept="image/*,.pdf" style="display:none" onchange="handleScanFile(this.files[0])"/>
+            </label>
+          </div>
+        </div>
+      </div>
+      <!-- Step 2: AI processing -->
+      <div id="scan-step-2" style="display:none">
+        <div style="display:flex;gap:16px;align-items:flex-start">
+          <div style="flex:0 0 200px"><img id="scan-preview-img" style="width:100%;border-radius:10px;border:1px solid var(--border)" alt=""/></div>
+          <div style="flex:1">
+            <div id="scan-ai-status" style="margin-bottom:12px"></div>
+            <div id="scan-doc-info"></div>
+          </div>
+        </div>
+        <div style="margin-top:16px;font-size:12px;font-weight:700;margin-bottom:8px">📦 Lignes extraites — Vérifiez et ajustez :</div>
+        <div class="tbl-wrap" style="max-height:340px;overflow-y:auto">
+          <table id="scan-lines-table"></table>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeScanModal()">Annuler</button>
+      <button class="btn btn-success" id="scan-validate-btn" style="display:none" onclick="validateScan()">✅ Créer <span id="scan-line-count"></span> mouvement(s) d'entrée</button>
     </div>
   </div>
 </div>
@@ -1335,6 +1384,169 @@ function startInventory(){
   switchTab('inventaire',document.querySelector('[data-tab="inventaire"]'));
 }
 window.startInventory=startInventory;
+
+// ══════════════════════════════════════════════════════════
+// SCAN & RÉCEPTION STOCK
+// ══════════════════════════════════════════════════════════
+var _scanResult = null;
+
+function openScanModal(){
+  document.getElementById('scan-step-1').style.display='';
+  document.getElementById('scan-step-2').style.display='none';
+  document.getElementById('scan-validate-btn').style.display='none';
+  _scanResult = null;
+  document.getElementById('scanOverlay').classList.add('show');
+}
+window.openScanModal = openScanModal;
+
+function closeScanModal(){document.getElementById('scanOverlay').classList.remove('show')}
+window.closeScanModal = closeScanModal;
+
+async function handleScanFile(file){
+  if(!file) return;
+  // Convert to base64
+  var reader = new FileReader();
+  reader.onload = async function(e){
+    var dataUrl = e.target.result;
+    var base64 = dataUrl.split(',')[1];
+    var mediaType = file.type || 'image/jpeg';
+
+    // Show preview
+    document.getElementById('scan-step-1').style.display='none';
+    document.getElementById('scan-step-2').style.display='';
+    document.getElementById('scan-preview-img').src = dataUrl;
+    document.getElementById('scan-ai-status').innerHTML = '<div style="display:flex;align-items:center;gap:8px"><div class="spin"></div><span style="font-size:13px;font-weight:700;color:var(--text)">🧠 Analyse en cours par Claude Vision...</span></div><div style="font-size:11px;color:var(--muted);margin-top:4px">Extraction des produits, quantités et prix...</div>';
+    document.getElementById('scan-doc-info').innerHTML = '';
+    document.getElementById('scan-lines-table').innerHTML = '';
+
+    // Existing refs for matching
+    var existingRefs = _products.map(function(p){return {ref:(p.ref||'').trim(), name:p.name||''}});
+
+    try {
+      var resp = await fetch('/api/stock-scan-ai', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({image: base64, mediaType: mediaType, existingRefs: existingRefs})
+      });
+      var data = await resp.json();
+      if(data.error) throw new Error(data.error);
+
+      _scanResult = data;
+      renderScanResult(data);
+    } catch(err) {
+      document.getElementById('scan-ai-status').innerHTML = '<div style="color:var(--red);font-weight:700">❌ Erreur : ' + esc(err.message) + '</div><button class="btn btn-outline btn-sm" style="margin-top:8px" onclick="document.getElementById(\'scan-step-1\').style.display=\'\';document.getElementById(\'scan-step-2\').style.display=\'none\'">← Réessayer</button>';
+    }
+  };
+  reader.readAsDataURL(file);
+}
+window.handleScanFile = handleScanFile;
+
+function renderScanResult(data){
+  var conf = data.confidence || 0;
+  var confCls = conf >= 0.8 ? 'ai-conf-high' : conf >= 0.5 ? 'ai-conf-mid' : 'ai-conf-low';
+  var confLabel = conf >= 0.8 ? '✅ Haute confiance' : conf >= 0.5 ? '⚠️ Confiance moyenne' : '⚡ À vérifier attentivement';
+
+  document.getElementById('scan-ai-status').innerHTML =
+    '<span class="ai-confidence ' + confCls + '">' + confLabel + ' (' + Math.round(conf*100) + '%)</span>';
+
+  var docTypes = {bon_livraison:'📦 Bon de livraison',facture:'🧾 Facture',ticket:'🎫 Ticket',autre:'📄 Document'};
+  document.getElementById('scan-doc-info').innerHTML =
+    '<div style="font-size:12px;color:var(--text);line-height:1.8">' +
+    (data.docType ? '<span class="badge badge-blue">' + (docTypes[data.docType]||data.docType) + '</span> ' : '') +
+    (data.fournisseur ? '<b>' + esc(data.fournisseur) + '</b> · ' : '') +
+    (data.date ? data.date + ' · ' : '') +
+    (data.numero ? 'N° ' + esc(data.numero) + ' · ' : '') +
+    (data.totalHT ? 'Total HT : <b>' + fmtE(data.totalHT) + '</b>' : '') +
+    (data.notes ? '<div style="font-size:10px;color:var(--muted);margin-top:4px">💡 ' + esc(data.notes) + '</div>' : '') +
+    '</div>';
+
+  var lignes = data.lignes || [];
+  var prodMap = {};
+  _products.forEach(function(p){ prodMap[(p.ref||'').trim().toLowerCase()] = p; });
+
+  // Build product match dropdown
+  function refSelect(idx, matchedRef){
+    var opts = '<option value="">— Nouveau produit —</option>';
+    _products.forEach(function(p){
+      var sel = (matchedRef && (p.ref||'').trim().toLowerCase() === matchedRef.toLowerCase()) ? ' selected' : '';
+      opts += '<option value="' + esc((p.ref||'').trim()) + '"' + sel + '>' + esc(p.ref) + ' — ' + esc(p.name) + '</option>';
+    });
+    return '<select id="scan-ref-' + idx + '" class="filter-sel" style="min-width:160px;font-size:11px">' + opts + '</select>';
+  }
+
+  document.getElementById('scan-lines-table').innerHTML =
+    '<thead><tr><th style="text-align:left">✓</th><th style="text-align:left">Réf. / Désignation</th><th style="text-align:left">Produit stock</th><th>Qté</th><th>PU HT</th><th>Total HT</th></tr></thead>' +
+    '<tbody>' + lignes.map(function(l, i){
+      var pu = l.prixUnitaireHT || (l.totalHT && l.quantite ? l.totalHT / l.quantite : 0);
+      var total = l.totalHT || (pu * (l.quantite||0));
+      return '<tr>' +
+        '<td style="text-align:left"><input type="checkbox" class="scan-check" data-idx="' + i + '" checked/></td>' +
+        '<td style="text-align:left"><div style="font-weight:700">' + esc(l.designation||'Produit ' + (i+1)) + '</div><div style="font-size:10px;color:var(--muted)">' + esc(l.ref||'Pas de réf.') + (l.unite ? ' · ' + esc(l.unite) : '') + '</div></td>' +
+        '<td style="text-align:left">' + refSelect(i, l.matchedRef || l.ref) + '</td>' +
+        '<td><input type="number" id="scan-qty-' + i + '" value="' + (l.quantite||0) + '" min="0" step="1" style="width:60px;padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;text-align:center;font-weight:700;font-family:inherit"/></td>' +
+        '<td><input type="number" id="scan-pu-' + i + '" value="' + (pu||0).toFixed(2) + '" min="0" step="0.01" style="width:80px;padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;text-align:center;font-family:inherit"/></td>' +
+        '<td style="font-weight:700">' + fmtE(total) + '</td>' +
+        '</tr>';
+    }).join('') + '</tbody>';
+
+  document.getElementById('scan-validate-btn').style.display = '';
+  document.getElementById('scan-line-count').textContent = lignes.length;
+}
+
+async function validateScan(){
+  if(!_scanResult || !_scanResult.lignes) return;
+  var btn = document.getElementById('scan-validate-btn');
+  btn.disabled = true; btn.textContent = '⏳ Création en cours...';
+
+  var lignes = _scanResult.lignes;
+  var created = 0;
+  var newProds = 0;
+
+  for(var i = 0; i < lignes.length; i++){
+    var check = document.querySelector('.scan-check[data-idx="' + i + '"]');
+    if(!check || !check.checked) continue;
+
+    var qty = pf(document.getElementById('scan-qty-' + i).value);
+    var pu = pf(document.getElementById('scan-pu-' + i).value);
+    if(qty <= 0) continue;
+
+    var selRef = document.getElementById('scan-ref-' + i).value;
+    var l = lignes[i];
+    var ref = selRef || (l.ref || l.designation || 'SCAN-' + Date.now()).replace(/\s+/g, '-').toUpperCase().slice(0, 30);
+
+    // If no existing product matched, create one
+    if(!selRef && !_products.some(function(p){return (p.ref||'').trim() === ref})){
+      var newProd = {
+        id: uid(), ref: ref, name: l.designation || ref,
+        stockType: 'marchandise', pa: pu, pv: 0,
+        stockBase: 0, min: 0, unite: l.unite || 'unité',
+        fournisseur: _scanResult.fournisseur || '',
+        cat: '', notes: 'Créé par scan du ' + today(),
+        updatedAt: new Date().toISOString()
+      };
+      _products.push(newProd);
+      await saveProdToFirestore(newProd);
+      newProds++;
+    }
+
+    // Create IN movement
+    var mov = {
+      id: uid(), date: _scanResult.date || today(), type: 'IN',
+      ref: ref, qty: qty, pa: pu,
+      lot: '', note: (_scanResult.docType === 'bon_livraison' ? 'BL' : _scanResult.docType === 'facture' ? 'Facture' : 'Scan') +
+           (_scanResult.numero ? ' ' + _scanResult.numero : '') +
+           (_scanResult.fournisseur ? ' — ' + _scanResult.fournisseur : '')
+    };
+    _movements.unshift(mov);
+    await saveMovToFirestore(mov);
+    created++;
+  }
+
+  closeScanModal();
+  showToast('✅ ' + created + ' mouvement(s) créé(s)' + (newProds > 0 ? ' + ' + newProds + ' nouveau(x) produit(s)' : ''));
+  renderAll();
+}
+window.validateScan = validateScan;
 
 // ══════════════════════════════════════════════════════════
 // CATALOGUE — Families / Categories / Sub-categories
