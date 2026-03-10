@@ -1035,8 +1035,8 @@ html, body { overflow-x: hidden; max-width: 100vw; }
       <div class="card">
         <div class="card-head"><div class="card-title">🕐 Horaires d'ouverture de l'établissement</div></div>
         <div class="card-body">
-          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Référence pour la génération du planning et la détection d'anomalies.</div>
-          <div id="rh-horaires-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px"></div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Référence pour la génération du planning et la détection d'anomalies. Ajoutez plusieurs créneaux par jour (ex : matin + après-midi).</div>
+          <div id="rh-horaires-grid" style="display:flex;flex-direction:column;gap:8px"></div>
           <div style="margin-top:12px;padding:10px 14px;background:#f8faff;border-radius:8px;font-size:11px;color:var(--muted)">
             💡 Le planning IA respectera ces plages horaires.
           </div>
@@ -1806,12 +1806,23 @@ function renderRhHoraires() {
   const horaires = _rhParams.horaires || {};
   grid.innerHTML = RH_JOURS.map((j, i) => {
     const h = horaires[j] || {actif: i < 5, deb: "08:00", fin: "18:00"};
-    return `<div class="rh-jour-card ${h.actif?"on":""}" id="rh-jcard-${j}">
-      <div class="rh-jour-label">${RH_JOURS_LABEL[i]}</div>
-      <button class="rh-jour-toggle ${h.actif?"on":"off"}" id="rh-jtog-${j}" onclick="rhToggleJour('${j}')"></button>
-      <div id="rh-jtime-${j}" style="${h.actif?"":"opacity:.35;pointer-events:none"}">
-        <input class="rh-time-in" id="rh-jdeb-${j}" type="time" value="${h.deb||""}" ${!h.actif?"disabled":""} oninput="rhMarkModified()"/>
-        <input class="rh-time-in" id="rh-jfin-${j}" type="time" value="${h.fin||""}" ${!h.actif?"disabled":""} oninput="rhMarkModified()"/>
+    const plages = h.plages || [{deb: h.deb || "08:00", fin: h.fin || "18:00"}];
+    const actif = h.actif;
+    return `<div class="rh-jour-row" id="rh-jcard-${j}" style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;border-radius:10px;border:1.5px solid ${actif?'#059669':'#e2e8f0'};background:${actif?'#f0fdf4':'#fafafa'};transition:.15s">
+      <div style="min-width:52px;text-align:center;padding-top:4px">
+        <div style="font-size:11px;font-weight:800;color:${actif?'#059669':'#9ca3af'};text-transform:uppercase;margin-bottom:6px">${RH_JOURS_LABEL[i]}</div>
+        <button class="rh-jour-toggle ${actif?'on':'off'}" id="rh-jtog-${j}" onclick="rhToggleJour('${j}')"></button>
+      </div>
+      <div id="rh-jtime-${j}" style="flex:1;${actif?'':'opacity:.35;pointer-events:none'}">
+        <div id="rh-plages-${j}" style="display:flex;flex-direction:column;gap:4px">
+          ${plages.map((p, pi) => `<div class="rh-plage-row" style="display:flex;align-items:center;gap:6px">
+            <input class="rh-time-in rh-pdeb" data-jour="${j}" type="time" value="${p.deb||''}" ${!actif?'disabled':''} oninput="rhMarkModified()" style="flex:1;padding:5px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;font-weight:700;font-family:inherit;text-align:center;outline:none"/>
+            <span style="font-size:11px;color:#9ca3af">→</span>
+            <input class="rh-time-in rh-pfin" data-jour="${j}" type="time" value="${p.fin||''}" ${!actif?'disabled':''} oninput="rhMarkModified()" style="flex:1;padding:5px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;font-weight:700;font-family:inherit;text-align:center;outline:none"/>
+            ${plages.length > 1 ? `<button onclick="rhRemovePlage('${j}',${pi})" style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;width:26px;height:26px;font-size:12px;cursor:pointer;color:#ef4444;display:flex;align-items:center;justify-content:center;flex-shrink:0">×</button>` : ''}
+          </div>`).join('')}
+        </div>
+        <button onclick="rhAddPlage('${j}')" style="margin-top:4px;padding:3px 10px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;font-size:10px;font-weight:700;color:#4f46e5;cursor:pointer;font-family:inherit">+ Créneau</button>
       </div>
     </div>`;
   }).join("");
@@ -1903,20 +1914,57 @@ function rhOnCCNChange() {
 }
 
 function rhToggleJour(j) {
-  const tog    = document.getElementById("rh-jtog-"+j);
-  const card   = document.getElementById("rh-jcard-"+j);
-  const tDiv   = document.getElementById("rh-jtime-"+j);
-  const debInp = document.getElementById("rh-jdeb-"+j);
-  const finInp = document.getElementById("rh-jfin-"+j);
-  const isOn   = tog.classList.contains("on");
+  const tog  = document.getElementById("rh-jtog-"+j);
+  const card = document.getElementById("rh-jcard-"+j);
+  const tDiv = document.getElementById("rh-jtime-"+j);
+  const isOn = tog.classList.contains("on");
   tog.classList.toggle("on", !isOn);
   tog.classList.toggle("off", isOn);
-  card.classList.toggle("on", !isOn);
+  card.style.borderColor = isOn ? "#e2e8f0" : "#059669";
+  card.style.background = isOn ? "#fafafa" : "#f0fdf4";
   tDiv.style.opacity       = isOn ? ".35" : "1";
   tDiv.style.pointerEvents = isOn ? "none" : "";
-  if (debInp) debInp.disabled = isOn;
-  if (finInp) finInp.disabled = isOn;
+  tDiv.querySelectorAll("input").forEach(inp => inp.disabled = isOn);
   rhMarkModified();
+}
+
+function rhAddPlage(j) {
+  const container = document.getElementById("rh-plages-"+j);
+  if (!container) return;
+  const rows = container.querySelectorAll(".rh-plage-row");
+  const lastFin = rows.length ? rows[rows.length-1].querySelector(".rh-pfin")?.value || "14:00" : "14:00";
+  const newRow = document.createElement("div");
+  newRow.className = "rh-plage-row";
+  newRow.style.cssText = "display:flex;align-items:center;gap:6px";
+  newRow.innerHTML = `<input class="rh-time-in rh-pdeb" data-jour="${j}" type="time" value="${lastFin}" oninput="rhMarkModified()" style="flex:1;padding:5px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;font-weight:700;font-family:inherit;text-align:center;outline:none"/>
+    <span style="font-size:11px;color:#9ca3af">→</span>
+    <input class="rh-time-in rh-pfin" data-jour="${j}" type="time" value="19:00" oninput="rhMarkModified()" style="flex:1;padding:5px 6px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;font-weight:700;font-family:inherit;text-align:center;outline:none"/>
+    <button onclick="this.closest('.rh-plage-row').remove();rhUpdateDelBtns('${j}');rhMarkModified()" style="background:#fef2f2;border:1px solid #fecaca;border-radius:6px;width:26px;height:26px;font-size:12px;cursor:pointer;color:#ef4444;display:flex;align-items:center;justify-content:center;flex-shrink:0">×</button>`;
+  container.appendChild(newRow);
+  rhUpdateDelBtns(j);
+  rhMarkModified();
+}
+window.rhAddPlage = rhAddPlage;
+
+function rhRemovePlage(j, idx) {
+  const container = document.getElementById("rh-plages-"+j);
+  if (!container) return;
+  const rows = container.querySelectorAll(".rh-plage-row");
+  if (rows.length <= 1) return;
+  rows[idx].remove();
+  rhUpdateDelBtns(j);
+  rhMarkModified();
+}
+window.rhRemovePlage = rhRemovePlage;
+
+function rhUpdateDelBtns(j) {
+  const container = document.getElementById("rh-plages-"+j);
+  if (!container) return;
+  const rows = container.querySelectorAll(".rh-plage-row");
+  rows.forEach(row => {
+    const btn = row.querySelector("button");
+    if (btn) btn.style.display = rows.length > 1 ? "flex" : "none";
+  });
 }
 
 function rhToggleAlerte(key, checked) {
@@ -1931,10 +1979,18 @@ async function saveRhParams() {
   const horaires = {};
   RH_JOURS.forEach(j => {
     const actif = document.getElementById("rh-jtog-"+j)?.classList.contains("on") || false;
+    const plages = [];
+    document.querySelectorAll(`#rh-plages-${j} .rh-plage-row`).forEach(row => {
+      const deb = row.querySelector(".rh-pdeb")?.value || "";
+      const fin = row.querySelector(".rh-pfin")?.value || "";
+      if (deb && fin) plages.push({deb, fin});
+    });
+    if (!plages.length) plages.push({deb: "09:00", fin: "18:00"});
     horaires[j] = {
       actif,
-      deb: document.getElementById("rh-jdeb-"+j)?.value || "",
-      fin: document.getElementById("rh-jfin-"+j)?.value || "",
+      deb: plages[0].deb,
+      fin: plages[plages.length - 1].fin,
+      plages
     };
   });
 
@@ -1978,8 +2034,10 @@ async function saveRhParams() {
   RH_JOURS.forEach((j, i) => {
     if (!horaires[j].actif) hebdoClosed.push(jsDayMap[i]);
     else {
-      const key = horaires[j].deb + '-' + horaires[j].fin;
-      plagesSet[key] = {deb: horaires[j].deb, fin: horaires[j].fin};
+      (horaires[j].plages || [{deb: horaires[j].deb, fin: horaires[j].fin}]).forEach(p => {
+        const key = p.deb + '-' + p.fin;
+        plagesSet[key] = {deb: p.deb, fin: p.fin};
+      });
     }
   });
   const plagesArr = Object.values(plagesSet).sort((a,b) => a.deb.localeCompare(b.deb));
