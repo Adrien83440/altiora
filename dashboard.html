@@ -1358,16 +1358,21 @@ async function loadCopilote(metrics) {
   var widget = document.getElementById('copilote-widget');
   if (!widget) return;
 
-  // Check cache (Firestore - 1 briefing par jour)
-  var todayKey = new Date().toISOString().slice(0,10);
+  // Hash des métriques pour détecter les changements
+  var metricsStr = JSON.stringify(metrics);
+  var hash = 0;
+  for (var i = 0; i < metricsStr.length; i++) { hash = ((hash << 5) - hash + metricsStr.charCodeAt(i)) | 0; }
+  var hashKey = 'h' + Math.abs(hash).toString(36);
+
+  // Check cache (sessionStorage — valide tant que l'onglet est ouvert ET données identiques)
   try {
-    var cacheSnap = await window._getDoc(window._doc(window._db, 'copilote', window._uid, 'briefings', todayKey));
-    if (cacheSnap.exists()) {
-      _copiloteCache = cacheSnap.data();
+    var cached = sessionStorage.getItem('copilote_' + hashKey);
+    if (cached) {
+      _copiloteCache = JSON.parse(cached);
       renderCopilote(widget, _copiloteCache);
       return;
     }
-  } catch(e) { /* pas de cache */ }
+  } catch(e) {}
 
   // Loading state
   widget.querySelector('.copilote-inner').innerHTML = '<div class="copilote-loading"><div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>🧠 Votre copilote analyse vos données...</div>';
@@ -1388,12 +1393,8 @@ async function loadCopilote(metrics) {
     _copiloteCache = data;
     renderCopilote(widget, data);
 
-    // Save to cache
-    try {
-      await window._setDoc(window._doc(window._db, 'copilote', window._uid, 'briefings', todayKey),
-        Object.assign({}, data, {createdAt: new Date().toISOString(), metrics: metrics})
-      );
-    } catch(e) { console.warn('Copilote cache save failed:', e); }
+    // Cache in sessionStorage (invalidé si données changent ou onglet fermé)
+    try { sessionStorage.setItem('copilote_' + hashKey, JSON.stringify(data)); } catch(e) {}
 
   } catch(e) {
     console.error('Copilote error:', e);
@@ -1457,10 +1458,7 @@ function renderCopilote(widget, data) {
 
 async function refreshCopilote() {
   _copiloteCache = null;
-  // Delete today's cache
-  var todayKey = new Date().toISOString().slice(0,10);
-  try { await window._deleteDoc(window._doc(window._db, 'copilote', window._uid, 'briefings', todayKey)); } catch(e) {}
-  // Re-trigger — we need the metrics, so reload
+  try { sessionStorage.clear(); } catch(e) {}
   var widget = document.getElementById('copilote-widget');
   if (widget) widget.querySelector('.copilote-inner').innerHTML = '<div class="copilote-loading"><div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>🧠 Actualisation en cours...</div>';
   window.loadData();
