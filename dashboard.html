@@ -127,7 +127,7 @@
     .quote-card{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;display:flex;flex-direction:column;justify-content:space-between;}
 
     /* VOCAL ASSISTANT */
-    .vocal-fab{position:fixed;bottom:28px;right:28px;width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;color:white;font-size:24px;cursor:pointer;box-shadow:0 6px 24px rgba(99,102,241,.4);z-index:300;display:flex;align-items:center;justify-content:center;transition:all .25s;font-family:inherit}
+    .vocal-fab{position:fixed;bottom:28px;left:280px;width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;color:white;font-size:24px;cursor:pointer;box-shadow:0 6px 24px rgba(99,102,241,.4);z-index:300;display:flex;align-items:center;justify-content:center;transition:all .25s;font-family:inherit}
     .vocal-fab:hover{transform:scale(1.08);box-shadow:0 8px 32px rgba(99,102,241,.5)}
     .vocal-fab.listening{background:linear-gradient(135deg,#ef4444,#f97316);animation:vpulse 1.2s infinite;box-shadow:0 6px 24px rgba(239,68,68,.5)}
     .vocal-fab.thinking{background:linear-gradient(135deg,#f59e0b,#fbbf24);animation:none}
@@ -324,6 +324,7 @@
       .kpi-grid-4,.kpi-grid-5,.kpi-grid-3{grid-template-columns:1fr 1fr!important;gap:8px!important;margin-bottom:12px!important;}
       .charts-grid,.charts-grid-3,.widget-row,.prev-grid{grid-template-columns:1fr!important;gap:12px!important;}
       #widgets-row{grid-template-columns:1fr!important;}
+      .vocal-fab{left:20px!important;bottom:20px!important;}
       .kpi-value{font-size:16px!important;}
       .kpi-label{font-size:9px!important;}
       canvas{max-width:100%!important;}
@@ -1500,31 +1501,52 @@ function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').
   <div class="vocal-status" id="vocalStatus">Appuyez et parlez</div>
   <div class="vocal-text" id="vocalText"></div>
   <div class="vocal-answer" id="vocalAnswer" style="display:none"></div>
+  <div id="vocalFallback" style="display:none;width:100%;max-width:480px;margin-top:10px">
+    <div style="display:flex;gap:8px">
+      <input type="text" id="vocalTextInput" placeholder="Tapez votre question ici..." style="flex:1;padding:12px 16px;border:1px solid rgba(255,255,255,.2);border-radius:10px;background:rgba(255,255,255,.08);color:white;font-family:inherit;font-size:14px;outline:none" onkeydown="if(event.key==='Enter')sendTextQuestion()"/>
+      <button onclick="sendTextQuestion()" style="padding:12px 20px;background:var(--purple);color:white;border:none;border-radius:10px;font-weight:700;cursor:pointer;font-family:inherit;font-size:14px">Envoyer</button>
+    </div>
+  </div>
   <div class="vocal-hint">Essayez : "Comment va mon CA ?" · "Est-ce que je suis rentable ?" · "Combien de charges ce mois ?" · "Je peux me verser 3000 euros ?"</div>
 </div>
 
 <script>
 // ══════════════════════════════════════════════════════════
 // VOCAL ASSISTANT — Web Speech API + Claude + Speech Synthesis
+// With text fallback for browsers that don't support speech
 // ══════════════════════════════════════════════════════════
 var _vocalState = 'idle'; // idle, listening, thinking, speaking
 var _recognition = null;
 var _synth = window.speechSynthesis;
-var _vocalMetrics = null;
+var _speechSupported = false;
 
 // Check browser support
 var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (!SpeechRecognition) {
-  var fab = document.getElementById('vocalFab');
-  if (fab) fab.style.display = 'none';
-}
 
 function toggleVocal() {
-  if (_vocalState === 'idle') startListening();
+  if (_vocalState === 'idle') openVocalUI();
   else if (_vocalState === 'listening') stopListening();
   else if (_vocalState === 'speaking') stopSpeaking();
 }
 window.toggleVocal = toggleVocal;
+
+function openVocalUI() {
+  document.getElementById('vocalOverlay').classList.add('show');
+  document.getElementById('vocalText').textContent = '';
+  document.getElementById('vocalAnswer').style.display = 'none';
+  // Always show text fallback
+  document.getElementById('vocalFallback').style.display = '';
+  document.getElementById('vocalTextInput').value = '';
+  // Try speech recognition
+  if (SpeechRecognition) {
+    startListening();
+  } else {
+    setVocalState('idle');
+    document.getElementById('vocalStatus').textContent = 'Tapez votre question ci-dessous';
+    document.getElementById('vocalIcon').textContent = '⌨️';
+    document.getElementById('vocalTextInput').focus();
+  }
+}
 
 function stopVocal() {
   if (_recognition) try { _recognition.abort(); } catch(e) {}
@@ -1561,9 +1583,6 @@ function setVocalState(state) {
 
 function startListening() {
   if (!SpeechRecognition) return;
-  document.getElementById('vocalOverlay').classList.add('show');
-  document.getElementById('vocalText').textContent = '';
-  document.getElementById('vocalAnswer').style.display = 'none';
 
   _recognition = new SpeechRecognition();
   _recognition.lang = 'fr-FR';
@@ -1571,7 +1590,10 @@ function startListening() {
   _recognition.interimResults = true;
   _recognition.maxAlternatives = 1;
 
-  _recognition.onstart = function() { setVocalState('listening'); };
+  _recognition.onstart = function() {
+    _speechSupported = true;
+    setVocalState('listening');
+  };
 
   _recognition.onresult = function(event) {
     var transcript = '';
@@ -1579,6 +1601,7 @@ function startListening() {
       transcript += event.results[i][0].transcript;
     }
     document.getElementById('vocalText').textContent = '🗣 "' + transcript + '"';
+    document.getElementById('vocalTextInput').value = transcript;
 
     if (event.results[event.results.length - 1].isFinal) {
       processQuestion(transcript);
@@ -1586,42 +1609,60 @@ function startListening() {
   };
 
   _recognition.onerror = function(event) {
-    if (event.error === 'no-speech') {
-      document.getElementById('vocalText').textContent = 'Aucune voix détectée — réessayez';
+    console.warn('Speech error:', event.error);
+    if (event.error === 'service-not-allowed' || event.error === 'not-allowed') {
+      // Safari or permission denied → switch to text mode
+      document.getElementById('vocalStatus').textContent = 'Micro non disponible — tapez votre question';
+      document.getElementById('vocalIcon').textContent = '⌨️';
       setVocalState('idle');
-    } else if (event.error === 'aborted') {
-      // user cancelled
-    } else {
-      document.getElementById('vocalText').textContent = 'Erreur : ' + event.error;
+      document.getElementById('vocalTextInput').focus();
+    } else if (event.error === 'no-speech') {
+      document.getElementById('vocalText').textContent = 'Aucune voix détectée';
       setVocalState('idle');
+    } else if (event.error !== 'aborted') {
+      document.getElementById('vocalStatus').textContent = 'Tapez votre question ci-dessous';
+      document.getElementById('vocalIcon').textContent = '⌨️';
+      setVocalState('idle');
+      document.getElementById('vocalTextInput').focus();
     }
   };
 
   _recognition.onend = function() {
     if (_vocalState === 'listening') {
-      // If we're still in listening state when it ends, it timed out
       if (!document.getElementById('vocalText').textContent) {
-        document.getElementById('vocalText').textContent = 'Pas de voix détectée';
+        document.getElementById('vocalText').textContent = '';
         setVocalState('idle');
       }
     }
   };
 
-  _recognition.start();
+  try {
+    _recognition.start();
+  } catch(e) {
+    // Fallback to text
+    document.getElementById('vocalStatus').textContent = 'Tapez votre question ci-dessous';
+    document.getElementById('vocalIcon').textContent = '⌨️';
+    document.getElementById('vocalTextInput').focus();
+  }
 }
 
 function stopListening() {
   if (_recognition) try { _recognition.stop(); } catch(e) {}
 }
 
+function sendTextQuestion() {
+  var input = document.getElementById('vocalTextInput');
+  var q = (input.value || '').trim();
+  if (!q) return;
+  document.getElementById('vocalText').textContent = '💬 "' + q + '"';
+  processQuestion(q);
+}
+window.sendTextQuestion = sendTextQuestion;
+
 async function processQuestion(question) {
   setVocalState('thinking');
-  document.getElementById('vocalText').textContent = '🗣 "' + question + '"';
 
-  // Collect current metrics from copilote cache or page
   var metrics = window._vocalMetrics || {};
-
-  // Get user name
   var prenom = '';
   try { var uEl = document.getElementById('uname'); if (uEl) prenom = uEl.textContent.split(' ')[0]; } catch(e) {}
 
@@ -1638,8 +1679,12 @@ async function processQuestion(question) {
     document.getElementById('vocalAnswer').textContent = answer;
     document.getElementById('vocalAnswer').style.display = '';
 
-    // Speak the answer
-    speakAnswer(answer);
+    // Try to speak if supported
+    if (_synth && _speechSupported) {
+      speakAnswer(answer);
+    } else {
+      setVocalState('idle');
+    }
   } catch(e) {
     document.getElementById('vocalAnswer').textContent = 'Erreur : ' + e.message;
     document.getElementById('vocalAnswer').style.display = '';
@@ -1656,10 +1701,8 @@ function speakAnswer(text) {
   utterance.rate = 1.0;
   utterance.pitch = 1.0;
 
-  // Try to find a French voice
   var voices = _synth.getVoices();
-  var frVoice = voices.find(function(v) { return v.lang.startsWith('fr') && v.name.includes('Google'); })
-    || voices.find(function(v) { return v.lang.startsWith('fr'); });
+  var frVoice = voices.find(function(v) { return v.lang.startsWith('fr'); });
   if (frVoice) utterance.voice = frVoice;
 
   utterance.onstart = function() { setVocalState('speaking'); };
