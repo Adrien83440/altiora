@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>ALTEORE — Correction crédits</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,sans-serif;background:#f5f7ff;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+    .card{background:#fff;border-radius:20px;padding:40px;max-width:440px;width:100%;text-align:center;box-shadow:0 8px 40px rgba(15,31,92,.1)}
+    .emoji{font-size:56px;margin-bottom:16px}
+    h1{font-size:20px;font-weight:800;color:#1a1f36;margin-bottom:8px}
+    p{font-size:14px;color:#6b7280;line-height:1.6;margin-bottom:24px}
+    .btn{display:inline-block;padding:16px 40px;background:linear-gradient(135deg,#ef4444,#f97316);color:#fff;font-size:16px;font-weight:700;border:none;border-radius:12px;cursor:pointer;font-family:inherit;transition:.2s}
+    .btn:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(239,68,68,.3)}
+    .btn:disabled{opacity:.5;cursor:wait;transform:none}
+    .result{margin-top:20px;padding:16px;border-radius:12px;font-size:14px;font-weight:600;display:none}
+    .result.ok{display:block;background:#f0fdf4;color:#059669;border:1px solid #bbf7d0}
+    .result.err{display:block;background:#fef2f2;color:#ef4444;border:1px solid #fca5a5}
+    .result.wait{display:block;background:#eff6ff;color:#1a3dce;border:1px solid #bfdbfe}
+    .footer{margin-top:24px;font-size:11px;color:#9ca3af}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="emoji">🔧</div>
+    <h1>Correction de vos crédits</h1>
+    <p>Cette page va supprimer les lignes <strong>CREDIT MUT 1</strong> et <strong>CREDIT MUT 2</strong> qui reviennent en double sur tous vos mois.<br><br>Cliquez sur le bouton ci-dessous :</p>
+    <button class="btn" id="btn" onclick="run()">🗑️ Supprimer les doublons</button>
+    <div class="result" id="result"></div>
+    <div class="footer">ALTEORE · Page de maintenance</div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+    import { getFirestore, doc, setDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+    const app = initializeApp({
+      apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+      authDomain:"altiora-70599.firebaseapp.com",
+      projectId:"altiora-70599",
+      storageBucket:"altiora-70599.firebasestorage.app",
+      messagingSenderId:"120905555746",
+      appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+    });
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    window._db = db; window._doc = doc; window._setDoc = setDoc;
+    window._collection = collection; window._getDocs = getDocs;
+    onAuthStateChanged(auth, user => {
+      if (!user) { window.location.href = 'index.html'; return; }
+      window._uid = user.uid;
+    });
+  </script>
+
+  <script>
+    async function run() {
+      var btn = document.getElementById('btn');
+      var res = document.getElementById('result');
+      if (!window._uid) { res.className='result err'; res.textContent='❌ Vous devez être connecté(e). Connectez-vous sur alteore.com puis revenez ici.'; return; }
+      btn.disabled = true; btn.textContent = '⏳ Nettoyage en cours...';
+      res.className='result wait'; res.textContent='⏳ Analyse de vos données...';
+      try {
+        var snap = await window._getDocs(window._collection(window._db, 'pilotage', window._uid, 'months'));
+        var n = 0;
+        for (var i = 0; i < snap.docs.length; i++) {
+          var d = snap.docs[i];
+          var data = d.data();
+          if (!data.credits || !data.credits.length) continue;
+          var before = data.credits.length;
+          var clean = data.credits.filter(function(c) {
+            return !(c.fournisseur || c.nom || '').toUpperCase().includes('CREDIT MUT');
+          });
+          if (clean.length < before) {
+            await window._setDoc(window._doc(window._db, 'pilotage', window._uid, 'months', d.id), {credits: clean}, {merge: true});
+            n += before - clean.length;
+          }
+        }
+        if (n > 0) {
+          res.className='result ok'; res.textContent='✅ Terminé ! ' + n + ' lignes CREDIT MUT supprimées. Vous pouvez fermer cette page et retourner sur Pilotage.';
+        } else {
+          res.className='result ok'; res.textContent='✅ Aucune ligne CREDIT MUT trouvée. Tout est déjà propre !';
+        }
+        btn.textContent = '✅ Terminé !';
+      } catch(e) {
+        res.className='result err'; res.textContent='❌ Erreur : ' + e.message;
+        btn.disabled = false; btn.textContent = '🗑️ Réessayer';
+      }
+    }
+    window.run = run;
+  </script>
+</body>
+</html>
