@@ -635,6 +635,8 @@ async function loadData(_tries){
   const plan=window._userPlan||window._userPlanDirect||'free';
   const CAN=['trial','pro','max','master','dev'];
   if(!CAN.includes(plan)){console.log('Accès refusé plan:',plan);return;}
+  // Load stock data
+  await loadStockData();
 
   const now=new Date();
   const civilYear=now.getFullYear();
@@ -1027,6 +1029,11 @@ async function loadData(_tries){
       </div>
     </div>
 
+    
+    <!-- KPIs STOCK -->
+    \${_stockData.refs>0?'<div class="section-label">📦 Stock & Inventaire</div><div class="kpi-grid-5"><div class="kpi-card blue"><div class="kpi-icon">📦</div><div class="kpi-label">Valeur du stock</div><div class="kpi-value">'+fmtE(_stockData.value)+'</div><div class="kpi-sub"><span class="neutral">'+_stockData.refs+' référence(s) en catalogue</span></div></div><div class="kpi-card '+(_stockData.variation>=0?'green':'red')+'"><div class="kpi-icon">📊</div><div class="kpi-label">Variation stock</div><div class="kpi-value '+(_stockData.variation>=0?'positive':'negative')+'">'+(_stockData.variation>=0?'+':'')+fmtE(_stockData.variation)+'</div><div class="kpi-sub"><span class="neutral">vs mois précédent'+((_stockData.variation>0)?' → +Résultat':_stockData.variation<0?' → −Résultat':'')+'</span></div></div><div class="kpi-card '+(_stockData.ruptures>0?'red':_stockData.alerts>0?'orange':'green')+'"><div class="kpi-icon">⚠️</div><div class="kpi-label">Alertes stock</div><div class="kpi-value '+(_stockData.ruptures>0?'negative':_stockData.alerts>0?'':'positive')+'">'+(_stockData.alerts+_stockData.ruptures)+'</div><div class="kpi-sub"><span class="neutral">'+_stockData.ruptures+' rupture(s) · '+_stockData.alerts+' seuil(s)</span></div></div><div class="kpi-card purple"><div class="kpi-icon">🔄</div><div class="kpi-label">Rotation</div><div class="kpi-value">'+(_stockData.rotation>0?_stockData.rotation.toFixed(1)+'×':'—')+'</div><div class="kpi-sub"><span class="neutral">'+(_stockData.joursStock>0?_stockData.joursStock+' jours de stock':'—')+'</span></div></div><div class="kpi-card teal"><div class="kpi-icon">💡</div><div class="kpi-label">Impact résultat</div><div class="kpi-value '+(_stockData.variation>=0?'positive':'negative')+'">'+(_stockData.variation>=0?'+':'')+fmtE(_stockData.variation)+'</div><div class="kpi-sub"><span class="neutral">Variation de stock</span></div></div></div><div style="padding:8px 14px;background:var(--blue-ghost);border-radius:8px;font-size:11px;color:var(--blue-main);margin-bottom:16px">💡 <b>Impact comptable</b> : La variation de stock de <b>'+(_stockData.variation>=0?'+':'')+fmtE(_stockData.variation)+'</b> '+ (_stockData.variation>0?'augmente':'diminue')+' votre résultat. <a href="gestion-stock.html" style="color:var(--blue-main);font-weight:700">Gérer le stock →</a></div>'
+    :''}
+
     <!-- PRÉVISIONS ANNUELLES + FIDÉLISATION -->
     <div class="section-label">🔮 Prévisions & Vue d'ensemble</div>
     <div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.8fr;gap:18px;margin-bottom:20px" id="prev-fid-grid">
@@ -1209,6 +1216,92 @@ window.toggleMenu=toggleMenu;
 window.handleLogout=handleLogout;
 window.setViewMode=setViewMode;
 window.setFiscalStart=setFiscalStart;
+</script>
+<script>
+// ══════════════════════════════════════════════════════════
+// STOCK DATA HELPER — shared across dashboard/cashflow/suivi-ca/rapport
+// Loads stock data and computes valuation + variation
+// ══════════════════════════════════════════════════════════
+var _stockData = {loaded:false, products:[], movements:[], value:0, variation:0, alerts:0, ruptures:0, refs:0, rotation:0, joursStock:0, snapshotPrev:null};
+
+async function loadStockData(){
+  if(!window._uid||!window._getDocs||!window._db||_stockData.loaded) return _stockData;
+  try{
+    var pSnap=await window._getDocs(window._collection(window._db,'stock',window._uid,'products'));
+    _stockData.products=[];
+    pSnap.forEach(function(d){_stockData.products.push(Object.assign({id:d.id},d.data()))});
+
+    var mSnap=await window._getDocs(window._collection(window._db,'stock',window._uid,'movements'));
+    _stockData.movements=[];
+    mSnap.forEach(function(d){_stockData.movements.push(Object.assign({id:d.id},d.data()))});
+
+    // Compute stock values (CMUP)
+    var map={};
+    _stockData.products.forEach(function(p){
+      var ref=(p.ref||'').trim();if(!ref)return;
+      var pa=parseFloat(String(p.pa||0).replace(',','.'))||0;
+      var sq=parseFloat(String(p.stockBase||0).replace(',','.'))||0;
+      map[ref]={qty:sq,cmup:pa,totalIn:sq*pa,totalQtyIn:sq};
+    });
+    var sorted=_stockData.movements.slice().sort(function(a,b){return(a.date||'').localeCompare(b.date||'')});
+    sorted.forEach(function(m){
+      var ref=(m.ref||'').trim();if(!ref)return;
+      if(!map[ref])map[ref]={qty:0,cmup:0,totalIn:0,totalQtyIn:0};
+      var q=parseFloat(String(m.qty||0).replace(',','.'))||0;
+      var pa=parseFloat(String(m.pa||0).replace(',','.'))||0;
+      var e=map[ref];
+      if(m.type==='IN'||m.type==='RETURN_IN'){
+        if(pa>0){e.totalIn+=q*pa;e.totalQtyIn+=q;e.cmup=e.totalQtyIn>0?e.totalIn/e.totalQtyIn:pa}
+        e.qty+=q;
+      } else if(m.type==='ADJUST'){e.qty=q}
+      else {e.qty-=q}
+    });
+
+    var totalVal=0,alerts=0,ruptures=0;
+    _stockData.products.forEach(function(p){
+      var ref=(p.ref||'').trim();if(!ref)return;
+      var s=map[ref]||{qty:0,cmup:0};
+      var val=Math.max(s.qty,0)*s.cmup;
+      totalVal+=val;
+      var min=parseFloat(p.min||0)||0;
+      if(s.qty<=0)ruptures++;
+      else if(min>0&&s.qty<=min)alerts++;
+    });
+    _stockData.value=totalVal;
+    _stockData.alerts=alerts;
+    _stockData.ruptures=ruptures;
+    _stockData.refs=_stockData.products.length;
+
+    // Load previous month snapshot for variation
+    var now=new Date();
+    var prevM=now.getMonth()===0?12:now.getMonth();
+    var prevY=now.getMonth()===0?now.getFullYear()-1:now.getFullYear();
+    var prevKey=prevY+'-'+String(prevM).padStart(2,'0');
+    try{
+      var snapDoc=await window._getDoc(window._doc(window._db,'stock',window._uid,'snapshots',prevKey));
+      if(snapDoc.exists()){
+        _stockData.snapshotPrev=snapDoc.data();
+        _stockData.variation=totalVal-(snapDoc.data().totalValue||0);
+      }
+    }catch(e){}
+
+    // Rotation (sorties 12 mois / stock moyen)
+    var cutoff=new Date();cutoff.setFullYear(cutoff.getFullYear()-1);
+    var cutStr=cutoff.toISOString().slice(0,10);
+    var totalOut=0;
+    _stockData.movements.forEach(function(m){
+      if((m.date||'')>=cutStr&&(m.type==='OUT'||m.type==='LOSS')){
+        totalOut+=(parseFloat(String(m.qty||0).replace(',','.'))||0)*(parseFloat(String(m.pa||0).replace(',','.'))||0);
+      }
+    });
+    _stockData.rotation=totalVal>0?totalOut/totalVal:0;
+    _stockData.joursStock=_stockData.rotation>0?Math.round(365/_stockData.rotation):0;
+
+    _stockData.loaded=true;
+  }catch(e){console.warn('Stock helper load error:',e)}
+  return _stockData;
+}
+
 </script>
 <script src="nav.js"></script>
 </body>

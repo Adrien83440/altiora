@@ -250,6 +250,92 @@ onAuthStateChanged(auth, async user => {
   window.initRapport();
 });
 </script>
+<script>
+// ══════════════════════════════════════════════════════════
+// STOCK DATA HELPER — shared across dashboard/cashflow/suivi-ca/rapport
+// Loads stock data and computes valuation + variation
+// ══════════════════════════════════════════════════════════
+var _stockData = {loaded:false, products:[], movements:[], value:0, variation:0, alerts:0, ruptures:0, refs:0, rotation:0, joursStock:0, snapshotPrev:null};
+
+async function loadStockData(){
+  if(!window._uid||!window._getDocs||!window._db||_stockData.loaded) return _stockData;
+  try{
+    var pSnap=await window._getDocs(window._collection(window._db,'stock',window._uid,'products'));
+    _stockData.products=[];
+    pSnap.forEach(function(d){_stockData.products.push(Object.assign({id:d.id},d.data()))});
+
+    var mSnap=await window._getDocs(window._collection(window._db,'stock',window._uid,'movements'));
+    _stockData.movements=[];
+    mSnap.forEach(function(d){_stockData.movements.push(Object.assign({id:d.id},d.data()))});
+
+    // Compute stock values (CMUP)
+    var map={};
+    _stockData.products.forEach(function(p){
+      var ref=(p.ref||'').trim();if(!ref)return;
+      var pa=parseFloat(String(p.pa||0).replace(',','.'))||0;
+      var sq=parseFloat(String(p.stockBase||0).replace(',','.'))||0;
+      map[ref]={qty:sq,cmup:pa,totalIn:sq*pa,totalQtyIn:sq};
+    });
+    var sorted=_stockData.movements.slice().sort(function(a,b){return(a.date||'').localeCompare(b.date||'')});
+    sorted.forEach(function(m){
+      var ref=(m.ref||'').trim();if(!ref)return;
+      if(!map[ref])map[ref]={qty:0,cmup:0,totalIn:0,totalQtyIn:0};
+      var q=parseFloat(String(m.qty||0).replace(',','.'))||0;
+      var pa=parseFloat(String(m.pa||0).replace(',','.'))||0;
+      var e=map[ref];
+      if(m.type==='IN'||m.type==='RETURN_IN'){
+        if(pa>0){e.totalIn+=q*pa;e.totalQtyIn+=q;e.cmup=e.totalQtyIn>0?e.totalIn/e.totalQtyIn:pa}
+        e.qty+=q;
+      } else if(m.type==='ADJUST'){e.qty=q}
+      else {e.qty-=q}
+    });
+
+    var totalVal=0,alerts=0,ruptures=0;
+    _stockData.products.forEach(function(p){
+      var ref=(p.ref||'').trim();if(!ref)return;
+      var s=map[ref]||{qty:0,cmup:0};
+      var val=Math.max(s.qty,0)*s.cmup;
+      totalVal+=val;
+      var min=parseFloat(p.min||0)||0;
+      if(s.qty<=0)ruptures++;
+      else if(min>0&&s.qty<=min)alerts++;
+    });
+    _stockData.value=totalVal;
+    _stockData.alerts=alerts;
+    _stockData.ruptures=ruptures;
+    _stockData.refs=_stockData.products.length;
+
+    // Load previous month snapshot for variation
+    var now=new Date();
+    var prevM=now.getMonth()===0?12:now.getMonth();
+    var prevY=now.getMonth()===0?now.getFullYear()-1:now.getFullYear();
+    var prevKey=prevY+'-'+String(prevM).padStart(2,'0');
+    try{
+      var snapDoc=await window._getDoc(window._doc(window._db,'stock',window._uid,'snapshots',prevKey));
+      if(snapDoc.exists()){
+        _stockData.snapshotPrev=snapDoc.data();
+        _stockData.variation=totalVal-(snapDoc.data().totalValue||0);
+      }
+    }catch(e){}
+
+    // Rotation (sorties 12 mois / stock moyen)
+    var cutoff=new Date();cutoff.setFullYear(cutoff.getFullYear()-1);
+    var cutStr=cutoff.toISOString().slice(0,10);
+    var totalOut=0;
+    _stockData.movements.forEach(function(m){
+      if((m.date||'')>=cutStr&&(m.type==='OUT'||m.type==='LOSS')){
+        totalOut+=(parseFloat(String(m.qty||0).replace(',','.'))||0)*(parseFloat(String(m.pa||0).replace(',','.'))||0);
+      }
+    });
+    _stockData.rotation=totalVal>0?totalOut/totalVal:0;
+    _stockData.joursStock=_stockData.rotation>0?Math.round(365/_stockData.rotation):0;
+
+    _stockData.loaded=true;
+  }catch(e){console.warn('Stock helper load error:',e)}
+  return _stockData;
+}
+
+</script>
 <script src="nav.js"></script>
 <script>
 var MONTHS_FR=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
@@ -487,6 +573,7 @@ async function loadData(year){
       }).catch(function(){})
   );
   await Promise.all(promises);
+  await loadStockData();
   renderRapport();
 }
 
@@ -743,6 +830,19 @@ function renderRapport(){
   if(totDettes>0&&ebe>0) html+=kpi(capaciteRemb>4?'red':capaciteRemb>3?'orange':'green','🔄','Capacité remboursement',capaciteRemb.toFixed(1)+' ans','Dettes / EBE (idéal < 3)',capaciteRemb>4?'negative':capaciteRemb<=3?'positive':'');
   html+='</div>';
 
+
+  // KPIs LIGNE 4 — STOCK & PATRIMOINE
+  if(_stockData.refs>0){
+    html+='<div class="kpi-row-6">';
+    html+=kpi('blue','📦','Valeur du stock',fmt(_stockData.value),'Au CMUP — '+_stockData.refs+' réf(s)');
+    html+=kpi(_stockData.variation>=0?'green':'red','📊','Variation de stock',(_stockData.variation>=0?'+':'')+fmt(_stockData.variation),_stockData.variation>0?'↑ +Résultat':_stockData.variation<0?'↓ −Résultat':'Stable',_stockData.variation>=0?'positive':'negative');
+    var bfrEstim=_stockData.value; // BFR simplifié = stock (sans créances/dettes fournis pour l'instant)
+    html+=kpi('teal','💼','Stock / CA',T.caHT>0?(_stockData.value/T.caHT*100).toFixed(1)+'%':'—','Poids du stock dans le CA');
+    html+=kpi(_stockData.rotation>0?'green':'orange','🔄','Rotation stock',_stockData.rotation>0?_stockData.rotation.toFixed(1)+'×/an':'—',_stockData.joursStock>0?_stockData.joursStock+' jours de couverture':'Pas assez de données');
+    html+=kpi(_stockData.alerts+_stockData.ruptures>0?'red':'green','⚠️','Alertes stock',String(_stockData.alerts+_stockData.ruptures),_stockData.ruptures+' rupture(s) · '+_stockData.alerts+' seuil(s)',_stockData.alerts+_stockData.ruptures>0?'negative':'positive');
+    html+='</div>';
+  }
+
   // TABS
   html+='<div class="tabs-bar">'+
     ['resume','detail','tva','dettes','projection'].map(function(t){
@@ -770,6 +870,9 @@ function renderRapport(){
   tabResume+='<tr><td>Charges variables HT</td><td>'+fmt(T.variable)+'</td><td><span class="'+(txVar>30?'negative':'')+'">'+(T.caHT>0?fmtPct(txVar,true):'—')+'</span></td>'+(TN1.moisData>0?'<td>'+fmt(TN1.variable)+'</td>':'')+'</tr>';
   if(T.credit>0)tabResume+='<tr><td>Crédits & Emprunts HT</td><td>'+fmt(T.credit)+'</td><td>'+(T.caHT>0?fmtPct(T.credit/T.caHT*100,true):'—')+'</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.credit)+'</td>':'')+'</tr>';
   if(T.leasing>0)tabResume+='<tr><td>Leasing / LOA / LLD</td><td>'+fmt(T.leasing)+'</td><td>'+(T.caHT>0?fmtPct(T.leasing/T.caHT*100,true):'—')+'</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.leasing)+'</td>':'')+'</tr>';
+  if(_stockData.refs>0&&_stockData.variation!==0){
+    tabResume+='<tr><td style="color:'+(_stockData.variation>0?'#059669':'var(--red)')+'">Variation de stock (603/713)</td><td style="color:'+(_stockData.variation>0?'#059669':'var(--red)')+'">'+(_stockData.variation>=0?'+':'')+fmt(_stockData.variation)+'</td><td>—</td>'+(TN1.moisData>0?'<td>—</td>':'')+'</tr>';
+  }
   tabResume+='<tr class="row-total"><td>Total Charges HT</td><td>'+fmt(T.charges)+'</td><td>'+fmtPct(txCharges,true)+'</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.charges)+'</td>':'')+'</tr>';
   var rcls=(T.resultat>=0?'row-result':'row-result neg');
   tabResume+='<tr class="'+rcls+'"><td>'+(T.resultat>=0?'✅ Résultat réel (mois passés)':'❌ Résultat réel (mois passés)')+'</td><td>'+fmt(T.resultat)+'</td><td>'+fmtPct(Math.abs(margeN),true)+'</td>'+(TN1.moisData>0?'<td class="'+(T.resultat>TN1.resultat?'positive':'negative')+'">'+fmt(TN1.resultat)+'</td>':'')+'</tr>';
@@ -801,6 +904,9 @@ function renderRapport(){
   if(chargesFin>0){
     tabResume+='<tr><td style="color:var(--red)">− Charges financières</td><td style="color:var(--red)">−'+fmt(chargesFin)+'</td><td>'+fmtPct(txChargesFin,true)+'</td>'+(TN1.moisData>0?'<td>−'+fmt(chFinN1)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Crédits, emprunts, leasing</td></tr>';
     tabResume+='<tr style="background:#faf5ff;border-top:1px solid #c7d2fe"><td style="font-weight:700;color:#6366f1">= Résultat courant avant impôts</td><td style="font-weight:700;color:'+(resCourant>=0?'#6366f1':'var(--red)')+'">'+fmt(resCourant)+'</td><td>'+fmtPct(T.caHT>0?resCourant/T.caHT*100:0,true)+'</td>'+(TN1.moisData>0?'<td>'+fmt(ebeN1-chFinN1)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Après charges financières</td></tr>';
+  }
+  if(_stockData.refs>0&&_stockData.variation!==0){
+    tabResume+='<tr style="background:#eff6ff"><td style="color:'+(_stockData.variation>=0?'#059669':'var(--red)')+'">'+(_stockData.variation>=0?'+ Variation de stock (→ +résultat)':'− Variation de stock (→ −résultat)')+'</td><td style="font-weight:700;color:'+(_stockData.variation>=0?'#059669':'var(--red)')+'">'+(_stockData.variation>=0?'+':'')+fmt(_stockData.variation)+'</td><td>—</td>'+(TN1.moisData>0?'<td>—</td>':'')+'<td style="font-size:11px;color:var(--muted)">SF − SI (compte 603/713)</td></tr>';
   }
   var resCls=T.resultat>=0?'row-result':'row-result neg';
   tabResume+='<tr class="'+resCls+'" style="border-top:2px solid '+(T.resultat>=0?'#10b981':'#ef4444')+'"><td style="font-weight:800">'+(T.resultat>=0?'✅':'❌')+' Résultat net estimé</td><td style="font-weight:800">'+fmt(T.resultat)+'</td><td style="font-weight:700">'+fmtPct(margeN,true)+'</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.resultat)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Bénéfice ou perte sur la période</td></tr>';

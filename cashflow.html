@@ -250,7 +250,7 @@ main{margin-left:250px;flex:1;display:flex;flex-direction:column}
 <script type="module">
   import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
   import { getAuth, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-  import { initializeFirestore, doc, getDoc, setDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+  import { initializeFirestore, doc, getDoc, setDoc, collection, getDocs } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
   const app = initializeApp({
     apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
@@ -269,6 +269,8 @@ main{margin-left:250px;flex:1;display:flex;flex-direction:column}
   window._doc     = doc;
   window._getDoc  = getDoc;
   window._setDoc  = setDoc;
+  window._collection = collection;
+  window._getDocs = getDocs;
   window._signOut = signOut;
   onAuthStateChanged(auth, async (user) => {
     if (!user) { window.location.href = 'index.html'; return; }
@@ -440,6 +442,7 @@ async function loadYear(year) {
     r.key = mo.key;
     return r;
   });
+  await loadStockData();
   renderPage(computed, dettes, year, labels, labelPeriode, tresorerieConfig);
 }
 
@@ -687,6 +690,10 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
   if (totPrev > 0 && totCA < totPrev * 0.85) alerts.push({type:'warn', icon:'📉', txt:`CA réel à ${Math.round((totCA/totPrev)*100)}% des prévisions. Vérifiez vos objectifs.`});
   if (totCF > 0 && filled.length > 0)        alerts.push({type:'good', icon:'✅', txt:`Cashflow annuel positif de ${fmt(totCF)}. Pensez à constituer une réserve.`});
   if (filled.length === 0)                    alerts.push({type:'info', icon:'ℹ️', txt:`Aucune donnée pour ${year}. Saisissez vos mois dans le Pilotage.`});
+  if (_stockData.refs>0) {
+    alerts.push({type:'info', icon:'📦', txt:'Valeur du stock : '+fmtK(_stockData.value)+' ('+_stockData.refs+' réf.) — '+(_stockData.variation!==0?'Variation : '+(_stockData.variation>=0?'+':'')+fmtK(_stockData.variation)+' → impact trésorerie':'Stable')});
+    if (_stockData.ruptures>0) alerts.push({type:'warn', icon:'🔴', txt:_stockData.ruptures+' produit(s) en rupture de stock. <a href="gestion-stock.html" style="color:inherit;font-weight:700">Voir le stock →</a>'});
+  }
 
   const html = `
     <div class="kpi-row" style="grid-template-columns:repeat(6,1fr)">
@@ -933,6 +940,92 @@ async function saveTresorerieDisponible() {
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') closeTresoModal();
 });
+</script>
+<script>
+// ══════════════════════════════════════════════════════════
+// STOCK DATA HELPER — shared across dashboard/cashflow/suivi-ca/rapport
+// Loads stock data and computes valuation + variation
+// ══════════════════════════════════════════════════════════
+var _stockData = {loaded:false, products:[], movements:[], value:0, variation:0, alerts:0, ruptures:0, refs:0, rotation:0, joursStock:0, snapshotPrev:null};
+
+async function loadStockData(){
+  if(!window._uid||!window._getDocs||!window._db||_stockData.loaded) return _stockData;
+  try{
+    var pSnap=await window._getDocs(window._collection(window._db,'stock',window._uid,'products'));
+    _stockData.products=[];
+    pSnap.forEach(function(d){_stockData.products.push(Object.assign({id:d.id},d.data()))});
+
+    var mSnap=await window._getDocs(window._collection(window._db,'stock',window._uid,'movements'));
+    _stockData.movements=[];
+    mSnap.forEach(function(d){_stockData.movements.push(Object.assign({id:d.id},d.data()))});
+
+    // Compute stock values (CMUP)
+    var map={};
+    _stockData.products.forEach(function(p){
+      var ref=(p.ref||'').trim();if(!ref)return;
+      var pa=parseFloat(String(p.pa||0).replace(',','.'))||0;
+      var sq=parseFloat(String(p.stockBase||0).replace(',','.'))||0;
+      map[ref]={qty:sq,cmup:pa,totalIn:sq*pa,totalQtyIn:sq};
+    });
+    var sorted=_stockData.movements.slice().sort(function(a,b){return(a.date||'').localeCompare(b.date||'')});
+    sorted.forEach(function(m){
+      var ref=(m.ref||'').trim();if(!ref)return;
+      if(!map[ref])map[ref]={qty:0,cmup:0,totalIn:0,totalQtyIn:0};
+      var q=parseFloat(String(m.qty||0).replace(',','.'))||0;
+      var pa=parseFloat(String(m.pa||0).replace(',','.'))||0;
+      var e=map[ref];
+      if(m.type==='IN'||m.type==='RETURN_IN'){
+        if(pa>0){e.totalIn+=q*pa;e.totalQtyIn+=q;e.cmup=e.totalQtyIn>0?e.totalIn/e.totalQtyIn:pa}
+        e.qty+=q;
+      } else if(m.type==='ADJUST'){e.qty=q}
+      else {e.qty-=q}
+    });
+
+    var totalVal=0,alerts=0,ruptures=0;
+    _stockData.products.forEach(function(p){
+      var ref=(p.ref||'').trim();if(!ref)return;
+      var s=map[ref]||{qty:0,cmup:0};
+      var val=Math.max(s.qty,0)*s.cmup;
+      totalVal+=val;
+      var min=parseFloat(p.min||0)||0;
+      if(s.qty<=0)ruptures++;
+      else if(min>0&&s.qty<=min)alerts++;
+    });
+    _stockData.value=totalVal;
+    _stockData.alerts=alerts;
+    _stockData.ruptures=ruptures;
+    _stockData.refs=_stockData.products.length;
+
+    // Load previous month snapshot for variation
+    var now=new Date();
+    var prevM=now.getMonth()===0?12:now.getMonth();
+    var prevY=now.getMonth()===0?now.getFullYear()-1:now.getFullYear();
+    var prevKey=prevY+'-'+String(prevM).padStart(2,'0');
+    try{
+      var snapDoc=await window._getDoc(window._doc(window._db,'stock',window._uid,'snapshots',prevKey));
+      if(snapDoc.exists()){
+        _stockData.snapshotPrev=snapDoc.data();
+        _stockData.variation=totalVal-(snapDoc.data().totalValue||0);
+      }
+    }catch(e){}
+
+    // Rotation (sorties 12 mois / stock moyen)
+    var cutoff=new Date();cutoff.setFullYear(cutoff.getFullYear()-1);
+    var cutStr=cutoff.toISOString().slice(0,10);
+    var totalOut=0;
+    _stockData.movements.forEach(function(m){
+      if((m.date||'')>=cutStr&&(m.type==='OUT'||m.type==='LOSS')){
+        totalOut+=(parseFloat(String(m.qty||0).replace(',','.'))||0)*(parseFloat(String(m.pa||0).replace(',','.'))||0);
+      }
+    });
+    _stockData.rotation=totalVal>0?totalOut/totalVal:0;
+    _stockData.joursStock=_stockData.rotation>0?Math.round(365/_stockData.rotation):0;
+
+    _stockData.loaded=true;
+  }catch(e){console.warn('Stock helper load error:',e)}
+  return _stockData;
+}
+
 </script>
 <script src="nav.js"></script>
 </body>
