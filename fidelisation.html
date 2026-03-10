@@ -1900,33 +1900,7 @@ function fcCopyLink(){
 }
 
 // ═══ DEMO DATA ═══
-function seedDemo(){
-  if(clients.length)return;
-  const names=[['Marie','Martin'],['Jean','Dupont'],['Sophie','Lefèvre'],['Pierre','Bernard'],['Emma','Dubois'],['Lucas','Moreau'],['Léa','Laurent'],['Thomas','Simon']];
-  const now=new Date();
-  names.forEach(([prenom,nom],i)=>{
-    const daysAgo=Math.floor(Math.random()*120);
-    const last=new Date(now-daysAgo*86400000).toISOString().slice(0,10);
-    const bm=String((i%12)+1).padStart(2,'0');
-    clients.push({
-      id:uid(),prenom,nom,
-      email:`${prenom.toLowerCase()}@email.com`,
-      tel:`06${Math.floor(Math.random()*90000000+10000000)}`,
-      birthday:`1990-${bm}-15`,
-      points:Math.floor(Math.random()*2500),
-      tampons:Math.floor(Math.random()*(parseInt(cfg.tampons)||10)),
-      lastVisit:last,
-      createdAt:new Date(now-180*86400000).toISOString().slice(0,10),
-      history:[]
-    });
-  });
-  coupons=[
-    {id:uid(),name:'Offre printemps',type:'pct',val:10,target:'all',code:'SPRING10',expDate:'2026-06-30',maxUse:50,usedCount:12,status:'active',createdAt:today()},
-    {id:uid(),name:'Café offert',type:'free',val:0,target:'vip',code:'VIPFREE',expDate:'2026-12-31',maxUse:20,usedCount:5,status:'active',createdAt:today()},
-    {id:uid(),name:'Réduction anniversaire',type:'eur',val:5,target:'all',code:'BDAY5',expDate:'2025-12-31',maxUse:30,usedCount:30,status:'used',createdAt:today()},
-  ];
-  save();
-}
+// seedDemo supprimé — les données viennent uniquement de Firebase
 
 // ═══ APPLY CONFIG (pour rechargement Firebase) ═══
 function applyConfig(){
@@ -2200,10 +2174,26 @@ onAuthStateChanged(auth, async user=>{
   try{
     // 1. Charger clients
     const snap = await getDocs(collection(db,'fidelite',user.uid,'clients'));
-    const fbClients = snap.docs.map(d=>d.data());
+    const fbClients = snap.docs.map(d=>({...d.data(), _docId:d.id}));
     if(fbClients.length > 0){
       clients = fbClients;
     }
+
+    // 1b. Nettoyage des données de démo (seedDemo) — exécuté une seule fois
+    const DEMO_EMAILS = ['marie@email.com','jean@email.com','sophie@email.com','pierre@email.com','emma@email.com','lucas@email.com','léa@email.com','thomas@email.com'];
+    const DEMO_COUPON_CODES = ['SPRING10','VIPFREE','BDAY5'];
+    const demoClients = clients.filter(c=>c.email&&DEMO_EMAILS.includes(c.email.toLowerCase()));
+    if(demoClients.length>0){
+      console.log('[Cleanup] Suppression de '+demoClients.length+' client(s) de démo');
+      for(const dc of demoClients){
+        const docId = dc._docId || dc.id;
+        try{ await deleteDoc(doc(db,'fidelite',user.uid,'clients',docId)); }catch(e){}
+        try{ await deleteDoc(doc(db,'fidelite_public',docId)); }catch(e){}
+        try{ await deleteDoc(doc(db,'fidelite_tablet',user.uid,'clients',docId)); }catch(e){}
+      }
+      clients = clients.filter(c=>!c.email||!DEMO_EMAILS.includes(c.email.toLowerCase()));
+    }
+    coupons = coupons.filter(c=>!DEMO_COUPON_CODES.includes(c.code));
 
     // 2. Charger config
     const cfgSnap = await getDoc(doc(db,'fidelite',user.uid,'config','main'));
