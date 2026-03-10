@@ -9,12 +9,12 @@
     max: 'Alteore Max', master: 'Alteore Master', past_due: 'Paiement en attente', dev: 'Dev / Admin'
   };
   const CAN_FIDELISATION = ['trial', 'max', 'master', 'dev'];
-  const CAN_IMPORT       = ['pro', 'max', 'master', 'dev'];
+  const CAN_IMPORT       = ['trial', 'pro', 'max', 'master', 'dev'];
   const CAN_CORE         = ['trial', 'pro', 'max', 'master', 'dev'];
   const CAN_STOCK        = ['max', 'master', 'trial', 'dev'];
-  const CAN_BILAN        = ['master', 'dev'];
-  const CAN_RAPPORT      = ['max', 'master', 'dev'];
-  const CAN_RH           = ['master', 'dev'];
+  const CAN_BILAN        = ['max', 'master', 'trial', 'dev'];
+  const CAN_RAPPORT      = ['trial', 'pro', 'max', 'master', 'dev'];
+  const CAN_RH           = ['master', 'trial', 'dev'];
 
   // Pages RH (contrôle d'accès + détection page active)
   const RH_PAGES = [
@@ -102,7 +102,7 @@
     <!-- Rapports -->
     <div class="ns">Rapports</div>
     <div class="ni${a('rapport-annuel.html')}" id="nav-rapport" onclick="location.href='rapport-annuel.html'">
-      <span>📄</span><span style="flex:1">Rapport annuel PDF</span>
+      <span>📄</span><span style="flex:1">Situation intermédiaire IA</span>
       <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.25);color:#6ee7b7;padding:2px 7px;border-radius:20px">Nouveau</span>
     </div>
 
@@ -434,8 +434,8 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     const configs = {
       fidelisation: { icon: '💎', title: 'Fidélisation — Plan Max requis',       desc: 'La gestion des clients, cartes de fidélité, coupons et campagnes SMS est disponible dès le plan <strong>Max (99€/mois)</strong> ou <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
       stock:        { icon: '📦', title: 'Gestion des stocks — Plan Max requis',  desc: 'La gestion des stocks est disponible dès le plan <strong>Max (99€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
-      bilan:        { icon: '🤖', title: 'Analyse de Bilan — Plan Master requis', desc: 'L\'analyse de bilan comptable par intelligence artificielle est disponible avec le plan <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Master' },
-      rapport:      { icon: '📄', title: 'Rapport annuel PDF — Plan Max requis',  desc: 'La génération de rapports annuels PDF est disponible dès le plan <strong>Max (99€/mois)</strong> ou <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
+      bilan:        { icon: '🤖', title: 'Analyse de Bilan IA — Plan Max requis', desc: 'L\'analyse de bilan comptable par intelligence artificielle est disponible dès le plan <strong>Max (99€/mois)</strong> ou <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
+      rapport:      { icon: '📄', title: 'Situation intermédiaire IA — Plan Pro requis',  desc: 'La situation intermédiaire IA est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Passer au plan Pro' },
       import:       { icon: '📥', title: 'Import/Export — Plan Pro requis',        desc: "L'import et l'export de données est disponible dès le plan <strong>Pro (69€/mois)</strong>.", cta: '⭐ Passer au plan Pro' },
       rh:           { icon: '👥', title: 'Module RH — Plan Master requis',         desc: 'La gestion complète des ressources humaines (employés, planning, congés, paie, rémunération dirigeant…) est disponible avec le plan <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Master' },
       core:         { icon: '📊', title: 'Fonctionnalité Premium',                 desc: 'Cette fonctionnalité est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Voir les plans' }
@@ -490,8 +490,8 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     if (!CAN_FIDELISATION.includes(plan)) lockNavItem('nav-fid',    'Max+',   'fidelisation');
     if (!CAN_STOCK.includes(plan))        lockNavItem('nav-stock',  'Max+',   'stock');
     if (!CAN_IMPORT.includes(plan))       lockNavItem('nav-import', 'Pro+',   'import');
-    if (!CAN_BILAN.includes(plan))        lockNavItem('nav-bilan',  'Master', 'bilan');
-    if (!CAN_RAPPORT.includes(plan))      lockNavItem('nav-rapport','Max+',   'rapport');
+    if (!CAN_BILAN.includes(plan))        lockNavItem('nav-bilan',  'Max+',   'bilan');
+    if (!CAN_RAPPORT.includes(plan))      lockNavItem('nav-rapport','Pro+',   'rapport');
     if (!CAN_RH.includes(plan))           lockNavItem('nav-rh',     'Master', 'rh');
 
     const mainEl = document.querySelector('main, .main');
