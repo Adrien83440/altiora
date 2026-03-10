@@ -387,7 +387,7 @@ async function submitForm(){
       return;
     }
 
-    // Créer le client (auth anonyme → règles Firestore l'autorisent)
+    // Créer le client — écriture dans la collection tablette publique
     const clientId = genId();
     const t = today();
     const clientData = {
@@ -399,13 +399,20 @@ async function submitForm(){
       source: 'inscription-autonome',
       uid: _merchantUid
     };
-    await window._fsSetDoc(window._fsDoc(window._db,'fidelite',_merchantUid,'clients',clientId), clientData);
-    await window._fsSetDoc(window._fsDoc(window._db,'fidelite_public',clientId), {
-      id: clientId, prenom, nom,
-      points: 0, tampons: 0,
-      lastVisit: t, createdAt: t, birthday: bday||'',
-      history: [], uid: _merchantUid
-    });
+    // Écriture principale : collection tablette publique (pas d'auth requise)
+    await window._fsSetDoc(window._fsDoc(window._db,'fidelite_tablet',_merchantUid,'clients',clientId), clientData);
+    // Tenter aussi les collections privées (échoue sans auth, sera sync par fidelisation.html)
+    try{
+      await window._fsSetDoc(window._fsDoc(window._db,'fidelite',_merchantUid,'clients',clientId), clientData);
+    }catch(e){ console.warn('fidelite write:', e.message); }
+    try{
+      await window._fsSetDoc(window._fsDoc(window._db,'fidelite_public',clientId), {
+        id: clientId, prenom, nom,
+        points: 0, tampons: 0,
+        lastVisit: t, createdAt: t, birthday: bday||'',
+        history: [], uid: _merchantUid
+      });
+    }catch(e){ console.warn('fidelite_public write:', e.message); }
 
     const client = { id: clientId, prenom, nom, tel: telNorm, email: email||'', birthday: bday||'', points: 0, tampons: 0 };
     _newClientId = clientId;
@@ -419,10 +426,10 @@ async function submitForm(){
 }
 
 async function checkExisting(telNorm, email){
-  // 1. Chercher par téléphone
+  // 1. Chercher par téléphone dans la collection tablette (publique)
   try{
     const q = window._fsQuery(
-      window._fsCollection(window._db,'fidelite',_merchantUid,'clients'),
+      window._fsCollection(window._db,'fidelite_tablet',_merchantUid,'clients'),
       window._fsWhere('tel','==',telNorm)
     );
     const snap = await window._fsGetDocs(q);
@@ -432,7 +439,7 @@ async function checkExisting(telNorm, email){
   if(email){
     try{
       const q2 = window._fsQuery(
-        window._fsCollection(window._db,'fidelite',_merchantUid,'clients'),
+        window._fsCollection(window._db,'fidelite_tablet',_merchantUid,'clients'),
         window._fsWhere('email','==',email.toLowerCase())
       );
       const snap2 = await window._fsGetDocs(q2);

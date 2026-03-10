@@ -446,11 +446,11 @@ window.addEventListener('fbReady', async ()=>{
     // PIN
     _correctPin = String(_cfg.tabletPin||'1234');
 
-    // Charger clients (auth anonyme = autorisé par les règles Firestore)
+    // Charger clients depuis collection publique tablette
     try{
-      const snap = await window._getDocs(window._collection(window._db,'fidelite',_merchantUid,'clients'));
+      const snap = await window._getDocs(window._collection(window._db,'fidelite_tablet',_merchantUid,'clients'));
       _clients = snap.docs.map(d=>d.data());
-    }catch(e){ console.warn('Clients:', e.message); }
+    }catch(e){ console.warn('Clients tablet:', e.message); }
 
     // Config roue (stockée dans fidelite_public_cfg par fidelisation.html)
     try{
@@ -752,11 +752,15 @@ async function createClient(){
     points:0,tampons:0,lastVisit:today(),createdAt:today(),history:[],source:'tablet'
   };
   try{
-    await window._setDoc(window._doc(window._db,'fidelite',_merchantUid,'clients',id), client);
-    await window._setDoc(window._doc(window._db,'fidelite_public',id),{
-      id,prenom,nom,points:0,tampons:0,lastVisit:today(),createdAt:today(),
-      birthday:client.birthday,history:[],uid:_merchantUid
-    });
+    // Écrire dans la collection publique tablette
+    await window._setDoc(window._doc(window._db,'fidelite_tablet',_merchantUid,'clients',id), client);
+    // Tenter aussi fidelite_public (peut échouer sans auth)
+    try{
+      await window._setDoc(window._doc(window._db,'fidelite_public',id),{
+        id,prenom,nom,points:0,tampons:0,lastVisit:today(),createdAt:today(),
+        birthday:client.birthday,history:[],uid:_merchantUid
+      });
+    }catch(e){ console.warn('fidelite_public sync:', e.message); }
     _clients.push(client);
     closeNewClient();
     selectClient(id);
@@ -786,18 +790,20 @@ function showDuplicateWarning(existing, type){
   document.getElementById('confirmOverlay').classList.add('show');
 }
 
-// ── ÉCRITURE FIRESTORE DIRECTE (auth anonyme autorisée par les règles) ──
+// ── ÉCRITURE FIRESTORE DIRECTE (collection publique tablette) ──
 async function apiAction(type, clientId, data){
-  // Écrire dans fidelite/{merchantUid}/clients/{clientId}
-  await window._setDoc(window._doc(window._db,'fidelite',_merchantUid,'clients',clientId), data, {merge:true});
-  // Écrire le sous-ensemble public
-  const pub = {};
-  if('tampons'   in data) pub.tampons   = data.tampons;
-  if('points'    in data) pub.points    = data.points;
-  if('lastVisit' in data) pub.lastVisit = data.lastVisit;
-  if('history'   in data) pub.history   = (data.history||[]).slice(-20);
-  if(Object.keys(pub).length>0)
-    await window._setDoc(window._doc(window._db,'fidelite_public',clientId), pub, {merge:true});
+  // Écrire dans fidelite_tablet/{merchantUid}/clients/{clientId} (public write)
+  await window._setDoc(window._doc(window._db,'fidelite_tablet',_merchantUid,'clients',clientId), data, {merge:true});
+  // Écrire le sous-ensemble public (try/catch car peut échouer sans auth)
+  try{
+    const pub = {};
+    if('tampons'   in data) pub.tampons   = data.tampons;
+    if('points'    in data) pub.points    = data.points;
+    if('lastVisit' in data) pub.lastVisit = data.lastVisit;
+    if('history'   in data) pub.history   = (data.history||[]).slice(-20);
+    if(Object.keys(pub).length>0)
+      await window._setDoc(window._doc(window._db,'fidelite_public',clientId), pub, {merge:true});
+  }catch(e){ console.warn('fidelite_public sync:', e.message); }
 }
 
 // ── AUTO-RESET FICHE APRÈS ACTION ──

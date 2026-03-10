@@ -1554,7 +1554,7 @@ function toggleClientPicker() {
 function filterClientPicker() {
   const q = document.getElementById('ca-client-search').value.toLowerCase();
   const list = document.getElementById('ca-client-list');
-  const filtered = clients.filter(c => c.tel && (c.prenom||'').toLowerCase().includes(q) || (c.nom||'').toLowerCase().includes(q)).slice(0, 8);
+  const filtered = clients.filter(c => c.tel && ((c.prenom||'').toLowerCase().includes(q) || (c.nom||'').toLowerCase().includes(q))).slice(0, 8);
   if (!q && filtered.length === 0) { list.style.display = 'none'; return; }
   list.style.display = 'block';
   list.innerHTML = filtered.map(c => 
@@ -2119,10 +2119,20 @@ async function fbSaveClient(uid, client){
     uid // pour retrouver la config du commerçant
   };
   await setDoc(doc(db,'fidelite_public',client.id), pub, {merge:true});
+  // 3. Miroir tablette (lecture/écriture publique pour tablet.html)
+  await setDoc(doc(db,'fidelite_tablet',uid,'clients',client.id), {
+    id:client.id, prenom:client.prenom||'', nom:client.nom||'',
+    tel:client.tel||'', email:client.email||'',
+    points:client.points||0, tampons:client.tampons||0,
+    lastVisit:client.lastVisit||'', birthday:client.birthday||'',
+    createdAt:client.createdAt||'', history:(client.history||[]).slice(0,20)
+  }, {merge:true});
 }
 async function fbDeleteClient(uid, clientId){
   await deleteDoc(doc(db,'fidelite',uid,'clients',clientId));
   await deleteDoc(doc(db,'fidelite_public',clientId));
+  // Supprimer aussi du miroir tablette
+  try{ await deleteDoc(doc(db,'fidelite_tablet',uid,'clients',clientId)); }catch(e){}
 }
 async function fbSaveConfig(uid, cfg){
   await setDoc(doc(db,'fidelite',uid,'config','main'), cfg, {merge:true});
@@ -2212,6 +2222,44 @@ onAuthStateChanged(auth, async user=>{
         paliers = pubCfgSnap.data().paliers;
       }
     }catch(e2){ /* paliers par défaut si erreur */ }
+
+    // 5. Sync tablette : récupérer clients créés depuis tablet.html + miroir initial
+    try{
+      const tabSnap = await getDocs(collection(db,'fidelite_tablet',user.uid,'clients'));
+      const tabClients = tabSnap.docs.map(d=>d.data());
+      // Fusionner les clients créés/modifiés depuis la tablette
+      const existingIds = new Set(clients.map(c=>c.id));
+      let newFromTablet = 0;
+      for(const tc of tabClients){
+        if(!existingIds.has(tc.id)){
+          // Nouveau client créé depuis la tablette
+          clients.push(tc);
+          await setDoc(doc(db,'fidelite',user.uid,'clients',tc.id), tc, {merge:true});
+          newFromTablet++;
+        } else {
+          // Client existant : sync si la tablette a des données plus récentes
+          const local = clients.find(c=>c.id===tc.id);
+          if(local && tc.lastVisit && tc.lastVisit > (local.lastVisit||'')){
+            Object.assign(local, {points:tc.points, tampons:tc.tampons, lastVisit:tc.lastVisit, history:tc.history||local.history});
+            await setDoc(doc(db,'fidelite',user.uid,'clients',local.id), local, {merge:true});
+          }
+        }
+      }
+      if(newFromTablet>0) console.log(`[Tablet sync] ${newFromTablet} nouveau(x) client(s) importé(s) depuis la tablette`);
+      // Miroir initial : s'assurer que tous les clients sont dans fidelite_tablet
+      const tabIds = new Set(tabClients.map(c=>c.id));
+      for(const c of clients){
+        if(!tabIds.has(c.id)){
+          setDoc(doc(db,'fidelite_tablet',user.uid,'clients',c.id), {
+            id:c.id, prenom:c.prenom||'', nom:c.nom||'',
+            tel:c.tel||'', email:c.email||'',
+            points:c.points||0, tampons:c.tampons||0,
+            lastVisit:c.lastVisit||'', birthday:c.birthday||'',
+            createdAt:c.createdAt||'', history:(c.history||[]).slice(0,20)
+          }, {merge:true}).catch(e=>console.warn('tablet mirror:', e.message));
+        }
+      }
+    }catch(e3){ console.warn('Tablet sync:', e3.message); }
 
     window._firebaseReady = true;
     window.renderDashboard();
