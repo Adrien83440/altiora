@@ -642,6 +642,24 @@ function renderRapport(){
   var totMensDettes=dettesActives.reduce(function(s,d){return s+(parseFloat(d.mensualite)||0);},0);
   var ratioEndett=T.caHT>0?totDettes/T.caHT*100:0;
 
+  // SIG : Soldes Intermédiaires de Gestion
+  var mcv = T.caHT - T.variable;
+  var txMCV = T.caHT>0 ? mcv/T.caHT*100 : 0;
+  var ebe = T.caHT + T.rentrees - T.fixe - T.variable;
+  var txEBE = T.caHT>0 ? ebe/T.caHT*100 : 0;
+  var chargesFin = T.credit + T.leasing;
+  var txChargesFin = T.caHT>0 ? chargesFin/T.caHT*100 : 0;
+  var resCourant = ebe - chargesFin;
+  var caf = T.resultat; // simplifié (hors dotations aux amortissements)
+  var pointMortJours = mcv>0 ? (T.fixe/mcv)*(T.moisData*30) : 0;
+  var seuilAnnuel = txMCV>0 ? T.fixe/(txMCV/100) : 0;
+  var capaciteRemb = ebe>0&&totDettes>0 ? totDettes/ebe : 0;
+  // N-1 SIG
+  var mcvN1 = TN1.caHT - TN1.variable;
+  var ebeN1 = TN1.caHT + TN1.rentrees - TN1.fixe - TN1.variable;
+  var chFinN1 = TN1.credit + TN1.leasing;
+  var cafN1 = TN1.resultat;
+
   // N-1 comparaison
   // N-1 valide seulement si données significatives (au moins 20% du CA actuel, et au moins 1 mois)
   var evCA=(TN1.caHT>0&&TN1.moisData>0&&TN1.caHT>T.caHT*0.05)?(T.caHT-TN1.caHT)/TN1.caHT*100:null;
@@ -716,6 +734,16 @@ function renderRapport(){
   html+=kpi('teal','💡','Seuil de rentabilité',T.moisData>0&&txVar<100?fmt(seuil)+'/mois':'—','Point mort estimé mensuel');
   html+='</div>';
 
+  // KPIs LIGNE 3 — SIG
+  html+='<div class="kpi-row-6">';
+  html+=kpi('blue','📊','EBE',fmt(ebe),fmtPct(txEBE,true)+' du CA',ebe>=0?'positive':'negative');
+  html+=kpi(txMCV>60?'green':txMCV>40?'orange':'red','📦','Marge coûts var.',fmt(mcv),fmtPct(txMCV,true)+' du CA');
+  html+=kpi(caf>=0?'green':'red','💰','CAF simplifiée',fmt(caf),'Hors amortissements',caf>=0?'positive':'negative');
+  html+=kpi('purple','⏱','Point mort',pointMortJours>0?Math.round(pointMortJours)+' jours':'—',pointMortJours>0&&pointMortJours<T.moisData*30*0.8?'✅ Atteint avec marge':'⚠️ Seuil tardif');
+  if(chargesFin>0) html+=kpi('orange','🏗','Charges financières',fmt(chargesFin),fmtPct(txChargesFin,true)+' du CA');
+  if(totDettes>0&&ebe>0) html+=kpi(capaciteRemb>4?'red':capaciteRemb>3?'orange':'green','🔄','Capacité remboursement',capaciteRemb.toFixed(1)+' ans','Dettes / EBE (idéal < 3)',capaciteRemb>4?'negative':capaciteRemb<=3?'positive':'');
+  html+='</div>';
+
   // TABS
   html+='<div class="tabs-bar">'+
     ['resume','detail','tva','dettes','projection'].map(function(t){
@@ -760,16 +788,46 @@ function renderRapport(){
   }
   tabResume+='</tbody></table></div>';
 
-  // Ratios
+  // ── SIG : SOLDES INTERMÉDIAIRES DE GESTION ──
   tabResume+='<div class="bilan-block">'+
-    '<div class="block-header"><div class="block-title">📐 Ratios & Indicateurs</div><span class="block-badge badge-gray">Analyse auto</span></div>'+
+    '<div class="block-header"><div class="block-title">📊 Soldes Intermédiaires de Gestion (SIG)</div>'+
+    '<span class="block-badge badge-blue">Cascade analytique</span></div>'+
+    '<table class="bilan-table"><thead><tr><th>Solde</th><th>Montant HT</th><th>% CA</th>'+(TN1.moisData>0?'<th>N-1</th>':'')+'<th>Interprétation</th></tr></thead><tbody>';
+  tabResume+='<tr style="background:#eff6ff"><td style="font-weight:700;color:var(--blue)">📦 Chiffre d\'affaires HT</td><td style="font-weight:700">'+fmt(T.caHT)+'</td><td>100%</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.caHT)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Total des ventes et prestations</td></tr>';
+  tabResume+='<tr><td style="color:var(--red)">− Charges variables (achats, MP)</td><td style="color:var(--red)">−'+fmt(T.variable)+'</td><td>'+fmtPct(txVar,true)+'</td>'+(TN1.moisData>0?'<td>−'+fmt(TN1.variable)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Coûts proportionnels au CA</td></tr>';
+  tabResume+='<tr class="row-total" style="background:#f0fdf4"><td style="font-weight:700;color:#059669">= Marge sur coûts variables</td><td style="font-weight:700;color:'+(mcv>=0?'#059669':'var(--red)')+'">'+fmt(mcv)+'</td><td style="font-weight:700">'+fmtPct(txMCV,true)+'</td>'+(TN1.moisData>0?'<td>'+fmt(mcvN1)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Capacité à couvrir les charges fixes</td></tr>';
+  tabResume+='<tr><td style="color:var(--red)">− Charges fixes d\'exploitation</td><td style="color:var(--red)">−'+fmt(T.fixe)+'</td><td>'+fmtPct(txFixe,true)+'</td>'+(TN1.moisData>0?'<td>−'+fmt(TN1.fixe)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Loyers, salaires, assurances...</td></tr>';
+  if(T.rentrees>0) tabResume+='<tr><td style="color:#059669">+ Rentrées exceptionnelles</td><td style="color:#059669">+'+fmt(T.rentrees)+'</td><td>—</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.rentrees)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Autres produits hors exploitation</td></tr>';
+  tabResume+='<tr class="row-total" style="background:#eff6ff;border-top:2px solid var(--blue)"><td style="font-weight:800;color:var(--blue)">= EBE (Excédent Brut d\'Exploitation)</td><td style="font-weight:800;color:'+(ebe>=0?'var(--blue)':'var(--red)')+'">'+fmt(ebe)+'</td><td style="font-weight:700">'+fmtPct(txEBE,true)+'</td>'+(TN1.moisData>0?'<td>'+fmt(ebeN1)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Richesse créée par l\'exploitation</td></tr>';
+  if(chargesFin>0){
+    tabResume+='<tr><td style="color:var(--red)">− Charges financières</td><td style="color:var(--red)">−'+fmt(chargesFin)+'</td><td>'+fmtPct(txChargesFin,true)+'</td>'+(TN1.moisData>0?'<td>−'+fmt(chFinN1)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Crédits, emprunts, leasing</td></tr>';
+    tabResume+='<tr style="background:#faf5ff;border-top:1px solid #c7d2fe"><td style="font-weight:700;color:#6366f1">= Résultat courant avant impôts</td><td style="font-weight:700;color:'+(resCourant>=0?'#6366f1':'var(--red)')+'">'+fmt(resCourant)+'</td><td>'+fmtPct(T.caHT>0?resCourant/T.caHT*100:0,true)+'</td>'+(TN1.moisData>0?'<td>'+fmt(ebeN1-chFinN1)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Après charges financières</td></tr>';
+  }
+  var resCls=T.resultat>=0?'row-result':'row-result neg';
+  tabResume+='<tr class="'+resCls+'" style="border-top:2px solid '+(T.resultat>=0?'#10b981':'#ef4444')+'"><td style="font-weight:800">'+(T.resultat>=0?'✅':'❌')+' Résultat net estimé</td><td style="font-weight:800">'+fmt(T.resultat)+'</td><td style="font-weight:700">'+fmtPct(margeN,true)+'</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.resultat)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Bénéfice ou perte sur la période</td></tr>';
+  tabResume+='</tbody></table>';
+  tabResume+='<div style="padding:10px 16px;background:#f8faff;border-top:1px solid var(--border);font-size:11px;color:var(--muted);line-height:1.6">'+
+    '💡 <strong>CAF simplifiée</strong> (hors amortissements) : <strong style="color:var(--text)">'+fmt(caf)+'</strong> — '+
+    'Capacité à autofinancer l\'investissement et rembourser les dettes.'+
+    (totDettes>0&&ebe>0?' <strong>Capacité de remboursement</strong> : <strong style="color:'+(capaciteRemb>4?'var(--red)':capaciteRemb>3?'var(--orange)':'var(--green)')+'">'+capaciteRemb.toFixed(1)+' an'+(capaciteRemb>=2?'s':'')+'</strong> (dettes/EBE — idéal &lt; 3 ans).':'')+
+    '</div></div>';
+
+  // Ratios (enrichis)
+  tabResume+='<div class="bilan-block">'+
+    '<div class="block-header"><div class="block-title">📐 Ratios & Indicateurs clés</div><span class="block-badge badge-gray">Analyse auto</span></div>'+
     '<div class="ratio-grid">'+
+    rcell('Taux EBE',fmtPct(txEBE,true),txEBE>15?'good':txEBE>5?'warn':'bad','EBE / CA — Richesse créée',Math.max(txEBE,0),30)+
+    rcell('Marge sur coûts var.',fmtPct(txMCV,true),txMCV>60?'good':txMCV>40?'warn':'bad','MCV / CA',Math.max(txMCV,0),100)+
     rcell('Taux de charges',fmtPct(txCharges,true),txCharges>90?'bad':txCharges>75?'warn':'good','Charges / CA',txCharges,100)+
     rcell('Marge nette',fmtPct(margeN<0?0:margeN,true),margeN<0?'bad':margeN<5?'warn':'good','Résultat / CA',Math.max(margeN,0),30)+
+    rcell('Point mort',pointMortJours>0?Math.round(pointMortJours)+' jours':'—',pointMortJours>0?(pointMortJours<T.moisData*30*0.8?'good':'warn'):'','Nb jours pour couvrir les fixes',Math.min(pointMortJours,365),365)+
+    rcell('Seuil de rentabilité',seuilAnnuel>0?fmt(seuilAnnuel)+' /an':'—',seuilAnnuel>0&&T.caHT>seuilAnnuel?'good':'warn','CA min. pour couvrir les fixes',0,0)+
     rcell('CA mensuel moy.',fmt(caMens),'','Sur '+T.moisData+' mois',0,0)+
-    rcell('Seuil de rentabilité',T.moisData>0&&txVar<100?fmt(seuil)+'/mois':'—',seuil>0&&caMens>seuil?'good':'warn','CA min. pour couvrir fixes',0,0)+
-    rcell('Mois bénéficiaires',moisBene+'/'+T.moisData,moisBene<T.moisData/2?'warn':'good','Sur les mois saisis',moisBene,T.moisData)+
+    (chargesFin>0?rcell('Charges fin. / CA',fmtPct(txChargesFin,true),txChargesFin>10?'bad':txChargesFin>5?'warn':'good','Poids financier',txChargesFin,15):'')+
+    (totDettes>0&&ebe>0?rcell('Capacité remboursement',capaciteRemb.toFixed(1)+' ans',capaciteRemb>4?'bad':capaciteRemb>3?'warn':'good','Dettes / EBE (idéal < 3)',Math.min(capaciteRemb,6),6):'')+
     rcell('Endettement / CA',T.caHT>0?fmtPct(ratioEndett,true):'—',ratioEndett>150?'bad':ratioEndett>80?'warn':'good','Encours / CA annuel',Math.min(ratioEndett,200),200)+
+    rcell('Mois bénéficiaires',moisBene+'/'+T.moisData,moisBene<T.moisData/2?'warn':'good','Sur les mois saisis',moisBene,T.moisData)+
+    rcell('Seuil rentab. / mois',T.moisData>0&&txVar<100?fmt(seuil)+'/mois':'—',seuil>0&&caMens>seuil?'good':'warn','Point mort mensuel',0,0)+
     '</div></div>';
   tabResume+='</div>'; // fin bilan-grid
 
@@ -904,6 +962,9 @@ function renderRapport(){
     else if(txCharges>90){scoreGlobal-=8;}
     if(txFixe>60){scoreGlobal-=10;analyse.push({type:'warn',titre:'Charges fixes dominantes',texte:'Les charges fixes représentent <strong>'+txFixe.toFixed(1)+'% du CA</strong> ('+fmt(T.fixe)+'), ce qui est élevé. Cette rigidité expose l\'activité aux fluctuations de CA : même en cas de baisse d\'activité, ces charges restent dues.'});}
     else if(txFixe>40){analyse.push({type:'info',titre:'Équilibre charges fixes/variables',texte:'Les charges fixes représentent '+txFixe.toFixed(1)+'% du CA. La structure est équilibrée mais le seuil de rentabilité reste à surveiller.'});}
+    // EBE score
+    if(txEBE>15)scoreGlobal+=8;else if(ebe<=0)scoreGlobal-=10;
+    if(totDettes>0&&ebe>0){if(capaciteRemb>4)scoreGlobal-=8;else if(capaciteRemb<=2)scoreGlobal+=5;}
 
     // Endettement
     if(totDettes>0){
@@ -915,6 +976,19 @@ function renderRapport(){
     // TVA
     if(T.tvaDue<0){analyse.push({type:'info',titre:'Crédit de TVA',texte:'La TVA déductible dépasse la TVA collectée, générant un <strong>crédit de '+fmt(Math.abs(T.tvaDue))+'</strong>. Ce montant est récupérable auprès des impôts ou reportable sur la prochaine déclaration.'});}
     else if(T.tvaDue>2000){analyse.push({type:'warn',titre:'TVA à provisionner',texte:'La TVA due estimée s\'élève à <strong>'+fmt(T.tvaDue)+'</strong>. Pensez à provisionner ce montant pour éviter une tension de trésorerie lors de la déclaration.'});}
+
+    // EBE & CAF
+    if(txEBE>15){analyse.push({type:'good',titre:'EBE solide ('+fmtPct(txEBE,true)+' du CA)',texte:'L\'Excédent Brut d\'Exploitation de <strong>'+fmt(ebe)+'</strong> témoigne d\'une bonne capacité à générer de la richesse par l\'exploitation courante, avant charges financières.'});}
+    else if(txEBE>5){analyse.push({type:'warn',titre:'EBE modéré ('+fmtPct(txEBE,true)+' du CA)',texte:'L\'EBE de <strong>'+fmt(ebe)+'</strong> est positif mais laisse peu de marge pour absorber les charges financières et investir. À consolider.'});}
+    else if(ebe<=0){analyse.push({type:'bad',titre:'EBE négatif',texte:'L\'exploitation ne génère pas de richesse (EBE = <strong>'+fmt(ebe)+'</strong>). Les charges d\'exploitation dépassent le CA. Une restructuration est à envisager.'});}
+    if(totDettes>0&&ebe>0){
+      if(capaciteRemb>4){scoreGlobal-=5;analyse.push({type:'bad',titre:'Capacité de remboursement tendue',texte:'Avec un ratio dettes/EBE de <strong>'+capaciteRemb.toFixed(1)+' ans</strong>, il faudrait plus de 4 ans d\'EBE pour rembourser l\'encours. L\'idéal est inférieur à 3 ans.'});}
+      else if(capaciteRemb<=3){analyse.push({type:'good',titre:'Bonne capacité de remboursement',texte:'Ratio dettes/EBE de <strong>'+capaciteRemb.toFixed(1)+' an'+(capaciteRemb>=2?'s':'')+'</strong>. L\'EBE permet de rembourser les dettes dans un délai raisonnable.'});}
+    }
+    if(pointMortJours>0){
+      if(pointMortJours<T.moisData*30*0.8){analyse.push({type:'good',titre:'Point mort atteint en '+Math.round(pointMortJours)+' jours',texte:'Le seuil de rentabilité est atteint rapidement, laissant une marge confortable pour générer du bénéfice sur le reste de la période.'});}
+      else{analyse.push({type:'warn',titre:'Point mort tardif ('+Math.round(pointMortJours)+' jours)',texte:'Le seuil de rentabilité est atteint tardivement dans la période. Réduire les charges fixes permettrait d\'atteindre l\'équilibre plus tôt.'});}
+    }
 
     // Dynamique S1/S2
     if(caAccelere&&Math.abs(caAccelere.pct)>10){
@@ -1382,6 +1456,22 @@ function exportPDF(){
     var evCA=(TN1.caHT>0&&TN1.moisData>0&&TN1.caHT>T.caHT*0.05)?(T.caHT-TN1.caHT)/TN1.caHT*100:null;
     var ratioEndett=T.caHT>0?totD/T.caHT*100:0;
 
+    // SIG variables
+    var mcv = T.caHT - T.variable;
+    var txMCV = T.caHT>0 ? mcv/T.caHT*100 : 0;
+    var ebe = T.caHT + T.rentrees - T.fixe - T.variable;
+    var txEBE = T.caHT>0 ? ebe/T.caHT*100 : 0;
+    var chFin = T.credit + T.leasing;
+    var txChFin = T.caHT>0 ? chFin/T.caHT*100 : 0;
+    var resCourant = ebe - chFin;
+    var caf = T.resultat;
+    var pointMortJ = mcv>0 ? (T.fixe/mcv)*(T.moisData*30) : 0;
+    var seuilAn = txMCV>0 ? T.fixe/(txMCV/100) : 0;
+    var capRemb = ebe>0&&totD>0 ? totD/ebe : 0;
+    var mcvN1 = TN1.caHT - TN1.variable;
+    var ebeN1 = TN1.caHT + TN1.rentrees - TN1.fixe - TN1.variable;
+    var chFinN1 = TN1.credit + TN1.leasing;
+
     // ── Couleurs ─────────────────────────────────────────────
     var cBD=[15,31,92], cBL=[26,61,206], cGR=[16,185,129], cRD=[239,68,68], cOR=[245,158,11];
     var cWH=[255,255,255], cTX=[26,31,54], cMT=[107,114,128], cGY=[248,250,252], cBR=[226,232,240];
@@ -1562,6 +1652,27 @@ function exportPDF(){
     });
     y+=21;
 
+    // KPIs ligne 3 — SIG
+    var kpis3=[
+      [fmtP(ebe),'EBE',fmtPctP(txEBE,true)+' du CA', ebe>=0?cGR:cRD],
+      [fmtPctP(txMCV,true),'Marge couts var.','MCV / CA', txMCV>60?cGR:cOR],
+      [fmtP(caf),'CAF simplifiee','Hors amortissements', caf>=0?cGR:cRD],
+      [pointMortJ>0?Math.round(pointMortJ)+' j':'-','Point mort','Jours pour couvrir fixes', pointMortJ>0&&pointMortJ<T.moisData*30*0.8?cGR:cOR],
+      [chFin>0?fmtP(chFin):'-','Charges fin.',fmtPctP(txChFin,true)+' du CA', cOR],
+      [totD>0&&ebe>0?capRemb.toFixed(1)+' ans':'-','Capac. remb.','Dettes / EBE', capRemb>4?cRD:capRemb>3?cOR:cGR],
+    ];
+    var kw3=(CW-10)/6;
+    kpis3.forEach(function(k,i){
+      var kx=MG+i*(kw3+2);
+      fill(cWH);doc.roundedRect(kx,y,kw3,18,1.5,1.5,'F');
+      fill(k[3]);doc.rect(kx,y,kw3,2,'F');
+      stroke(cBR,0.2);doc.roundedRect(kx,y,kw3,18,1.5,1.5,'S');
+      sf('normal',4.5,cMT);txt(k[1],kx+2.5,y+6);
+      sf('bold',8,k[3]);txt(k[0],kx+2.5,y+12.5);
+      sf('normal',4,cMT);txt(k[2],kx+2.5,y+16.5);
+    });
+    y+=23;
+
     // ── COMPTE DE RÉSULTAT ────────────────────────────────────
     // Colonnes: Poste(90) | Montant(40) | %CA(28) | N-1(24) = 182 ✓
     var rC=[
@@ -1614,6 +1725,74 @@ function exportPDF(){
     y+=2;
     prowR(T.resultat>=0?'BENEFICE ESTIME':'PERTE ESTIMEE',T.resultat,fmtPctP(Math.abs(mgN),true),TN1.resultat,true,true);
     y+=10;
+
+    // ── SOLDES INTERMÉDIAIRES DE GESTION (SIG) ──────────────
+
+    // 50+48+28+56 = 182 ✓
+    var sigCols=[
+      {label:'Solde intermediaire',x:MG,    w:50, r:false},
+      {label:'Montant HT',        x:MG+50, w:32, r:true},
+      {label:'% CA',              x:MG+82, w:20, r:true},
+      {label:'N-1',               x:MG+102,w:28, r:true},
+      {label:'Interpretation',    x:MG+130,w:52, r:false},
+    ];
+    var sigTotalH = 12 + HEAD_H + ROW_H*8 + 22;
+    if(sigTotalH < 200) ensureFits(sigTotalH);
+    else ensureFits(12 + HEAD_H + ROW_H*4);
+
+    sectionTitle('SOLDES INTERMEDIAIRES DE GESTION (SIG)', ROW_H*4);
+
+    tableHeader(sigCols);
+    // CA HT
+    tableRow(sigCols,['CA HT',fmtP(T.caHT),'100%',TN1.moisData>0?fmtP(TN1.caHT):'-','Total ventes et prestations'],0,{
+      bg:cLBL,colors:[cBL,cBL,cBL,cMT,cMT],reHead:function(){tableHeader(sigCols);}});
+    // - Charges variables
+    tableRow(sigCols,['- Charges variables','-'+fmtP(T.variable),fmtPctP(txVar,true),TN1.moisData>0?'-'+fmtP(TN1.variable):'-','Couts proportionnels'],1,{
+      colors:[cRD,cRD,cRD,cMT,cMT],reHead:function(){tableHeader(sigCols);}});
+    // = MCV
+    tableRow(sigCols,['= MARGE SUR COUTS VARIABLES',fmtP(mcv),fmtPctP(txMCV,true),TN1.moisData>0?fmtP(mcvN1):'-','Capacite a couvrir les fixes'],2,{
+      bg:cLGR,colors:[cGR,mcv>=0?cGR:cRD,cGR,cMT,cMT],bold:true,reHead:function(){tableHeader(sigCols);}});
+    // - Charges fixes
+    tableRow(sigCols,['- Charges fixes exploitation','-'+fmtP(T.fixe),fmtPctP(txFixe,true),TN1.moisData>0?'-'+fmtP(TN1.fixe):'-','Loyers, salaires, assurances'],3,{
+      colors:[cRD,cRD,cRD,cMT,cMT],reHead:function(){tableHeader(sigCols);}});
+    // = EBE
+    tableRow(sigCols,['= EBE (Excedent Brut Exploit.)',fmtP(ebe),fmtPctP(txEBE,true),TN1.moisData>0?fmtP(ebeN1):'-','Richesse creee par exploitation'],4,{
+      bg:cLBL,colors:[cBL,ebe>=0?cBL:cRD,[0,0,120],cMT,cMT],bold:true,reHead:function(){tableHeader(sigCols);}});
+    // - Charges financières (si existantes)
+    if(chFin>0){
+      tableRow(sigCols,['- Charges financieres','-'+fmtP(chFin),fmtPctP(txChFin,true),TN1.moisData>0&&chFinN1>0?'-'+fmtP(chFinN1):'-','Credits, leasing, emprunts'],5,{
+        colors:[cRD,cRD,cRD,cMT,cMT],reHead:function(){tableHeader(sigCols);}});
+      tableRow(sigCols,['= RESULTAT COURANT',fmtP(resCourant),T.caHT>0?fmtPctP(resCourant/T.caHT*100,true):'-',TN1.moisData>0?fmtP(ebeN1-chFinN1):'-','Apres charges financieres'],6,{
+        bg:[250,245,255],colors:[cPU,resCourant>=0?cPU:cRD,cPU,cMT,cMT],bold:true,reHead:function(){tableHeader(sigCols);}});
+    }
+    // = Résultat net
+    var resClr = T.resultat>=0?cGR:cRD;
+    tableRow(sigCols,[(T.resultat>=0?'RESULTAT NET ESTIME':'PERTE NETTE ESTIMEE'),fmtP(T.resultat),fmtPctP(Math.abs(mgN),true),TN1.moisData>0?fmtP(TN1.resultat):'-','Benefice ou perte periode'],chFin>0?7:5,{
+      bg:T.resultat>=0?cLGR:cLRD,colors:[resClr,resClr,resClr,cMT,cMT],bold:true,reHead:function(){tableHeader(sigCols);}});
+    y+=6;
+
+    // ── INDICATEURS AVANCES ─────────────────────────────────
+    var indH = 22;
+    ensureFits(indH + 8);
+    // Bloc indicateurs : 4 cartes sur une ligne
+    var iw = (CW-9)/4;
+    var indicators = [
+      {lbl:'Taux EBE',        val:fmtPctP(txEBE,true),  sub:'EBE / CA',                  cl:txEBE>15?cGR:txEBE>5?cOR:cRD, bg:txEBE>15?cLGR:txEBE>5?cLOR:cLRD},
+      {lbl:'Point mort',       val:pointMortJ>0?Math.round(pointMortJ)+' jours':'-', sub:'Nb jours pour couvrir fixes',   cl:pointMortJ>0&&pointMortJ<T.moisData*30*0.8?cGR:cOR, bg:cGY},
+      {lbl:'CAF simplifiee',   val:fmtP(caf),            sub:'Hors amortissements',        cl:caf>=0?cGR:cRD,               bg:caf>=0?cLGR:cLRD},
+      {lbl:totD>0&&ebe>0?'Capacite remboursement':'Seuil rentabilite /an', val:totD>0&&ebe>0?capRemb.toFixed(1)+' ans':seuilAn>0?fmtP(seuilAn):'-', sub:totD>0&&ebe>0?'Dettes / EBE (ideal < 3 ans)':'CA min. annuel',  cl:totD>0&&ebe>0?(capRemb>4?cRD:capRemb>3?cOR:cGR):cBL, bg:cGY},
+    ];
+    ensureFits(indH + 4);
+    indicators.forEach(function(ind,idx){
+      var ix = MG + idx*(iw+3);
+      fill(ind.bg);doc.roundedRect(ix,y,iw,indH,2,2,'F');
+      fill(ind.cl);doc.rect(ix,y,iw,2.5,'F');
+      stroke(cBR,0.2);doc.roundedRect(ix,y,iw,indH,2,2,'S');
+      sf('normal',5.5,cMT);txt(ind.lbl,ix+3,y+7.5);
+      sf('bold',10,ind.cl);txt(ind.val,ix+3,y+15);
+      sf('normal',5,cMT);txt(ind.sub.slice(0,34),ix+3,y+20);
+    });
+    y += indH + 8;
 
     // ── TVA ──────────────────────────────────────────────────
     // 3 blocs + tableau: besoin ~65mm → forcer nouvelle page si < 65mm
@@ -1752,6 +1931,10 @@ function exportPDF(){
     // Taux de charges
     if(txCh>100)scoreG-=15;else if(txCh>90)scoreG-=8;
     if(txFixe>60)scoreG-=10;
+    // EBE
+    if(txEBE>15)scoreG+=8;else if(txEBE<=0)scoreG-=10;
+    // Capacité remboursement
+    if(totD>0&&ebe>0){if(capRemb>4)scoreG-=8;else if(capRemb<=2)scoreG+=5;}
     if(totD>0){if(ratioEndett>150)scoreG-=15;else if(ratioEndett>80)scoreG-=5;}
     scoreG=Math.max(0,Math.min(100,scoreG));
     // Cohérence : résultat négatif → jamais "Situation saine"
@@ -1778,6 +1961,16 @@ function exportPDF(){
     }
     if(T.tvaDue>2000)analyses.push({cl:cOR,t:'TVA a provisionner : '+fmtP(T.tvaDue)+'. Preparer la tresorerie pour la declaration.'});
     if(T.tvaDue<0)analyses.push({cl:cBL,t:'Credit de TVA : '+fmtP(Math.abs(T.tvaDue))+'. Recuperable aupres de l\'administration fiscale.'});
+    // EBE & CAF
+    if(txEBE>15)analyses.push({cl:cGR,t:'Taux EBE solide ('+fmtPctP(txEBE,true)+'). L\'exploitation genere une richesse significative avant charges financieres.'});
+    else if(txEBE>5)analyses.push({cl:cOR,t:'Taux EBE modere ('+fmtPctP(txEBE,true)+'). Marge d\'exploitation a renforcer pour plus de resilience.'});
+    else if(txEBE<=0)analyses.push({cl:cRD,t:'EBE negatif ('+fmtP(ebe)+'). L\'exploitation ne degage pas de richesse. Revoir la structure de charges.'});
+    if(totD>0&&ebe>0){
+      if(capRemb>4)analyses.push({cl:cRD,t:'Capacite de remboursement tendue : '+capRemb.toFixed(1)+' ans (dettes/EBE). Ideal < 3 ans.'});
+      else if(capRemb>3)analyses.push({cl:cOR,t:'Capacite de remboursement a surveiller : '+capRemb.toFixed(1)+' ans (dettes/EBE).'});
+      else analyses.push({cl:cGR,t:'Bonne capacite de remboursement : '+capRemb.toFixed(1)+' ans. L\'EBE couvre largement les dettes.'});
+    }
+    if(pointMortJ>0)analyses.push({cl:pointMortJ<T.moisData*30*0.8?cGR:cOR,t:'Point mort atteint en '+Math.round(pointMortJ)+' jours. '+(pointMortJ<T.moisData*30*0.8?'Le seuil de rentabilite est atteint avec de la marge.':'Le seuil de rentabilite est atteint tardivement. Reduire les charges fixes.')});
 
     var analHeight = 24 + analyses.length * 9;
     sectionTitle('ANALYSE DE LA SITUATION', analHeight);
