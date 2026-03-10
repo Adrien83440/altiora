@@ -126,6 +126,28 @@
     /* QUOTE CARD — compact */
     .quote-card{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;display:flex;flex-direction:column;justify-content:space-between;}
 
+    /* VOCAL ASSISTANT */
+    .vocal-fab{position:fixed;bottom:28px;right:28px;width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg,#6366f1,#8b5cf6);border:none;color:white;font-size:24px;cursor:pointer;box-shadow:0 6px 24px rgba(99,102,241,.4);z-index:300;display:flex;align-items:center;justify-content:center;transition:all .25s;font-family:inherit}
+    .vocal-fab:hover{transform:scale(1.08);box-shadow:0 8px 32px rgba(99,102,241,.5)}
+    .vocal-fab.listening{background:linear-gradient(135deg,#ef4444,#f97316);animation:vpulse 1.2s infinite;box-shadow:0 6px 24px rgba(239,68,68,.5)}
+    .vocal-fab.thinking{background:linear-gradient(135deg,#f59e0b,#fbbf24);animation:none}
+    .vocal-fab.speaking{background:linear-gradient(135deg,#10b981,#34d399);animation:vpulse 1.5s infinite}
+    @keyframes vpulse{0%,100%{box-shadow:0 6px 24px rgba(239,68,68,.4)}50%{box-shadow:0 6px 24px rgba(239,68,68,.15),0 0 0 12px rgba(239,68,68,.08)}}
+    .vocal-overlay{position:fixed;inset:0;background:rgba(15,31,92,.6);backdrop-filter:blur(8px);z-index:299;display:none;align-items:center;justify-content:center;flex-direction:column;gap:20px}
+    .vocal-overlay.show{display:flex}
+    .vocal-ring{width:140px;height:140px;border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative}
+    .vocal-ring.listening{background:rgba(239,68,68,.1);border:3px solid rgba(239,68,68,.3);animation:vring 1.2s infinite}
+    .vocal-ring.thinking{background:rgba(245,158,11,.1);border:3px solid rgba(245,158,11,.3)}
+    .vocal-ring.speaking{background:rgba(16,185,129,.1);border:3px solid rgba(16,185,129,.3);animation:vring 1.5s infinite}
+    @keyframes vring{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+    .vocal-ring-icon{font-size:48px}
+    .vocal-status{font-size:16px;font-weight:800;color:white;text-align:center}
+    .vocal-text{font-size:14px;color:rgba(255,255,255,.7);text-align:center;max-width:500px;line-height:1.7;min-height:24px}
+    .vocal-answer{font-size:15px;color:white;text-align:center;max-width:520px;line-height:1.8;background:rgba(255,255,255,.08);padding:16px 24px;border-radius:14px;border:1px solid rgba(255,255,255,.1)}
+    .vocal-close{position:absolute;top:20px;right:20px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.15);border-radius:10px;color:white;font-size:14px;padding:8px 16px;cursor:pointer;font-family:inherit;font-weight:600}
+    .vocal-close:hover{background:rgba(255,255,255,.2)}
+    .vocal-hint{font-size:11px;color:rgba(255,255,255,.35);text-align:center;max-width:400px;line-height:1.6}
+
     /* COPILOTE IA */
     .copilote-card{background:linear-gradient(135deg,#0f172a,#1e293b);border-radius:var(--radius);padding:0;overflow:hidden;position:relative;}
     .copilote-inner{padding:16px 18px;position:relative;z-index:1;}
@@ -1182,6 +1204,7 @@ async function loadData(_tries){
     dettesMens: monthsData.reduce(function(s,d){return s+d.creditsPrincipal+d.creditsInteret},0)/Math.max(nbMoisReel,1),
   };
   loadCopilote(_copiloteMetrics);
+  window._vocalMetrics = _copiloteMetrics;
 }
 
 function buildCharts(monthsData,currentIdx,year,hasAnnualData,fiscalMonths){
@@ -1469,5 +1492,191 @@ function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').
 
 </script>
 <script src="nav.js"></script>
+<!-- VOCAL ASSISTANT -->
+<button class="vocal-fab" id="vocalFab" onclick="toggleVocal()" title="Parle-moi de mon business">🎤</button>
+<div class="vocal-overlay" id="vocalOverlay">
+  <button class="vocal-close" onclick="stopVocal()">✕ Fermer</button>
+  <div class="vocal-ring" id="vocalRing"><div class="vocal-ring-icon" id="vocalIcon">🎤</div></div>
+  <div class="vocal-status" id="vocalStatus">Appuyez et parlez</div>
+  <div class="vocal-text" id="vocalText"></div>
+  <div class="vocal-answer" id="vocalAnswer" style="display:none"></div>
+  <div class="vocal-hint">Essayez : "Comment va mon CA ?" · "Est-ce que je suis rentable ?" · "Combien de charges ce mois ?" · "Je peux me verser 3000 euros ?"</div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════════
+// VOCAL ASSISTANT — Web Speech API + Claude + Speech Synthesis
+// ══════════════════════════════════════════════════════════
+var _vocalState = 'idle'; // idle, listening, thinking, speaking
+var _recognition = null;
+var _synth = window.speechSynthesis;
+var _vocalMetrics = null;
+
+// Check browser support
+var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SpeechRecognition) {
+  var fab = document.getElementById('vocalFab');
+  if (fab) fab.style.display = 'none';
+}
+
+function toggleVocal() {
+  if (_vocalState === 'idle') startListening();
+  else if (_vocalState === 'listening') stopListening();
+  else if (_vocalState === 'speaking') stopSpeaking();
+}
+window.toggleVocal = toggleVocal;
+
+function stopVocal() {
+  if (_recognition) try { _recognition.abort(); } catch(e) {}
+  if (_synth) _synth.cancel();
+  setVocalState('idle');
+  document.getElementById('vocalOverlay').classList.remove('show');
+}
+window.stopVocal = stopVocal;
+
+function setVocalState(state) {
+  _vocalState = state;
+  var fab = document.getElementById('vocalFab');
+  var ring = document.getElementById('vocalRing');
+  var icon = document.getElementById('vocalIcon');
+  var status = document.getElementById('vocalStatus');
+
+  fab.className = 'vocal-fab ' + state;
+  ring.className = 'vocal-ring ' + state;
+
+  if (state === 'idle') {
+    fab.textContent = '🎤'; icon.textContent = '🎤';
+    status.textContent = 'Appuyez et parlez';
+  } else if (state === 'listening') {
+    fab.textContent = '⏹'; icon.textContent = '👂';
+    status.textContent = 'Je vous écoute...';
+  } else if (state === 'thinking') {
+    fab.textContent = '⏳'; icon.textContent = '🧠';
+    status.textContent = 'Analyse en cours...';
+  } else if (state === 'speaking') {
+    fab.textContent = '⏹'; icon.textContent = '🗣';
+    status.textContent = 'Réponse';
+  }
+}
+
+function startListening() {
+  if (!SpeechRecognition) return;
+  document.getElementById('vocalOverlay').classList.add('show');
+  document.getElementById('vocalText').textContent = '';
+  document.getElementById('vocalAnswer').style.display = 'none';
+
+  _recognition = new SpeechRecognition();
+  _recognition.lang = 'fr-FR';
+  _recognition.continuous = false;
+  _recognition.interimResults = true;
+  _recognition.maxAlternatives = 1;
+
+  _recognition.onstart = function() { setVocalState('listening'); };
+
+  _recognition.onresult = function(event) {
+    var transcript = '';
+    for (var i = event.resultIndex; i < event.results.length; i++) {
+      transcript += event.results[i][0].transcript;
+    }
+    document.getElementById('vocalText').textContent = '🗣 "' + transcript + '"';
+
+    if (event.results[event.results.length - 1].isFinal) {
+      processQuestion(transcript);
+    }
+  };
+
+  _recognition.onerror = function(event) {
+    if (event.error === 'no-speech') {
+      document.getElementById('vocalText').textContent = 'Aucune voix détectée — réessayez';
+      setVocalState('idle');
+    } else if (event.error === 'aborted') {
+      // user cancelled
+    } else {
+      document.getElementById('vocalText').textContent = 'Erreur : ' + event.error;
+      setVocalState('idle');
+    }
+  };
+
+  _recognition.onend = function() {
+    if (_vocalState === 'listening') {
+      // If we're still in listening state when it ends, it timed out
+      if (!document.getElementById('vocalText').textContent) {
+        document.getElementById('vocalText').textContent = 'Pas de voix détectée';
+        setVocalState('idle');
+      }
+    }
+  };
+
+  _recognition.start();
+}
+
+function stopListening() {
+  if (_recognition) try { _recognition.stop(); } catch(e) {}
+}
+
+async function processQuestion(question) {
+  setVocalState('thinking');
+  document.getElementById('vocalText').textContent = '🗣 "' + question + '"';
+
+  // Collect current metrics from copilote cache or page
+  var metrics = window._vocalMetrics || {};
+
+  // Get user name
+  var prenom = '';
+  try { var uEl = document.getElementById('uname'); if (uEl) prenom = uEl.textContent.split(' ')[0]; } catch(e) {}
+
+  try {
+    var resp = await fetch('/api/vocal-ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: question, metrics: metrics, prenom: prenom })
+    });
+    var data = await resp.json();
+    if (data.error) throw new Error(data.error);
+
+    var answer = data.answer || 'Désolé, je n\'ai pas de réponse.';
+    document.getElementById('vocalAnswer').textContent = answer;
+    document.getElementById('vocalAnswer').style.display = '';
+
+    // Speak the answer
+    speakAnswer(answer);
+  } catch(e) {
+    document.getElementById('vocalAnswer').textContent = 'Erreur : ' + e.message;
+    document.getElementById('vocalAnswer').style.display = '';
+    setVocalState('idle');
+  }
+}
+
+function speakAnswer(text) {
+  if (!_synth) { setVocalState('idle'); return; }
+  _synth.cancel();
+
+  var utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'fr-FR';
+  utterance.rate = 1.0;
+  utterance.pitch = 1.0;
+
+  // Try to find a French voice
+  var voices = _synth.getVoices();
+  var frVoice = voices.find(function(v) { return v.lang.startsWith('fr') && v.name.includes('Google'); })
+    || voices.find(function(v) { return v.lang.startsWith('fr'); });
+  if (frVoice) utterance.voice = frVoice;
+
+  utterance.onstart = function() { setVocalState('speaking'); };
+  utterance.onend = function() { setVocalState('idle'); };
+  utterance.onerror = function() { setVocalState('idle'); };
+
+  _synth.speak(utterance);
+}
+
+function stopSpeaking() {
+  if (_synth) _synth.cancel();
+  setVocalState('idle');
+}
+
+// Store metrics for vocal when copilote loads — set directly in the metrics collector
+// _vocalMetrics is set by the copilote metrics block in loadData (var _copiloteMetrics)
+</script>
+
 </body>
 </html>
