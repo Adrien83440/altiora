@@ -3,30 +3,51 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>ALTEORE — Correction crédits</title>
+  <title>ALTEORE — Suppression de crédits</title>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,sans-serif;background:#f5f7ff;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
-    .card{background:#fff;border-radius:20px;padding:40px;max-width:440px;width:100%;text-align:center;box-shadow:0 8px 40px rgba(15,31,92,.1)}
+    .card{background:#fff;border-radius:20px;padding:40px;max-width:500px;width:100%;text-align:center;box-shadow:0 8px 40px rgba(15,31,92,.1)}
     .emoji{font-size:56px;margin-bottom:16px}
     h1{font-size:20px;font-weight:800;color:#1a1f36;margin-bottom:8px}
-    p{font-size:14px;color:#6b7280;line-height:1.6;margin-bottom:24px}
-    .btn{display:inline-block;padding:16px 40px;background:linear-gradient(135deg,#ef4444,#f97316);color:#fff;font-size:16px;font-weight:700;border:none;border-radius:12px;cursor:pointer;font-family:inherit;transition:.2s}
-    .btn:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(239,68,68,.3)}
+    p{font-size:14px;color:#6b7280;line-height:1.6;margin-bottom:20px}
+    .btn{display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:700;border:none;border-radius:12px;cursor:pointer;font-family:inherit;transition:.2s;margin:6px}
+    .btn:hover{transform:translateY(-2px)}
     .btn:disabled{opacity:.5;cursor:wait;transform:none}
-    .result{margin-top:20px;padding:16px;border-radius:12px;font-size:14px;font-weight:600;display:none}
+    .btn-scan{background:linear-gradient(135deg,#1a3dce,#4f7ef8);box-shadow:0 4px 16px rgba(26,61,206,.25)}
+    .btn-del{background:linear-gradient(135deg,#ef4444,#f97316);box-shadow:0 4px 16px rgba(239,68,68,.25)}
+    .credit-list{text-align:left;margin:16px 0;max-height:350px;overflow-y:auto}
+    .credit-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid #e2e8f0;border-radius:10px;margin-bottom:8px;cursor:pointer;transition:.15s}
+    .credit-item:hover{border-color:#4f7ef8;background:#f0f4ff}
+    .credit-item.checked{border-color:#ef4444;background:#fef2f2}
+    .credit-item input{width:18px;height:18px;accent-color:#ef4444;flex-shrink:0}
+    .credit-name{font-size:14px;font-weight:700;color:#1a1f36}
+    .credit-detail{font-size:11px;color:#6b7280}
+    .credit-months{font-size:10px;color:#9ca3af;margin-top:2px}
+    .result{margin-top:16px;padding:14px;border-radius:12px;font-size:13px;font-weight:600;display:none}
     .result.ok{display:block;background:#f0fdf4;color:#059669;border:1px solid #bbf7d0}
     .result.err{display:block;background:#fef2f2;color:#ef4444;border:1px solid #fca5a5}
     .result.wait{display:block;background:#eff6ff;color:#1a3dce;border:1px solid #bfdbfe}
-    .footer{margin-top:24px;font-size:11px;color:#9ca3af}
+    .footer{margin-top:20px;font-size:11px;color:#9ca3af}
+    .step{display:none}.step.active{display:block}
   </style>
 </head>
 <body>
   <div class="card">
     <div class="emoji">🔧</div>
     <h1>Suppression de crédits</h1>
-    <p>Cette page va supprimer les lignes <strong>CREDIT MUT 1</strong> et <strong>CREDIT MUT 2</strong> de tous vos mois.<br><br>Cliquez sur le bouton ci-dessous :</p>
-    <button class="btn" id="btn" onclick="run()">🗑️ Supprimer CREDIT MUT 1 & 2</button>
+
+    <div class="step active" id="step1">
+      <p>Cette page va analyser vos données et vous permettre de choisir quels crédits supprimer de tous vos mois.</p>
+      <button class="btn btn-scan" id="btn-scan" onclick="scan()">🔍 Analyser mes crédits</button>
+    </div>
+
+    <div class="step" id="step2">
+      <p>Cochez les crédits à supprimer de <strong>tous les mois</strong> :</p>
+      <div class="credit-list" id="credit-list"></div>
+      <button class="btn btn-del" id="btn-del" onclick="del()" disabled>🗑️ Supprimer la sélection</button>
+    </div>
+
     <div class="result" id="result"></div>
     <div class="footer">ALTEORE · Page de maintenance</div>
   </div>
@@ -54,32 +75,121 @@
   </script>
 
   <script>
-    async function run() {
-      var btn = document.getElementById('btn');
+    var _allMonths = [];
+    var _creditNames = {};
+    var _selected = {};
+
+    function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+    async function scan() {
+      var btn = document.getElementById('btn-scan');
       var res = document.getElementById('result');
-      if (!window._uid) { res.className='result err'; res.textContent='❌ Vous devez être connecté(e). Connectez-vous sur alteore.com puis revenez ici.'; return; }
-      btn.disabled = true; btn.textContent = '⏳ Nettoyage en cours...';
-      res.className='result wait'; res.textContent='⏳ Analyse de vos données...';
+      if (!window._uid) { res.className='result err'; res.textContent='Vous devez être connecté(e).'; res.style.display='block'; return; }
+      btn.disabled = true; btn.textContent = '⏳ Analyse en cours...';
+      res.className='result wait'; res.textContent='⏳ Chargement de vos données...'; res.style.display='block';
+
       try {
-        // 1. Nettoyer pilotage/months
+        _allMonths = [];
+        _creditNames = {};
         var snap = await window._getDocs(window._collection(window._db, 'pilotage', window._uid, 'months'));
-        var n = 0;
-        for (var i = 0; i < snap.docs.length; i++) {
-          var d = snap.docs[i];
+        snap.forEach(function(d) {
           var data = d.data();
-          if (!data.credits || !data.credits.length) continue;
-          var before = data.credits.length;
-          var clean = data.credits.filter(function(c) {
-            return !(c.fournisseur || c.nom || '').toUpperCase().includes('CREDIT MUT');
+          if (data.credits && data.credits.length) {
+            _allMonths.push({id: d.id, credits: data.credits});
+            data.credits.forEach(function(c) {
+              var nom = (c.fournisseur || c.nom || '').toUpperCase().trim();
+              if (!nom) return;
+              if (!_creditNames[nom]) _creditNames[nom] = {count:0, months:[], montant: c.montant||'?'};
+              _creditNames[nom].count++;
+              if (_creditNames[nom].months.indexOf(d.id) === -1) _creditNames[nom].months.push(d.id);
+            });
+          }
+        });
+
+        try {
+          var dSnap = await window._getDocs(window._collection(window._db, 'dettes', window._uid, 'data'));
+          dSnap.forEach(function(dd) {
+            var dData = dd.data();
+            if (dData.list && dData.list.length) {
+              dData.list.forEach(function(d) {
+                var nom = (d.libelle || d.nom || '').toUpperCase().trim();
+                if (!nom) return;
+                if (!_creditNames[nom]) _creditNames[nom] = {count:0, months:[], montant: d.montant||'?'};
+                _creditNames[nom].count++;
+              });
+            }
+          });
+        } catch(e) {}
+
+        var names = Object.keys(_creditNames).sort();
+        if (!names.length) {
+          res.className='result ok'; res.textContent='Aucun crédit trouvé dans vos données.';
+          btn.disabled = false; btn.textContent = '🔍 Analyser mes crédits';
+          return;
+        }
+
+        var list = document.getElementById('credit-list');
+        list.innerHTML = names.map(function(nom) {
+          var info = _creditNames[nom];
+          var nbMois = info.months.length;
+          var safeId = nom.replace(/[^A-Z0-9]/g,'_');
+          return '<label class="credit-item" id="ci-' + safeId + '">'
+            + '<input type="checkbox" onchange="toggle(\'' + esc(nom) + '\', this.checked)">'
+            + '<div>'
+            + '<div class="credit-name">' + esc(nom) + '</div>'
+            + '<div class="credit-detail">' + esc(String(info.montant)) + ' €/mois · ' + info.count + ' occurrence(s)</div>'
+            + (nbMois > 0 ? '<div class="credit-months">Présent sur ' + nbMois + ' mois</div>' : '')
+            + '</div>'
+            + '</label>';
+        }).join('');
+
+        res.style.display = 'none';
+        document.getElementById('step1').className = 'step';
+        document.getElementById('step2').className = 'step active';
+
+      } catch(e) {
+        res.className='result err'; res.textContent='Erreur : ' + e.message; res.style.display='block';
+        btn.disabled = false; btn.textContent = '🔍 Analyser mes crédits';
+      }
+    }
+    window.scan = scan;
+
+    function toggle(nom, checked) {
+      if (checked) _selected[nom] = true;
+      else delete _selected[nom];
+      var n = Object.keys(_selected).length;
+      document.getElementById('btn-del').disabled = n === 0;
+      document.getElementById('btn-del').textContent = n > 0 ? '🗑️ Supprimer (' + n + ' crédit' + (n>1?'s':'') + ')' : '🗑️ Supprimer la sélection';
+      var safeId = 'ci-' + nom.replace(/[^A-Z0-9]/g,'_');
+      var el = document.getElementById(safeId);
+      if (el) el.className = 'credit-item' + (checked ? ' checked' : '');
+    }
+    window.toggle = toggle;
+
+    async function del() {
+      var names = Object.keys(_selected);
+      if (!names.length) return;
+      var btn = document.getElementById('btn-del');
+      var res = document.getElementById('result');
+      btn.disabled = true; btn.textContent = '⏳ Suppression en cours...';
+      res.className='result wait'; res.textContent='⏳ Nettoyage...'; res.style.display='block';
+
+      try {
+        var nPilotage = 0;
+        for (var i = 0; i < _allMonths.length; i++) {
+          var m = _allMonths[i];
+          var before = m.credits.length;
+          var clean = m.credits.filter(function(c) {
+            var nom = (c.fournisseur || c.nom || '').toUpperCase().trim();
+            return !_selected[nom];
           });
           if (clean.length < before) {
-            await window._setDoc(window._doc(window._db, 'pilotage', window._uid, 'months', d.id), {credits: clean}, {merge: true});
-            n += before - clean.length;
+            await window._setDoc(window._doc(window._db, 'pilotage', window._uid, 'months', m.id), {credits: clean}, {merge: true});
+            nPilotage += before - clean.length;
           }
         }
 
-        // 2. Nettoyer dettes
-        var nd = 0;
+        var nDettes = 0;
         try {
           var dSnap = await window._getDocs(window._collection(window._db, 'dettes', window._uid, 'data'));
           for (var j = 0; j < dSnap.docs.length; j++) {
@@ -88,31 +198,31 @@
             if (dData.list && dData.list.length) {
               var beforeD = dData.list.length;
               var cleanD = dData.list.filter(function(d) {
-                return !(d.libelle || d.nom || '').toUpperCase().includes('CREDIT MUT');
+                var nom = (d.libelle || d.nom || '').toUpperCase().trim();
+                return !_selected[nom];
               });
               if (cleanD.length < beforeD) {
                 await window._setDoc(window._doc(window._db, 'dettes', window._uid, 'data', dd.id), {list: cleanD}, {merge: true});
-                nd += beforeD - cleanD.length;
+                nDettes += beforeD - cleanD.length;
               }
             }
           }
-        } catch(e2) { console.warn('Dettes:', e2.message); }
+        } catch(e) {}
 
         var msg = '';
-        if (n > 0) msg += n + ' lignes supprimées dans Pilotage. ';
-        if (nd > 0) msg += nd + ' lignes supprimées dans Dettes. ';
-        if (n === 0 && nd === 0) {
-          res.className='result ok'; res.textContent='✅ Aucune ligne CREDIT MUT trouvée. Tout est déjà propre !';
-        } else {
-          res.className='result ok'; res.textContent='✅ Terminé ! ' + msg + 'Vous pouvez fermer cette page et retourner sur Pilotage.';
-        }
+        if (nPilotage > 0) msg += nPilotage + ' lignes supprimées dans Pilotage. ';
+        if (nDettes > 0) msg += nDettes + ' lignes supprimées dans Dettes. ';
+        if (!msg) msg = 'Aucune ligne trouvée.';
+        res.className='result ok';
+        res.textContent = '✅ ' + msg + 'Vous pouvez fermer cette page.';
         btn.textContent = '✅ Terminé !';
+
       } catch(e) {
-        res.className='result err'; res.textContent='❌ Erreur : ' + e.message;
+        res.className='result err'; res.textContent='Erreur : ' + e.message; res.style.display='block';
         btn.disabled = false; btn.textContent = '🗑️ Réessayer';
       }
     }
-    window.run = run;
+    window.del = del;
   </script>
 </body>
 </html>
