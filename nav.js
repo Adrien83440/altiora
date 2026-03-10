@@ -106,6 +106,9 @@
       <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.25);color:#6ee7b7;padding:2px 7px;border-radius:20px">Nouveau</span>
     </div>
 
+    <div class="ni${a('scenarios.html')}" id="nav-scenarios" onclick="location.href='scenarios.html'">
+      <span>🎯</span><span style="flex:1">Scénarios "Et si..."</span>
+    </div>
     <!-- IA -->
     <div class="ns">Intelligence IA</div>
     <div class="ni${a('bilan.html')}" id="nav-bilan" onclick="location.href='bilan.html'">
@@ -513,7 +516,7 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     if (PAGE === 'bilan.html'          && !CAN_BILAN.includes(plan))        { showUpgradeModal('bilan');        return false; }
     if (PAGE === 'rapport-annuel.html' && !CAN_RAPPORT.includes(plan))      { showUpgradeModal('rapport');      return false; }
     if (RH_PAGES.includes(PAGE)        && !CAN_RH.includes(plan))           { showUpgradeModal('rh');           return false; }
-    const corePages = ['dashboard.html','pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','cashflow.html'];
+    const corePages = ['dashboard.html','pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','cashflow.html','scenarios.html'];
     if (corePages.includes(PAGE) && !CAN_CORE.includes(plan)) { showUpgradeModal('core'); return false; }
     return true;
   }
