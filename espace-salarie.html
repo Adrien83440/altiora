@@ -1285,5 +1285,104 @@ window.renderAll = function() {
 console.log('[PATCH v2] Planning fixes + Timeline chargés ✓');
 })();
 </script>
+
+<!-- ══ PATCH v3 : Fix congés permission-denied (collection publique) ══ -->
+<script>
+(function() {
+'use strict';
+
+/* ══════════════════════════════════════════════════════
+   PATCH 3 : Override loadDemandes + submitDemande
+   Utilise rh_conges_public/{uid}/demandes au lieu de
+   rh_conges/{uid}/demandes (qui exige auth + hasRhPlan)
+   ══════════════════════════════════════════════════════ */
+
+// Override loadDemandes — lecture depuis collection publique
+var _origLoadDemandes = window.loadDemandes;
+window.loadDemandes = async function() {
+  var uid   = window._uid   || '';
+  var empId = window._empId || '';
+  if (!uid || !empId) return;
+  window._demandes = [];
+  try {
+    var snap = await window._queryWhere(['rh_conges_public', uid, 'demandes'], 'empId', empId);
+    snap.forEach(function(d) {
+      window._demandes.push(Object.assign({id: d.id}, d.data()));
+    });
+    window._demandes.sort(function(a, b) {
+      return (b.createdAt || '').localeCompare(a.createdAt || '');
+    });
+    console.log('[PATCH v3] Demandes chargées :', window._demandes.length);
+  } catch(e) {
+    console.warn('[PATCH v3] loadDemandes public:', e.message);
+    // Fallback : tenter l'ancienne collection (si l'utilisateur est aussi auth)
+    if (_origLoadDemandes) {
+      try { await _origLoadDemandes(); } catch(e2) {}
+    }
+  }
+};
+
+// Override submitDemande — écriture dans collection publique
+window.submitDemande = async function() {
+  var uid   = window._uid   || '';
+  var empId = window._empId || '';
+  var deb   = document.getElementById('f-deb').value;
+  var fin   = document.getElementById('f-fin').value || deb;
+  var motif = document.getElementById('f-motif').value.trim();
+  var selType = window._selType || '';
+  var btn = document.getElementById('btn-submit');
+  if (!deb || !selType) { return; }
+
+  // Calcul jours ouvrés
+  function joursOuvres(d1, d2) {
+    if (!d1 || !d2) return 0;
+    var a = new Date(d1+'T12:00:00'), b = new Date(d2+'T12:00:00'), c = 0;
+    while (a <= b) { var dw = a.getDay(); if (dw !== 0 && dw !== 6) c++; a.setDate(a.getDate()+1); }
+    return c;
+  }
+  var jours = joursOuvres(deb, fin);
+
+  btn.disabled = true; btn.textContent = 'Envoi\u2026';
+  var demandeData = {
+    empId: empId, uid: uid, type: selType, dateDebut: deb, dateFin: fin, nbJours: jours,
+    statut: 'pending', motif: motif || null,
+    createdAt: new Date().toISOString(), source: 'salarie',
+    employeNom: (window._emp && window._emp.prenom ? window._emp.prenom + ' ' + (window._emp.nom||'') : '').trim()
+  };
+
+  // Justificatif
+  if (window._justifB64 && window._justifMeta) {
+    demandeData.justificatif = { data: window._justifB64, name: window._justifMeta.name, size: window._justifMeta.size, type: window._justifMeta.type };
+  }
+
+  try {
+    // Écrire dans la collection publique
+    await window._addDoc(['rh_conges_public', uid, 'demandes'], demandeData);
+    console.log('[PATCH v3] Demande envoyée dans rh_conges_public');
+
+    // Mettre à jour l'état local
+    window._demandes.unshift({id: 'tmp_'+Date.now(), empId: empId, type: selType, dateDebut: deb, dateFin: fin, nbJours: jours, statut: 'pending', motif: motif || null, createdAt: new Date().toISOString()});
+    if (typeof window.calcSoldes === 'function') window.calcSoldes();
+    if (typeof window.renderSoldesFlottants === 'function') window.renderSoldesFlottants();
+    if (typeof window.renderDemandes === 'function') window.renderDemandes();
+    if (typeof window.renderCal === 'function') window.renderCal();
+    if (typeof window.renderAccueil === 'function') window.renderAccueil();
+
+    // Afficher succès
+    var LABELS = {cp:'Congés payés',rtt:'RTT',css:'Sans solde',evenement:'Événement familial',maladie:'Maladie / Arrêt',recuperation:'Récupération heures',formation:'Formation'};
+    document.getElementById('st3').classList.remove('active');
+    var sw = document.getElementById('success-wrap');
+    sw.style.display = 'flex'; sw.classList.add('show');
+    document.getElementById('success-sub').textContent = 'Votre demande de '+jours+'j ('+(LABELS[selType]||selType)+') a été transmise. Votre employeur la traitera prochainement.';
+  } catch(e) {
+    console.error('[PATCH v3] submitDemande error:', e);
+    if (typeof window.showToast === 'function') window.showToast('Erreur : '+e.message, 'err');
+    btn.disabled = false; btn.textContent = '\u2709\ufe0f Envoyer la demande';
+  }
+};
+
+console.log('[PATCH v3] Congés public override chargé ✓');
+})();
+</script>
 </body>
 </html>

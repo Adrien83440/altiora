@@ -598,8 +598,26 @@ async function loadDemandes(){
   try{
     const s=await window._getDocs(window._col(window._db,'rh_conges',window._uid,'demandes'));
     s.forEach(d=>_demandes.push({id:d.id,...d.data()}));
-    _demandes.sort((a,b)=>b.createdAt?.localeCompare?.(a.createdAt)||0);
   }catch(e){console.warn(e);}
+  // Sync depuis rh_conges_public (demandes créées par le portail salarié)
+  try{
+    const pub=await window._getDocs(window._col(window._db,'rh_conges_public',window._uid,'demandes'));
+    const existingIds=new Set(_demandes.map(d=>d.id));
+    const existingKeys=new Set(_demandes.map(d=>d.empId+'_'+d.dateDebut+'_'+d.type+'_'+(d.createdAt||'').slice(0,19)));
+    let synced=0;
+    for(const pd of pub.docs){
+      const pdata=pd.data();
+      const pkey=pdata.empId+'_'+pdata.dateDebut+'_'+pdata.type+'_'+(pdata.createdAt||'').slice(0,19);
+      if(!existingIds.has(pd.id) && !existingKeys.has(pkey)){
+        // Copier dans rh_conges (collection privée admin)
+        await window._setDoc(window._doc(window._db,'rh_conges',window._uid,'demandes',pd.id),pdata);
+        _demandes.push({id:pd.id,...pdata});
+        synced++;
+      }
+    }
+    if(synced>0) console.log('[Conges sync] '+synced+' demande(s) importée(s) du portail salarié');
+  }catch(e){console.warn('rh_conges_public sync:',e.message);}
+  _demandes.sort((a,b)=>b.createdAt?.localeCompare?.(a.createdAt)||0);
 }
 
 // ══ CALCULS SOLDES ══
@@ -1067,8 +1085,10 @@ async function saveDemande(){
   try{
     if(_editDemandeId){
       await window._updateDoc(window._doc(window._db,'rh_conges',window._uid,'demandes',_editDemandeId),data);
+      syncDemandePublic(_editDemandeId,data);
     } else {
-      await window._addDoc(window._col(window._db,'rh_conges',window._uid,'demandes'),data);
+      const newRef=await window._addDoc(window._col(window._db,'rh_conges',window._uid,'demandes'),data);
+      if(newRef&&newRef.id) syncDemandePublic(newRef.id,data);
     }
     clearJustif();
     closeModal('modal-demande');
@@ -1080,11 +1100,18 @@ async function saveDemande(){
 }
 window.saveDemande=saveDemande;
 
+// ══ SYNC PORTAIL SALARIÉ ══
+async function syncDemandePublic(id, data){
+  try{ await window._setDoc(window._doc(window._db,'rh_conges_public',window._uid,'demandes',id),data,{merge:true}); }
+  catch(e){ console.warn('syncDemandePublic:',e.message); }
+}
+
 // ══ ACTIONS ══
 async function approuver(id){
   try{
-    await window._updateDoc(window._doc(window._db,'rh_conges',window._uid,'demandes',id),
-      {statut:'approved', traitePar:document.getElementById('uname')?.textContent||'Manager', traiteLe:new Date().toISOString()});
+    var update={statut:'approved', traitePar:document.getElementById('uname')?.textContent||'Manager', traiteLe:new Date().toISOString()};
+    await window._updateDoc(window._doc(window._db,'rh_conges',window._uid,'demandes',id),update);
+    syncDemandePublic(id,update);
     const idx=_demandes.findIndex(d=>d.id===id);
     if(idx>=0){_demandes[idx].statut='approved';}
     renderAll();
@@ -1099,8 +1126,9 @@ window.openRefus=openRefus;
 async function confirmRefus(){
   const motif=document.getElementById('refus-motif').value.trim();
   try{
-    await window._updateDoc(window._doc(window._db,'rh_conges',window._uid,'demandes',_refusId),
-      {statut:'refused', motifRefus:motif||null, traitePar:document.getElementById('uname')?.textContent||'Manager', traiteLe:new Date().toISOString()});
+    var update={statut:'refused', motifRefus:motif||null, traitePar:document.getElementById('uname')?.textContent||'Manager', traiteLe:new Date().toISOString()};
+    await window._updateDoc(window._doc(window._db,'rh_conges',window._uid,'demandes',_refusId),update);
+    syncDemandePublic(_refusId,update);
     const idx=_demandes.findIndex(d=>d.id===_refusId);
     if(idx>=0){_demandes[idx].statut='refused';_demandes[idx].motifRefus=motif||null;}
     closeModal('modal-refus');
@@ -1114,6 +1142,7 @@ async function annuler(id){
   if(!confirm('Annuler cette demande approuvée ?')) return;
   try{
     await window._updateDoc(window._doc(window._db,'rh_conges',window._uid,'demandes',id),{statut:'cancelled'});
+    syncDemandePublic(id,{statut:'cancelled'});
     const idx=_demandes.findIndex(d=>d.id===id);
     if(idx>=0) _demandes[idx].statut='cancelled';
     renderAll();
@@ -1126,6 +1155,7 @@ async function deleteDemande(id){
   if(!confirm('Supprimer définitivement cette demande ?')) return;
   try{
     await window._deleteDoc(window._doc(window._db,'rh_conges',window._uid,'demandes',id));
+    try{ await window._deleteDoc(window._doc(window._db,'rh_conges_public',window._uid,'demandes',id)); }catch(e){}
     _demandes=_demandes.filter(d=>d.id!==id);
     renderAll();
     showToast('Supprimé','ok');
