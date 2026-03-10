@@ -985,22 +985,22 @@ function renderPage() {
     <div class="right-content" id="right-content">
 
       <!-- SCORE GLOBAL -->
-      <div class="score-banner">
+      <div class="score-banner" id="score-banner">
         <div class="score-circle">
-          <div class="score-num" style="color:${barColor}">${scorePct}</div>
+          <div class="score-num" id="score-num" style="color:${barColor}">${scorePct}</div>
           <div class="score-denom">/ 100</div>
         </div>
         <div class="score-info">
           <div class="score-title">Score de conformité RH</div>
-          <div class="score-sub">${applicables.length} obligations applicables · ${empList.length} salarié(s)</div>
+          <div class="score-sub" id="score-sub">${applicables.length} obligations applicables · ${empList.length} salarié(s)</div>
           <div class="score-bar-wrap">
-            <div class="score-bar-fill" style="width:${scorePct}%;background:${barColor}"></div>
+            <div class="score-bar-fill" id="score-bar" style="width:${scorePct}%;background:${barColor}"></div>
           </div>
           <div class="score-kpis">
-            <div class="score-kpi"><div class="score-kpi-val" style="color:#34d399">${totalOk}</div><div class="score-kpi-lbl">Conformes</div></div>
-            <div class="score-kpi"><div class="score-kpi-val" style="color:#fbbf24">${totalWarn}</div><div class="score-kpi-lbl">À améliorer</div></div>
-            <div class="score-kpi"><div class="score-kpi-val" style="color:#f87171">${totalErr}</div><div class="score-kpi-lbl">Non conf.</div></div>
-            <div class="score-kpi"><div class="score-kpi-val" style="color:rgba(255,255,255,.5)">${totalTodo}</div><div class="score-kpi-lbl">À évaluer</div></div>
+            <div class="score-kpi"><div class="score-kpi-val" id="score-ok" style="color:#34d399">${totalOk}</div><div class="score-kpi-lbl">Conformes</div></div>
+            <div class="score-kpi"><div class="score-kpi-val" id="score-warn" style="color:#fbbf24">${totalWarn}</div><div class="score-kpi-lbl">À améliorer</div></div>
+            <div class="score-kpi"><div class="score-kpi-val" id="score-err" style="color:#f87171">${totalErr}</div><div class="score-kpi-lbl">Non conf.</div></div>
+            <div class="score-kpi"><div class="score-kpi-val" id="score-todo" style="color:rgba(255,255,255,.5)">${totalTodo}</div><div class="score-kpi-lbl">À évaluer</div></div>
           </div>
         </div>
         <div style="text-align:right;flex-shrink:0">
@@ -1263,6 +1263,35 @@ function renderSalariesConformite(empList) {
 // ═══════════════════════════════════════════════════════
 // ACTIONS
 // ═══════════════════════════════════════════════════════
+function updateScoreBanner() {
+  const obligations = getObligations();
+  const applicables = obligations.filter(o => o.obligatoire);
+  const scores = applicables.map(o => {
+    const d = _conformiteData[o.id] || {};
+    const st = d.statut || 'todo';
+    return st === 'ok' ? 1 : st === 'warn' ? 0.5 : st === 'err' ? 0 : st === 'na' ? null : null;
+  }).filter(v => v !== null);
+  const totalOk = scores.filter(v => v === 1).length;
+  const totalWarn = scores.filter(v => v === 0.5).length;
+  const totalErr = scores.filter(v => v === 0).length;
+  const totalTodo = applicables.filter(o => {
+    const st = (_conformiteData[o.id] || {}).statut;
+    return !st || st === 'todo';
+  }).length;
+  const scorePct = applicables.length > 0 ? Math.round((totalOk + totalWarn * 0.5) / applicables.length * 100) : 0;
+  const barColor = scorePct >= 80 ? '#34d399' : scorePct >= 50 ? '#fbbf24' : '#f87171';
+  const el = (id, val) => { const e = document.getElementById(id); if (e) e.textContent = val; };
+  el('score-num', scorePct);
+  const numEl = document.getElementById('score-num');
+  if (numEl) numEl.style.color = barColor;
+  el('score-ok', totalOk);
+  el('score-warn', totalWarn);
+  el('score-err', totalErr);
+  el('score-todo', totalTodo);
+  const bar = document.getElementById('score-bar');
+  if (bar) { bar.style.width = scorePct + '%'; bar.style.background = barColor; }
+}
+
 function setStatut(itemId, statut) {
   if (!_conformiteData[itemId]) _conformiteData[itemId] = {};
   _conformiteData[itemId].statut = statut;
@@ -1280,6 +1309,7 @@ function setStatut(itemId, statut) {
     btn.classList.toggle('active', btn.textContent.includes({ok:'OK',warn:'Partiel',err:'KO',na:'N/A'}[statut]||''));
   });
   scheduleAutoSave();
+  updateScoreBanner();
 }
 
 var _autoSaveTimer = null;
