@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
   <title>ALTEORE — Génération de contrats</title>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://unpkg.com/docx@8.5.0/build/index.umd.js"></script>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
@@ -1138,18 +1139,227 @@ function printContract(){
 // ═══════════════════════════════════════════════════
 function exportDOCX(){
   if(!_generatedHTML){showToast('Aucun contrat à exporter','error');return;}
+  if(typeof docx === 'undefined'){showToast('Bibliothèque DOCX non chargée','error');return;}
   try{
-    var docHtml = _buildContractPage(true);
-    var blob = new Blob(['\ufeff' + docHtml], {type:'application/msword;charset=utf-8'});
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    var nom = (gv('sal-nom')||'contrat').replace(/\s+/g,'_');
-    a.download = 'contrat_'+ (_type||'travail') +'_'+ nom +'.doc';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 300);
-    showToast('📥 Document Word téléchargé !','success');
+    var D = docx;
+    var FONT = 'Georgia';
+    var FONT_SIZE = 23; // 11.5pt in half-points
+
+    // ── Parse HTML → DOM ──
+    var parser = new DOMParser();
+    var htmlDoc = parser.parseFromString('<div>'+_generatedHTML+'</div>','text/html');
+    var root = htmlDoc.body.firstChild;
+
+    // ── Helpers ──
+    function parseInlineRuns(el, parentBold, parentItalic){
+      var runs = [];
+      el.childNodes.forEach(function(node){
+        if(node.nodeType === 3){ // text
+          var text = node.textContent;
+          if(text.trim()){
+            runs.push(new D.TextRun({text:text, font:FONT, size:FONT_SIZE, bold:!!parentBold, italics:!!parentItalic}));
+          }
+        } else if(node.nodeType === 1){
+          var tag = node.tagName.toLowerCase();
+          if(tag === 'strong' || tag === 'b'){
+            runs = runs.concat(parseInlineRuns(node, true, parentItalic));
+          } else if(tag === 'em' || tag === 'i'){
+            runs = runs.concat(parseInlineRuns(node, parentBold, true));
+          } else if(tag === 'br'){
+            runs.push(new D.TextRun({text:'', break:1, font:FONT, size:FONT_SIZE}));
+          } else {
+            runs = runs.concat(parseInlineRuns(node, parentBold, parentItalic));
+          }
+        }
+      });
+      return runs;
+    }
+
+    // ── Walk DOM → docx paragraphs ──
+    var children = [];
+    var bulletItems = [];
+
+    function flushBullets(){
+      // handled inline
+    }
+
+    function walkNode(node){
+      if(node.nodeType === 3){
+        var t = node.textContent.trim();
+        if(t) children.push(new D.Paragraph({children:[new D.TextRun({text:t, font:FONT, size:FONT_SIZE})], spacing:{after:120}}));
+        return;
+      }
+      if(node.nodeType !== 1) return;
+      var tag = node.tagName.toLowerCase();
+
+      if(tag === 'h1'){
+        // Titre du contrat — centré, majuscules, espacement
+        children.push(new D.Paragraph({
+          alignment: D.AlignmentType.CENTER,
+          spacing: {before:200, after:80},
+          children: [new D.TextRun({text: node.textContent.toUpperCase(), font:FONT, size:32, bold:true, characterSpacing:80})]
+        }));
+        // Ligne séparatrice sous le titre
+        children.push(new D.Paragraph({
+          alignment: D.AlignmentType.CENTER,
+          spacing: {after:300},
+          border: {bottom:{style:D.BorderStyle.DOUBLE, size:3, space:4, color:'333333'}},
+          children: [new D.TextRun({text:' ', font:FONT, size:8})]
+        }));
+      }
+      else if(tag === 'h2'){
+        // Articles — gras, majuscules, bordure basse
+        children.push(new D.Paragraph({
+          spacing: {before:360, after:160},
+          border: {bottom:{style:D.BorderStyle.SINGLE, size:1, space:3, color:'999999'}},
+          children: [new D.TextRun({text: node.textContent.toUpperCase(), font:FONT, size:25, bold:true, characterSpacing:40})]
+        }));
+      }
+      else if(tag === 'h3'){
+        children.push(new D.Paragraph({
+          spacing: {before:240, after:120},
+          children: [new D.TextRun({text: node.textContent, font:FONT, size:24, bold:true})]
+        }));
+      }
+      else if(tag === 'p'){
+        var runs = parseInlineRuns(node, false, false);
+        if(runs.length > 0){
+          children.push(new D.Paragraph({
+            alignment: D.AlignmentType.JUSTIFIED,
+            spacing: {after:140, line:340},
+            children: runs
+          }));
+        }
+      }
+      else if(tag === 'ul' || tag === 'ol'){
+        var items = node.querySelectorAll(':scope > li');
+        items.forEach(function(li){
+          var liRuns = parseInlineRuns(li, false, false);
+          children.push(new D.Paragraph({
+            numbering: {reference: tag === 'ol' ? 'contrat-numbers' : 'contrat-bullets', level: 0},
+            spacing: {after:80, line:320},
+            children: liRuns
+          }));
+        });
+      }
+      else if(tag === 'table'){
+        // Table de signatures
+        var rows = node.querySelectorAll('tr');
+        var tableRows = [];
+        rows.forEach(function(tr){
+          var cells = tr.querySelectorAll('td,th');
+          var tableCells = [];
+          cells.forEach(function(td){
+            var cellParas = [];
+            var lines = td.innerHTML.replace(/<br\s*\/?>/gi,'\n').replace(/<[^>]+>/g,'').split('\n');
+            lines.forEach(function(line){
+              var trimmed = line.trim();
+              if(trimmed){
+                var isBold = td.querySelector('strong,b') !== null;
+                cellParas.push(new D.Paragraph({
+                  alignment: D.AlignmentType.CENTER,
+                  spacing: {after:60},
+                  children: [new D.TextRun({text:trimmed, font:FONT, size:FONT_SIZE, bold:isBold})]
+                }));
+              }
+            });
+            if(cellParas.length === 0) cellParas.push(new D.Paragraph({children:[new D.TextRun({text:' ', font:FONT, size:FONT_SIZE})]}));
+            tableCells.push(new D.TableCell({
+              width: {size: 4513, type: D.WidthType.DXA},
+              verticalAlign: D.VerticalAlign.TOP,
+              margins: {top:80, bottom:80, left:120, right:120},
+              children: cellParas
+            }));
+          });
+          if(tableCells.length > 0){
+            tableRows.push(new D.TableRow({children:tableCells}));
+          }
+        });
+        if(tableRows.length > 0){
+          children.push(new D.Table({
+            width: {size: 9026, type: D.WidthType.DXA},
+            columnWidths: [4513, 4513],
+            rows: tableRows
+          }));
+        }
+      }
+      else if(tag === 'div' || tag === 'section' || tag === 'article' || tag === 'header' || tag === 'footer'){
+        // Recurse into container elements
+        node.childNodes.forEach(walkNode);
+      }
+      else if(tag === 'hr'){
+        children.push(new D.Paragraph({
+          border:{bottom:{style:D.BorderStyle.SINGLE, size:1, space:8, color:'cccccc'}},
+          spacing:{before:200, after:200},
+          children:[new D.TextRun({text:' ', size:4})]
+        }));
+      }
+    }
+
+    root.childNodes.forEach(walkNode);
+
+    // ── Build Document ──
+    var doc = new D.Document({
+      creator: 'Alteore — Générateur de contrats',
+      title: (TYPE_LABELS[_type]||'Contrat') + ' — ' + (gv('sal-prenom')||'')+' '+(gv('sal-nom')||''),
+      styles: {
+        default: {
+          document: {
+            run: {font: FONT, size: FONT_SIZE, color: '1a1a1a'}
+          }
+        }
+      },
+      numbering: {
+        config: [
+          {
+            reference: 'contrat-bullets',
+            levels: [{
+              level: 0,
+              format: D.LevelFormat.BULLET,
+              text: '–',
+              alignment: D.AlignmentType.LEFT,
+              style: {paragraph:{indent:{left:720,hanging:360}}}
+            }]
+          },
+          {
+            reference: 'contrat-numbers',
+            levels: [{
+              level: 0,
+              format: D.LevelFormat.DECIMAL,
+              text: '%1.',
+              alignment: D.AlignmentType.LEFT,
+              style: {paragraph:{indent:{left:720,hanging:360}}}
+            }]
+          }
+        ]
+      },
+      sections: [{
+        properties: {
+          page: {
+            size: {width: 11906, height: 16838}, // A4
+            margin: {top: 1418, right: 1276, bottom: 1418, left: 1276} // ~25mm/22mm
+          }
+        },
+        children: children
+      }]
+    });
+
+    // ── Export ──
+    D.Packer.toBlob(doc).then(function(blob){
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      var nom = (gv('sal-nom')||'contrat').replace(/\s+/g,'_');
+      a.download = 'contrat_'+ (_type||'travail') +'_'+ nom +'.docx';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 300);
+      showToast('📥 Document Word (.docx) téléchargé !','success');
+    }).catch(function(err){
+      console.error('DOCX Packer error:', err);
+      showToast('Erreur export DOCX : '+err.message,'error');
+    });
+
   }catch(e){
     console.error('DOCX export error:', e);
     showToast('Erreur export Word : '+e.message,'error');
