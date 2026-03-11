@@ -78,10 +78,13 @@ function fromFsValue(v) {
 
 module.exports = async function handler(req, res) {
   // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const secret = process.env.ADMIN_SECRET || 'alteore-admin-2026';
+  const secret = process.env.ADMIN_SECRET;
+  if (!secret) {
+    return res.status(500).json({ error: 'ADMIN_SECRET non configuré dans les variables Vercel.' });
+  }
   const { uid, match, dry } = req.query;
 
   if (req.query.secret !== secret) {

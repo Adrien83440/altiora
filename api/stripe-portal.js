@@ -1,25 +1,56 @@
 // api/stripe-portal.js
 // Génère un lien vers le portail client Stripe pour gérer l'abonnement
+// SÉCURISÉ : vérifie le token Firebase avant d'accéder au portail Stripe
+
+async function verifyFirebaseToken(idToken) {
+  const fbKey = process.env.FIREBASE_API_KEY;
+  if (!fbKey) throw new Error('FIREBASE_API_KEY non configurée');
+  const res = await fetch(
+    'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + fbKey,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken })
+    }
+  );
+  if (!res.ok) throw new Error('Token invalide');
+  const data = await res.json();
+  const uid = data.users?.[0]?.localId;
+  if (!uid) throw new Error('Utilisateur introuvable');
+  return uid;
+}
 
 module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { uid } = req.body || {};
-  if (!uid) return res.status(400).json({ error: 'uid manquant' });
+  // ── AUTH : vérifier le token Firebase ──
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!token) {
+    return res.status(401).json({ error: "Token d'authentification manquant." });
+  }
 
+  let verifiedUid;
+  try {
+    verifiedUid = await verifyFirebaseToken(token);
+  } catch (e) {
+    return res.status(401).json({ error: 'Token invalide ou expiré.' });
+  }
+
+  // ── On utilise l'uid vérifié côté serveur, PAS celui du body ──
   const stripeKey = process.env.STRIPE_SECRET_KEY;
-  const baseUrl = process.env.APP_URL || 'https://altiora-theta.vercel.app';
+  const baseUrl = process.env.APP_URL || 'https://alteore.com';
   const fbProject = 'altiora-70599';
   const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
 
   try {
     // 1. Récupérer le stripeCustomerId depuis Firestore
     const fbRes = await fetch(
-      `https://firestore.googleapis.com/v1/projects/${fbProject}/databases/(default)/documents/users/${uid}`,
+      `https://firestore.googleapis.com/v1/projects/${fbProject}/databases/(default)/documents/users/${verifiedUid}`,
       { headers: { 'x-goog-api-key': fbKey } }
     );
     const fbData = await fbRes.json();

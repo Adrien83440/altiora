@@ -1,7 +1,7 @@
 // api/news.js — Proxy RSS Le Monde Économie
 // Appel côté serveur → pas de restriction CORS
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
   res.setHeader('Cache-Control', 's-maxage=600'); // cache 10 min
 
   const RSS_URL = 'https://www.lemonde.fr/economie/rss_full.xml';

@@ -1,7 +1,7 @@
 // api/geo.js — Géolocalisation par IP via ip-api.com
 // Appel côté serveur Vercel → pas de restriction HTTPS/CORS
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
   res.setHeader('Cache-Control', 'no-store'); // pas de cache : chaque IP est différente
 
   // Récupérer l'IP réelle du client (Vercel ajoute x-forwarded-for)
