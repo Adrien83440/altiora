@@ -51,13 +51,7 @@ AUCUN texte avant <h1>. Pas de "Voici le contrat", pas de "J'ai trouvé", pas de
 Uniquement le HTML du contrat, rien d'autre.
 
 RÈGLES ABSOLUES :
-1. RECHERCHE OBLIGATOIRE : Avant de rédiger, tu DOIS utiliser l'outil web_search pour :
-   - Vérifier le SMIC horaire et mensuel brut en vigueur
-   - Rechercher les dispositions spécifiques de la convention collective (IDCC fourni) : période d'essai, préavis, classification, grille salariale minimum
-   - Vérifier les durées légales de période d'essai selon le type de contrat et la catégorie du salarié
-   - Pour les CDD : vérifier les règles de durée maximale et de renouvellement en vigueur
-   - Pour l'alternance : vérifier les pourcentages du SMIC par tranche d'âge en vigueur
-   - Pour les stages : vérifier le montant minimum de la gratification en vigueur
+1. RECHERCHE : Utilise web_search pour vérifier le SMIC en vigueur et les dispositions clés de la convention collective (IDCC fourni). Limite-toi à 2-3 recherches essentielles maximum.
 
 2. MENTIONS OBLIGATOIRES : Chaque contrat DOIT inclure TOUTES les mentions légales obligatoires selon son type. Ne jamais en omettre. Inclure systématiquement :
    - Clause de préavis de rupture (délais selon ancienneté et CCN)
@@ -203,7 +197,7 @@ INSTRUCTIONS SPÉCIALES :
         {
           type: 'web_search_20250305',
           name: 'web_search',
-          max_uses: 8
+          max_uses: 3
         }
       ],
       messages: [
@@ -232,7 +226,7 @@ INSTRUCTIONS SPÉCIALES :
 
       // 429 (rate limit) ou 529 (overloaded) → retry après attente
       if ((response.status === 429 || response.status === 529) && attempt < 3) {
-        const wait = attempt * 5; // 5s, 10s
+        const wait = attempt * 10; // 10s, 20s
         console.log(`Anthropic ${response.status}, retry ${attempt}/3 dans ${wait}s...`);
         await new Promise(r => setTimeout(r, wait * 1000));
         continue;
