@@ -1,11 +1,45 @@
 const Anthropic = require('@anthropic-ai/sdk').default || require('@anthropic-ai/sdk');
 
+
+// ── Auth verification ──
+async function verifyToken(req) {
+  const h = req.headers.authorization || '';
+  const token = h.startsWith('Bearer ') ? h.slice(7) : '';
+  if (!token) return null;
+  try {
+    const apiKey = process.env.FIREBASE_API_KEY;
+    if (apiKey) {
+      const r = await fetch('https://identitytoolkit.googleapis.com/v1/accounts:lookup?key='+apiKey, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({idToken:token})});
+      if (!r.ok) return null;
+      const d = await r.json();
+      return d.users?.[0]?.localId || null;
+    }
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+    if (payload.exp && payload.exp < Date.now()/1000) return null;
+    return payload.user_id || payload.sub || null;
+  } catch(e) { return null; }
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
+
+  // Auth check
+  const uid = await verifyToken(req);
+  if (!uid) return res.status(401).json({ error: 'Non authentifié.' });
+
+  // Rate limit (5 req/min for heavy vision endpoint)
+  if (!global._bilanBuckets) global._bilanBuckets = new Map();
+  const now = Date.now();
+  let bkt = global._bilanBuckets.get(uid);
+  if (!bkt || now > bkt.r) { bkt = {c:0, r:now+60000}; global._bilanBuckets.set(uid, bkt); }
+  bkt.c++;
+  if (bkt.c > 5) return res.status(429).json({ error: 'Trop de requêtes.' });
 
   try {
     const { pages, pdfText, mode, fileName, existingYears } = req.body;
