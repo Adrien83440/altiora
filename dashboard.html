@@ -694,7 +694,11 @@ async function loadData(_tries){
   }
   const plan=window._userPlan||window._userPlanDirect||'free';
   const CAN=['trial','pro','max','master','dev'];
+  const CAN_MAX=['trial','max','master','dev'];
   if(!CAN.includes(plan)){console.log('Accès refusé plan:',plan);return;}
+  // Hide vocal button for non-Max plans
+  var vFab=document.getElementById('vocalFab');
+  if(vFab) vFab.style.display=CAN_MAX.includes(plan)?'flex':'none';
   // Load stock data
   await loadStockData();
 
@@ -1091,7 +1095,7 @@ async function loadData(_tries){
     :''}
 
     <!-- PRÉVISIONS ANNUELLES + FIDÉLISATION -->
-    <div class="section-label">🔮 Prévisions & Vue d'ensemble <a href="scenarios.html" style="font-size:11px;font-weight:600;color:var(--blue-main);text-decoration:none;margin-left:12px;padding:3px 10px;border:1px solid var(--border);border-radius:6px;background:white">🎯 Simuler des scénarios →</a></div>
+    <div class="section-label">🔮 Prévisions & Vue d'ensemble ${CAN_MAX.includes(plan)?'<a href="scenarios.html" style="font-size:11px;font-weight:600;color:var(--blue-main);text-decoration:none;margin-left:12px;padding:3px 10px;border:1px solid var(--border);border-radius:6px;background:white">🎯 Simuler des scénarios →</a>':''}</div>
     <div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.8fr;gap:18px;margin-bottom:20px" id="prev-fid-grid">
       <!-- Progression mensuelle CA -->
       <div class="prev-card">
@@ -1374,6 +1378,14 @@ async function loadStockData(){
 }
 
 // ══════════════════════════════════════════════════════════
+
+// ── Auth helper for secured API calls ──
+async function authFetch(url, body) {
+  var token = '';
+  try { if (window._auth && window._auth.currentUser) token = await window._auth.currentUser.getIdToken(); } catch(e) {}
+  return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': token ? 'Bearer ' + token : '' }, body: JSON.stringify(body) });
+}
+
 // COPILOTE IA — Briefing quotidien intelligent
 // ══════════════════════════════════════════════════════════
 var _copiloteCache = null;
@@ -1406,11 +1418,7 @@ async function loadCopilote(metrics) {
   try { var uEl = document.getElementById('uname'); if(uEl) prenom = uEl.textContent.split(' ')[0]; } catch(e){}
 
   try {
-    var resp = await fetch('/api/copilote-ai', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ metrics: metrics, prenom: prenom })
-    });
+    var resp = await authFetch('/api/copilote-ai', { metrics: metrics, prenom: prenom });
     var data = await resp.json();
     if (data.error) throw new Error(data.error);
 
@@ -1671,11 +1679,7 @@ async function processQuestion(question) {
   try { var uEl = document.getElementById('uname'); if (uEl) prenom = uEl.textContent.split(' ')[0]; } catch(e) {}
 
   try {
-    var resp = await fetch('/api/vocal-ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: question, metrics: metrics, prenom: prenom })
-    });
+    var resp = await authFetch('/api/vocal-ai', { question: question, metrics: metrics, prenom: prenom });
     var data = await resp.json();
     if (data.error) throw new Error(data.error);
 

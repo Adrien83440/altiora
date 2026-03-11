@@ -11,10 +11,11 @@
   const CAN_FIDELISATION = ['trial', 'max', 'master', 'dev'];
   const CAN_IMPORT       = ['trial', 'pro', 'max', 'master', 'dev'];
   const CAN_CORE         = ['trial', 'pro', 'max', 'master', 'dev'];
-  const CAN_STOCK        = ['max', 'master', 'trial', 'dev'];
+  const CAN_STOCK        = ['pro', 'max', 'master', 'trial', 'dev'];
   const CAN_BILAN        = ['max', 'master', 'trial', 'dev'];
   const CAN_RAPPORT      = ['trial', 'pro', 'max', 'master', 'dev'];
   const CAN_RH           = ['master', 'trial', 'dev'];
+  const CAN_SCENARIOS    = ['max', 'master', 'trial', 'dev'];
 
   // Pages RH (contrôle d'accès + détection page active)
   const RH_PAGES = [
@@ -436,11 +437,12 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     injectUpgradeModal();
     const configs = {
       fidelisation: { icon: '💎', title: 'Fidélisation — Plan Max requis',       desc: 'La gestion des clients, cartes de fidélité, coupons et campagnes SMS est disponible dès le plan <strong>Max (99€/mois)</strong> ou <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
-      stock:        { icon: '📦', title: 'Gestion des stocks — Plan Max requis',  desc: 'La gestion des stocks est disponible dès le plan <strong>Max (99€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
+      stock:        { icon: '📦', title: 'Gestion des stocks — Plan Pro requis',  desc: 'La gestion des stocks est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
       bilan:        { icon: '🤖', title: 'Analyse de Bilan IA — Plan Max requis', desc: 'L\'analyse de bilan comptable par intelligence artificielle est disponible dès le plan <strong>Max (99€/mois)</strong> ou <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
       rapport:      { icon: '📄', title: 'Situation intermédiaire IA — Plan Pro requis',  desc: 'La situation intermédiaire IA est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Passer au plan Pro' },
       import:       { icon: '📥', title: 'Import/Export — Plan Pro requis',        desc: "L'import et l'export de données est disponible dès le plan <strong>Pro (69€/mois)</strong>.", cta: '⭐ Passer au plan Pro' },
       rh:           { icon: '👥', title: 'Module RH — Plan Master requis',         desc: 'La gestion complète des ressources humaines (employés, planning, congés, paie, rémunération dirigeant…) est disponible avec le plan <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Master' },
+      scenarios:    { icon: '🎯', title: 'Scénarios & IA avancée — Plan Max requis', desc: 'Les scénarios \"Et si...\", l\'assistant vocal IA et l\'analyse IA du stock sont disponibles dès le plan <strong>Max (99€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
       core:         { icon: '📊', title: 'Fonctionnalité Premium',                 desc: 'Cette fonctionnalité est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Voir les plans' }
     };
     const cfg = configs[upgrade] || configs.core;
@@ -491,11 +493,12 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     if (upl) upl.textContent = PLAN_NAMES[plan] || plan;
 
     if (!CAN_FIDELISATION.includes(plan)) lockNavItem('nav-fid',    'Max+',   'fidelisation');
-    if (!CAN_STOCK.includes(plan))        lockNavItem('nav-stock',  'Max+',   'stock');
+    if (!CAN_STOCK.includes(plan))        lockNavItem('nav-stock',  'Pro+',   'stock');
     if (!CAN_IMPORT.includes(plan))       lockNavItem('nav-import', 'Pro+',   'import');
     if (!CAN_BILAN.includes(plan))        lockNavItem('nav-bilan',  'Max+',   'bilan');
     if (!CAN_RAPPORT.includes(plan))      lockNavItem('nav-rapport','Pro+',   'rapport');
     if (!CAN_RH.includes(plan))           lockNavItem('nav-rh',     'Master', 'rh');
+    if (!CAN_SCENARIOS.includes(plan))     lockNavItem('nav-scenarios','Max+', 'scenarios');
 
     const mainEl = document.querySelector('main, .main');
     if (mainEl) mainEl.style.visibility = 'visible';
@@ -516,7 +519,8 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     if (PAGE === 'bilan.html'          && !CAN_BILAN.includes(plan))        { showUpgradeModal('bilan');        return false; }
     if (PAGE === 'rapport-annuel.html' && !CAN_RAPPORT.includes(plan))      { showUpgradeModal('rapport');      return false; }
     if (RH_PAGES.includes(PAGE)        && !CAN_RH.includes(plan))           { showUpgradeModal('rh');           return false; }
-    const corePages = ['dashboard.html','pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','cashflow.html','scenarios.html'];
+    if (PAGE === 'scenarios.html'       && !CAN_SCENARIOS.includes(plan))     { showUpgradeModal('scenarios');    return false; }
+    const corePages = ['dashboard.html','pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','cashflow.html'];
     if (corePages.includes(PAGE) && !CAN_CORE.includes(plan)) { showUpgradeModal('core'); return false; }
     return true;
   }
