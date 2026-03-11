@@ -26,7 +26,7 @@ const LEGAL = {
 };
 // ════════════════════════════════════════════════════════════════
 
-export const config = { maxDuration: 90 };
+export const config = { maxDuration: 60 };
 
 function _cors(req, res) {
   const origin = req.headers.origin;
@@ -74,8 +74,7 @@ DONNEES LEGALES EN VIGUEUR :
 - Preavis demission/licenciement : selon CCN, a defaut 1 mois (< 2 ans), 2 mois (>= 2 ans)
 - Mutuelle obligatoire depuis 2016 (ANI), participation employeur >= 50%
 
-Si un IDCC est fourni, mentionne que les dispositions conventionnelles plus favorables prevalent.
-IMPORTANT : Tu disposes d'1 recherche web. Utilise-la pour rechercher "convention collective IDCC [numero] periode essai preavis grille salaire" afin d'adapter le contrat aux dispositions specifiques de la CCN du salarie.
+Si un IDCC est fourni, utilise tes connaissances sur cette convention collective pour adapter les clauses (periode essai, preavis, classification). Mentionne toujours que les dispositions conventionnelles plus favorables prevalent.
 
 FORMAT DE SORTIE :
 1. Ta reponse commence DIRECTEMENT par <h1>. AUCUN texte avant. ZERO introduction.
@@ -83,6 +82,7 @@ FORMAT DE SORTIE :
 3. JAMAIS de placeholders [A COMPLETER]
 4. JAMAIS de backticks markdown
 5. Le premier caractere de ta reponse est le symbole <
+6. Tu ne poses JAMAIS de question. Tu ne demandes JAMAIS plus d informations. Tu generes TOUJOURS le contrat complet avec ce qui est fourni. Si une info manque, redige la clause de facon generale.<
 
 STRUCTURE :
 <h1>CONTRAT DE [TYPE]</h1>
@@ -129,7 +129,7 @@ if(c.type==='mobilite')return'mobilite '+(c.perimetre||'national');
 if(c.type==='dedit_formation')return'dedit-formation '+(c.duree||'2 ans');
 return c.type.replace(/_/g,' ');}).join(', '):'aucune'}
 
-Commence directement par <h1>.`;
+Commence directement par <h1>. Genere le contrat complet maintenant, ne pose aucune question.`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -142,13 +142,6 @@ Commence directement par <h1>.`;
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 8000,
         system: SYSTEM_PROMPT,
-        tools: [
-          {
-            type: 'web_search_20250305',
-            name: 'web_search',
-            max_uses: 1
-          }
-        ],
         messages: [{ role: 'user', content: userPrompt }]
       })
     });
