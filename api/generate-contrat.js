@@ -4,6 +4,9 @@
  * Utilise Claude Sonnet + Web Search pour vérifier les lois en vigueur
  */
 
+// Vercel Pro : autoriser 120s pour la génération (web search + retry)
+export const config = { maxDuration: 120 };
+
 // ── Auth inline (même pattern que generate-rh-doc.js) ──
 function _cors(req, res) {
   const origin = req.headers.origin;
@@ -34,16 +37,6 @@ async function _verifyAuth(req, res) {
     if (!u?.localId) { res.status(401).json({ error: 'Utilisateur introuvable.' }); return null; }
     return { uid: u.localId };
   } catch (e) { res.status(401).json({ error: 'Erreur auth.' }); return null; }
-}
-
-const _rlBuckets = new Map();
-function _rateLimit(uid, res, max = 8) {
-  const now = Date.now();
-  let b = _rlBuckets.get(uid);
-  if (!b || now > b.r) { b = { c: 0, r: now + 60000 }; _rlBuckets.set(uid, b); }
-  b.c++;
-  if (b.c > max) { res.status(429).json({ error: 'Trop de requêtes. Attendez une minute.' }); return true; }
-  return false;
 }
 
 // ── System prompt juridique ──
@@ -119,8 +112,6 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const auth = await _verifyAuth(req, res);
   if (!auth) return;
-  // Rate limit désactivé temporairement pour la phase de test
-  // if (_rateLimit(auth.uid, res, 50)) return;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY non configurée.' });
@@ -203,35 +194,63 @@ INSTRUCTIONS SPÉCIALES :
 - Vérifie que la rémunération est au moins égale au SMIC en vigueur${type === 'apprentissage' || type === 'professionnalisation' ? ' (ou au % applicable selon l\'âge pour l\'alternance)' : ''}.
 - Rédige le contrat en HTML structuré, prêt à être affiché et imprimé.`;
 
-    // ── Appel API Anthropic avec web_search ──
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 12000,
-        system: SYSTEM_PROMPT,
-        tools: [
-          {
-            type: 'web_search_20250305',
-            name: 'web_search',
-            max_uses: 8
-          }
-        ],
-        messages: [
-          { role: 'user', content: userPrompt }
-        ]
-      })
+    // ── Appel API Anthropic avec web_search + retry sur 429 ──
+    const apiBody = JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 12000,
+      system: SYSTEM_PROMPT,
+      tools: [
+        {
+          type: 'web_search_20250305',
+          name: 'web_search',
+          max_uses: 8
+        }
+      ],
+      messages: [
+        { role: 'user', content: userPrompt }
+      ]
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('Anthropic API error:', response.status, errText);
-      return res.status(response.status).json({ error: 'Erreur API IA', details: errText });
+    const apiHeaders = {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01'
+    };
+
+    let response = null;
+    let lastError = '';
+
+    // Retry jusqu'à 3 fois avec backoff sur 429/529
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: apiHeaders,
+        body: apiBody
+      });
+
+      if (response.ok) break;
+
+      // 429 (rate limit) ou 529 (overloaded) → retry après attente
+      if ((response.status === 429 || response.status === 529) && attempt < 3) {
+        const wait = attempt * 5; // 5s, 10s
+        console.log(`Anthropic ${response.status}, retry ${attempt}/3 dans ${wait}s...`);
+        await new Promise(r => setTimeout(r, wait * 1000));
+        continue;
+      }
+
+      // Autre erreur ou dernier essai → on sort
+      lastError = await response.text().catch(() => '');
+      break;
+    }
+
+    if (!response || !response.ok) {
+      const status = response ? response.status : 500;
+      console.error('Anthropic API error après retries:', status, lastError);
+      // Message clair pour le client
+      if (status === 429) {
+        return res.status(503).json({ error: 'L\'IA est temporairement surchargée. Réessayez dans 1 minute.' });
+      }
+      return res.status(502).json({ error: 'Erreur du service IA', details: lastError.substring(0, 200) });
     }
 
     const data = await response.json();
