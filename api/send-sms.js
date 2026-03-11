@@ -1,13 +1,37 @@
 // api/send-sms.js — Twilio
+// SÉCURISÉ : vérification token Firebase + lecture crédits côté serveur
 
-async function firestoreGetPublic(path) {
-  // Lecture publique via REST sans auth (fonctionne si rules = allow read: if true pour sms_credits)
-  // Sinon on utilise le token client passé en header
+// ── Vérification du token Firebase côté serveur ──
+async function verifyFirebaseToken(idToken) {
+  const fbKey = process.env.FIREBASE_API_KEY;
+  if (!fbKey) throw new Error('FIREBASE_API_KEY non configurée');
+  const res = await fetch(
+    'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + fbKey,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken })
+    }
+  );
+  if (!res.ok) throw new Error('Token invalide');
+  const data = await res.json();
+  const uid = data.users?.[0]?.localId;
+  if (!uid) throw new Error('Utilisateur introuvable');
+  return uid;
+}
+
+// ── Lecture crédits Firestore via token client (rules: allow read if isOwner) ──
+async function readCreditsWithToken(clientToken, uid) {
   const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
   const res = await fetch(
-    'https://firestore.googleapis.com/v1/projects/' + projectId + '/databases/(default)/documents/' + path
+    'https://firestore.googleapis.com/v1/projects/' + projectId + '/databases/(default)/documents/sms_credits/' + uid,
+    { headers: { 'Authorization': 'Bearer ' + clientToken } }
   );
-  return res.json();
+  if (!res.ok) return 0;
+  const doc = await res.json();
+  const raw = doc?.fields?.credits;
+  if (!raw) return 0;
+  return parseInt(raw.integerValue || raw.stringValue || '0') || 0;
 }
 
 async function firestorePatchWithToken(clientToken, path, fields) {
@@ -94,51 +118,58 @@ module.exports = async (req, res) => {
   }
   if (req.method !== 'POST') return res.status(405).end();
 
-  // Le client passe son token Firebase dans Authorization header
+  // ── AUTH : vérifier le token Firebase et extraire l'uid ──
   const clientToken = (req.headers.authorization || '').replace('Bearer ', '').trim();
-
-  const { uid, campagneId, recipients, message, sender, clientCredits } = req.body || {};
-  console.log('send-sms — uid:', uid, '| destinataires:', recipients && recipients.length, '| clientCredits:', clientCredits);
-
-  if (!uid || !recipients || !message) {
-    return res.status(400).json({ error: 'Paramètres manquants (uid, recipients, message)' });
+  if (!clientToken) {
+    return res.status(401).json({ error: 'Token d\'authentification manquant.' });
   }
 
-  // Vérif solde : on fait confiance au solde passé par le client (lu via SDK Firebase auth)
-  // La protection réelle = les Firestore rules empêchent le client de falsifier son solde
-  const knownCredits = parseInt(clientCredits) || 0;
-  console.log('Solde client déclaré:', knownCredits, '| SMS requis:', recipients.length);
+  let verifiedUid;
+  try {
+    verifiedUid = await verifyFirebaseToken(clientToken);
+  } catch (e) {
+    return res.status(401).json({ error: 'Token invalide ou expiré.' });
+  }
 
-  if (knownCredits < recipients.length) {
-    return res.status(402).json({ error: 'Solde insuffisant', credits: knownCredits, required: recipients.length });
+  const { campagneId, recipients, message, sender } = req.body || {};
+  console.log('send-sms — uid vérifié:', verifiedUid, '| destinataires:', recipients && recipients.length);
+
+  if (!recipients || !message) {
+    return res.status(400).json({ error: 'Paramètres manquants (recipients, message)' });
+  }
+
+  // ── Lecture du solde RÉEL depuis Firestore (pas le client) ──
+  const realCredits = await readCreditsWithToken(clientToken, verifiedUid);
+  console.log('Solde réel Firestore:', realCredits, '| SMS requis:', recipients.length);
+
+  if (realCredits < recipients.length) {
+    return res.status(402).json({ error: 'Solde insuffisant', credits: realCredits, required: recipients.length });
   }
 
   try {
     // Envoyer les SMS via Twilio
-    const results = await sendSmsTwilio(recipients, message, sender || 'ALTIORA');
+    const results = await sendSmsTwilio(recipients, message, sender || 'ALTEORE');
     console.log('Résultats Twilio:', results);
 
     if (results.sent > 0) {
-      const newCredits = knownCredits - results.sent;
+      const newCredits = realCredits - results.sent;
 
-      // Débiter le solde via token client Firebase (a les droits sur son propre doc)
-      if (clientToken) {
-        try {
-          await firestorePatchWithToken(clientToken, 'sms_credits/' + uid, { credits: newCredits });
-          // Historique
-          const txId = Date.now().toString();
-          await firestorePatchWithToken(clientToken, 'sms_credits/' + uid + '/history/' + txId, {
-            type: 'send',
-            campagneId: campagneId || '',
-            smsSent: results.sent,
-            smsFailed: results.failed,
-            date: new Date().toISOString().slice(0, 10),
-            message: message.slice(0, 100),
-          });
-          console.log('✅ Solde débité:', knownCredits, '→', newCredits);
-        } catch (debitErr) {
-          console.warn('⚠️ Débit Firestore échoué (SMS envoyés quand même):', debitErr.message);
-        }
+      // Débiter le solde via token client Firebase
+      try {
+        await firestorePatchWithToken(clientToken, 'sms_credits/' + verifiedUid, { credits: newCredits });
+        // Historique
+        const txId = Date.now().toString();
+        await firestorePatchWithToken(clientToken, 'sms_credits/' + verifiedUid + '/history/' + txId, {
+          type: 'send',
+          campagneId: campagneId || '',
+          smsSent: results.sent,
+          smsFailed: results.failed,
+          date: new Date().toISOString().slice(0, 10),
+          message: message.slice(0, 100),
+        });
+        console.log('✅ Solde débité:', realCredits, '→', newCredits);
+      } catch (debitErr) {
+        console.warn('⚠️ Débit Firestore échoué (SMS envoyés quand même):', debitErr.message);
       }
 
       return res.status(200).json({ success: true, sent: results.sent, failed: results.failed, remaining: newCredits, errors: results.errors });
