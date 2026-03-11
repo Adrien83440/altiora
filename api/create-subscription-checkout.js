@@ -1,5 +1,15 @@
 // api/create-subscription-checkout.js
 
+// ── Whitelist des priceId Stripe autorisés ──
+const VALID_PRICES = [
+  'price_1T3gqlGSYbSgNdWwlr6RX92r',  // Pro mensuel 69€
+  'price_1T3gveGSYbSgNdWwot2e5YpG',  // Pro annuel 55€/mois
+  'price_1T3gtkGSYbSgNdWw81ff10tt',  // Max mensuel 99€
+  'price_1T3gwGGSYbSgNdWw1ptpHTDB',  // Max annuel 79€/mois
+  'price_1T3guhGSYbSgNdWwtKX6EFuy',  // Master mensuel 169€
+  'price_1T3gwsGSYbSgNdWwezlggjJR',  // Master annuel 135€/mois
+];
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -10,8 +20,13 @@ module.exports = async (req, res) => {
   const { priceId, plan, billing, uid, email, skipTrial, referralCode } = req.body || {};
   if (!priceId) return res.status(400).json({ error: 'priceId manquant' });
 
+  // ── Vérification whitelist ──
+  if (!VALID_PRICES.includes(priceId)) {
+    return res.status(400).json({ error: 'Prix non autorisé' });
+  }
+
   const stripeKey = process.env.STRIPE_SECRET_KEY;
-  const baseUrl = process.env.APP_URL || 'https://altiora-theta.vercel.app';
+  const baseUrl = process.env.APP_URL || 'https://alteore.com';
 
   try {
     const res2 = await fetch('https://api.stripe.com/v1/checkout/sessions', {
