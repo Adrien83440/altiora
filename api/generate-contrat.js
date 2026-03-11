@@ -1,13 +1,33 @@
 /**
  * api/generate-contrat.js
- * Génération de contrats de travail assistée par IA
- * Utilise Claude Sonnet + Web Search pour vérifier les lois en vigueur
+ * Génération de contrats de travail — Claude Haiku (rapide, fiable)
+ * Données légales intégrées directement (pas de web search = pas de rate limit)
  */
 
-// Vercel Pro : autoriser 120s pour la génération (web search + retry)
-export const config = { maxDuration: 120 };
+// ════════════════════════════════════════════════════════════════
+// 📋 DONNÉES LÉGALES — À METTRE À JOUR QUAND LA LOI CHANGE
+//    Le SMIC change en général au 1er janvier (parfois novembre)
+//    Dernière mise à jour : novembre 2024
+// ════════════════════════════════════════════════════════════════
+const LEGAL = {
+  smicHoraire: '11,88',           // € brut/heure
+  smicMensuel: '1 801,80',        // € brut/mois pour 35h
+  smicDate: 'novembre 2024',      // Date de la dernière revalorisation
+  gratificationStage: '4,35',     // € minimum/heure
+  // Période d'essai CDI (art. L.1221-19)
+  essaiEmploye: '2 mois',
+  essaiMaitrise: '3 mois',
+  essaiCadre: '4 mois',
+  // CDD
+  cddDureeMax: '18 mois',
+  cddIndemnite: '10%',
+  // Apprentissage (% du SMIC par année)
+  apprentissage: '16-17 ans 27%/39%/55%, 18-20 ans 43%/51%/67%, 21-25 ans 53%/61%/78%, 26+ ans 100%',
+};
+// ════════════════════════════════════════════════════════════════
 
-// ── Auth inline (même pattern que generate-rh-doc.js) ──
+export const config = { maxDuration: 90 };
+
 function _cors(req, res) {
   const origin = req.headers.origin;
   const allowed = ['https://alteore.com', 'https://www.alteore.com'];
@@ -23,7 +43,7 @@ function _cors(req, res) {
 async function _verifyAuth(req, res) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : '';
-  if (!token) { res.status(401).json({ error: 'Non authentifié.' }); return null; }
+  if (!token) { res.status(401).json({ error: 'Non authentifie.' }); return null; }
   try {
     const apiKey = process.env.FIREBASE_API_KEY;
     if (!apiKey) { res.status(500).json({ error: 'Config serveur manquante.' }); return null; }
@@ -39,67 +59,38 @@ async function _verifyAuth(req, res) {
   } catch (e) { res.status(401).json({ error: 'Erreur auth.' }); return null; }
 }
 
-// ── System prompt juridique ──
-const SYSTEM_PROMPT = `Tu es un expert juridique spécialisé en droit du travail français, avec une expertise approfondie dans la rédaction de contrats de travail conformes au Code du travail et aux conventions collectives.
+const SYSTEM_PROMPT = `Tu es un juriste expert en droit du travail francais. Tu rediges des contrats de travail complets et conformes.
 
-MISSION : Générer un contrat de travail complet, professionnel et juridiquement conforme à partir des informations fournies.
+DONNEES LEGALES EN VIGUEUR :
+- SMIC horaire brut : ${LEGAL.smicHoraire} euros (${LEGAL.smicDate}), soit ${LEGAL.smicMensuel} euros mensuel brut pour 35h
+- Duree legale du travail : 35 heures hebdomadaires (art. L.3121-27)
+- Conges payes : 2,5 jours ouvrables par mois, soit 30 jours/an (art. L.3141-3)
+- Periode essai CDI (art. L.1221-19) : Ouvriers/Employes ${LEGAL.essaiEmploye}, Agents de maitrise ${LEGAL.essaiMaitrise}, Cadres ${LEGAL.essaiCadre}
+- Renouvellement essai : 1 fois si accord de branche le prevoit (art. L.1221-21)
+- CDD duree max : ${LEGAL.cddDureeMax} renouvellements inclus (art. L.1242-8)
+- Indemnite fin CDD : ${LEGAL.cddIndemnite} des remunerations brutes (art. L.1243-8)
+- Stage : max 6 mois/an enseignement, gratification obligatoire si > 2 mois : ${LEGAL.gratificationStage} euros/h minimum
+- Apprentissage remuneration (% SMIC) : ${LEGAL.apprentissage}
+- Preavis demission/licenciement : selon CCN, a defaut 1 mois (< 2 ans), 2 mois (>= 2 ans)
+- Mutuelle obligatoire depuis 2016 (ANI), participation employeur >= 50%
 
-RÈGLE CRITIQUE DE FORMAT :
-Ta réponse DOIT commencer DIRECTEMENT par la balise <h1> du titre du contrat.
-Tu ne dois JAMAIS écrire de texte d'introduction, d'analyse, de résumé de recherche ou de raisonnement avant le HTML.
-AUCUN texte avant <h1>. Pas de "Voici le contrat", pas de "J'ai trouvé", pas de résumé de recherche.
-Uniquement le HTML du contrat, rien d'autre.
+Si un IDCC est fourni, mentionne que les dispositions conventionnelles plus favorables prevalent.
+IMPORTANT : Tu disposes d'1 recherche web. Utilise-la pour rechercher "convention collective IDCC [numero] periode essai preavis grille salaire" afin d'adapter le contrat aux dispositions specifiques de la CCN du salarie.
 
-RÈGLES ABSOLUES :
-1. RECHERCHE : Utilise web_search pour vérifier le SMIC en vigueur et les dispositions clés de la convention collective (IDCC fourni). Limite-toi à 2-3 recherches essentielles maximum.
+FORMAT DE SORTIE :
+1. Ta reponse commence DIRECTEMENT par <h1>. AUCUN texte avant. ZERO introduction.
+2. HTML : <h1> titre, <h2> articles, <p> paragraphes, <strong> gras, <em> italique, <ul>/<li> listes
+3. JAMAIS de placeholders [A COMPLETER]
+4. JAMAIS de backticks markdown
+5. Le premier caractere de ta reponse est le symbole <
 
-2. MENTIONS OBLIGATOIRES : Chaque contrat DOIT inclure TOUTES les mentions légales obligatoires selon son type. Ne jamais en omettre. Inclure systématiquement :
-   - Clause de préavis de rupture (délais selon ancienneté et CCN)
-   - Mention RGPD : information sur le traitement des données personnelles du salarié
-   - Mention du droit applicable et juridiction compétente (Conseil de Prud'hommes)
-   - Pour les CDI : rappel des conditions de rupture (démission, licenciement, rupture conventionnelle)
-
-3. PAS DE PLACEHOLDERS : Tu n'utilises JAMAIS de crochets [À COMPLÉTER], [NOM], etc. Si une information manque, rédige la clause de manière générale ou omets-la proprement.
-
-4. FORMAT HTML :
-   - Utilise <h1> pour le titre du contrat
-   - <h2> pour les articles
-   - <p> pour les paragraphes
-   - <strong> pour les mentions importantes
-   - <ul>/<li> pour les listes
-   - Pas de CSS inline complexe
-   - PAS de balise markdown, PAS de backticks
-
-5. STRUCTURE TYPE d'un contrat :
-   - En-tête : "CONTRAT DE [TYPE]" + "Conforme aux articles L.xxxx du Code du travail"
-   - ENTRE (employeur) ET (salarié)
-   - Article 1 : Engagement / Objet
-   - Article 2 : Fonctions et qualification
-   - Article 3 : Lieu de travail
-   - Article 4 : Durée du contrat (CDI/CDD)
-   - Article 5 : Période d'essai (+ renouvellement si applicable)
-   - Article 6 : Durée et horaires de travail
-   - Article 7 : Rémunération
-   - Article 8 : Congés payés
-   - Article 9 : Protection sociale (mutuelle, prévoyance)
-   - Article 10 : Convention collective applicable
-   - Article 11 : Obligations du salarié (confidentialité, loyauté)
-   - Article 12 : Préavis de rupture (délais légaux et conventionnels)
-   - Article 13 : Protection des données personnelles (RGPD)
-   - Articles supplémentaires : clauses optionnelles demandées
-   - Article final : Dispositions générales + juridiction compétente
-   - Signatures (deux colonnes en HTML table)
-   - Mention "Fait en deux exemplaires originaux"
-
-6. Pour les CDD obligatoirement ajouter : motif de recours, nom du salarié remplacé si remplacement, date de fin ou durée minimale, possibilité de renouvellement, indemnité de fin de contrat (10%).
-
-7. Pour les contrats d'alternance : mentionner le centre de formation, le diplôme préparé, la rémunération en % du SMIC, le maître d'apprentissage/tuteur.
-
-8. Pour les conventions de stage : durée maximale 6 mois, gratification obligatoire si > 2 mois, pas de lien de subordination.
-
-9. DISCLAIMER : Ajouter en fin de document dans un paragraphe en italique : "Ce document a été généré à l'aide d'un outil d'assistance à la rédaction. Il ne constitue pas un conseil juridique personnalisé. Il est recommandé de le faire vérifier par un professionnel du droit du travail avant signature."
-
-RAPPEL FINAL : Ta sortie ne contient QUE du HTML. Le premier caractère de ta réponse est "<".`;
+STRUCTURE :
+<h1>CONTRAT DE [TYPE]</h1>
+<p><em>Conforme aux articles L.xxxx et suivants du Code du travail</em></p>
+ENTRE (employeur) ET (salarie)
+Art. 1 Engagement / Art. 2 Fonctions / Art. 3 Lieu / Art. 4 Duree / Art. 5 Essai / Art. 6 Horaires / Art. 7 Remuneration / Art. 8 Conges / Art. 9 Protection sociale / Art. 10 CCN / Art. 11 Obligations / Art. 12 Preavis et rupture / Art. 13 RGPD / + clauses optionnelles / Art. final Dispositions generales
+Signatures (table 2 colonnes) + "Fait en deux exemplaires originaux"
+Disclaimer italique en fin.`;
 
 export default async function handler(req, res) {
   if (_cors(req, res)) return;
@@ -108,196 +99,87 @@ export default async function handler(req, res) {
   if (!auth) return;
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY non configurée.' });
+  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY non configuree.' });
 
   try {
     const { type, employeur, salarie, conditions, clauses, idcc, ccnNom } = req.body;
-
     if (!type || !employeur || !salarie || !conditions) {
-      return res.status(400).json({ error: 'Données incomplètes.' });
+      return res.status(400).json({ error: 'Donnees incompletes.' });
     }
 
-    // ── Construire le prompt utilisateur ──
     const typeLabels = {
-      'cdi_tp': 'CDI à temps plein',
-      'cdi_partiel': 'CDI à temps partiel',
-      'cdd_remplacement': 'CDD de remplacement',
-      'cdd_surcroit': 'CDD pour surcroît d\'activité',
-      'cdd_saisonnier': 'CDD saisonnier',
-      'apprentissage': 'Contrat d\'apprentissage',
-      'professionnalisation': 'Contrat de professionnalisation',
-      'stage': 'Convention de stage'
+      'cdi_tp': 'CDI a temps plein', 'cdi_partiel': 'CDI a temps partiel',
+      'cdd_remplacement': 'CDD de remplacement', 'cdd_surcroit': 'CDD pour surcroit d\'activite',
+      'cdd_saisonnier': 'CDD saisonnier', 'apprentissage': 'Contrat d\'apprentissage',
+      'professionnalisation': 'Contrat de professionnalisation', 'stage': 'Convention de stage'
     };
 
-    const userPrompt = `Génère un ${typeLabels[type] || type} complet et conforme.
+    const userPrompt = `Genere un ${typeLabels[type] || type} complet.
 
-INFORMATIONS EMPLOYEUR :
-- Raison sociale : ${employeur.raisonSociale || 'Non renseigné'}
-- Forme juridique : ${employeur.formeJuridique || 'Non renseigné'}
-- SIRET : ${employeur.siret || 'Non renseigné'}
-- Adresse : ${employeur.adresse || 'Non renseigné'}
-- Représentant légal : ${employeur.representant || 'Non renseigné'} (${employeur.qualiteRepresentant || 'Gérant'})
-- Code APE/NAF : ${employeur.codeAPE || 'Non renseigné'}
-- Convention collective : ${ccnNom || 'Non renseigné'} (IDCC ${idcc || 'Non renseigné'})
-- Organisme mutuelle : ${employeur.mutuelle || 'Non renseigné'}
-- Organisme prévoyance : ${employeur.prevoyance || 'Non renseigné'}
+EMPLOYEUR : ${employeur.raisonSociale||'?'} (${employeur.formeJuridique||'?'}), SIRET ${employeur.siret||'?'}, ${employeur.adresse||'?'}, represente par ${employeur.representant||'?'} (${employeur.qualiteRepresentant||'Gerant'}), APE ${employeur.codeAPE||'?'}, CCN ${ccnNom||'?'} IDCC ${idcc||'?'}, mutuelle ${employeur.mutuelle||'?'}, prevoyance ${employeur.prevoyance||'?'}
 
-INFORMATIONS ${type === 'stage' ? 'STAGIAIRE' : 'SALARIÉ(E)'} :
-- Civilité : ${salarie.civilite || 'M.'}
-- Nom : ${salarie.nom || 'Non renseigné'}
-- Prénom : ${salarie.prenom || 'Non renseigné'}
-- Date de naissance : ${salarie.dateNaissance || 'Non renseigné'}
-- Lieu de naissance : ${salarie.lieuNaissance || 'Non renseigné'}
-- Nationalité : ${salarie.nationalite || 'Française'}
-- Adresse : ${salarie.adresse || 'Non renseigné'}
-- N° Sécurité sociale : ${salarie.numSS || 'Non renseigné'}
-${salarie.etablissement ? '- Établissement de formation : ' + salarie.etablissement : ''}
-${salarie.diplome ? '- Diplôme préparé : ' + salarie.diplome : ''}
-${salarie.tuteur ? '- Tuteur/Maître d\'apprentissage : ' + salarie.tuteur : ''}
+${type==='stage'?'STAGIAIRE':'SALARIE'} : ${salarie.civilite||'M.'} ${salarie.prenom||''} ${salarie.nom||''}, ne(e) le ${salarie.dateNaissance||'?'} a ${salarie.lieuNaissance||'?'}, ${salarie.nationalite||'Francaise'}, ${salarie.adresse||'?'}, SS ${salarie.numSS||'?'}${salarie.etablissement?' | Formation: '+salarie.etablissement:''}${salarie.diplome?' ('+salarie.diplome+')':''}${salarie.tuteur?' | Tuteur: '+salarie.tuteur:''}
 
-CONDITIONS DU CONTRAT :
-- Intitulé du poste : ${conditions.poste || 'Non renseigné'}
-- Qualification / Coefficient : ${conditions.qualification || 'Non renseigné'}
-- Date de début : ${conditions.dateDebut || 'Non renseigné'}
-${conditions.dateFin ? '- Date de fin : ' + conditions.dateFin : ''}
-${conditions.duree ? '- Durée : ' + conditions.duree : ''}
-${conditions.motifCDD ? '- Motif de recours (CDD) : ' + conditions.motifCDD : ''}
-${conditions.salarieRemplace ? '- Salarié remplacé : ' + conditions.salarieRemplace + ' (' + (conditions.posteRemplace || '') + ')' : ''}
-- Lieu de travail : ${conditions.lieuTravail || 'Non renseigné'}
-- Durée hebdomadaire de travail : ${conditions.dureeHebdo || '35'} heures
-${conditions.repartitionHoraire ? '- Répartition horaire : ' + conditions.repartitionHoraire : ''}
-- Rémunération brute mensuelle : ${conditions.remuneration || 'Non renseigné'} €
-${conditions.periodeEssai ? '- Période d\'essai : ' + conditions.periodeEssai : ''}
-${conditions.renouvellementEssai ? '- Renouvellement période d\'essai : Oui' : ''}
-${conditions.gratification ? '- Gratification mensuelle (stage) : ' + conditions.gratification + ' €' : ''}
+CONDITIONS : poste ${conditions.poste||'?'}, qualification ${conditions.qualification||'selon CCN'}, debut ${conditions.dateDebut||'?'}${conditions.dateFin?', fin '+conditions.dateFin:''}${conditions.duree?', duree '+conditions.duree:''}${conditions.motifCDD?', motif: '+conditions.motifCDD:''}${conditions.salarieRemplace?', remplace '+conditions.salarieRemplace:''}, lieu ${conditions.lieuTravail||'?'}, ${conditions.dureeHebdo||'35'}h/sem${conditions.repartitionHoraire?', repartition: '+conditions.repartitionHoraire:''}, remuneration ${conditions.remuneration||'?'} euros brut/mois${conditions.periodeEssai?', essai '+conditions.periodeEssai:''}${conditions.renouvellementEssai?', renouvellement oui':''}${conditions.gratification?', gratification '+conditions.gratification+' euros/mois':''}
 
-CLAUSES OPTIONNELLES DEMANDÉES :
-${clauses && clauses.length > 0 ? clauses.map(c => {
-      if (c.type === 'non_concurrence') return `- Clause de non-concurrence : durée ${c.duree || '1 an'}, périmètre géographique : ${c.perimetre || 'départemental'}, contrepartie financière : ${c.contrepartie || '30% du salaire'}`;
-      if (c.type === 'confidentialite') return '- Clause de confidentialité';
-      if (c.type === 'exclusivite') return '- Clause d\'exclusivité';
-      if (c.type === 'teletravail') return `- Clause de télétravail : ${c.jours || '2'} jours/semaine, indemnité : ${c.indemnite || '0'} €/mois`;
-      if (c.type === 'vehicule') return '- Véhicule de fonction';
-      if (c.type === 'mobilite') return `- Clause de mobilité : ${c.perimetre || 'national'}`;
-      if (c.type === 'dedit_formation') return `- Clause de dédit-formation : engagement ${c.duree || '2 ans'}, montant : ${c.montant || 'proportionnel'}`;
-      return `- ${c.type}`;
-    }).join('\n') : 'Aucune clause optionnelle'}
+CLAUSES : ${clauses&&clauses.length>0?clauses.map(c=>{
+if(c.type==='non_concurrence')return'non-concurrence '+( c.duree||'1 an')+' zone '+(c.perimetre||'departementale')+' contrepartie '+(c.contrepartie||'30%');
+if(c.type==='teletravail')return'teletravail '+(c.jours||'2')+'j/sem indemnite '+(c.indemnite||'0')+'euros';
+if(c.type==='mobilite')return'mobilite '+(c.perimetre||'national');
+if(c.type==='dedit_formation')return'dedit-formation '+(c.duree||'2 ans');
+return c.type.replace(/_/g,' ');}).join(', '):'aucune'}
 
-INSTRUCTIONS SPÉCIALES :
-- Recherche les dispositions actuelles de la CCN IDCC ${idcc || '(non précisé)'} pour les clauses de période d'essai, préavis et classification.
-- Vérifie que la rémunération est au moins égale au SMIC en vigueur${type === 'apprentissage' || type === 'professionnalisation' ? ' (ou au % applicable selon l\'âge pour l\'alternance)' : ''}.
-- Rédige le contrat en HTML structuré, prêt à être affiché et imprimé.`;
+Commence directement par <h1>.`;
 
-    // ── Appel API Anthropic avec web_search + retry sur 429 ──
-    const apiBody = JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 12000,
-      system: SYSTEM_PROMPT,
-      tools: [
-        {
-          type: 'web_search_20250305',
-          name: 'web_search',
-          max_uses: 3
-        }
-      ],
-      messages: [
-        { role: 'user', content: userPrompt }
-      ]
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 8000,
+        system: SYSTEM_PROMPT,
+        tools: [
+          {
+            type: 'web_search_20250305',
+            name: 'web_search',
+            max_uses: 1
+          }
+        ],
+        messages: [{ role: 'user', content: userPrompt }]
+      })
     });
 
-    const apiHeaders = {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
-    };
-
-    let response = null;
-    let lastError = '';
-
-    // Retry jusqu'à 3 fois avec backoff sur 429/529
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: apiHeaders,
-        body: apiBody
-      });
-
-      if (response.ok) break;
-
-      // 429 (rate limit) ou 529 (overloaded) → retry après attente
-      if ((response.status === 429 || response.status === 529) && attempt < 3) {
-        const wait = attempt * 10; // 10s, 20s
-        console.log(`Anthropic ${response.status}, retry ${attempt}/3 dans ${wait}s...`);
-        await new Promise(r => setTimeout(r, wait * 1000));
-        continue;
-      }
-
-      // Autre erreur ou dernier essai → on sort
-      lastError = await response.text().catch(() => '');
-      break;
-    }
-
-    if (!response || !response.ok) {
-      const status = response ? response.status : 500;
-      console.error('Anthropic API error après retries:', status, lastError);
-      // Message clair pour le client
-      if (status === 429) {
-        return res.status(503).json({ error: 'L\'IA est temporairement surchargée. Réessayez dans 1 minute.' });
-      }
-      return res.status(502).json({ error: 'Erreur du service IA', details: lastError.substring(0, 200) });
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      console.error('Anthropic error:', response.status, errText);
+      return res.status(502).json({ error: 'Erreur IA. Reessayez dans quelques secondes.' });
     }
 
     const data = await response.json();
-
-    // Extraire le texte des blocs de réponse (peut contenir text + tool_use + tool_result)
     let rawText = '';
     if (data.content && Array.isArray(data.content)) {
       for (const block of data.content) {
-        if (block.type === 'text' && block.text) {
-          rawText += block.text;
-        }
+        if (block.type === 'text' && block.text) rawText += block.text;
       }
     }
 
-    // Nettoyer : enlever les éventuels backticks markdown
     rawText = rawText.replace(/```html?\s*/gi, '').replace(/```/g, '').trim();
 
-    // CRITIQUE : extraire uniquement le HTML du contrat
-    // Claude écrit souvent son raisonnement en texte brut AVANT le HTML
-    // On cherche le premier tag HTML significatif et on coupe tout ce qui précède
     let htmlContent = rawText;
-    const htmlStartPatterns = [
-      /<h1[\s>]/i,
-      /<div[\s>]/i,
-      /<!DOCTYPE/i,
-      /<html[\s>]/i,
-      /<article[\s>]/i,
-      /<section[\s>]/i,
-      /<header[\s>]/i
-    ];
-    for (const pattern of htmlStartPatterns) {
-      const match = rawText.match(pattern);
-      if (match && match.index !== undefined) {
-        htmlContent = rawText.substring(match.index);
-        break;
-      }
-    }
+    const m = rawText.match(/<h1[\s>]/i);
+    if (m && m.index > 0) htmlContent = rawText.substring(m.index);
 
-    // Si aucun tag trouvé mais contient du HTML inline, chercher le premier <
-    if (htmlContent === rawText && rawText.includes('<')) {
-      const firstTag = rawText.indexOf('<');
-      if (firstTag > 0) {
-        htmlContent = rawText.substring(firstTag);
-      }
-    }
-
-    if (!htmlContent) {
-      return res.status(500).json({ error: 'Aucun contenu généré.' });
+    if (!htmlContent || htmlContent.length < 50) {
+      return res.status(500).json({ error: 'Contenu genere trop court.' });
     }
 
     return res.status(200).json({
       html: htmlContent,
-      type: type,
+      type,
       typeLabel: typeLabels[type] || type,
       generatedAt: new Date().toISOString()
     });
