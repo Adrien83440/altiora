@@ -144,11 +144,34 @@
 
     /* PRINT */
     @media print{
-      .sidebar,.topbar,.left-panel,.wizard-progress,.wizard-footer,.preview-head,.btn,.toast,.gen-overlay{display:none!important;}
-      .main{margin-left:0!important;}
-      .content{padding:0!important;}
-      .right-panel{flex:1;}
-      .preview-body{max-height:none!important;padding:20px!important;}
+      /* NUCLEAR: hide absolutely everything first */
+      body > *:not(.print-only) { display:none!important; visibility:hidden!important; }
+      nav, aside, .sidebar, #alteore-nav, .topbar, .left-panel,
+      .wizard-progress, .wizard-footer, .preview-head, .preview-actions,
+      .btn, .toast, .gen-overlay, .hamburger, .nav-overlay,
+      .panel-card, .empty-state, #emptyState, .topbar-right, .topbar-left,
+      footer, .sidebar-footer, .user-card { display:none!important; }
+      /* Then show only what we need */
+      body { display:block!important; background:white!important; }
+      .main { display:block!important; visibility:visible!important; margin-left:0!important; width:100%!important; }
+      .content { display:block!important; visibility:visible!important; padding:0!important; }
+      .right-panel { display:block!important; visibility:visible!important; width:100%!important; animation:none!important; }
+      #wizardWrap { display:block!important; visibility:visible!important; }
+      .wizard-card { display:block!important; visibility:visible!important; border:none!important; box-shadow:none!important; }
+      .step-panel#step-6 { display:block!important; visibility:visible!important; }
+      .step-panel:not(#step-6) { display:none!important; }
+      .preview-card { display:block!important; visibility:visible!important; border:none!important; box-shadow:none!important; }
+      .preview-body {
+        display:block!important; visibility:visible!important;
+        max-height:none!important; overflow:visible!important;
+        padding:15mm 20mm!important;
+        font-size:12pt!important; line-height:1.6!important;
+        color:#000!important;
+      }
+      .preview-body * { visibility:visible!important; color:#000!important; }
+      .preview-body h1 { font-size:16pt!important; margin-bottom:14pt!important; }
+      .preview-body h2 { font-size:13pt!important; margin-top:14pt!important; page-break-after:avoid; }
+      .preview-body p { orphans:3; widows:3; }
     }
 
     /* ANIMATIONS */
@@ -513,7 +536,7 @@
                     <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3)" onclick="regenerateContract()">🔄 Régénérer</button>
                     <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3)" onclick="exportPDF()">📥 PDF</button>
                     <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3)" onclick="exportDOCX()">📝 DOCX</button>
-                    <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3)" onclick="window.print()">🖨️ Imprimer</button>
+                    <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:white;border:1px solid rgba(255,255,255,0.3)" onclick="printContract()">🖨️ Imprimer</button>
                   </div>
                 </div>
                 <div class="preview-body" id="previewBody">
@@ -904,7 +927,7 @@ async function generateContract(){
     }
 
     const data = await resp.json();
-    _generatedHTML = data.html;
+    _generatedHTML = cleanContractHTML(data.html || '');
     document.getElementById('previewBody').innerHTML = _generatedHTML;
     showToast('✅ Contrat généré avec succès !','success');
   }catch(e){
@@ -913,6 +936,21 @@ async function generateContract(){
     showToast('Erreur : '+e.message,'error');
     goStep(5);
   }
+}
+
+// Nettoyage côté client : supprimer le raisonnement IA avant le HTML
+function cleanContractHTML(raw){
+  if(!raw) return '';
+  // Chercher le premier tag HTML significatif
+  const patterns = [/<h1[\s>]/i, /<div[\s>]/i, /<!DOCTYPE/i, /<html[\s>]/i];
+  for(const pat of patterns){
+    const m = raw.match(pat);
+    if(m && m.index > 0) return raw.substring(m.index);
+  }
+  // Fallback : si ça commence par du texte brut suivi de HTML
+  const firstTag = raw.indexOf('<');
+  if(firstTag > 20) return raw.substring(firstTag);
+  return raw;
 }
 
 function regenerateContract(){
@@ -952,49 +990,75 @@ async function saveContract(){
 }
 
 // ═══════════════════════════════════════════════════
-// EXPORT PDF
+// EXPORT — HTML propre isolé de la page
 // ═══════════════════════════════════════════════════
+function _getCleanHTML(){
+  return '<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/><title>Contrat - '+(gv('sal-prenom')||'')+' '+(gv('sal-nom')||'')+'</title><style>@page{margin:20mm 18mm;size:A4}body{font-family:Calibri,Segoe UI,sans-serif;font-size:12pt;line-height:1.7;color:#1a1a1a;margin:0;padding:20px 40px}h1{font-size:16pt;text-align:center;margin-bottom:16pt;font-weight:bold;text-transform:uppercase;letter-spacing:1px}h2{font-size:13pt;font-weight:bold;margin-top:18pt;margin-bottom:8pt;border-bottom:1px solid #ccc;padding-bottom:4pt}p{margin-bottom:8pt;text-align:justify}strong{font-weight:bold}em{font-style:italic}ul{margin:8pt 0 8pt 24pt}li{margin-bottom:4pt}table{width:100%;border-collapse:collapse;margin:10pt 0}td{padding:8pt;vertical-align:top}@media print{body{padding:0}}</style></head><body>'+_generatedHTML+'</body></html>';
+}
+
 function exportPDF(){
   if(!_generatedHTML){showToast('Aucun contrat à exporter','error');return;}
-  const el = document.getElementById('previewBody');
-  const opt = {
-    margin: [15, 15, 15, 15],
-    filename: 'contrat_'+ (_type||'travail') +'_'+ (gv('sal-nom')||'').replace(/\s/g,'_') +'.pdf',
-    image: {type:'jpeg', quality:0.98},
-    html2canvas: {scale:2, useCORS:true},
-    jsPDF: {unit:'mm', format:'a4', orientation:'portrait'}
-  };
-  html2pdf().set(opt).from(el).save();
-  showToast('📥 Téléchargement PDF...','success');
+  try{
+    if(typeof html2pdf === 'undefined') throw new Error('lib non chargée');
+    // Élément temporaire ISOLÉ de la page (pas de sidebar, pas de nav)
+    var container = document.createElement('div');
+    container.style.cssText = 'position:fixed;left:-9999px;top:0;width:794px;background:white;padding:60px 56px;font-family:Calibri,sans-serif;font-size:12pt;line-height:1.7;color:#1a1a1a;';
+    container.innerHTML = _generatedHTML;
+    document.body.appendChild(container);
+
+    var nom = (gv('sal-nom')||'contrat').replace(/\s+/g,'_');
+    html2pdf().set({
+      margin: [12, 14, 12, 14],
+      filename: 'contrat_'+ (_type||'travail') +'_'+ nom +'.pdf',
+      image: {type:'jpeg', quality:0.98},
+      html2canvas: {scale:2, useCORS:true, logging:false, width:794},
+      jsPDF: {unit:'mm', format:'a4', orientation:'portrait'},
+      pagebreak: {mode:['avoid-all','css','legacy']}
+    }).from(container).save().then(function(){
+      document.body.removeChild(container);
+      showToast('📥 PDF téléchargé !','success');
+    }).catch(function(err){
+      document.body.removeChild(container);
+      console.error('html2pdf error:', err);
+      printContract();
+    });
+  }catch(e){
+    console.error('PDF export fallback:', e);
+    printContract();
+  }
+}
+
+function printContract(){
+  if(!_generatedHTML){showToast('Aucun contrat à imprimer','error');return;}
+  var win = window.open('','_blank','width=800,height=1000');
+  if(!win){showToast('Popup bloquée — autorisez les popups','error');return;}
+  win.document.write(_getCleanHTML());
+  win.document.close();
+  setTimeout(function(){ win.focus(); win.print(); }, 500);
 }
 
 // ═══════════════════════════════════════════════════
-// EXPORT DOCX (HTML-to-Word blob approach)
+// EXPORT DOCX (HTML → Word blob)
 // ═══════════════════════════════════════════════════
 function exportDOCX(){
   if(!_generatedHTML){showToast('Aucun contrat à exporter','error');return;}
-  const header = `<html xmlns:o='urn:schemas-microsoft-com:office:office'
-    xmlns:w='urn:schemas-microsoft-com:office:word'
-    xmlns='http://www.w3.org/TR/REC-html40'>
-    <head><meta charset='utf-8'>
-    <style>
-      body{font-family:'Calibri',sans-serif;font-size:12pt;line-height:1.6;color:#1a1a1a;margin:2cm;}
-      h1{font-size:16pt;text-align:center;margin-bottom:20pt;font-weight:bold;}
-      h2{font-size:13pt;font-weight:bold;margin-top:16pt;margin-bottom:8pt;border-bottom:1px solid #ccc;padding-bottom:4pt;}
-      p{margin-bottom:8pt;}
-      strong{font-weight:bold;}
-      ul{margin:8pt 0 8pt 20pt;}
-      li{margin-bottom:4pt;}
-    </style></head><body>`;
-  const footer = '</body></html>';
-  const blob = new Blob([header + _generatedHTML + footer], {type:'application/msword'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'contrat_'+ (_type||'travail') +'_'+ (gv('sal-nom')||'').replace(/\s/g,'_') +'.doc';
-  a.click();
-  URL.revokeObjectURL(url);
-  showToast('📥 Téléchargement DOCX...','success');
+  try{
+    var preHtml = "<!DOCTYPE html><html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]--><style>@page{size:A4;margin:2cm}body{font-family:'Calibri',sans-serif;font-size:12pt;line-height:1.6;color:#1a1a1a;}h1{font-size:16pt;text-align:center;margin-bottom:20pt;font-weight:bold;text-transform:uppercase;}h2{font-size:13pt;font-weight:bold;margin-top:16pt;margin-bottom:8pt;border-bottom:1pt solid #cccccc;padding-bottom:4pt;}p{margin-bottom:8pt;text-align:justify;}strong{font-weight:bold;}em{font-style:italic;}ul{margin:8pt 0 8pt 24pt;}li{margin-bottom:4pt;}table{width:100%;border-collapse:collapse;}td{padding:8pt;vertical-align:top;}</style></head><body>";
+    var postHtml = "</body></html>";
+    var blob = new Blob(['\ufeff' + preHtml + _generatedHTML + postHtml], {type:'application/msword;charset=utf-8'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    var nom = (gv('sal-nom')||'contrat').replace(/\s+/g,'_');
+    a.download = 'contrat_'+ (_type||'travail') +'_'+ nom +'.doc';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 200);
+    showToast('📥 Document Word téléchargé !','success');
+  }catch(e){
+    console.error('DOCX export error:', e);
+    showToast('Erreur export Word : '+e.message,'error');
+  }
 }
 
 // ═══════════════════════════════════════════════════
@@ -1063,6 +1127,7 @@ window.regenerateContract=regenerateContract;
 window.saveContract=saveContract;
 window.exportPDF=exportPDF;
 window.exportDOCX=exportDOCX;
+window.printContract=printContract;
 window.openSavedContract=openSavedContract;
 </script>
 
