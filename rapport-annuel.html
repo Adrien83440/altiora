@@ -612,7 +612,7 @@ async function loadData(year){
 
 // Calcul mois complet
 function computeMonth(d,key,isFuture){
-  if(!d)return{caHT:0,caJ:0,caFP:0,rentrees:0,fixe:0,variable:0,credit:0,leasing:0,charges:0,resultat:0,
+  if(!d)return{caHT:0,caJ:0,caFP:0,rentrees:0,fixe:0,variable:0,credit:0,leasing:0,masseSal:0,charges:0,resultat:0,
     tvaCollectee:0,tvaDed:0,tvaDue:0,caHT055:0,caHT10:0,caHT20:0,
     prevCharges:0,prevCA:0,topCharges:[],hasData:false,isFuture:false};
   // CA journalier multi-TVA
@@ -665,11 +665,12 @@ function computeMonth(d,key,isFuture){
   });
   var tvaDed=tvaDedFix+tvaDedVar+tvaDedLeas;
   var tvaDue=tvaCollectee-tvaDed;
-  var charges=fixe+variable+credit+leasing+_calcMS(d);
+  var masseSal=_calcMS(d);
+  var charges=fixe+variable+credit+leasing+masseSal;
   // Mois futur : charges et CA passent en prévisionnel, résultat réel = 0
   var prevCharges = isFuture ? charges : 0;
   var prevCA      = isFuture ? caHT    : 0;
-  if(isFuture){ charges=0; caHT=0; caJ=0; caFP=0; caHT055=0; caHT10=0; caHT20=0; tvaCollectee=0; tvaDed=0; tvaDue=0; }
+  if(isFuture){ charges=0; masseSal=0; caHT=0; caJ=0; caFP=0; caHT055=0; caHT10=0; caHT20=0; tvaCollectee=0; tvaDed=0; tvaDue=0; }
   var resultat = caHT+rentrees-charges;
   // Top charges for details
   var topCharges=[];
@@ -677,7 +678,7 @@ function computeMonth(d,key,isFuture){
     if(pf(r.montantHT)>0)topCharges.push({fournisseur:r.fournisseur||'',type:r.type||'',montant:pf(r.montantHT),cat:r===((d.chargesFixe||[])[0])?'fixe':'variable'});
   });
   topCharges.sort(function(a,b){return b.montant-a.montant;});
-  return{caHT,caJ,caFP,caHT055,caHT10,caHT20,rentrees,fixe,variable,credit,leasing,charges,resultat,
+  return{caHT,caJ,caFP,caHT055,caHT10,caHT20,rentrees,fixe,variable,credit,leasing,masseSal,charges,resultat,
     tvaCollectee,tvaDed,tvaDue,prevCharges,prevCA,isFuture:!!isFuture,topCharges,hasData:true};
 }
 
@@ -687,7 +688,7 @@ function aggregateKeys(keys){
   var _now=new Date();
   var nowKey=_now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0');
 
-  var T={caHT:0,caJ:0,caFP:0,caHT055:0,caHT10:0,caHT20:0,rentrees:0,fixe:0,variable:0,credit:0,leasing:0,charges:0,resultat:0,tvaCollectee:0,tvaDed:0,tvaDue:0,moisData:0,prevCharges:0,prevCA:0};
+  var T={caHT:0,caJ:0,caFP:0,caHT055:0,caHT10:0,caHT20:0,rentrees:0,fixe:0,variable:0,credit:0,leasing:0,masseSal:0,charges:0,resultat:0,tvaCollectee:0,tvaDed:0,tvaDue:0,moisData:0,prevCharges:0,prevCA:0};
   var monthly=[];
   var chargesMap={};
   keys.forEach(function(k){
@@ -710,7 +711,7 @@ function aggregateKeys(keys){
     T.caHT+=r.caHT;T.caJ+=r.caJ;T.caFP+=r.caFP;
     T.caHT055+=r.caHT055;T.caHT10+=r.caHT10;T.caHT20+=r.caHT20;
     T.rentrees+=r.rentrees;T.fixe+=r.fixe;T.variable+=r.variable;
-    T.credit+=r.credit;T.leasing+=r.leasing;T.charges+=r.charges;T.resultat+=r.resultat;
+    T.credit+=r.credit;T.leasing+=r.leasing;T.masseSal+=r.masseSal;T.charges+=r.charges;T.resultat+=r.resultat;
     T.tvaCollectee+=r.tvaCollectee;T.tvaDed+=r.tvaDed;T.tvaDue+=r.tvaDue;
     T.prevCharges+=r.prevCharges; T.prevCA+=r.prevCA;
   });
@@ -764,18 +765,18 @@ function renderRapport(){
   // SIG : Soldes Intermédiaires de Gestion
   var mcv = T.caHT - T.variable;
   var txMCV = T.caHT>0 ? mcv/T.caHT*100 : 0;
-  var ebe = T.caHT + T.rentrees - T.fixe - T.variable;
+  var ebe = T.caHT + T.rentrees - T.fixe - T.variable - T.masseSal;
   var txEBE = T.caHT>0 ? ebe/T.caHT*100 : 0;
   var chargesFin = T.credit + T.leasing;
   var txChargesFin = T.caHT>0 ? chargesFin/T.caHT*100 : 0;
   var resCourant = ebe - chargesFin;
   var caf = T.resultat; // simplifié (hors dotations aux amortissements)
-  var pointMortJours = mcv>0 ? (T.fixe/mcv)*(T.moisData*30) : 0;
-  var seuilAnnuel = txMCV>0 ? T.fixe/(txMCV/100) : 0;
+  var pointMortJours = mcv>0 ? ((T.fixe+(T.masseSal||0))/mcv)*(T.moisData*30) : 0;
+  var seuilAnnuel = txMCV>0 ? (T.fixe+(T.masseSal||0))/(txMCV/100) : 0;
   var capaciteRemb = ebe>0&&totDettes>0 ? totDettes/ebe : 0;
   // N-1 SIG
   var mcvN1 = TN1.caHT - TN1.variable;
-  var ebeN1 = TN1.caHT + TN1.rentrees - TN1.fixe - TN1.variable;
+  var ebeN1 = TN1.caHT + TN1.rentrees - TN1.fixe - TN1.variable - (TN1.masseSal||0);
   var chFinN1 = TN1.credit + TN1.leasing;
   var cafN1 = TN1.resultat;
 
@@ -920,6 +921,7 @@ function renderRapport(){
   tabResume+='<tr class="row-section"><td colspan="4">▸ CHARGES</td></tr>';
   tabResume+='<tr><td>Charges fixes HT</td><td>'+fmt(T.fixe)+'</td><td><span class="'+(txFixe>50?'negative':'')+'">'+(T.caHT>0?fmtPct(txFixe,true):'—')+'</span></td>'+(TN1.moisData>0?'<td>'+fmt(TN1.fixe)+'</td>':'')+'</tr>';
   tabResume+='<tr><td>Charges variables HT</td><td>'+fmt(T.variable)+'</td><td><span class="'+(txVar>30?'negative':'')+'">'+(T.caHT>0?fmtPct(txVar,true):'—')+'</span></td>'+(TN1.moisData>0?'<td>'+fmt(TN1.variable)+'</td>':'')+'</tr>';
+  if(T.masseSal>0)tabResume+='<tr><td>👥 Masse salariale</td><td>'+fmt(T.masseSal)+'</td><td>'+(T.caHT>0?fmtPct(T.masseSal/T.caHT*100,true):'—')+'</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.masseSal||0)+'</td>':'')+'</tr>';
   if(T.credit>0)tabResume+='<tr><td>Crédits & Emprunts HT</td><td>'+fmt(T.credit)+'</td><td>'+(T.caHT>0?fmtPct(T.credit/T.caHT*100,true):'—')+'</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.credit)+'</td>':'')+'</tr>';
   if(T.leasing>0)tabResume+='<tr><td>Leasing / LOA / LLD</td><td>'+fmt(T.leasing)+'</td><td>'+(T.caHT>0?fmtPct(T.leasing/T.caHT*100,true):'—')+'</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.leasing)+'</td>':'')+'</tr>';
   if(_stockData.refs>0&&_stockData.variation!==0){
@@ -950,7 +952,8 @@ function renderRapport(){
   tabResume+='<tr style="background:#eff6ff"><td style="font-weight:700;color:var(--blue)">📦 Chiffre d\'affaires HT</td><td style="font-weight:700">'+fmt(T.caHT)+'</td><td>100%</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.caHT)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Total des ventes et prestations</td></tr>';
   tabResume+='<tr><td style="color:var(--red)">− Charges variables (achats, MP)</td><td style="color:var(--red)">−'+fmt(T.variable)+'</td><td>'+fmtPct(txVar,true)+'</td>'+(TN1.moisData>0?'<td>−'+fmt(TN1.variable)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Coûts proportionnels au CA</td></tr>';
   tabResume+='<tr class="row-total" style="background:#f0fdf4"><td style="font-weight:700;color:#059669">= Marge sur coûts variables</td><td style="font-weight:700;color:'+(mcv>=0?'#059669':'var(--red)')+'">'+fmt(mcv)+'</td><td style="font-weight:700">'+fmtPct(txMCV,true)+'</td>'+(TN1.moisData>0?'<td>'+fmt(mcvN1)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Capacité à couvrir les charges fixes</td></tr>';
-  tabResume+='<tr><td style="color:var(--red)">− Charges fixes d\'exploitation</td><td style="color:var(--red)">−'+fmt(T.fixe)+'</td><td>'+fmtPct(txFixe,true)+'</td>'+(TN1.moisData>0?'<td>−'+fmt(TN1.fixe)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Loyers, salaires, assurances...</td></tr>';
+  tabResume+='<tr><td style="color:var(--red)">− Charges fixes d\'exploitation</td><td style="color:var(--red)">−'+fmt(T.fixe)+'</td><td>'+fmtPct(txFixe,true)+'</td>'+(TN1.moisData>0?'<td>−'+fmt(TN1.fixe)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Loyers, assurances, abonnements...</td></tr>';
+  if(T.masseSal>0) tabResume+='<tr><td style="color:var(--red)">− 👥 Masse salariale</td><td style="color:var(--red)">−'+fmt(T.masseSal)+'</td><td>'+(T.caHT>0?fmtPct(T.masseSal/T.caHT*100,true):'—')+'</td>'+(TN1.moisData>0?'<td>−'+fmt(TN1.masseSal||0)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Salariés + dirigeant (charges incluses)</td></tr>';
   if(T.rentrees>0) tabResume+='<tr><td style="color:#059669">+ Rentrées exceptionnelles</td><td style="color:#059669">+'+fmt(T.rentrees)+'</td><td>—</td>'+(TN1.moisData>0?'<td>'+fmt(TN1.rentrees)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Autres produits hors exploitation</td></tr>';
   tabResume+='<tr class="row-total" style="background:#eff6ff;border-top:2px solid var(--blue)"><td style="font-weight:800;color:var(--blue)">= EBE (Excédent Brut d\'Exploitation)</td><td style="font-weight:800;color:'+(ebe>=0?'var(--blue)':'var(--red)')+'">'+fmt(ebe)+'</td><td style="font-weight:700">'+fmtPct(txEBE,true)+'</td>'+(TN1.moisData>0?'<td>'+fmt(ebeN1)+'</td>':'')+'<td style="font-size:11px;color:var(--muted)">Richesse créée par l\'exploitation</td></tr>';
   if(chargesFin>0){
@@ -1034,6 +1037,7 @@ function renderRapport(){
   tabResume+='<div class="bilan-block"><div class="block-header"><div class="block-title">📊 Répartition des charges</div></div><div class="progress-wrap">';
   if(T.fixe>0)tabResume+=pbar('Charges fixes',T.fixe,T.charges,'#1a3dce');
   if(T.variable>0)tabResume+=pbar('Charges variables',T.variable,T.charges,'#f59e0b');
+  if(T.masseSal>0)tabResume+=pbar('Masse salariale',T.masseSal,T.charges,'#f97316');
   if(T.credit>0)tabResume+=pbar('Crédits & Emprunts',T.credit,T.charges,'#6366f1');
   if(T.leasing>0)tabResume+=pbar('Leasing / LOA',T.leasing,T.charges,'#0d9488');
   tabResume+='</div></div>';
@@ -1791,17 +1795,17 @@ function exportPDF(){
     // SIG variables
     var mcv = T.caHT - T.variable;
     var txMCV = T.caHT>0 ? mcv/T.caHT*100 : 0;
-    var ebe = T.caHT + T.rentrees - T.fixe - T.variable;
+    var ebe = T.caHT + T.rentrees - T.fixe - T.variable - (T.masseSal||0);
     var txEBE = T.caHT>0 ? ebe/T.caHT*100 : 0;
     var chFin = T.credit + T.leasing;
     var txChFin = T.caHT>0 ? chFin/T.caHT*100 : 0;
     var resCourant = ebe - chFin;
     var caf = T.resultat;
-    var pointMortJ = mcv>0 ? (T.fixe/mcv)*(T.moisData*30) : 0;
-    var seuilAn = txMCV>0 ? T.fixe/(txMCV/100) : 0;
+    var pointMortJ = mcv>0 ? ((T.fixe+(T.masseSal||0))/mcv)*(T.moisData*30) : 0;
+    var seuilAn = txMCV>0 ? (T.fixe+(T.masseSal||0))/(txMCV/100) : 0;
     var capRemb = ebe>0&&totD>0 ? totD/ebe : 0;
     var mcvN1 = TN1.caHT - TN1.variable;
-    var ebeN1 = TN1.caHT + TN1.rentrees - TN1.fixe - TN1.variable;
+    var ebeN1 = TN1.caHT + TN1.rentrees - TN1.fixe - TN1.variable - (TN1.masseSal||0);
     var chFinN1 = TN1.credit + TN1.leasing;
 
     // ── Couleurs ─────────────────────────────────────────────
@@ -2051,6 +2055,7 @@ function exportPDF(){
     y+=2;
     prowR('Charges fixes HT',T.fixe,T.caHT>0?fmtPctP(T.fixe/T.caHT*100,true):'',TN1.fixe);
     prowR('Charges variables HT',T.variable,T.caHT>0?fmtPctP(T.variable/T.caHT*100,true):'',TN1.variable);
+    if(T.masseSal>0)prowR('Masse salariale',T.masseSal,T.caHT>0?fmtPctP(T.masseSal/T.caHT*100,true):'',TN1.masseSal||0);
     if(T.credit>0)prowR('Credits & Emprunts',T.credit,T.caHT>0?fmtPctP(T.credit/T.caHT*100,true):'',TN1.credit);
     if(T.leasing>0)prowR('Leasing / LOA / LLD',T.leasing,'',TN1.leasing);
     prowR('TOTAL CHARGES HT',T.charges,fmtPctP(txCh,true),TN1.charges,true);
@@ -2085,8 +2090,13 @@ function exportPDF(){
     tableRow(sigCols,['= MARGE SUR COUTS VARIABLES',fmtP(mcv),fmtPctP(txMCV,true),TN1.moisData>0?fmtP(mcvN1):'-','Capacite a couvrir les fixes'],2,{
       bg:cLGR,colors:[cGR,mcv>=0?cGR:cRD,cGR,cMT,cMT],bold:true,reHead:function(){tableHeader(sigCols);}});
     // - Charges fixes
-    tableRow(sigCols,['- Charges fixes exploitation','-'+fmtP(T.fixe),fmtPctP(txFixe,true),TN1.moisData>0?'-'+fmtP(TN1.fixe):'-','Loyers, salaires, assurances'],3,{
+    tableRow(sigCols,['- Charges fixes exploitation','-'+fmtP(T.fixe),fmtPctP(txFixe,true),TN1.moisData>0?'-'+fmtP(TN1.fixe):'-','Loyers, assurances, abonnements'],3,{
       colors:[cRD,cRD,cRD,cMT,cMT],reHead:function(){tableHeader(sigCols);}});
+    // - Masse salariale
+    if(T.masseSal>0){
+      tableRow(sigCols,['- Masse salariale','-'+fmtP(T.masseSal),T.caHT>0?fmtPctP(T.masseSal/T.caHT*100,true):'-',TN1.moisData>0?'-'+fmtP(TN1.masseSal||0):'-','Salaries + dirigeant'],3,{
+        colors:[cRD,cRD,cRD,cMT,cMT],reHead:function(){tableHeader(sigCols);}});
+    }
     // = EBE
     tableRow(sigCols,['= EBE (Excedent Brut Exploit.)',fmtP(ebe),fmtPctP(txEBE,true),TN1.moisData>0?fmtP(ebeN1):'-','Richesse creee par exploitation'],4,{
       bg:cLBL,colors:[cBL,ebe>=0?cBL:cRD,[0,0,120],cMT,cMT],bold:true,reHead:function(){tableHeader(sigCols);}});
