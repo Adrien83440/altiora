@@ -1647,18 +1647,45 @@ window.openCongeModal = function(id) {
   const c = _congesEnAttente.find(x => x.id === id);
   if (!c) return;
   _currentCongeId = id;
-  document.getElementById('modal-conge-title').textContent = `🌴 Congé — ${c.employeNom||'Employé'}`;
-  document.getElementById('modal-conge-body').innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:10px">
-      <div style="background:var(--rh-ghost);border:1px solid var(--rh-border);border-radius:10px;padding:14px">
-        ${infoRow('Employé', c.employeNom||'—')}
-        ${infoRow('Type', c.typeConge||'Congés payés')}
-        ${infoRow('Du', c.dateDebut||'—')}
-        ${infoRow('Au', c.dateFin||'—')}
-        ${infoRow('Durée', (c.nbJours||'—')+' jour(s)')}
-        ${c.motif ? infoRow('Motif', c.motif) : ''}
-      </div>
-    </div>`;
+
+  if (c.type === 'shift_swap') {
+    document.getElementById('modal-conge-title').textContent = '🔄 Échange de shift';
+    const fmtShift = items => {
+      if (!items || !items.length) return '—';
+      return items.filter(it => it.type==='travail'||it.type==='partiel'||it.type==='formation').map(it => {
+        const pl = it.plages && it.plages.length ? it.plages : (it.deb && it.fin ? [{deb:it.deb,fin:it.fin}] : []);
+        return pl.map(p => p.deb+'–'+p.fin).join(' | ');
+      }).join(' + ') || '—';
+    };
+    const dateLabel = c.swapDate ? new Date(c.swapDate+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'}) : '—';
+    document.getElementById('modal-conge-body').innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="background:var(--rh-ghost);border:1px solid var(--rh-border);border-radius:10px;padding:14px">
+          ${infoRow('📅 Date', dateLabel)}
+          ${infoRow('👤 Demandeur', c.employeNom||'—')}
+          ${infoRow('📋 Son shift', fmtShift(c.myShiftItems))}
+          <div style="text-align:center;font-size:18px;margin:6px 0">🔄</div>
+          ${infoRow('👤 Échange avec', c.targetEmpNom||'—')}
+          ${infoRow('📋 Son shift', fmtShift(c.targetShiftItems))}
+        </div>
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px;font-size:11px;color:#065f46">
+          ✅ Si approuvé, <strong>le planning sera mis à jour automatiquement</strong> pour les deux salariés.
+        </div>
+      </div>`;
+  } else {
+    document.getElementById('modal-conge-title').textContent = `🌴 Congé — ${c.employeNom||'Employé'}`;
+    document.getElementById('modal-conge-body').innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="background:var(--rh-ghost);border:1px solid var(--rh-border);border-radius:10px;padding:14px">
+          ${infoRow('Employé', c.employeNom||'—')}
+          ${infoRow('Type', c.typeConge||c.type||'Congés payés')}
+          ${infoRow('Du', c.dateDebut||'—')}
+          ${infoRow('Au', c.dateFin||'—')}
+          ${infoRow('Durée', (c.nbJours||'—')+' jour(s)')}
+          ${c.motif ? infoRow('Motif', c.motif) : ''}
+        </div>
+      </div>`;
+  }
   document.getElementById('modalConge').classList.add('show');
 };
 
@@ -1669,11 +1696,17 @@ function infoRow(label, val) {
   </div>`;
 }
 
+function dateToWeekKey(dateStr) {
+  const d = new Date(dateStr + 'T12:00:00');
+  const day = d.getDay(), diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0');
+}
+
 window.validateConge = async function(approve) {
   if (!_currentCongeId) return;
-  // Determine which statut convention the demande uses
   const demande = _congesEnAttente.find(c => c.id === _currentCongeId);
-  const isSwap = demande && (demande.type === 'shift_swap' || demande.statut === 'en_attente');
+  const isSwap = demande && demande.type === 'shift_swap';
   const newStatut = approve 
     ? (isSwap ? 'approuve' : 'approved') 
     : (isSwap ? 'refuse' : 'refused');
@@ -1681,8 +1714,40 @@ window.validateConge = async function(approve) {
   try {
     try { await window._updateDoc(window._doc(window._db, 'rh_conges', window._uid, 'demandes', _currentCongeId), update); } catch(e) {}
     try { await window._updateDoc(window._doc(window._db, 'rh_conges_public', window._uid, 'demandes', _currentCongeId), update); } catch(e) {}
+
+    if (approve && isSwap && demande.swapDate && demande.empId && demande.targetEmpId) {
+      try {
+        const ds = demande.swapDate;
+        const wk = dateToWeekKey(ds);
+        const colKey = 'plan_' + wk;
+        const docA = ds + '_' + demande.empId;
+        const docB = ds + '_' + demande.targetEmpId;
+
+        let dataA = null, dataB = null;
+        try { const s = await window._getDoc(window._doc(window._db, 'rh', window._uid, colKey, docA)); if (s.exists()) dataA = s.data(); } catch(e) {}
+        try { const s = await window._getDoc(window._doc(window._db, 'rh', window._uid, colKey, docB)); if (s.exists()) dataB = s.data(); } catch(e) {}
+
+        const newA = { items: dataB ? dataB.items : (demande.targetShiftItems || []), updatedAt: Date.now(), swappedWith: demande.targetEmpId };
+        const newB = { items: dataA ? dataA.items : (demande.myShiftItems || []), updatedAt: Date.now(), swappedWith: demande.empId };
+
+        await window._setDoc(window._doc(window._db, 'rh', window._uid, colKey, docA), newA);
+        await window._setDoc(window._doc(window._db, 'rh', window._uid, colKey, docB), newB);
+        try {
+          await window._setDoc(window._doc(window._db, 'rh_planning_public', window._uid, colKey, docA), newA);
+          await window._setDoc(window._doc(window._db, 'rh_planning_public', window._uid, colKey, docB), newB);
+        } catch(e) {}
+
+        console.log('[Swap] Planning mis à jour:', docA, '↔', docB);
+        showToast('✅ Échange approuvé — Planning mis à jour', 'success');
+      } catch(e) {
+        console.error('[Swap] Erreur planning:', e);
+        showToast('✅ Échange approuvé — ⚠️ Planning à vérifier', 'success');
+      }
+    } else {
+      showToast(approve ? '✅ Congé approuvé' : '✕ Congé refusé', approve ? 'success' : 'err');
+    }
+
     closeModal('modalConge');
-    showToast(approve ? '✅ Congé approuvé' : '✕ Congé refusé', approve ? 'success' : 'err');
     await loadConges();
     renderKpis();
   } catch(e) {
