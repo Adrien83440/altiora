@@ -4,6 +4,44 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
 <title>Ma Carte Fidélité</title>
+<meta name="theme-color" content="#0f1f5c"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Ma Carte"/>
+<link rel="apple-touch-icon" href="/icons/pwa-salarie-192.png"/>
+<script>
+// Dynamic manifest: bake ?client= into start_url for PWA
+(function(){
+  var cid = new URLSearchParams(window.location.search).get('client');
+  if (!cid && location.hash.includes('client=')) {
+    var m = location.hash.match(/client=([^&]+)/);
+    if (m) cid = m[1];
+  }
+  if (cid) {
+    try { localStorage.setItem('alteore-fidelite-id', cid); } catch(e){}
+    var manifest = {
+      name: "Ma Carte Fidélité",
+      short_name: "Ma Carte",
+      description: "Carte fidélité, points et récompenses",
+      start_url: "/client-fidelite.html?client=" + cid,
+      scope: "/",
+      display: "standalone",
+      orientation: "portrait",
+      background_color: "#0f1f5c",
+      theme_color: "#0f1f5c",
+      icons: [
+        { src: "/icons/pwa-fidelite-192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
+        { src: "/icons/pwa-fidelite-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" }
+      ]
+    };
+    var blob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+    var link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = URL.createObjectURL(blob);
+    document.head.appendChild(link);
+  }
+})();
+</script>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"/>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -517,15 +555,23 @@ function getClientId(){
     const afterHash = location.hash.includes('?') ? location.hash.split('?')[1] : location.hash.slice(1);
     id = new URLSearchParams(afterHash).get('client');
     if(id) return id;
-    // Format #client=ID directement
     const m = location.hash.match(/client=([^&]+)/);
     if(m) return m[1];
   }
+  // PWA fallback: localStorage
+  try { 
+    const saved = localStorage.getItem('alteore-fidelite-id');
+    if(saved) {
+      history.replaceState(null, '', location.pathname + '?client=' + saved);
+      return saved;
+    }
+  } catch(e){}
   return null;
 }
 
 const clientId = getClientId();
 console.log('clientId extrait:', clientId, '| URL:', location.href);
+if(clientId){ try { localStorage.setItem('alteore-fidelite-id', clientId); } catch(e){} }
 
 if(!clientId){
   showError('Aucun identifiant client dans le lien.<br/>Demandez un nouveau lien à votre commerçant.', 'URL: '+location.href);
@@ -1288,6 +1334,58 @@ function showToast(msg, isErr) {
   setTimeout(function(){ t.classList.remove('show'); }, 3000);
 }
 
+</script>
+<!-- PWA Install Banner -->
+<div id="pwa-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;padding:14px 16px;background:linear-gradient(135deg,#0f1f5c,#1a3dce);box-shadow:0 -4px 24px rgba(15,31,92,.4);font-family:'Plus Jakarta Sans',sans-serif;animation:pwaSlide .4s ease">
+  <div style="display:flex;align-items:center;gap:12px;max-width:500px;margin:0 auto">
+    <div style="width:44px;height:44px;background:rgba(255,255,255,.15);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;border:1.5px solid rgba(255,255,255,.2)">🎁</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-size:13px;font-weight:700;color:white">Ajouter Ma Carte</div>
+      <div style="font-size:11px;color:rgba(255,255,255,.6)">Accédez à votre carte fidélité en un tap</div>
+    </div>
+    <button id="pwa-install" style="background:white;color:#0f1f5c;border:none;border-radius:10px;padding:10px 16px;font-family:inherit;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;flex-shrink:0">Installer</button>
+    <button id="pwa-close" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:18px;cursor:pointer;padding:4px;flex-shrink:0">✕</button>
+  </div>
+</div>
+<style>@keyframes pwaSlide{from{transform:translateY(100%)}to{transform:translateY(0)}}</style>
+<script>
+// SW registration
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw-salarie.js').then(function(r){console.log('[PWA] SW ok');}).catch(function(e){});
+}
+// Android install prompt
+var _deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', function(e) {
+  e.preventDefault(); _deferredPrompt = e;
+  if (!localStorage.getItem('pwa-fid-dismissed')) document.getElementById('pwa-banner').style.display = 'block';
+});
+document.getElementById('pwa-install').addEventListener('click', function() {
+  if (_deferredPrompt) {
+    _deferredPrompt.prompt();
+    _deferredPrompt.userChoice.then(function(r) { _deferredPrompt = null; document.getElementById('pwa-banner').style.display = 'none'; });
+  }
+});
+document.getElementById('pwa-close').addEventListener('click', function() {
+  document.getElementById('pwa-banner').style.display = 'none';
+  localStorage.setItem('pwa-fid-dismissed', '1');
+});
+// iOS instructions
+(function() {
+  var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  var isStandalone = window.navigator.standalone === true;
+  if (isIOS && !isStandalone && !localStorage.getItem('pwa-fid-dismissed')) {
+    setTimeout(function() {
+      var b = document.getElementById('pwa-banner');
+      if (!b) return;
+      b.style.display = 'block';
+      var btn = document.getElementById('pwa-install');
+      btn.textContent = 'Comment ?';
+      btn.addEventListener('click', function() {
+        b.querySelector('div > div:nth-child(2)').innerHTML = '<div style="font-size:12px;font-weight:700;color:white">Sur Safari :</div><div style="font-size:11px;color:rgba(255,255,255,.7);line-height:1.6">1. Tapez <strong style="color:white">⬆️ Partager</strong> (en bas)<br>2. <strong style="color:white">Sur l\'écran d\'accueil</strong><br>3. <strong style="color:white">Ajouter</strong></div>';
+      }, {once: true});
+    }, 3000);
+  }
+})();
 </script>
 </body>
 </html>
