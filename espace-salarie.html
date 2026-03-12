@@ -5,12 +5,38 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
   <title>Mon espace — ALTEORE</title>
-  <link rel="manifest" href="/manifest-salarie.json"/>
   <meta name="theme-color" content="#0f1f5c"/>
   <meta name="apple-mobile-web-app-capable" content="yes"/>
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
   <meta name="apple-mobile-web-app-title" content="Mon Espace"/>
   <link rel="apple-touch-icon" href="/icons/pwa-salarie-192.png"/>
+  <script>
+  // Dynamic manifest: bake the ?id= into start_url so PWA opens with the right employee
+  (function(){
+    var id = new URLSearchParams(window.location.search).get('id');
+    if (!id) return;
+    var manifest = {
+      name: "ALTEORE — Mon Espace",
+      short_name: "Mon Espace",
+      description: "Planning, congés, pointage",
+      start_url: "/espace-salarie.html?id=" + id,
+      scope: "/",
+      display: "standalone",
+      orientation: "portrait",
+      background_color: "#0f1f5c",
+      theme_color: "#0f1f5c",
+      icons: [
+        { src: "/icons/pwa-salarie-192.png", sizes: "192x192", type: "image/png", purpose: "any maskable" },
+        { src: "/icons/pwa-salarie-512.png", sizes: "512x512", type: "image/png", purpose: "any maskable" }
+      ]
+    };
+    var blob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+    var link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = URL.createObjectURL(blob);
+    document.head.appendChild(link);
+  })();
+  </script>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet"/>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -676,31 +702,20 @@
   window._queryWhere = (colPath, field, val) =>
     getDocs(query(collection(db, ...colPath), where(field, '==', val)));
   window._dbReady = true;
-  // PWA: save/restore employee ID via localStorage
-  function tryStart() {
-    if(typeof window.startApp === 'function') {
-      var origStart = window.startApp;
-      window.startApp = function() {
-        var p = new URLSearchParams(window.location.search);
-        var pid = p.get('id') || '';
-        if (pid) {
-          // Save for PWA home screen
-          try { localStorage.setItem('alteore-salarie-id', pid); } catch(e) {}
-        } else {
-          // No ID in URL — try localStorage (PWA standalone launch)
-          try {
-            var saved = localStorage.getItem('alteore-salarie-id');
-            if (saved) {
-              // Inject ID into URL without reloading
-              var newUrl = window.location.pathname + '?id=' + saved + window.location.hash;
-              window.history.replaceState(null, '', newUrl);
-            }
-          } catch(e) {}
-        }
-        origStart();
-      };
-      window.startApp();
+  // PWA fallback: if no ?id in URL, try localStorage
+  (function(){
+    var p = new URLSearchParams(window.location.search);
+    var id = p.get('id');
+    if (id) { try { localStorage.setItem('alteore-salarie-id', id); } catch(e){} }
+    else {
+      try {
+        var saved = localStorage.getItem('alteore-salarie-id');
+        if (saved) { window.history.replaceState(null, '', window.location.pathname + '?id=' + saved); }
+      } catch(e){}
     }
+  })();
+  function tryStart() {
+    if(typeof window.startApp === 'function') { window.startApp(); }
     else { setTimeout(tryStart, 30); }
   }
   tryStart();
