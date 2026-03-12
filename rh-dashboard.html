@@ -527,9 +527,24 @@ window.initRHDashboard = async function() {
     loadPaie(),
     loadTemps(),
     loadRecompenses(),
-    loadSmsCredits()
+    loadSmsCredits(),
+    loadPlanningForAlerts()
   ]);
 };
+
+async function loadPlanningForAlerts() {
+  _planningData = {};
+  try {
+    // Load current week's planning
+    const now = new Date(); now.setHours(12,0,0,0);
+    const day = now.getDay(), diff = day === 0 ? -6 : 1 - day;
+    const mon = new Date(now); mon.setDate(mon.getDate() + diff);
+    const wk = mon.getFullYear() + String(mon.getMonth()+1).padStart(2,'0') + String(mon.getDate()).padStart(2,'0');
+    const snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'plan_' + wk));
+    snap.forEach(d => { _planningData[d.id] = d.data(); });
+    console.log('[Planning] Chargé semaine', wk, ':', snap.size, 'docs');
+  } catch(e) { console.warn('[Planning]', e.message||e); }
+}
 
 async function loadSmsCredits() {
   try {
@@ -652,6 +667,8 @@ async function loadPaie() {
 
 // ── TEMPS DE TRAVAIL ──
 let _tempsData = [];
+let _allPointages = {}; // {dateStr: [events]} — raw pointages for alerts
+let _planningData = {}; // {dateStr_empId: {items:[...]}} — planning for alerts
 async function loadTemps() {
   _tempsData = [];
   // 1. Saisie manuelle (module temps de travail)
@@ -684,6 +701,7 @@ async function loadTemps() {
     } catch(e) { console.warn('[Temps] pointages publics:', e.message||e); }
 
     console.log('[Temps] Jours chargés:', Object.keys(allDayEvents).length, Object.keys(allDayEvents));
+    _allPointages = allDayEvents; // Store globally for alerts
 
     // Filter current month only and deduplicate
     const moisPrefix = y + '-' + String(m+1).padStart(2,'0');
@@ -1197,18 +1215,75 @@ function buildAlertes() {
     }
   });
 
-  // 4. Salariés sans pointage hier (jour ouvré)
+  // 4. Salariés sans pointage hier (jour ouvré) — amélioré avec planning
+  const _toMin = t => { if(!t) return 0; const p=(t||'0:0').split(':').map(Number); return p[0]*60+(p[1]||0); };
   const hier = new Date(); hier.setDate(hier.getDate() - 1);
   if (hier.getDay() > 0 && hier.getDay() < 6) {
     const hierStr = hier.toISOString().slice(0,10);
-    const hierEvts = _tempsData.filter(t => t.id && t.id.startsWith(hierStr));
-    const empIdsHier = new Set(hierEvts.map(t => t.employeId));
+    const hierEvts = _allPointages[hierStr] || [];
     _employes.filter(e => e.statut !== 'inactif').forEach(e => {
-      if (!empIdsHier.has(e.id) && hierEvts.length > 0) { // Only alert if SOME people pointed
-        alertes.push({ type:'info', text:`${e.prenom||''} ${e.nom||''} non pointé hier`, sub:`${hier.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'short'})}` });
+      const empEvts = hierEvts.filter(ev => ev.empId === e.id);
+      const planKey = `${hierStr}_${e.id}`;
+      const plan = _planningData[planKey];
+      const wasPlanned = plan && plan.items && plan.items.some(it => it.type==='travail'||it.type==='partiel'||it.type==='formation');
+      const hasPointed = empEvts.some(ev => ev.type === 'arrivee');
+      if (wasPlanned && !hasPointed) {
+        alertes.push({ type:'danger', text:`${e.prenom||''} ${e.nom||''} absent hier (était planifié)`, sub:`${hier.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'short'})}` });
       }
     });
   }
+
+  // 5. Retards aujourd'hui (arrivée > 15min après début planifié)
+  const todayEvts = _allPointages[todayStr] || [];
+  _employes.filter(e => e.statut !== 'inactif').forEach(e => {
+    const empEvts = todayEvts.filter(ev => ev.empId === e.id);
+    const planKey = `${todayStr}_${e.id}`;
+    const plan = _planningData[planKey];
+    if (!plan || !plan.items) return;
+
+    // Find planned start & end
+    let planStartMin = 9999, planEndMin = 0;
+    plan.items.filter(it => it.type==='travail'||it.type==='partiel'||it.type==='formation').forEach(it => {
+      const plages = it.plages && it.plages.length ? it.plages : (it.deb && it.fin ? [{deb:it.deb,fin:it.fin}] : []);
+      plages.forEach(p => {
+        const s = _toMin(p.deb), f = _toMin(p.fin);
+        if (s < planStartMin) planStartMin = s;
+        if (f > planEndMin) planEndMin = f;
+      });
+    });
+    if (planStartMin >= 9999) return;
+    const planStartStr = Math.floor(planStartMin/60)+':'+String(planStartMin%60).padStart(2,'0');
+    const planEndStr = Math.floor(planEndMin/60)+':'+String(planEndMin%60).padStart(2,'0');
+
+    const arrives = empEvts.filter(ev => ev.type === 'arrivee').sort((a,b) => (a.timestamp||0)-(b.timestamp||0));
+    const departs = empEvts.filter(ev => ev.type === 'depart').sort((a,b) => (a.timestamp||0)-(b.timestamp||0));
+    const arrive = arrives[arrives.length-1];
+    const depart = departs[departs.length-1];
+
+    // 5a. Retard
+    if (arrive) {
+      const arriveMin = _toMin(arrive.heure);
+      const retard = arriveMin - planStartMin;
+      if (retard > 15) {
+        alertes.push({ type:'warn', text:`🕐 ${e.prenom||''} ${e.nom||''} en retard de ${retard} min`, sub:`Aujourd'hui — Prévu ${planStartStr}, arrivé ${arrive.heure}` });
+      }
+    }
+
+    // 5b. Départ anticipé
+    if (depart && arrive && depart.timestamp > arrive.timestamp) {
+      const departMin = _toMin(depart.heure);
+      const earlyMin = planEndMin - departMin;
+      if (earlyMin > 15) {
+        alertes.push({ type:'warn', text:`🚪 ${e.prenom||''} ${e.nom||''} parti ${earlyMin} min en avance`, sub:`Aujourd'hui — Fin prévue ${planEndStr}, départ ${depart.heure}` });
+      }
+    }
+
+    // 5c. Planifié mais pas encore pointé (si heure de début dépassée)
+    const nowMin = _toMin(new Date().getHours()+':'+String(new Date().getMinutes()).padStart(2,'0'));
+    if (!arrive && nowMin > planStartMin + 30) {
+      alertes.push({ type:'danger', text:`❌ ${e.prenom||''} ${e.nom||''} non pointé (prévu à ${planStartStr})`, sub:`Aujourd'hui — ${nowMin - planStartMin} min de retard` });
+    }
+  });
 
   // 5. Anniversaires à venir (7 jours)
   _employes.forEach(e => {
@@ -1228,6 +1303,10 @@ function buildAlertes() {
     alertes.push({ type:'success', text:'Aucune alerte RH active', sub:'Tout est en ordre 🎉' });
   }
 
+  // Sort: danger first, then warn, then info
+  const priority = {danger:0, warn:1, info:2, success:3};
+  alertes.sort((a,b) => (priority[a.type]||9) - (priority[b.type]||9));
+
   // Badge
   const nb = alertes.filter(a => a.type !== 'success' && a.type !== 'info').length;
   const badge = document.getElementById('alert-badge');
@@ -1235,9 +1314,9 @@ function buildAlertes() {
   badge.style.background = nb > 0 ? '#fee2e2' : '#d1fae5';
   badge.style.color = nb > 0 ? '#991b1b' : '#065f46';
 
-  // Render (max 5 dans le dashboard)
+  // Render (max 8 dans le dashboard)
   const body = document.getElementById('alertes-body');
-  body.innerHTML = alertes.slice(0, 5).map(a => `
+  body.innerHTML = alertes.slice(0, 8).map(a => `
     <div class="alert-item ${a.type}">
       <div class="alert-dot ${a.type}"></div>
       <div>
