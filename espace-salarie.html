@@ -1832,18 +1832,32 @@ window.confirmDailyEmarg=async function(){
     };
 
     // Save daily émargement
-    await window._setDocPath(['rh_emargements',_uid,'daily',dailyId],dailyData);
+    try{
+      console.log('[EMARG] Writing daily →','rh_emargements/'+_uid+'/daily/'+dailyId);
+      await window._setDocPath(['rh_emargements',_uid,'daily',dailyId],dailyData);
+      console.log('[EMARG] ✅ daily OK');
+    }catch(e1){
+      console.error('[EMARG] ❌ daily FAILED',e1.code,e1.message);
+      throw e1;
+    }
 
-    // Save signature in public collection (immutable)
+    // Save signature in public collection (immutable bonus — daily/ is the primary proof)
     var sigId='sig_daily_'+dailyId+'_'+serverData.timestamp;
-    await window._setDocPath(['rh_emargements_public',_uid,'signatures',sigId],{
-      ficheId:dailyId,type:'daily',publicId:pid,
-      employeNom:dailyData.employeNom,
-      signedAt:serverData.iso,ip:serverData.ip,
-      userAgent:navigator.userAgent||'\u2014',
-      proofHash:proofHash,status:'signed',
-      motifContestation:null,timestampSource:'server'
-    });
+    try{
+      console.log('[EMARG] Writing signature →','rh_emargements_public/'+_uid+'/signatures/'+sigId);
+      await window._setDocPath(['rh_emargements_public',_uid,'signatures',sigId],{
+        ficheId:dailyId,type:'daily',publicId:pid,
+        employeNom:dailyData.employeNom,
+        signedAt:serverData.iso,ip:serverData.ip,
+        userAgent:navigator.userAgent||'\u2014',
+        proofHash:proofHash,status:'signed',
+        motifContestation:null,timestampSource:'server'
+      });
+      console.log('[EMARG] ✅ signature OK');
+    }catch(e2){
+      console.warn('[EMARG] ⚠️ signature non enregistrée (non bloquant)',e2.code||e2.message);
+      // Non bloquant : le daily/ signé est la preuve principale
+    }
 
     window.showToast('\u2705 Heures valid\u00e9es !','ok');
   }catch(e){
@@ -2144,6 +2158,7 @@ var _swapTimer=setInterval(function(){
   var _emargFiches=[];
   var _emargAcks=[];
   var _emargSigs=[];
+  var _emargDaily=[];
 
   async function sha256(str){
     var buf=new TextEncoder().encode(str);
@@ -2160,7 +2175,7 @@ var _swapTimer=setInterval(function(){
 
   async function loadEmargData(){
     if(!_uid) return;
-    _emargFiches=[];_emargAcks=[];_emargSigs=[];
+    _emargFiches=[];_emargAcks=[];_emargSigs=[];_emargDaily=[];
 
     // Load fiches for this employee
     try{
@@ -2170,6 +2185,15 @@ var _swapTimer=setInterval(function(){
         if(f.employeId===_empId) _emargFiches.push(f);
       });
     }catch(e){console.warn('emarg fiches',e);}
+
+    // Load daily émargements for this employee
+    try{
+      var snapD=await window._getDocs('rh_emargements',_uid,'daily');
+      snapD.forEach(function(d){
+        var dd=d.data();dd._id=d.id;
+        if(dd.employeId===_empId) _emargDaily.push(dd);
+      });
+    }catch(e){console.warn('emarg daily',e);}
 
     // Load planning acks
     try{
@@ -2249,7 +2273,11 @@ var _swapTimer=setInterval(function(){
     var signed=_emargFiches.filter(function(f){return f.status!=='pending';});
     var ackedList=_emargAcks.filter(function(a){return a.status!=='pending';});
     var all=[];
+    // Daily émargements (jour par jour)
+    _emargDaily.forEach(function(d){all.push({type:'daily',data:d,ts:d.createdAt||0});});
+    // Fiches mensuelles
     signed.forEach(function(f){all.push({type:'fiche',data:f,ts:f.updatedAt||f.createdAt||0});});
+    // Accusés planning
     ackedList.forEach(function(a){all.push({type:'ack',data:a,ts:a.updatedAt||a.createdAt||0});});
     all.sort(function(a,b){return (b.ts||0)-(a.ts||0);});
 
@@ -2262,10 +2290,13 @@ var _swapTimer=setInterval(function(){
         var statusBg={signed:'#dcfce7',validated:'#d1fae5',contested:'#fee2e2',acknowledged:'#dbeafe',expired:'#f3f4f6'};
         var statusColor={signed:'#166534',validated:'#065f46',contested:'#991b1b',acknowledged:'#1e40af',expired:'#6b7280'};
         var st=item.data.status||'signed';
+        var icon=item.type==='daily'?'\u270d\ufe0f':(item.type==='fiche'?'\ud83d\udccb':'\ud83d\udcc5');
+        var label=item.type==='daily'?'\u00c9margement du '+(item.data.date||''):(item.type==='fiche'?'Fiche d\'heures':'Accus\u00e9 planning');
+        var sub=item.type==='daily'?((item.data.arrivee||'')+' \u2192 '+(item.data.depart||'')+' \u00b7 '+(item.data.totalHeures||0).toFixed(1)+'h'+(item.data.source==='tablette'?' \ud83d\udda5':'')):(item.data.periodeLabel||item.data.periode||item.data.planningDebut||'');
         hh+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f3f4f6">';
-        hh+='<div style="font-size:18px">'+(item.type==='fiche'?'\ud83d\udccb':'\ud83d\udcc5')+'</div>';
-        hh+='<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700">'+(item.type==='fiche'?'Fiche d\'heures':'Accus\u00e9 planning')+'</div>';
-        hh+='<div style="font-size:10px;color:var(--muted)">'+(item.data.periodeLabel||item.data.periode||item.data.planningDebut||'')+'</div></div>';
+        hh+='<div style="font-size:18px">'+icon+'</div>';
+        hh+='<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700">'+label+'</div>';
+        hh+='<div style="font-size:10px;color:var(--muted)">'+sub+'</div></div>';
         hh+='<span style="background:'+(statusBg[st]||'#f3f4f6')+';color:'+(statusColor[st]||'#6b7280')+';padding:3px 8px;border-radius:8px;font-size:10px;font-weight:700">'+(statusLabel[st]||st)+'</span>';
         hh+='</div>';
       });
@@ -2319,15 +2350,18 @@ var _swapTimer=setInterval(function(){
 
     try{
       var sigId='sig_'+ficheId+'_'+serverData.timestamp;
-      await window._setDocPublic('rh_emargements_public',_uid,'signatures',sigId,sigData);
 
-      // Update fiche status — only allowed fields (Firestore rules restrict public updates)
+      // Update fiche status FIRST (critical write)
       await window._setDocPath(['rh_emargements',_uid,'fiches',ficheId],{
         status:'signed',
         signatureEmploye:{signedAt:serverData.iso,ip:serverData.ip,hash:proofHash,status:'signed'},
         locked:true,
         updatedAt:serverData.timestamp
       },{merge:true});
+
+      // Signature in public collection (non-blocking bonus)
+      try{await window._setDocPublic('rh_emargements_public',_uid,'signatures',sigId,sigData);}
+      catch(e2){console.warn('[EMARG] signature non enregistrée (non bloquant)',e2.code);}
 
       window.showToast('\u2705 Fiche sign\u00e9e avec succ\u00e8s !','ok');
       loadEmargData();
@@ -2361,12 +2395,14 @@ var _swapTimer=setInterval(function(){
 
     try{
       var sigId='sig_'+ficheId+'_'+serverData.timestamp;
-      await window._setDocPublic('rh_emargements_public',_uid,'signatures',sigId,sigData);
-      // Only allowed fields
+      // Fiche status FIRST (critical)
       await window._setDocPath(['rh_emargements',_uid,'fiches',ficheId],{
         status:'contested',
         updatedAt:serverData.timestamp
       },{merge:true});
+      // Signature (non-blocking)
+      try{await window._setDocPublic('rh_emargements_public',_uid,'signatures',sigId,sigData);}
+      catch(e2){console.warn('[EMARG] sig non enregistrée',e2.code);}
       window.showToast('\u26a0\ufe0f Fiche contest\u00e9e — Votre employeur sera notifi\u00e9','ok');
       loadEmargData();
     }catch(e){console.error(e);window.showToast('Erreur : '+e.message,'err');}
@@ -2395,13 +2431,15 @@ var _swapTimer=setInterval(function(){
 
     try{
       var sigId='sig_'+ackId+'_'+serverData.timestamp;
-      await window._setDocPublic('rh_emargements_public',_uid,'signatures',sigId,sigData);
-      // Only allowed fields
+      // Planning ack FIRST (critical)
       await window._setDocPath(['rh_emargements',_uid,'planning_acks',ackId],{
         status:'acknowledged',
         signatureEmploye:{signedAt:serverData.iso,ip:serverData.ip,hash:proofHash},
         updatedAt:serverData.timestamp
       },{merge:true});
+      // Signature (non-blocking)
+      try{await window._setDocPublic('rh_emargements_public',_uid,'signatures',sigId,sigData);}
+      catch(e2){console.warn('[EMARG] sig non enregistrée',e2.code);}
       window.showToast('\u2705 Planning accus\u00e9 r\u00e9ception !','ok');
       loadEmargData();
     }catch(e){console.error(e);window.showToast('Erreur : '+e.message,'err');}
