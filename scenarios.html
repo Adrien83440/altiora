@@ -163,9 +163,43 @@ var _levers = {
 };
 
 // ── LOAD DATA ──
+/* ─── MASSE SALARIALE HELPER ─── */
+function _calcMS(d) {
+  var ms = d && d.masseSalariale;
+  if (!ms) return 0;
+  var total = 0;
+  if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
+    window._rhEmployes.forEach(function(e) {
+      var brut = parseFloat(e.salaireBrut) || 0;
+      var taux = (parseFloat(e.tauxCharges) || 42) / 100;
+      total += brut * (1 + taux);
+    });
+  } else {
+    (ms.lignes || []).forEach(function(l) {
+      var brut = parseFloat((l.brut || '').toString().replace(',', '.')) || 0;
+      var taux = (parseFloat(l.tauxCharges) || 42) / 100;
+      total += brut * (1 + taux);
+    });
+  }
+  var dir = ms.dirigeant || {};
+  var remDir = parseFloat((dir.remuneration || '').toString().replace(',', '.')) || 0;
+  total += remDir * (1 + (parseFloat(dir.tauxCharges) || 45) / 100);
+  var divid = parseFloat((dir.dividendes || '').toString().replace(',', '.')) || 0;
+  total += divid * (1 + (parseFloat(dir.tauxDividendes) || 30) / 100);
+  return total;
+}
+
 async function loadBaseData(){
   var now = new Date();
   var year = now.getFullYear();
+  // Load RH employees for masse salariale
+  if (!window._rhEmployes) {
+    window._rhEmployes = [];
+    try {
+      var empSnap = await window._getDocs(window._collection(window._db,'rh',window._uid,'employes'));
+      empSnap.forEach(function(d2){ var e=d2.data(); e.id=d2.id; if(e.statut!=='inactif') window._rhEmployes.push(e); });
+    } catch(e) {}
+  }
   var data = [];
   for(var m = 0; m < 12; m++){
     var key = year + '-' + String(m+1).padStart(2,'0');
@@ -186,12 +220,13 @@ async function loadBaseData(){
         var leasing=(d.leasing||[]).reduce(function(s,r){return s+pf(r.montantHT)},0);
         var credit=0;
         (d.credits||[]).forEach(function(r){credit+=pf(r.montant)});
-        data.push({month:m, key:key, caHT:caHT, fixe:fixe, variable:variable, leasing:leasing, credit:credit, charges:fixe+variable+leasing+credit, hasData:caHT>0||fixe>0});
+        var masseSal=_calcMS(d);
+        data.push({month:m, key:key, caHT:caHT, fixe:fixe, variable:variable, leasing:leasing, credit:credit, masseSal:masseSal, charges:fixe+variable+leasing+credit+masseSal, hasData:caHT>0||fixe>0});
       } else {
-        data.push({month:m, key:key, caHT:0, fixe:0, variable:0, leasing:0, credit:0, charges:0, hasData:false});
+        data.push({month:m, key:key, caHT:0, fixe:0, variable:0, leasing:0, credit:0, masseSal:0, charges:0, hasData:false});
       }
     }catch(e){
-      data.push({month:m, key:key, caHT:0, fixe:0, variable:0, leasing:0, credit:0, charges:0, hasData:false});
+      data.push({month:m, key:key, caHT:0, fixe:0, variable:0, leasing:0, credit:0, masseSal:0, charges:0, hasData:false});
     }
   }
   return data;
@@ -203,7 +238,7 @@ function simulate(){
     var ca = d.caHT * (1 + (_levers.prixVente + _levers.volume)/100) + _levers.nouveauCA;
     var fixe = d.fixe * (1 + _levers.chargesFixes/100) + _levers.embauche;
     var variable = d.variable * (1 + (_levers.chargesVar + _levers.perteFourn)/100);
-    var charges = fixe + variable + d.leasing + d.credit;
+    var charges = fixe + variable + d.leasing + d.credit + (d.masseSal||0);
     var resultat = ca - charges;
     return {month:d.month, caBase:d.caHT, caSim:ca, chargesBase:d.charges, chargesSim:charges, fixeSim:fixe, varSim:variable, resultatBase:d.caHT-d.charges, resultatSim:resultat, hasData:d.hasData};
   });

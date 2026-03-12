@@ -625,9 +625,35 @@ async function fetchNews(){
   }catch(e){return null;}
 }
 
+/* ─── MASSE SALARIALE HELPER ─── */
+function _calcMS(d) {
+  var ms = d && d.masseSalariale;
+  if (!ms) return 0;
+  var total = 0;
+  if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
+    window._rhEmployes.forEach(function(e) {
+      var brut = parseFloat(e.salaireBrut) || 0;
+      var taux = (parseFloat(e.tauxCharges) || 42) / 100;
+      total += brut * (1 + taux);
+    });
+  } else {
+    (ms.lignes || []).forEach(function(l) {
+      var brut = parseFloat((l.brut || '').toString().replace(',', '.')) || 0;
+      var taux = (parseFloat(l.tauxCharges) || 42) / 100;
+      total += brut * (1 + taux);
+    });
+  }
+  var dir = ms.dirigeant || {};
+  var remDir = parseFloat((dir.remuneration || '').toString().replace(',', '.')) || 0;
+  total += remDir * (1 + (parseFloat(dir.tauxCharges) || 45) / 100);
+  var divid = parseFloat((dir.dividendes || '').toString().replace(',', '.')) || 0;
+  total += divid * (1 + (parseFloat(dir.tauxDividendes) || 30) / 100);
+  return total;
+}
+
 /* ─── EXTRACTION DONNÉES MOIS ─── */
 function extractMonthData(d,isFuture){
-  if(!d)return{caHT:0,caTTC:0,tvaCollectee:0,rentrees:0,prevCA:0,fixesHT:0,varHT:0,creditsHT:0,leasingHT:0,chargesHT:0,resultat:0,cashflow:0,prevCharges:0,isFuture:false,caJournalier:[]};
+  if(!d)return{caHT:0,caTTC:0,tvaCollectee:0,rentrees:0,prevCA:0,fixesHT:0,varHT:0,creditsHT:0,leasingHT:0,masseSalHT:0,chargesHT:0,resultat:0,cashflow:0,prevCharges:0,isFuture:false,caJournalier:[]};
   const caHT_j=d.ca?d.ca.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;const multi=h055+h10+h20;return s+(multi>0?multi:(parseFloat(r.montantHT)||0));},0):0;
   const caTTC_j=d.ca?d.ca.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;const multi=h055*1.055+h10*1.10+h20*1.20;if(multi>0)return s+multi;const h=parseFloat(r.montantHT)||0;return s+h*(1+(r.tvaRate||0)/100);},0):0;
   const tva_j=d.ca?d.ca.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;const multi=h055*0.055+h10*0.10+h20*0.20;if(multi>0)return s+multi;const h=parseFloat(r.montantHT)||0;return s+h*(r.tvaRate||0)/100;},0):0;
@@ -648,7 +674,7 @@ function extractMonthData(d,isFuture){
     if(r.ligneType==='principal')creditsHT+=parseFloat(r.montant)||0;
     else{let mt=parseFloat(r.montant)||0;if(r.tvaAuto&&parseFloat(r.tauxInteret)>0){const p=d.credits.slice(0,i).reverse().find(c=>c.fournisseur===r.fournisseur&&c.ligneType==='principal');if(p)mt=(parseFloat(p.montant)||0)*parseFloat(r.tauxInteret)/100/12;}creditsHT+=mt;}
   });
-  const chargesHT=fixesHT+varHT+creditsHT+leasingHT;
+  const chargesHT=fixesHT+varHT+creditsHT+leasingHT+_calcMS(d);
   const prevCharges=isFuture?chargesHT:0;
   const prevCAFutur=isFuture?(caHT||0):0;
   const caHTReel=isFuture?0:caHT;
@@ -658,10 +684,11 @@ function extractMonthData(d,isFuture){
   const prevCAFinal=isFuture?(prevCA||prevCAFutur):prevCA;
   // Extraire les ventes journalières du mois
   const caJournalier=d.ca||[];
+  const masseSalHT=_calcMS(d);
   return{caHT:caHTReel,caTTC:isFuture?0:caTTC,tvaCollectee:isFuture?0:tvaCollectee,
     rentrees:isFuture?0:rentrees,prevCA:prevCAFinal,
     fixesHT:isFuture?0:fixesHT,varHT:isFuture?0:varHT,creditsHT:isFuture?0:creditsHT,
-    leasingHT:isFuture?0:leasingHT,chargesHT:chargesReel,resultat,cashflow,
+    leasingHT:isFuture?0:leasingHT,masseSalHT:isFuture?0:masseSalHT,chargesHT:chargesReel,resultat,cashflow,
     prevCharges,isFuture:!!isFuture,caJournalier};
 }
 
@@ -701,6 +728,14 @@ async function loadData(_tries){
   if(vFab) vFab.style.display=CAN_MAX.includes(plan)?'flex':'none';
   // Load stock data
   await loadStockData();
+  // Load RH employees for masse salariale
+  if (!window._rhEmployes) {
+    window._rhEmployes = [];
+    try {
+      var empSnap = await window._getDocs(window._collection(window._db,'rh',window._uid,'employes'));
+      empSnap.forEach(function(d2){ var e=d2.data(); e.id=d2.id; if(e.statut!=='inactif') window._rhEmployes.push(e); });
+    } catch(e) {}
+  }
 
   const now=new Date();
   const civilYear=now.getFullYear();
@@ -1067,7 +1102,7 @@ async function loadData(_tries){
         <div class="kpi-icon">📉</div>
         <div class="kpi-label">Charges annuelles HT</div>
         <div class="kpi-value ${!hasAnnualData?'empty':''}">${hasAnnualData?fmtE(annualCharges):'— €'}</div>
-        <div class="kpi-sub"><span class="neutral">Fixes + Var + Crédits + Leasing</span></div>
+        <div class="kpi-sub"><span class="neutral">Fixes + Var + Crédits + Leasing${T.masseSalHT>0?' + Masse sal.':''}</span></div>
       </div>
       <div class="kpi-card ${!hasAnnualData?'green':annualResultat>=0?'green':'red'}">
         <div class="kpi-icon">🎯</div>
@@ -1179,6 +1214,7 @@ async function loadData(_tries){
           <tr><td><b>CA HT</b></td><td class="${current.caHT>0?'':'td-muted'}">${current.caHT>0?fmtE(current.caHT):'—'}</td><td class="td-muted">TTC : ${fmtE(current.caTTC)}</td><td><span class="status-pill ${current.caHT>0?'sp-ok':'sp-empty'}">${current.caHT>0?'✓ Renseigné':'En attente'}</span></td></tr>
           <tr><td><b>Charges fixes</b></td><td class="${current.fixesHT>0?'':'td-muted'}">${current.fixesHT>0?fmtE(current.fixesHT):'—'}</td><td class="td-muted">Prévisionnel mensuel</td><td><span class="status-pill ${current.fixesHT>0?'sp-ok':'sp-empty'}">${current.fixesHT>0?'✓ Renseigné':'En attente'}</span></td></tr>
           <tr><td><b>Charges variables</b></td><td class="${current.varHT>0?'':'td-muted'}">${current.varHT>0?fmtE(current.varHT):'—'}</td><td class="td-muted">Au fil de l'eau</td><td><span class="status-pill ${current.varHT>0?'sp-ok':'sp-empty'}">${current.varHT>0?'✓ Renseigné':'En attente'}</span></td></tr>
+          ${current.masseSalHT>0?`<tr><td><b>👥 Masse salariale</b></td><td>${fmtE(current.masseSalHT)}</td><td class="td-muted">Salariés + Dirigeant (URSSAF)</td><td><span class="status-pill sp-ok">✓ Renseigné</span></td></tr>`:''}
           <tr><td><b>Emprunts / Crédits</b></td><td class="${current.creditsHT>0?'':'td-muted'}">${current.creditsHT>0?fmtE(current.creditsHT):'—'}</td><td class="td-muted">Principal + Intérêts</td><td><span class="status-pill ${current.creditsHT>0?'sp-ok':'sp-empty'}">${current.creditsHT>0?'✓ Renseigné':'En attente'}</span></td></tr>
           <tr><td><b>Résultat HT</b></td><td class="${current.caHT>0||current.chargesHT>0?(current.resultat>=0?'td-pos':'td-neg'):'td-muted'}">${current.caHT>0||current.chargesHT>0?fmtE(current.resultat):'—'}</td><td class="td-muted">CA − Total dépenses</td><td><span class="status-pill ${current.caHT>0||current.chargesHT>0?(current.resultat>=0?'sp-ok':'sp-bad'):'sp-empty'}">${current.caHT>0||current.chargesHT>0?(current.resultat>=0?'✓ Positif':'⚠ Négatif'):'En attente'}</span></td></tr>
           <tr><td><b>Taux de résultat</b></td><td class="${txMarge!==null?(txMarge>=0?'td-pos':'td-neg'):'td-muted'}">${txMarge!==null?txMarge.toFixed(1)+'%':'—'}</td><td class="td-muted">Résultat / CA HT</td><td><span class="status-pill ${txMarge===null?'sp-empty':txMarge>=20?'sp-ok':txMarge>=5?'sp-warn':'sp-bad'}">${txMarge===null?'En attente':txMarge>=20?'✓ Bon':txMarge>=5?'⚠ Moyen':'⚠ Faible'}</span></td></tr>
@@ -1240,10 +1276,10 @@ function buildCharts(monthsData,currentIdx,year,hasAnnualData,fiscalMonths){
   ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font,color:'#6b7280',padding:10,boxWidth:10}}},scales:baseScales}});
   _charts.push(c1);
 
-  const hasCharges=current.fixesHT>0||current.varHT>0||current.creditsHT>0||current.leasingHT>0;
+  const hasCharges=current.fixesHT>0||current.varHT>0||current.creditsHT>0||current.leasingHT>0||current.masseSalHT>0;
   const c2=new Chart(document.getElementById('coutChart'),{type:'doughnut',data:{
-    labels:['Charges fixes','Charges var.','Emprunts','Leasing'],
-    datasets:[{data:hasCharges?[current.fixesHT,current.varHT,current.creditsHT,current.leasingHT]:[1,1,1,1],backgroundColor:['#1a3dce','#4f7ef8','#f59e0b','#10b981'],borderWidth:0,hoverOffset:6}]
+    labels:['Charges fixes','Charges var.','Emprunts','Leasing','Masse sal.'],
+    datasets:[{data:hasCharges?[current.fixesHT,current.varHT,current.creditsHT,current.leasingHT,current.masseSalHT]:[1,1,1,1,1],backgroundColor:['#1a3dce','#4f7ef8','#f59e0b','#10b981','#f97316'],borderWidth:0,hoverOffset:6}]
   },options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{position:'bottom',labels:{font,color:'#6b7280',padding:10,boxWidth:10}}}}});
   _charts.push(c2);
 

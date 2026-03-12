@@ -443,11 +443,45 @@ async function loadYear(year) {
     return r;
   });
   await loadStockData();
+  // Load RH employees for masse salariale
+  if (!window._rhEmployes) {
+    window._rhEmployes = [];
+    try {
+      var empSnap2 = await window._getDocs(window._collection(window._db,'rh',uid,'employes'));
+      empSnap2.forEach(function(d2){ var e=d2.data(); e.id=d2.id; if(e.statut!=='inactif') window._rhEmployes.push(e); });
+    } catch(e) {}
+  }
   renderPage(computed, dettes, year, labels, labelPeriode, tresorerieConfig);
 }
 
+/* ─── MASSE SALARIALE HELPER ─── */
+function _calcMS(d) {
+  var ms = d && d.masseSalariale;
+  if (!ms) return 0;
+  var total = 0;
+  if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
+    window._rhEmployes.forEach(function(e) {
+      var brut = parseFloat(e.salaireBrut) || 0;
+      var taux = (parseFloat(e.tauxCharges) || 42) / 100;
+      total += brut * (1 + taux);
+    });
+  } else {
+    (ms.lignes || []).forEach(function(l) {
+      var brut = parseFloat((l.brut || '').toString().replace(',', '.')) || 0;
+      var taux = (parseFloat(l.tauxCharges) || 42) / 100;
+      total += brut * (1 + taux);
+    });
+  }
+  var dir = ms.dirigeant || {};
+  var remDir = parseFloat((dir.remuneration || '').toString().replace(',', '.')) || 0;
+  total += remDir * (1 + (parseFloat(dir.tauxCharges) || 45) / 100);
+  var divid = parseFloat((dir.dividendes || '').toString().replace(',', '.')) || 0;
+  total += divid * (1 + (parseFloat(dir.tauxDividendes) || 30) / 100);
+  return total;
+}
+
 function calcMonth(m, raw, isFuture) {
-  if (!raw) return { m, hasData:false, caHT:0, caTotal:0, rentreeSupp:0, prevCA:0, chargesHT:0, fixesHT:0, varHT:0, leasingHT:0, creditsPrincipal:0, creditsInteret:0, cashflow:0, tvaCollectee:0, tvaDed:0, tvaDue:0, prevCharges:0, isFuture:!!isFuture };
+  if (!raw) return { m, hasData:false, caHT:0, caTotal:0, rentreeSupp:0, prevCA:0, chargesHT:0, fixesHT:0, varHT:0, leasingHT:0, masseSalHT:0, creditsPrincipal:0, creditsInteret:0, cashflow:0, tvaCollectee:0, tvaDed:0, tvaDue:0, prevCharges:0, isFuture:!!isFuture };
 
   // CA journalier
   let caHT = 0, tvaC = 0;
@@ -507,7 +541,8 @@ function calcMonth(m, raw, isFuture) {
     }
   });
 
-  const chargesHT = fixesHT + varHT + leasingHT + creditsPrincipal + creditsInteret;
+  const masseSalHT = _calcMS(raw);
+  const chargesHT = fixesHT + varHT + leasingHT + creditsPrincipal + creditsInteret + masseSalHT;
   const tvaDed = tvaDedF + tvaDedV + tvaDedL;
   const tvaDue = tvaC - tvaDed;
 
@@ -524,7 +559,7 @@ function calcMonth(m, raw, isFuture) {
     prevCA: prevCAFinal, prevCharges, isFuture: !!isFuture,
     chargesHT: isFuture?0:chargesHT,
     fixesHT: isFuture?0:fixesHT, varHT: isFuture?0:varHT,
-    leasingHT: isFuture?0:leasingHT,
+    leasingHT: isFuture?0:leasingHT, masseSalHT: isFuture?0:masseSalHT,
     creditsPrincipal: isFuture?0:creditsPrincipal, creditsInteret: isFuture?0:creditsInteret,
     cashflow, tvaCollectee: isFuture?0:tvaC, tvaDed: isFuture?0:tvaDed, tvaDue: isFuture?0:tvaDue };
 }

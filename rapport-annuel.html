@@ -258,6 +258,32 @@ onAuthStateChanged(auth, async user => {
 var _stockData = {loaded:false, products:[], movements:[], value:0, variation:0, alerts:0, ruptures:0, refs:0, rotation:0, joursStock:0, snapshotPrev:null};
 var _rhEmployes = []; // for masse salariale section
 
+/* ─── MASSE SALARIALE HELPER ─── */
+function _calcMS(d) {
+  var ms = d && d.masseSalariale;
+  if (!ms) return 0;
+  var total = 0;
+  if (ms.mode === 'auto' && _rhEmployes && _rhEmployes.length > 0) {
+    _rhEmployes.forEach(function(e) {
+      var brut = parseFloat(e.salaireBrut) || 0;
+      var taux = (parseFloat(e.tauxCharges) || 42) / 100;
+      total += brut * (1 + taux);
+    });
+  } else {
+    (ms.lignes || []).forEach(function(l) {
+      var brut = parseFloat((l.brut || '').toString().replace(',', '.')) || 0;
+      var taux = (parseFloat(l.tauxCharges) || 42) / 100;
+      total += brut * (1 + taux);
+    });
+  }
+  var dir = ms.dirigeant || {};
+  var remDir = parseFloat((dir.remuneration || '').toString().replace(',', '.')) || 0;
+  total += remDir * (1 + (parseFloat(dir.tauxCharges) || 45) / 100);
+  var divid = parseFloat((dir.dividendes || '').toString().replace(',', '.')) || 0;
+  total += divid * (1 + (parseFloat(dir.tauxDividendes) || 30) / 100);
+  return total;
+}
+
 async function loadStockData(){
   if(!window._uid||!window._getDocs||!window._db||_stockData.loaded) return _stockData;
   try{
@@ -639,7 +665,7 @@ function computeMonth(d,key,isFuture){
   });
   var tvaDed=tvaDedFix+tvaDedVar+tvaDedLeas;
   var tvaDue=tvaCollectee-tvaDed;
-  var charges=fixe+variable+credit+leasing;
+  var charges=fixe+variable+credit+leasing+_calcMS(d);
   // Mois futur : charges et CA passent en prévisionnel, résultat réel = 0
   var prevCharges = isFuture ? charges : 0;
   var prevCA      = isFuture ? caHT    : 0;
