@@ -574,6 +574,16 @@
       <div class="card-head"><div class="card-title">⏰ Mes horaires habituels</div></div>
       <div class="card-body" id="horaires-body"></div>
     </div>
+    <!-- Échange de shifts -->
+    <div class="card" id="swap-card">
+      <div class="card-head">
+        <div class="card-title">🔄 Échange de shifts</div>
+        <button class="btn btn-ghost" style="font-size:11px" onclick="refreshSwaps()">↻ Actualiser</button>
+      </div>
+      <div class="card-body" id="swap-body" style="padding:14px">
+        <div style="font-size:12px;color:var(--muted);text-align:center;padding:12px">Chargement…</div>
+      </div>
+    </div>
   </div>
 
   <!-- ══ ONGLET POINTAGE ══ -->
@@ -1594,6 +1604,263 @@ window.showTab=function(id,btn){
 
 // Also try loading at page load after a delay
 setTimeout(function(){if(_uid&&window._dbReady)loadPtEvents();},3000);
+})();
+</script>
+
+<!-- ══ SWAP MODAL ══ -->
+<div id="swapOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:500;align-items:flex-end;justify-content:center">
+  <div style="background:white;border-radius:18px 18px 0 0;width:100%;max-width:500px;max-height:85vh;overflow:hidden;display:flex;flex-direction:column">
+    <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:linear-gradient(135deg,#059669,#10b981)">
+      <div style="color:white;font-size:14px;font-weight:700">🔄 Proposer un échange</div>
+      <button onclick="closeSwapModal()" style="background:rgba(255,255,255,.2);border:none;border-radius:8px;width:30px;height:30px;font-size:15px;cursor:pointer;color:white;display:flex;align-items:center;justify-content:center">✕</button>
+    </div>
+    <div id="swapModalBody" style="padding:16px 20px;overflow-y:auto;flex:1"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+var _swapAll={};  // {dateStr: [{empId, items}]}
+var _colleagues={}; // {empId: {prenom, nom}}
+var _swapRequests=[]; // pending swap requests
+
+// ── INTERCEPT TAB SWITCH ──
+var _origShowTab=window.showTab;
+window.showTab=function(tab,el){
+  if(_origShowTab) _origShowTab(tab,el);
+  if(tab==='planning') setTimeout(loadSwapData,500);
+};
+
+async function loadSwapData(){
+  if(!window._dbReady||!_uid||!_empId) return;
+  _swapAll={};
+  _colleagues={};
+
+  // 1. Load planning for next 2 weeks (ALL employees)
+  var now=new Date();
+  var weeks={};
+  for(var d=0;d<14;d++){
+    var dt=new Date(now);dt.setDate(dt.getDate()+d);
+    var mon=new Date(dt);var dow=mon.getDay();
+    mon.setDate(mon.getDate()-(dow===0?6:dow-1));
+    mon.setHours(12,0,0,0);
+    var wk=mon.getFullYear()+String(mon.getMonth()+1).padStart(2,'0')+String(mon.getDate()).padStart(2,'0');
+    weeks[wk]=true;
+  }
+
+  for(var wk in weeks){
+    try{
+      var snap=await window._getDocs('rh_planning_public',_uid,'plan_'+wk);
+      snap.forEach(function(docSnap){
+        var id=docSnap.id;
+        var parts=id.split('_');
+        if(parts.length<2) return;
+        var empId=parts[parts.length-1];
+        var dateStr=parts.slice(0,parts.length-1).join('_');
+        if(!_swapAll[dateStr]) _swapAll[dateStr]=[];
+        _swapAll[dateStr].push({empId:empId,items:docSnap.data().items||[]});
+      });
+    }catch(e){}
+  }
+
+  // 2. Try to load colleague names from rh_employes_public_profil
+  try{
+    var profSnap=await window._getDocs('rh_employes_public_profil');
+    profSnap.forEach(function(doc){
+      var d=doc.data();
+      if(d.empId) _colleagues[d.empId]={prenom:d.prenom||'',nom:d.nom||''};
+    });
+  }catch(e){}
+
+  // 3. Load swap requests
+  await loadSwapRequests();
+
+  // 4. Render
+  renderSwapSection();
+}
+
+async function loadSwapRequests(){
+  _swapRequests=[];
+  try{
+    var snap=await window._queryWhere(['rh_conges_public',_uid,'demandes'],'empId',_empId);
+    snap.forEach(function(doc){
+      var d=doc.data();d._id=doc.id;
+      if(d.type==='shift_swap') _swapRequests.push(d);
+    });
+  }catch(e){}
+}
+
+function colName(empId){
+  var c=_colleagues[empId];
+  if(c) return ((c.prenom||'')+' '+(c.nom||'')).trim()||empId.slice(0,8);
+  return empId.slice(0,8)+'…';
+}
+
+function shiftStr(items){
+  return items.filter(function(it){return it.type==='travail'||it.type==='partiel'||it.type==='formation';}).map(function(it){
+    var plages=it.plages&&it.plages.length?it.plages:(it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
+    return plages.map(function(p){return p.deb+'–'+p.fin;}).join(' | ');
+  }).join(' + ')||'—';
+}
+
+function fmtDateLabel(ds){
+  var p=ds.split('-');
+  var dt=new Date(+p[0],+p[1]-1,+p[2],12);
+  return dt.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+}
+
+function renderSwapSection(){
+  var el=document.getElementById('swap-body');
+  if(!el) return;
+
+  // My upcoming shifts
+  var today=new Date();today.setHours(0,0,0,0);
+  var myShifts=[];
+  for(var ds in _swapAll){
+    var p=ds.split('-');
+    var dt=new Date(+p[0],+p[1]-1,+p[2],12);
+    if(dt<today) continue;
+    _swapAll[ds].forEach(function(s){
+      if(s.empId===_empId&&s.items.length) myShifts.push({date:ds,items:s.items,dt:dt});
+    });
+  }
+  myShifts.sort(function(a,b){return a.dt-b.dt;});
+
+  var h='';
+
+  // Pending requests
+  var pending=_swapRequests.filter(function(r){return r.statut==='en_attente';});
+  if(pending.length){
+    h+='<div style="margin-bottom:14px">';
+    h+='<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px;text-transform:uppercase">Demandes en cours</div>';
+    pending.forEach(function(r){
+      var statusTag='<span style="background:#fef3c7;color:#92400e;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px">⏳ En attente</span>';
+      h+='<div style="padding:10px 12px;border:1.5px solid #fde68a;border-radius:10px;margin-bottom:6px;background:#fffbeb">';
+      h+='<div style="display:flex;align-items:center;justify-content:space-between">';
+      h+='<div><div style="font-size:12px;font-weight:700">'+fmtDateLabel(r.swapDate)+' : mon '+shiftStr(r.myShiftItems||[])+'</div>';
+      h+='<div style="font-size:11px;color:var(--muted)">↔ '+colName(r.targetEmpId)+' ('+shiftStr(r.targetShiftItems||[])+')</div></div>';
+      h+=statusTag;
+      h+='</div></div>';
+    });
+    h+='</div>';
+  }
+
+  // Approved/rejected
+  var resolved=_swapRequests.filter(function(r){return r.statut==='approuve'||r.statut==='refuse';});
+  if(resolved.length){
+    h+='<div style="margin-bottom:14px">';
+    h+='<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px;text-transform:uppercase">Historique</div>';
+    resolved.slice(0,5).forEach(function(r){
+      var isOk=r.statut==='approuve';
+      var tag=isOk?'<span style="background:#d1fae5;color:#065f46;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px">✅ Approuvé</span>'
+        :'<span style="background:#fee2e2;color:#991b1b;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px">❌ Refusé</span>';
+      h+='<div style="padding:8px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:4px;opacity:.7">';
+      h+='<div style="display:flex;align-items:center;justify-content:space-between">';
+      h+='<div style="font-size:11px">'+fmtDateLabel(r.swapDate)+' ↔ '+colName(r.targetEmpId)+'</div>';
+      h+=tag+'</div></div>';
+    });
+    h+='</div>';
+  }
+
+  // My upcoming shifts
+  if(!myShifts.length){
+    h+='<div style="text-align:center;padding:16px;color:var(--muted)"><div style="font-size:28px;margin-bottom:4px">📅</div><div style="font-size:12px">Aucun shift à venir dans les 2 prochaines semaines</div></div>';
+  } else {
+    h+='<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px;text-transform:uppercase">Mes prochains shifts</div>';
+    myShifts.forEach(function(s){
+      var dateLabel=fmtDateLabel(s.date);
+      var shift=shiftStr(s.items);
+      // Count colleagues working same day
+      var colleagues=(_swapAll[s.date]||[]).filter(function(c){return c.empId!==_empId&&c.items.length;});
+      h+='<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;margin-bottom:6px">';
+      h+='<div style="flex:1">';
+      h+='<div style="font-size:13px;font-weight:700">'+dateLabel+'</div>';
+      h+='<div style="font-size:12px;color:var(--muted)">'+shift+'</div>';
+      h+='</div>';
+      if(colleagues.length){
+        h+='<button onclick="openSwapModal(\''+s.date+'\')" style="padding:6px 12px;border-radius:10px;border:2px solid #d1fae5;background:#f0fdf4;cursor:pointer;font-family:Plus Jakarta Sans,sans-serif;font-size:11px;font-weight:700;color:#065f46;white-space:nowrap">🔄 Échanger</button>';
+      } else {
+        h+='<span style="font-size:10px;color:var(--muted);white-space:nowrap">Pas de collègue ce jour</span>';
+      }
+      h+='</div>';
+    });
+  }
+
+  el.innerHTML=h;
+}
+
+function openSwapModal(dateStr){
+  var overlay=document.getElementById('swapOverlay');
+  overlay.style.display='flex';
+  var body=document.getElementById('swapModalBody');
+
+  var myShift=(_swapAll[dateStr]||[]).find(function(s){return s.empId===_empId;});
+  var colleagues=(_swapAll[dateStr]||[]).filter(function(s){return s.empId!==_empId&&s.items.length;});
+  var dateLabel=fmtDateLabel(dateStr);
+
+  var h='<div style="margin-bottom:14px;padding:10px 14px;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0">';
+  h+='<div style="font-size:11px;color:var(--muted);font-weight:600">Mon shift — '+dateLabel+'</div>';
+  h+='<div style="font-size:14px;font-weight:800;color:#065f46;margin-top:2px">'+shiftStr(myShift?myShift.items:[])+'</div>';
+  h+='</div>';
+
+  h+='<div style="font-size:12px;font-weight:700;margin-bottom:8px">Avec qui voulez-vous échanger ?</div>';
+
+  colleagues.forEach(function(c){
+    var name=colName(c.empId);
+    var shift=shiftStr(c.items);
+    h+='<button onclick="submitSwap(\''+dateStr+'\',\''+c.empId+'\')" style="width:100%;display:flex;align-items:center;gap:10px;padding:12px 14px;border:2px solid var(--border);border-radius:12px;margin-bottom:8px;cursor:pointer;background:white;font-family:Plus Jakarta Sans,sans-serif;text-align:left;transition:all .15s"';
+    h+=' onmouseover="this.style.borderColor=\'#059669\';this.style.background=\'#f0fdf4\'" onmouseout="this.style.borderColor=\'\';this.style.background=\'white\'">';
+    h+='<div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#059669,#34d399);display:flex;align-items:center;justify-content:center;color:white;font-size:13px;font-weight:800;flex-shrink:0">'+name.charAt(0).toUpperCase()+'</div>';
+    h+='<div style="flex:1"><div style="font-size:13px;font-weight:700">'+name+'</div><div style="font-size:11px;color:var(--muted)">'+shift+'</div></div>';
+    h+='<span style="font-size:16px">🔄</span>';
+    h+='</button>';
+  });
+
+  h+='<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:6px">Votre responsable devra valider l\'échange</div>';
+  body.innerHTML=h;
+}
+
+window.closeSwapModal=function(){document.getElementById('swapOverlay').style.display='none';};
+window.openSwapModal=openSwapModal;
+
+window.submitSwap=async function(dateStr,targetEmpId){
+  var myShift=(_swapAll[dateStr]||[]).find(function(s){return s.empId===_empId;});
+  var targetShift=(_swapAll[dateStr]||[]).find(function(s){return s.empId===targetEmpId;});
+  var myName=(_emp?(_emp.prenom||'')+' '+(_emp.nom||''):'').trim();
+
+  var data={
+    type:'shift_swap',
+    empId:_empId,
+    employeNom:myName,
+    targetEmpId:targetEmpId,
+    targetEmpNom:colName(targetEmpId),
+    swapDate:dateStr,
+    myShiftItems:myShift?myShift.items:[],
+    targetShiftItems:targetShift?targetShift.items:[],
+    statut:'en_attente',
+    dateCreation:new Date().toISOString(),
+    timestamp:Date.now()
+  };
+
+  try{
+    await window._addDoc(['rh_conges_public',_uid,'demandes'],data);
+    window.closeSwapModal();
+    window.showToast('✅ Demande envoyée !','ok');
+    await loadSwapData();
+  }catch(e){
+    console.error('submitSwap',e);
+    window.showToast('Erreur: '+e.message,'err');
+  }
+};
+
+window.refreshSwaps=loadSwapData;
+
+// Auto-load when ready
+var _swapTimer=setInterval(function(){
+  if(window._dbReady&&_uid&&_empId){clearInterval(_swapTimer);setTimeout(loadSwapData,1000);}
+},500);
+
 })();
 </script>
 </body>

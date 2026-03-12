@@ -88,6 +88,9 @@ tr:hover td{background:rgba(16,185,129,.02);}
 .alert-icon.late{background:#fee2e2;}
 .alert-icon.missing{background:#fef3c7;}
 .alert-icon.overtime{background:#dbeafe;}
+.alert-icon.late{background:#fef3c7;}
+.alert-icon.undertime{background:#fce7f3;}
+.alert-icon.hors{background:#f0fdf4;}
 .alert-icon.anomaly{background:#f3e8ff;}
 .alert-body{flex:1;min-width:0;}
 .alert-title{font-size:12px;font-weight:700;}
@@ -303,6 +306,7 @@ const TYPE_LABELS={arrivee:'Arrivée',depart:'Départ',pause_deb:'Début pause',
 const TYPE_CLS={arrivee:'tag-arrive',depart:'tag-depart',pause_deb:'tag-pause-deb',pause_fin:'tag-pause-fin'};
 
 let _emps=[], _view='jour', _cur=new Date(), _cache={}, _selEmp=null;
+let _planning={}; // {dateStr_empId: {items:[...]}}
 
 function fmt(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function empName(e){return `${e.prenom||''} ${e.nom||''}`.trim()||'?';}
@@ -316,6 +320,7 @@ async function initPointages(){
   if(!window._uid||!window._col){setTimeout(initPointages,400);return;}
   await loadEmps();
   await loadConfig();
+  await loadPlanning();
   await loadData();
   render();
 }
@@ -329,6 +334,67 @@ async function loadEmps(){
   }catch(e){console.error(e);}
   _emps.sort((a,b)=>empName(a).localeCompare(empName(b)));
   if(_emps.length&&!_selEmp) _selEmp=_emps[0].id;
+}
+
+// ═══ PLANNING DATA ═══
+async function loadPlanning(){
+  _planning={};
+  try{
+    // Load weeks covering the current view
+    const weeks=new Set();
+    if(_view==='recap'){
+      weeks.add(getMonday(_cur));
+    } else if(_view==='salarie'){
+      // Load all weeks of the month
+      const y=_cur.getFullYear(),m=_cur.getMonth();
+      let d=new Date(y,m,1);
+      while(d.getMonth()===m){weeks.add(getMonday(d));d.setDate(d.getDate()+7);}
+    } else {
+      weeks.add(getMonday(_cur));
+    }
+    for(const mon of weeks){
+      const wk=mon.getFullYear()+String(mon.getMonth()+1).padStart(2,'0')+String(mon.getDate()).padStart(2,'0');
+      try{
+        const snap=await window._getDocs(window._col(window._db,'rh',window._uid,'plan_'+wk));
+        snap.forEach(doc=>{_planning[doc.id]=doc.data();});
+      }catch(e){}
+    }
+  }catch(e){console.warn('loadPlanning',e);}
+}
+
+function getMonday(d){
+  const dt=new Date(d);dt.setHours(12,0,0,0);
+  const day=dt.getDay(),diff=day===0?-6:1-day;
+  dt.setDate(dt.getDate()+diff);
+  return dt;
+}
+
+function getPlannedMinutes(dateStr,empId){
+  const k=`${dateStr}_${empId}`;
+  const data=_planning[k];
+  if(!data||!data.items||!data.items.length) return 0;
+  let total=0;
+  data.items.filter(it=>it.type==='travail'||it.type==='partiel'||it.type==='formation').forEach(it=>{
+    const plages=it.plages&&it.plages.length>0?it.plages:(it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
+    plages.forEach(p=>{
+      const[ah,am]=(p.deb||'0:0').split(':').map(Number);
+      const[bh,bm]=(p.fin||'0:0').split(':').map(Number);
+      total+=Math.max(0,(bh*60+bm)-(ah*60+am));
+    });
+  });
+  return total;
+}
+
+function getPlannedShiftStr(dateStr,empId){
+  const k=`${dateStr}_${empId}`;
+  const data=_planning[k];
+  if(!data||!data.items||!data.items.length) return null;
+  const workItems=data.items.filter(it=>it.type==='travail'||it.type==='partiel'||it.type==='formation');
+  if(!workItems.length) return null;
+  return workItems.map(it=>{
+    const plages=it.plages&&it.plages.length>0?it.plages:(it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
+    return plages.map(p=>`${p.deb}–${p.fin}`).join(' | ');
+  }).join(' + ');
 }
 
 async function loadData(){
@@ -390,7 +456,7 @@ function navNext(){
   refresh();
 }
 function goToday(){_cur=new Date();refresh();}
-async function refresh(){_cache={};await loadData();render();}
+async function refresh(){_cache={};await loadPlanning();await loadData();render();}
 window.navPrev=navPrev;window.navNext=navNext;window.goToday=goToday;
 
 function setView(v){
@@ -479,7 +545,7 @@ function renderJour(c){
   h+=`</div>`;
 
   // Timeline par employé
-  h+=`<div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">👥 Résumé par employé</div></div><div class="table-wrap"><table><thead><tr><th>Employé</th><th>Arrivée</th><th>Départ</th><th>Pauses</th><th>Heures travaillées</th><th>Statut</th></tr></thead><tbody>`;
+  h+=`<div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">👥 Résumé par employé — Planifié vs Réalisé</div></div><div class="table-wrap"><table><thead><tr><th>Employé</th><th>Planifié</th><th>Arrivée</th><th>Départ</th><th>Pauses</th><th>Heures réalisées</th><th>Écart</th><th>Statut</th></tr></thead><tbody>`;
   _emps.forEach((emp,i)=>{
     const evts=events.filter(e=>e.empId===emp.id).sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
     const arrives=evts.filter(e=>e.type==='arrivee');
@@ -489,17 +555,26 @@ function renderJour(c){
     const departValid=depart&&arrive&&depart.timestamp>arrive.timestamp;
     const pauseCount=evts.filter(e=>e.type==='pause_deb').length;
     const hrs=calcEmpHours(evts,isToday);
+    const plannedMin=getPlannedMinutes(d,emp.id);
+    const plannedStr=getPlannedShiftStr(d,emp.id);
+    const ecart=hrs-plannedMin;
     let statut='<span style="color:var(--muted)">Absent</span>';
     if(departValid) statut='<span style="color:var(--text)">Terminé</span>';
     else if(evts.some(e=>e.type==='pause_deb')&&!evts.some(e=>e.type==='pause_fin'&&e.timestamp>(evts.filter(x=>x.type==='pause_deb').pop()?.timestamp||0))) statut='<span style="color:var(--orange)">⏸ En pause</span>';
     else if(arrive) statut='<span style="color:var(--rh-main)">🟢 Présent</span>';
+    // Flag: not planned but pointed
+    if(!plannedMin&&hrs>0) statut+=' <span class="tag" style="background:#fef3c7;color:#92400e;font-size:9px">Hors planning</span>';
     const ci=COLORS[i%COLORS.length];
+    const ecartCls=ecart>=0?'var(--rh-main)':'var(--red)';
+    const ecartIcon=ecart>0?'▲':ecart<0?'▼':'=';
     h+=`<tr>
       <td><div class="emp-chip"><div class="emp-av" style="background:${ci}">${empInit(emp)}</div>${empName(emp)}</div></td>
+      <td style="font-size:11px">${plannedStr?`<div class="time-mono" style="font-weight:700">${fmtDur(plannedMin)}</div><div style="font-size:10px;color:var(--muted)">${plannedStr}</div>`:'<span style="color:var(--muted)">—</span>'}</td>
       <td class="time-mono">${arrive?.heure||'—'}</td>
       <td class="time-mono">${departValid?depart.heure:'—'}</td>
       <td>${pauseCount>0?pauseCount+' pause(s)':'—'}</td>
       <td class="time-mono" style="font-weight:800;color:var(--rh-main)">${hrs>0?fmtDur(hrs):'—'}</td>
+      <td style="font-weight:700;color:${ecartCls}">${plannedMin>0&&hrs>0?ecartIcon+' '+fmtDur(Math.abs(ecart)):'—'}</td>
       <td>${statut}</td>
     </tr>`;
   });
@@ -526,13 +601,16 @@ function renderSalarie(c){
   let totalWorked=0, totalDays=0, lateDays=0;
 
   h+=`<div class="card"><div class="card-head"><div class="card-title">📅 Historique de ${empName(emp)} — ${_cur.toLocaleDateString('fr-FR',{month:'long',year:'numeric'})}</div></div>`;
-  h+=`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Arrivée</th><th>Départ</th><th>Pauses</th><th>Heures</th></tr></thead><tbody>`;
+  h+=`<div class="table-wrap"><table><thead><tr><th>Date</th><th>Planifié</th><th>Arrivée</th><th>Départ</th><th>Pauses</th><th>Réalisé</th><th>Écart</th></tr></thead><tbody>`;
 
+  let totalPlanned=0;
   for(let d=1;d<=last;d++){
     const dt=new Date(y,m,d);
     const ds=fmt(dt);
     const evts=(getEvents(ds)||[]).filter(e=>e.empId===_selEmp).sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
-    if(evts.length===0) continue;
+    const plannedMin=getPlannedMinutes(ds,_selEmp);
+    const plannedStr=getPlannedShiftStr(ds,_selEmp);
+    if(evts.length===0&&!plannedMin) continue;
     const arrives=evts.filter(e=>e.type==='arrivee');
     const departs=evts.filter(e=>e.type==='depart');
     const arrive=arrives[arrives.length-1]||null;
@@ -541,18 +619,28 @@ function renderSalarie(c){
     const pauseCount=evts.filter(e=>e.type==='pause_deb').length;
     const hrs=calcEmpHours(evts,ds===fmt(new Date()));
     if(hrs>0){totalWorked+=hrs;totalDays++;}
+    totalPlanned+=plannedMin;
+    const ecart=hrs-plannedMin;
+    const ecartCls=ecart>=0?'var(--rh-main)':'var(--red)';
     const dow=dt.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
-    h+=`<tr>
+    // Row highlight: planned but not worked = light red bg
+    const rowStyle=plannedMin>0&&hrs===0&&dt<new Date()?' style="background:#fef2f2"':'';
+    h+=`<tr${rowStyle}>
       <td style="font-weight:600">${dow}</td>
+      <td style="font-size:11px">${plannedStr||'—'}${plannedMin?`<div style="font-size:10px;color:var(--muted)">${fmtDur(plannedMin)}</div>`:''}</td>
       <td class="time-mono">${arrive?.heure||'—'}</td>
       <td class="time-mono">${departValid?depart.heure:'—'}</td>
       <td>${pauseCount>0?pauseCount:'—'}</td>
-      <td class="time-mono" style="font-weight:800;color:${hrs>=0?'var(--rh-main)':'var(--red)'}">${hrs>0?fmtDur(hrs):'—'}</td>
+      <td class="time-mono" style="font-weight:800;color:${hrs>0?'var(--rh-main)':'var(--muted)'}">${hrs>0?fmtDur(hrs):'—'}</td>
+      <td style="font-weight:700;color:${ecartCls}">${(plannedMin>0||hrs>0)?((ecart>0?'▲':ecart<0?'▼':'=')+' '+fmtDur(Math.abs(ecart))):'—'}</td>
     </tr>`;
   }
   h+=`</tbody></table></div>`;
+  const totalEcart=totalWorked-totalPlanned;
   h+=`<div style="padding:12px 20px;background:var(--rh-ghost);border-top:1px solid var(--rh-border);display:flex;gap:24px;flex-wrap:wrap">
-    <div><span style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Total heures</span><div style="font-size:18px;font-weight:800;color:var(--rh-main)">${fmtDur(totalWorked)}</div></div>
+    <div><span style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Heures réalisées</span><div style="font-size:18px;font-weight:800;color:var(--rh-main)">${fmtDur(totalWorked)}</div></div>
+    <div><span style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Heures planifiées</span><div style="font-size:18px;font-weight:800;color:#166534">${totalPlanned>0?fmtDur(totalPlanned):'—'}</div></div>
+    <div><span style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Écart</span><div style="font-size:18px;font-weight:800;color:${totalEcart>=0?'var(--rh-main)':'var(--red)'}">${totalPlanned>0?(totalEcart>=0?'+':'')+fmtDur(Math.abs(totalEcart)):'—'}</div></div>
     <div><span style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Jours travaillés</span><div style="font-size:18px;font-weight:800">${totalDays}</div></div>
     <div><span style="font-size:10px;color:var(--muted);font-weight:700;text-transform:uppercase">Moyenne / jour</span><div style="font-size:18px;font-weight:800">${totalDays>0?fmtDur(Math.round(totalWorked/totalDays)):'—'}</div></div>
   </div>`;
@@ -572,24 +660,31 @@ function renderRecap(c){
     const isToday=fmt(d)===fmt(new Date());
     h+=`<th${isToday?' style="color:var(--rh-main);background:var(--rh-ghost)"':''}>${dowLabels[i]}<br>${d.getDate()}</th>`;
   });
-  h+=`<th style="background:var(--rh-ghost)">Total</th></tr></thead><tbody>`;
+  h+=`<th style="background:var(--rh-ghost)">Réalisé</th><th style="background:#f0fdf4">Planifié</th><th style="background:#fefce8">Écart</th></tr></thead><tbody>`;
 
   _emps.forEach((emp,ei)=>{
     const ci=COLORS[ei%COLORS.length];
     h+=`<tr><td><div class="emp-chip"><div class="emp-av" style="background:${ci}">${empInit(emp)}</div>${empName(emp)}</div></td>`;
-    let weekTotal=0;
+    let weekTotal=0, weekPlanned=0;
     days.forEach(d=>{
       const ds=fmt(d);
       const evts=(getEvents(ds)||[]).filter(e=>e.empId===emp.id);
       const hrs=calcEmpHours(evts,fmt(d)===fmt(new Date()));
+      const planned=getPlannedMinutes(ds,emp.id);
       weekTotal+=hrs;
+      weekPlanned+=planned;
       const heuresHebdo=(emp.heuresHebdo||35)/5;
       const cls=hrs===0?'cell-empty':hrs<heuresHebdo*0.8?'cell-warn':'cell-ok';
-      h+=`<td class="${cls}">${hrs>0?fmtDur(hrs):'—'}</td>`;
+      // Show planned underneath actual
+      h+=`<td class="${cls}">${hrs>0?fmtDur(hrs):'—'}${planned>0?`<div style="font-size:9px;color:var(--muted)">${fmtDur(planned)}</div>`:''}</td>`;
     });
-    const target=emp.heuresHebdo||35;
-    const totalCls=weekTotal>=target?'cell-ok':weekTotal>=target*0.8?'cell-warn':'cell-danger';
-    h+=`<td class="recap-total ${totalCls}">${fmtDur(weekTotal)}<div style="font-size:9px;font-weight:400;color:var(--muted)">/${target}h</div></td></tr>`;
+    const ecart=weekTotal-weekPlanned;
+    const ecartCls=ecart>=0?'var(--rh-main)':'var(--red)';
+    const ecartIcon=ecart>0?'▲':ecart<0?'▼':'=';
+    const totalCls=weekPlanned>0?(weekTotal>=weekPlanned?'cell-ok':weekTotal>=weekPlanned*0.8?'cell-warn':'cell-danger'):(weekTotal>0?'cell-ok':'cell-empty');
+    h+=`<td class="recap-total ${totalCls}">${fmtDur(weekTotal)}</td>`;
+    h+=`<td class="recap-total" style="background:#f0fdf4;color:#166534">${weekPlanned>0?fmtDur(weekPlanned):'—'}</td>`;
+    h+=`<td class="recap-total" style="background:${ecart>=0?'#f0fdf4':'#fef2f2'};color:${ecartCls};font-weight:800">${weekPlanned>0?ecartIcon+' '+fmtDur(Math.abs(ecart)):'—'}</td></tr>`;
   });
   h+=`</tbody></table></div></div>`;
   c.innerHTML=h;
@@ -599,49 +694,100 @@ function renderRecap(c){
 function renderAlertes(c){
   const days=weekDays(_cur);
   const alerts=[];
+  const lateMin=_ptConfig.lateMin||15;
 
   days.forEach(d=>{
     const ds=fmt(d);
     const evts=getEvents(ds);
     const dateLabel=d.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
+    const isPast=d<new Date()&&fmt(d)!==fmt(new Date());
 
     _emps.forEach(emp=>{
-      const empEvts=evts.filter(e=>e.empId===emp.id);
-      const arrive=empEvts.find(e=>e.type==='arrivee');
-      const depart=empEvts.find(e=>e.type==='depart');
+      const empEvts=evts.filter(e=>e.empId===emp.id).sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
+      const arrives=empEvts.filter(e=>e.type==='arrivee');
+      const departs=empEvts.filter(e=>e.type==='depart');
+      const arrive=arrives[arrives.length-1]||null;
+      const depart=departs[departs.length-1]||null;
+      const departValid=depart&&arrive&&depart.timestamp>arrive.timestamp;
       const hrs=calcEmpHours(empEvts,false);
+      const plannedMin=getPlannedMinutes(ds,emp.id);
+      const plannedStr=getPlannedShiftStr(ds,emp.id);
 
-      // Absent (si jour ouvré)
-      if(d.getDay()>0&&d.getDay()<6&&!arrive&&d<=new Date()){
-        alerts.push({icon:'missing',emoji:'❌',title:`${empName(emp)} absent`,sub:dateLabel,severity:2});
+      // 1. Absent quand planifié
+      if(plannedMin>0&&!arrive&&isPast){
+        alerts.push({icon:'missing',emoji:'❌',title:`${empName(emp)} absent (était planifié)`,sub:`${dateLabel} — Prévu : ${plannedStr}`,severity:3});
       }
-      // Overtime
-      if(hrs>600){// >10h
-        alerts.push({icon:'overtime',emoji:'⏰',title:`${empName(emp)} : ${fmtDur(hrs)} travaillées`,sub:`${dateLabel} — Dépassement durée journalière`,severity:1});
+      // 2. Absent jour ouvré sans planning
+      else if(!plannedMin&&d.getDay()>0&&d.getDay()<6&&!arrive&&isPast){
+        // Only flag if not also absent in planning - softer alert
       }
-      // Arrivée sans départ
-      if(arrive&&!depart&&d<new Date()&&fmt(d)!==fmt(new Date())){
+
+      // 3. Retard vs planning
+      if(plannedMin>0&&arrive){
+        // Get first planned start time
+        const k=`${ds}_${emp.id}`;
+        const data=_planning[k];
+        if(data&&data.items){
+          const workItems=data.items.filter(it=>it.type==='travail'||it.type==='partiel'||it.type==='formation');
+          if(workItems.length){
+            const first=workItems[0];
+            const plages=first.plages&&first.plages.length?first.plages:(first.deb?[{deb:first.deb}]:[]);
+            if(plages[0]&&plages[0].deb){
+              const plannedStart=toMin(plages[0].deb);
+              const actualStart=toMin(arrive.heure);
+              if(actualStart>plannedStart+lateMin){
+                const retardMin=actualStart-plannedStart;
+                alerts.push({icon:'late',emoji:'🕐',title:`${empName(emp)} en retard de ${retardMin} min`,sub:`${dateLabel} — Prévu ${plages[0].deb}, arrivé ${arrive.heure}`,severity:2});
+              }
+            }
+          }
+        }
+      }
+
+      // 4. Heures insuffisantes vs planning (journée terminée)
+      if(plannedMin>0&&departValid&&hrs<plannedMin*0.8){
+        alerts.push({icon:'undertime',emoji:'📉',title:`${empName(emp)} : ${fmtDur(hrs)} / ${fmtDur(plannedMin)} planifiées`,sub:`${dateLabel} — ${fmtDur(plannedMin-hrs)} en moins`,severity:1});
+      }
+
+      // 5. Overtime >10h
+      if(hrs>600){
+        alerts.push({icon:'overtime',emoji:'⏰',title:`${empName(emp)} : ${fmtDur(hrs)} travaillées`,sub:`${dateLabel} — Dépassement durée journalière (>10h)`,severity:2});
+      }
+
+      // 6. Arrivée sans départ (jour passé)
+      if(arrive&&!departValid&&isPast){
         alerts.push({icon:'anomaly',emoji:'⚠️',title:`${empName(emp)} : arrivée sans départ`,sub:`${dateLabel} — Pointage incomplet`,severity:2});
       }
-      // Pause ouverte
+
+      // 7. Pause ouverte
       const pauseDebs=empEvts.filter(e=>e.type==='pause_deb');
       const pauseFins=empEvts.filter(e=>e.type==='pause_fin');
-      if(pauseDebs.length>pauseFins.length&&fmt(d)!==fmt(new Date())){
+      if(pauseDebs.length>pauseFins.length&&isPast){
         alerts.push({icon:'anomaly',emoji:'☕',title:`${empName(emp)} : pause non clôturée`,sub:`${dateLabel} — Pointage incomplet`,severity:1});
+      }
+
+      // 8. Hors planning
+      if(!plannedMin&&hrs>0){
+        const motif=empEvts.find(e=>e.motifHorsPlan)?.motifHorsPlan||'';
+        alerts.push({icon:'hors',emoji:'📋',title:`${empName(emp)} a travaillé hors planning`,sub:`${dateLabel}${motif?' — Motif : '+motif:''}`,severity:1});
       }
     });
   });
 
   alerts.sort((a,b)=>b.severity-a.severity);
+  const absences=alerts.filter(a=>a.icon==='missing').length;
+  const retards=alerts.filter(a=>a.icon==='late').length;
+  const anomalies=alerts.filter(a=>a.icon==='anomaly'||a.icon==='overtime'||a.icon==='undertime'||a.icon==='hors').length;
 
-  let h=`<div class="kpi-row" style="grid-template-columns:repeat(3,1fr)">
+  let h=`<div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
     <div class="kpi"><div class="kpi-label">Total alertes</div><div class="kpi-val ${alerts.length>0?'red':''}">${alerts.length}</div></div>
-    <div class="kpi"><div class="kpi-label">Absences</div><div class="kpi-val orange">${alerts.filter(a=>a.icon==='missing').length}</div></div>
-    <div class="kpi"><div class="kpi-label">Anomalies</div><div class="kpi-val blue">${alerts.filter(a=>a.icon==='anomaly'||a.icon==='overtime').length}</div></div>
+    <div class="kpi"><div class="kpi-label">Absences</div><div class="kpi-val" style="color:var(--red)">${absences}</div></div>
+    <div class="kpi"><div class="kpi-label">Retards</div><div class="kpi-val" style="color:var(--orange)">${retards}</div></div>
+    <div class="kpi"><div class="kpi-label">Anomalies</div><div class="kpi-val" style="color:var(--blue)">${anomalies}</div></div>
   </div>`;
 
   if(alerts.length===0){
-    h+=`<div class="card"><div style="padding:40px;text-align:center"><div style="font-size:42px;margin-bottom:8px">✅</div><div style="font-size:14px;font-weight:700;color:var(--rh-main)">Aucune alerte cette semaine</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Tous les pointages sont en ordre</div></div></div>`;
+    h+=`<div class="card"><div style="padding:40px;text-align:center"><div style="font-size:42px;margin-bottom:8px">✅</div><div style="font-size:14px;font-weight:700;color:var(--rh-main)">Aucune alerte cette semaine</div><div style="font-size:12px;color:var(--muted);margin-top:4px">Tous les pointages sont conformes au planning</div></div></div>`;
   } else {
     h+=`<div class="alert-card">`;
     alerts.forEach(a=>{
