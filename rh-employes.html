@@ -3571,13 +3571,81 @@ window.calcSalaire = function(source) {
     document.getElementById('rc-sal').textContent = f2(c.sal);
     document.getElementById('rc-sal-pct').textContent = `${(c.sal/brut*100).toFixed(1)}% du brut`;
     document.getElementById('rc-pat').textContent = f2(c.pat);
-    document.getElementById('rc-pat-pct').textContent = `${(c.pat/brut*100).toFixed(1)}% du brut`;
+    document.getElementById('rc-pat-pct').textContent = `${(c.pat/brut*100).toFixed(1)}% du brut (avant réductions)`;
     document.getElementById('rc-net').textContent = f2(c.net);
     document.getElementById('rc-net-pct').textContent = `${(c.net/brut*100).toFixed(1)}% du brut`;
-    // Store effective taux for saving
+    // Store local taux as temporary fallback
     window._currentTauxCharges = Math.round(c.pat / brut * 10000) / 100;
+    // Auto-fetch URSSAF (debounced)
+    _scheduleURSSAF(brut, estCadre);
   }
 };
+
+// ── AUTO URSSAF — Debounced ──
+var _urssafTimer = null;
+function _scheduleURSSAF(brut, estCadre) {
+  clearTimeout(_urssafTimer);
+  _urssafTimer = setTimeout(function(){ _fetchURSSAF(brut, estCadre); }, 800);
+}
+
+async function _fetchURSSAF(brut, estCadre) {
+  if (!brut || brut <= 0) return;
+  var contrat = document.getElementById('f-contrat')?.value || 'CDI';
+  var btn = document.getElementById('urssaf-btn');
+  var result = document.getElementById('urssaf-result');
+  if (btn) { btn.textContent = '⏳...'; btn.disabled = true; }
+  try {
+    var resp = await fetch('/api/urssaf-cost', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        brutMensuel: brut,
+        cadre: estCadre,
+        apprenti: (contrat || '').toLowerCase().indexOf('apprenti') >= 0,
+        cdd: contrat === 'CDD'
+      })
+    });
+    if (!resp.ok) throw new Error('API error ' + resp.status);
+    var d = await resp.json();
+    if (d.tauxEffectif !== null && d.tauxEffectif !== undefined) {
+      // Use URSSAF taux as the real one
+      window._currentTauxCharges = d.tauxEffectif;
+      // Update display to show URSSAF values
+      var f2 = function(n){ return n.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'; };
+      var patEl = document.getElementById('rc-pat');
+      var patPctEl = document.getElementById('rc-pat-pct');
+      if (patEl && d.cotisationsPatronales !== null) {
+        patEl.textContent = f2(d.cotisationsPatronales);
+        patEl.style.color = '#34d399'; // vert pour indiquer URSSAF
+      }
+      if (patPctEl) patPctEl.textContent = d.tauxEffectif.toFixed(1) + '% du brut (URSSAF ' + d.annee + ')';
+      // Update net if available
+      var netEl = document.getElementById('rc-net');
+      var netPctEl = document.getElementById('rc-net-pct');
+      if (netEl && d.netAvantImpot) {
+        netEl.textContent = f2(d.netAvantImpot);
+      }
+      if (netPctEl && d.netAvantImpot) netPctEl.textContent = (d.netAvantImpot/brut*100).toFixed(1) + '% du brut';
+      // Update super brut field
+      var sbEl = document.getElementById('f-superbrut');
+      if (sbEl && d.coutEmployeur) sbEl.value = d.coutEmployeur.toFixed(2);
+      // Show URSSAF badge
+      if (result) {
+        result.innerHTML = '✅ <strong>Taux URSSAF ' + d.annee + ' : ' + d.tauxEffectif.toFixed(1) + '%</strong> · Coût employeur : <strong>' + f2(d.coutEmployeur||0) + '</strong>'
+          + (d.netAvantImpot ? ' · Net : ' + f2(d.netAvantImpot) : '')
+          + '<br><span style="font-size:9px;opacity:.6">Source : mon-entreprise.urssaf.fr — inclut RGDU/Fillon</span>';
+        result.style.display = '';
+      }
+    }
+  } catch(e) {
+    // Silencieux en auto, le local reste
+    if (result) {
+      result.innerHTML = '⚠️ API URSSAF indisponible — taux local conservé (' + (window._currentTauxCharges||42).toFixed(1) + '%)';
+      result.style.display = '';
+    }
+  }
+  if (btn) { btn.textContent = '🔄 Vérifier URSSAF'; btn.disabled = false; }
+}
 
 function clearSalRecap() {
   const recap = document.getElementById('sal-recap');
@@ -3595,44 +3663,12 @@ document.addEventListener('change', e => {
 window.setSalMode = window.setSalMode;
 window.calcSalaire = window.calcSalaire;
 
-// ── URSSAF API VERIFICATION ──
-window.verifyURSSAF = async function() {
-  const brut = parseFloat(document.getElementById('f-brut')?.value) || 0;
-  if (!brut) { return; }
-  const cat = document.getElementById('f-categorie')?.value || 'employe';
-  const contrat = document.getElementById('f-contrat')?.value || 'CDI';
-  const btn = document.getElementById('urssaf-btn');
-  const result = document.getElementById('urssaf-result');
-  btn.textContent = '⏳ Vérification...'; btn.disabled = true;
-  try {
-    const resp = await fetch('/api/urssaf-cost', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        brutMensuel: brut,
-        cadre: cat === 'cadre',
-        apprenti: contrat === 'Apprentissage',
-        cdd: contrat === 'CDD'
-      })
-    });
-    if (!resp.ok) throw new Error('API indisponible');
-    const d = await resp.json();
-    if (d.tauxEffectif !== null && d.tauxEffectif !== undefined) {
-      window._currentTauxCharges = d.tauxEffectif;
-      result.innerHTML = '✅ <strong>Taux URSSAF officiel ' + d.annee + ' : ' + d.tauxEffectif.toFixed(1) + '%</strong>'
-        + ' · Coût employeur : <strong>' + (d.coutEmployeur||0).toLocaleString('fr-FR',{minimumFractionDigits:2}) + ' €</strong>'
-        + (d.netAvantImpot ? ' · Net avant impôt : ' + d.netAvantImpot.toLocaleString('fr-FR',{minimumFractionDigits:2}) + ' €' : '')
-        + '<br><span style="font-size:9px;opacity:.6">Source : mon-entreprise.urssaf.fr — inclut réductions Fillon/RGDU</span>';
-      result.style.display = '';
-    } else {
-      result.innerHTML = '⚠️ Réponse URSSAF incomplète. Taux local conservé.';
-      result.style.display = '';
-    }
-  } catch(e) {
-    result.innerHTML = '⚠️ API URSSAF indisponible. Le calcul local est utilisé (taux : ' + (window._currentTauxCharges||42).toFixed(1) + '%).';
-    result.style.display = '';
-  }
-  btn.textContent = '🔄 Vérifier URSSAF'; btn.disabled = false;
+// ── URSSAF MANUAL BUTTON ──
+window.verifyURSSAF = function() {
+  var brut = parseFloat(document.getElementById('f-brut')?.value) || 0;
+  if (!brut) return;
+  var cat = document.getElementById('f-categorie')?.value || 'employe';
+  _fetchURSSAF(brut, cat === 'cadre');
 };
 window.onContratChange = window.onContratChange;
 window.onPEChange = window.onPEChange;

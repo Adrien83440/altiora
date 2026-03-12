@@ -905,6 +905,8 @@ async function loadMonth() {
 
   renderPage(data, m);
   renderHiddenCredits();
+  // Auto-fetch URSSAF taux pour tous les salariés + dirigeant
+  setTimeout(function(){ autoFetchMSUrssaf(); }, 500);
 }
 
 // ── SYNC DETTES → PILOTAGE (par mois) ──
@@ -1562,7 +1564,7 @@ function renderMasseSalariale(data, t) {
     '</select></div>' +
     '<table class="data-table"><thead><tr><th>Type</th><th>Montant mensuel (€)</th><th>Taux charges (%)</th><th>Coût total (€)</th></tr></thead><tbody>' +
     '<tr><td style="font-weight:600">💰 Rémunération</td>' +
-    '<td><input class="cell-input" style="width:90px;text-align:right" type="text" inputmode="decimal" value="' + (dir.remuneration || '') + '" placeholder="0.00" oninput="_data.masseSalariale.dirigeant.remuneration=this.value;refreshTotals()"/></td>' +
+    '<td><input class="cell-input" style="width:90px;text-align:right" type="text" inputmode="decimal" value="' + (dir.remuneration || '') + '" placeholder="0.00" oninput="_data.masseSalariale.dirigeant.remuneration=this.value;refreshTotals();scheduleDirURSSAF()"/></td>' +
     '<td style="text-align:center"><input class="cell-input" id="ms-dir-taux" style="width:55px;text-align:center" type="number" value="' + tauxDir + '" min="0" max="100" step="1" oninput="_data.masseSalariale.dirigeant.tauxCharges=parseFloat(this.value)||45;refreshTotals()"/></td>' +
     '<td style="text-align:right;font-weight:700;color:#f59e0b"><span id="ms-dir-cout">' + fmtN(coutDir) + '</span> €</td></tr>' +
     '<tr><td style="font-weight:600">💸 Dividendes /mois</td>' +
@@ -1587,6 +1589,7 @@ function renderMasseSalariale(data, t) {
       ' <span style="color:var(--muted)">(Commerce &lt;20% · Restauration &lt;35%)</span></div>';
   }
 
+  html += '<div style="font-size:9px;color:var(--muted);padding:6px 0 2px">💡 Taux chargés depuis <strong>mon-entreprise.urssaf.fr</strong> (RGDU/Fillon inclus). Modifiables à la main si besoin. Rafraîchis automatiquement au chargement.</div>';
   html += '</div>';
   return html;
 }
@@ -1629,15 +1632,15 @@ function onDirTypeChange(val) {
   var el = document.getElementById('ms-dir-taux');
   if (el) el.value = d;
   refreshTotals();
+  scheduleDirURSSAF();
 }
 
 async function fetchAllURSSAF() {
   var btn = document.getElementById('ms-urssaf-btn');
-  if (!btn) return;
-  btn.textContent = '⏳ Vérification...'; btn.disabled = true;
+  if (btn) { btn.textContent = '⏳ Mise à jour...'; btn.disabled = true; }
 
-  var empList = [];
   var ms = _data.masseSalariale || {};
+  var empList = [];
   if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
     empList = window._rhEmployes;
   } else {
@@ -1647,6 +1650,8 @@ async function fetchAllURSSAF() {
   }
 
   var updated = 0, errors = 0;
+
+  // Fetch pour chaque salarié
   for (var i = 0; i < empList.length; i++) {
     var emp = empList[i];
     var brut = parseFloat(emp.salaireBrut) || 0;
@@ -1678,13 +1683,72 @@ async function fetchAllURSSAF() {
     } catch(e) { errors++; }
   }
 
-  btn.textContent = '🔄 Taux URSSAF 2026'; btn.disabled = false;
+  // Fetch pour dirigeant rémunération
+  var dir = ms.dirigeant || {};
+  var remDir = pf(dir.remuneration);
+  if (remDir > 0) {
+    try {
+      var modeDir = dir.type === 'Assimilé salarié' ? 'assimile' : 'tns';
+      var respD = await fetch('/api/urssaf-cost', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ brutMensuel: remDir, dirigeant: modeDir })
+      });
+      if (respD.ok) {
+        var dd = await respD.json();
+        if (dd.tauxEffectif !== null) {
+          _data.masseSalariale.dirigeant.tauxCharges = dd.tauxEffectif;
+          updated++;
+        }
+      }
+    } catch(e) { errors++; }
+  }
+
+  if (btn) { btn.textContent = '🔄 Taux URSSAF ' + new Date().getFullYear(); btn.disabled = false; }
   if (updated > 0) {
     renderPage(_data, parseInt(document.getElementById('monthSelect').value));
-    showToast('✅ ' + updated + ' taux mis à jour via URSSAF officiel' + (errors > 0 ? ' (' + errors + ' erreur(s))' : ''), 'success');
+    showToast('✅ ' + updated + ' taux URSSAF mis à jour' + (errors > 0 ? ' (' + errors + ' erreur)' : ''), 'success');
   } else if (errors > 0) {
-    showToast('⚠️ API URSSAF indisponible — taux locaux conservés', 'warning');
+    showToast('⚠️ API URSSAF indisponible', 'warning');
   }
+}
+
+// Auto-fetch silencieux au chargement (1 seule fois)
+var _urssafAutoFetched = false;
+async function autoFetchMSUrssaf() {
+  if (_urssafAutoFetched) return;
+  var ms = _data.masseSalariale || {};
+  var hasEmployes = (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0)
+    || (ms.lignes && ms.lignes.some(function(l){ return l.label && pf(l.brut) > 0; }));
+  var hasDir = pf((ms.dirigeant||{}).remuneration) > 0;
+  if (!hasEmployes && !hasDir) return;
+  _urssafAutoFetched = true;
+  await fetchAllURSSAF();
+}
+
+// Debounced URSSAF pour dirigeant
+var _dirUrssafTimer = null;
+function scheduleDirURSSAF() {
+  clearTimeout(_dirUrssafTimer);
+  _dirUrssafTimer = setTimeout(async function(){
+    var dir = _data.masseSalariale.dirigeant || {};
+    var rem = pf(dir.remuneration);
+    if (rem <= 0) return;
+    try {
+      var modeDir = dir.type === 'Assimilé salarié' ? 'assimile' : 'tns';
+      var resp = await fetch('/api/urssaf-cost', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ brutMensuel: rem, dirigeant: modeDir })
+      });
+      if (resp.ok) {
+        var d = await resp.json();
+        if (d.tauxEffectif !== null) {
+          _data.masseSalariale.dirigeant.tauxCharges = d.tauxEffectif;
+          refreshTotals();
+        }
+      }
+    } catch(e) {}
+  }, 1000);
 }
 
 function renderCharges(rows, key) {
