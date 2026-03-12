@@ -572,28 +572,33 @@ async function loadEmployes() {
 }
 
 async function loadConges() {
+  _congesEnAttente = [];
   try {
-    const snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'conges'));
-    _congesEnAttente = [];
+    // 1. Collection privée admin
+    const snap = await window._getDocs(window._collection(window._db, 'rh_conges', window._uid, 'demandes'));
     snap.forEach(d => {
       const c = { id: d.id, ...d.data() };
       if (c.statut === 'en_attente') _congesEnAttente.push(c);
     });
-    renderConges();
-    buildAlertes();
-    buildNotifications();
-  } catch(e) {
-    console.warn('Conges:', e);
-    _congesEnAttente = [];
-    renderConges();
-    buildAlertes();
-    buildNotifications();
-  }
+  } catch(e) { console.warn('Conges privé:', e); }
+  try {
+    // 2. Collection publique (demandes soumises par le portail salarié)
+    const pub = await window._getDocs(window._collection(window._db, 'rh_conges_public', window._uid, 'demandes'));
+    const existingIds = new Set(_congesEnAttente.map(c => c.id));
+    pub.forEach(d => {
+      if (existingIds.has(d.id)) return;
+      const c = { id: d.id, ...d.data() };
+      if (c.statut === 'en_attente') _congesEnAttente.push(c);
+    });
+  } catch(e) { console.warn('Conges public:', e); }
+  renderConges();
+  buildAlertes();
+  buildNotifications();
 }
 
 async function loadRecrutements() {
   try {
-    const snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'recrutement'));
+    const snap = await window._getDocs(window._collection(window._db, 'rh_recrutement', window._uid, 'offres'));
     _recrutements = [];
     snap.forEach(d => _recrutements.push({ id: d.id, ...d.data() }));
     renderRecrutement();
@@ -643,19 +648,77 @@ async function loadPaie() {
 // ── TEMPS DE TRAVAIL ──
 let _tempsData = [];
 async function loadTemps() {
+  _tempsData = [];
+  // 1. Saisie manuelle (module temps de travail)
   try {
-    const moisKey = new Date().toISOString().slice(0,7);
     const snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'temps'));
-    _tempsData = [];
     snap.forEach(d => _tempsData.push({ id: d.id, ...d.data() }));
-    renderTemps();
-    renderTopSalaries('temps');
-  } catch(e) {
-    console.warn('Temps:', e);
-    _tempsData = [];
-    renderTemps();
-    renderTopSalaries('temps');
+  } catch(e) { console.warn('Temps:', e); }
+
+  // 2. Agrégation depuis les pointages du mois (si pas de saisie manuelle)
+  if (_tempsData.length === 0) {
+    try {
+      const now = new Date();
+      const y = now.getFullYear(), m = now.getMonth();
+      const last = new Date(y, m + 1, 0).getDate();
+      const fmt = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      const toMin = t => { if(!t) return 0; const p=(t||'0:0').split(':').map(Number); return p[0]*60+(p[1]||0); };
+
+      for (let d = 1; d <= Math.min(last, now.getDate()); d++) {
+        const dt = new Date(y, m, d); 
+        const ds = fmt(dt);
+        // Read from both collections
+        let allEvts = [];
+        try {
+          const s1 = await window._getDoc(window._doc(window._db, 'rh', window._uid, 'pointages', ds));
+          if (s1.exists()) allEvts.push(...(s1.data().events || []));
+        } catch(e) {}
+        try {
+          const s2 = await window._getDoc(window._doc(window._db, 'rh_pointages_public', window._uid, 'events', ds));
+          if (s2.exists()) allEvts.push(...(s2.data().events || []));
+        } catch(e) {}
+        // Deduplicate
+        const seen = new Set();
+        allEvts = allEvts.filter(ev => {
+          const k = ev.empId + '_' + ev.type + '_' + ev.heure;
+          if (seen.has(k)) return false; seen.add(k); return true;
+        });
+        // Aggregate per employee
+        const byEmp = {};
+        allEvts.forEach(ev => { if (!byEmp[ev.empId]) byEmp[ev.empId] = []; byEmp[ev.empId].push(ev); });
+        Object.entries(byEmp).forEach(([empId, evts]) => {
+          evts.sort((a,b) => (a.timestamp||0) - (b.timestamp||0));
+          const arrives = evts.filter(e => e.type === 'arrivee');
+          const departs = evts.filter(e => e.type === 'depart');
+          const arrive = arrives[arrives.length-1];
+          const depart = departs[departs.length-1];
+          if (!arrive) return;
+          const startM = toMin(arrive.heure);
+          const endM = depart && depart.timestamp > arrive.timestamp ? toMin(depart.heure) : 0;
+          if (endM <= startM) return;
+          let pauseM = 0, lastP = null;
+          evts.filter(e => e.type === 'pause_deb' || e.type === 'pause_fin').forEach(p => {
+            if (p.type === 'pause_deb') lastP = toMin(p.heure);
+            else if (p.type === 'pause_fin' && lastP !== null) { pauseM += toMin(p.heure) - lastP; lastP = null; }
+          });
+          const hrs = Math.max(0, endM - startM - pauseM) / 60;
+          const emp = _employes.find(e => e.id === empId);
+          _tempsData.push({
+            id: ds + '_' + empId,
+            employeId: empId,
+            employeNom: emp ? ((emp.prenom||'') + ' ' + (emp.nom||'')).trim() : empId,
+            mois: ds.slice(0, 7),
+            heuresTravaillees: hrs,
+            joursPresence: hrs > 0 ? 1 : 0,
+            source: 'pointages'
+          });
+        });
+      }
+    } catch(e) { console.warn('Pointages→Temps:', e); }
   }
+
+  renderTemps();
+  renderTopSalaries('temps');
 }
 
 function renderTemps() {
@@ -1501,11 +1564,12 @@ function infoRow(label, val) {
 
 window.validateConge = async function(approve) {
   if (!_currentCongeId) return;
+  const update = { statut: approve ? 'approuve' : 'refuse', updatedAt: Date.now() };
   try {
-    await window._updateDoc(
-      window._doc(window._db, 'rh', window._uid, 'conges', _currentCongeId),
-      { statut: approve ? 'approuve' : 'refuse', updatedAt: Date.now() }
-    );
+    // Update in private collection
+    try { await window._updateDoc(window._doc(window._db, 'rh_conges', window._uid, 'demandes', _currentCongeId), update); } catch(e) {}
+    // Update in public collection too (so salarié sees the result)
+    try { await window._updateDoc(window._doc(window._db, 'rh_conges_public', window._uid, 'demandes', _currentCongeId), update); } catch(e) {}
     closeModal('modalConge');
     showToast(approve ? '✅ Congé approuvé' : '✕ Congé refusé', approve ? 'success' : 'err');
     await loadConges();
