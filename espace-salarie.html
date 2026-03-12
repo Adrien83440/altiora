@@ -657,6 +657,28 @@
       <div id="pt-conf-alert" style="margin-top:10px;display:none"></div>
     </div>
 
+    <!-- Émargement départ (récap + confirmation) -->
+    <div id="pt-emarg" style="display:none;padding:16px;background:white;border-radius:14px;border:2px solid var(--green-light)">
+      <div style="text-align:center;font-size:22px;margin-bottom:4px">📝</div>
+      <div style="text-align:center;font-size:15px;font-weight:800;color:var(--text);margin-bottom:2px">Émargement de votre journée</div>
+      <div style="text-align:center;font-size:11px;color:var(--muted);margin-bottom:14px" id="pt-emarg-name">—</div>
+
+      <div style="background:var(--green-ghost);border:1.5px solid var(--green-light);border-radius:10px;padding:14px;margin-bottom:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px">
+          <div><div style="font-size:9px;color:var(--muted);font-weight:700;text-transform:uppercase">Arrivée</div><div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--g3)" id="pt-emarg-arr">—</div></div>
+          <div><div style="font-size:9px;color:var(--muted);font-weight:700;text-transform:uppercase">Départ</div><div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--red)" id="pt-emarg-dep">—</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><div style="font-size:9px;color:var(--muted);font-weight:700;text-transform:uppercase">Pause</div><div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:var(--orange)" id="pt-emarg-pause">—</div></div>
+          <div><div style="font-size:9px;color:var(--muted);font-weight:700;text-transform:uppercase">Total travaillé</div><div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:800;color:var(--g3)" id="pt-emarg-total">—</div></div>
+        </div>
+      </div>
+
+      <button id="pt-emarg-btn" onclick="confirmDailyEmarg()" style="width:100%;padding:12px;border:none;border-radius:10px;background:linear-gradient(135deg,var(--g3),var(--g4));color:white;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 3px 12px rgba(5,150,105,.3)">✅ Je confirme mes heures</button>
+      <button onclick="skipDailyEmarg()" style="width:100%;margin-top:6px;padding:8px;border:none;border-radius:8px;background:transparent;color:var(--muted);font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;cursor:pointer;text-decoration:underline">Signer plus tard</button>
+      <div style="font-size:8px;color:var(--muted);text-align:center;margin-top:6px;line-height:1.5">Signature électronique simple (art. 1366 Code civil). Conservation 5 ans (art. D.3171-16).</div>
+    </div>
+
     <!-- Historique du jour -->
     <div class="card" id="pt-history-card">
       <div class="card-head"><div class="card-title">📋 Mes pointages aujourd'hui</div></div>
@@ -1686,6 +1708,38 @@ window.doPointage=async function(type){
   var labels={arrivee:'Arrivée enregistrée !',depart:'Départ enregistré !',pause_deb:'Pause démarrée',pause_fin:'Pause terminée'};
   var icons={arrivee:'✅',depart:'👋',pause_deb:'⏸️',pause_fin:'▶️'};
   var actions=document.getElementById('pt-actions');
+
+  // ── DÉPART → Émargement quotidien ──
+  if(type==='depart'){
+    actions.style.display='none';
+    var emarg=document.getElementById('pt-emarg');
+    emarg.style.display='';
+
+    // Build day recap
+    var arrEvt=_ptEvents.filter(function(e){return e.type==='arrivee';});
+    var depEvt=_ptEvents.filter(function(e){return e.type==='depart';});
+    var arrTime=arrEvt.length?arrEvt[0].heure:'\u2014';
+    var depTime=depEvt.length?depEvt[depEvt.length-1].heure:'\u2014';
+    var pauseM=0,lastPD=null;
+    _ptEvents.forEach(function(e){
+      if(e.type==='pause_deb') lastPD=ptToMin(e.heure);
+      else if(e.type==='pause_fin'&&lastPD!==null){pauseM+=ptToMin(e.heure)-lastPD;lastPD=null;}
+    });
+    var totalW=arrTime!=='\u2014'&&depTime!=='\u2014'?Math.max(0,ptToMin(depTime)-ptToMin(arrTime)-pauseM):0;
+    var hh=Math.floor(totalW/60),mmm=totalW%60;
+
+    document.getElementById('pt-emarg-name').textContent=(_emp.prenom||'')+' '+(_emp.nom||'');
+    document.getElementById('pt-emarg-arr').textContent=arrTime;
+    document.getElementById('pt-emarg-dep').textContent=depTime;
+    document.getElementById('pt-emarg-pause').textContent=pauseM>0?(Math.floor(pauseM/60)+'h'+String(pauseM%60).padStart(2,'0')):'Aucune';
+    document.getElementById('pt-emarg-total').textContent=hh+'h'+String(mmm).padStart(2,'0');
+
+    // Store recap for confirmDailyEmarg
+    window._ptEmargRecap={arrTime:arrTime,depTime:depTime,pauseMin:pauseM,totalMinutes:totalW};
+    return;
+  }
+
+  // ── Autres types → confirmation normale ──
   var confirm=document.getElementById('pt-confirm');
   actions.style.display='none';
   confirm.style.display='';
@@ -1709,17 +1763,12 @@ window.doPointage=async function(type){
     if(allPlages.length){
       allPlages.sort(function(a,b){return ptToMin(a.deb)-ptToMin(b.deb);});
       var planStart=allPlages[0].deb;
-      var planEnd=allPlages[allPlages.length-1].fin;
       var nowM=ptToMin(ptNow());
       var alertMsg=null,alertColor='#d97706',alertIcon='⚠️';
       if(type==='arrivee'){
         var lateMin=nowM-ptToMin(planStart);
         if(lateMin>15){alertMsg='Retard de '+lateMin+' min (prévu à '+planStart+')';alertIcon='🕐';alertColor='#ef4444';}
         else if(lateMin<-10){alertMsg='En avance de '+Math.abs(lateMin)+' min';alertIcon='👍';alertColor='#059669';}
-      }
-      if(type==='depart'){
-        var earlyMin=ptToMin(planEnd)-nowM;
-        if(earlyMin>15){alertMsg='Départ anticipé de '+earlyMin+' min (fin prévue à '+planEnd+')';alertIcon='🚪';alertColor='#ef4444';}
       }
       if(alertMsg){
         alertEl.style.display='';
@@ -1732,6 +1781,90 @@ window.doPointage=async function(type){
     actions.style.display='';confirm.style.display='none';
     updatePtStatus();renderPtHistory();
   },3000);
+};
+
+// Init: load pointages when tab is shown or on start
+
+// ── CONFIRM DAILY ÉMARGEMENT (mobile) ──
+window.confirmDailyEmarg=async function(){
+  var recap=window._ptEmargRecap;
+  if(!recap){window.showToast('Erreur recap','err');return;}
+  var btn=document.getElementById('pt-emarg-btn');
+  btn.disabled=true;btn.textContent='\u23f3 Enregistrement...';
+
+  try{
+    // Server timestamp
+    var serverData={timestamp:Date.now(),iso:new Date().toISOString(),ip:'\u2014'};
+    try{var r=await fetch('/api/server-timestamp');var j=await r.json();serverData=j;}catch(e){}
+
+    var dateStr=ptFmt(new Date());
+    var pid=new URLSearchParams(window.location.search).get('id')||'';
+
+    // SHA-256
+    async function sha256(str){
+      var buf=new TextEncoder().encode(str);
+      var hash=await crypto.subtle.digest('SHA-256',buf);
+      return Array.from(new Uint8Array(hash)).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
+    }
+
+    var contentStr=JSON.stringify({date:dateStr,arrivee:recap.arrTime,depart:recap.depTime,pause:recap.pauseMin,total:recap.totalMinutes,empId:_empId});
+    var contentHash=await sha256(contentStr);
+    var proofHash=await sha256(contentHash+_empId+serverData.iso);
+
+    var dailyId=dateStr+'_'+_empId;
+    var dailyData={
+      employeId:_empId,
+      publicId:pid,
+      employeNom:((_emp.prenom||'')+' '+(_emp.nom||'')).trim(),
+      date:dateStr,
+      arrivee:recap.arrTime,
+      depart:recap.depTime,
+      pauseMin:recap.pauseMin,
+      totalMinutes:recap.totalMinutes,
+      totalHeures:Math.round(recap.totalMinutes/60*100)/100,
+      contentHash:contentHash,
+      signedAt:serverData.iso,
+      ip:serverData.ip,
+      proofHash:proofHash,
+      status:'signed',
+      source:'mobile',
+      createdAt:serverData.timestamp
+    };
+
+    // Save daily émargement
+    await window._setDocPath(['rh_emargements',_uid,'daily',dailyId],dailyData);
+
+    // Save signature in public collection (immutable)
+    var sigId='sig_daily_'+dailyId+'_'+serverData.timestamp;
+    await window._setDocPath(['rh_emargements_public',_uid,'signatures',sigId],{
+      ficheId:dailyId,type:'daily',publicId:pid,
+      employeNom:dailyData.employeNom,
+      signedAt:serverData.iso,ip:serverData.ip,
+      userAgent:navigator.userAgent||'\u2014',
+      proofHash:proofHash,status:'signed',
+      motifContestation:null,timestampSource:'server'
+    });
+
+    window.showToast('\u2705 Heures valid\u00e9es !','ok');
+  }catch(e){
+    console.error('confirmDailyEmarg',e);
+    window.showToast('Erreur : '+e.message,'err');
+  }
+
+  btn.disabled=false;btn.textContent='\u2705 Je confirme mes heures';
+  // Reset UI
+  document.getElementById('pt-emarg').style.display='none';
+  document.getElementById('pt-actions').style.display='';
+  updatePtStatus();renderPtHistory();
+  // Update émargement badge
+  if(window.loadEmargData) setTimeout(window.loadEmargData,500);
+};
+
+window.skipDailyEmarg=function(){
+  document.getElementById('pt-emarg').style.display='none';
+  document.getElementById('pt-actions').style.display='';
+  updatePtStatus();renderPtHistory();
+  window.showToast('\ud83d\udcdd Vous pourrez signer dans l\u2019onglet \u00c9margements','ok');
 };
 
 // Init: load pointages when tab is shown or on start
