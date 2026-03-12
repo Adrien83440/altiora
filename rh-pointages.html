@@ -91,6 +91,7 @@ tr:hover td{background:rgba(16,185,129,.02);}
 .alert-icon.late{background:#fef3c7;}
 .alert-icon.undertime{background:#fce7f3;}
 .alert-icon.hors{background:#f0fdf4;}
+.alert-icon.early{background:#fef3c7;}
 .alert-icon.anomaly{background:#f3e8ff;}
 .alert-body{flex:1;min-width:0;}
 .alert-title{font-size:12px;font-weight:700;}
@@ -749,6 +750,28 @@ function renderAlertes(c){
         alerts.push({icon:'undertime',emoji:'📉',title:`${empName(emp)} : ${fmtDur(hrs)} / ${fmtDur(plannedMin)} planifiées`,sub:`${dateLabel} — ${fmtDur(plannedMin-hrs)} en moins`,severity:1});
       }
 
+      // 4b. Départ anticipé (parti avant la fin prévue au planning)
+      if(plannedMin>0&&departValid){
+        const k2=`${ds}_${emp.id}`;
+        const planData=_planning[k2];
+        if(planData&&planData.items){
+          const workItems=planData.items.filter(it=>it.type==='travail'||it.type==='partiel'||it.type==='formation');
+          let lastEnd=0;
+          workItems.forEach(it=>{
+            const plages=it.plages&&it.plages.length?it.plages:(it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
+            plages.forEach(p=>{const em=toMin(p.fin);if(em>lastEnd)lastEnd=em;});
+          });
+          if(lastEnd>0){
+            const departMin=toMin(depart.heure);
+            const earlyMin=lastEnd-departMin;
+            if(earlyMin>15){
+              const endStr=Math.floor(lastEnd/60)+':'+String(lastEnd%60).padStart(2,'0');
+              alerts.push({icon:'early',emoji:'🚪',title:`${empName(emp)} parti ${earlyMin} min en avance`,sub:`${dateLabel} — Fin prévue ${endStr}, départ ${depart.heure}`,severity:2});
+            }
+          }
+        }
+      }
+
       // 5. Overtime >10h
       if(hrs>600){
         alerts.push({icon:'overtime',emoji:'⏰',title:`${empName(emp)} : ${fmtDur(hrs)} travaillées`,sub:`${dateLabel} — Dépassement durée journalière (>10h)`,severity:2});
@@ -777,7 +800,7 @@ function renderAlertes(c){
   alerts.sort((a,b)=>b.severity-a.severity);
   const absences=alerts.filter(a=>a.icon==='missing').length;
   const retards=alerts.filter(a=>a.icon==='late').length;
-  const anomalies=alerts.filter(a=>a.icon==='anomaly'||a.icon==='overtime'||a.icon==='undertime'||a.icon==='hors').length;
+  const anomalies=alerts.filter(a=>a.icon==='anomaly'||a.icon==='overtime'||a.icon==='undertime'||a.icon==='hors'||a.icon==='early').length;
 
   let h=`<div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
     <div class="kpi"><div class="kpi-label">Total alertes</div><div class="kpi-val ${alerts.length>0?'red':''}">${alerts.length}</div></div>

@@ -621,6 +621,7 @@
       <div style="font-size:16px;font-weight:800" id="pt-conf-text">Pointage enregistré</div>
       <div style="font-size:13px;color:var(--muted);margin-top:4px" id="pt-conf-sub">—</div>
       <div style="font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:700;color:var(--g3);margin-top:8px" id="pt-conf-time">--:--</div>
+      <div id="pt-conf-alert" style="margin-top:10px;display:none"></div>
     </div>
 
     <!-- Historique du jour -->
@@ -1501,26 +1502,41 @@ function updatePtStatus(){
   var btnPD=document.getElementById('pt-btn-pause-deb');
   var btnPF=document.getElementById('pt-btn-pause-fin');
   if(!btnA) return;
+
+  // Get today's planning
+  var todayStr=ptFmt(new Date());
+  var planItems=window._planningCache?window._planningCache[todayStr]:null;
+  var planStr='';
+  if(planItems&&planItems.length){
+    var pls=[];
+    planItems.forEach(function(it){
+      if(it.type!=='travail'&&it.type!=='partiel'&&it.type!=='formation') return;
+      var pl=it.plages&&it.plages.length?it.plages:(it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
+      pl.forEach(function(p){pls.push(p.deb+'–'+p.fin);});
+    });
+    if(pls.length) planStr='<div style="font-size:10px;color:var(--muted);margin-top:2px">📅 Prévu : '+pls.join(' | ')+'</div>';
+  }
+
   if(st.departed){
-    if(line)line.innerHTML='<span style="color:#059669">✅ Journée terminée — '+st.arriveTime+' → '+st.departTime+'</span>';
+    if(line)line.innerHTML='<span style="color:#059669">✅ Journée terminée — '+st.arriveTime+' → '+st.departTime+'</span>'+planStr;
     btnA.style.opacity='0.3';btnA.style.pointerEvents='none';
     btnD.style.opacity='0.3';btnD.style.pointerEvents='none';
     btnPD.style.opacity='0.3';btnPD.style.pointerEvents='none';
     btnPF.style.opacity='0.3';btnPF.style.pointerEvents='none';
   } else if(st.onPause){
-    if(line)line.innerHTML='<span style="color:#f59e0b">⏸ En pause depuis '+_ptEvents.filter(function(e){return e.type==="pause_deb";}).pop().heure+'</span>';
+    if(line)line.innerHTML='<span style="color:#f59e0b">⏸ En pause depuis '+_ptEvents.filter(function(e){return e.type==="pause_deb";}).pop().heure+'</span>'+planStr;
     btnA.style.opacity='0.3';btnA.style.pointerEvents='none';
     btnPD.style.opacity='0.3';btnPD.style.pointerEvents='none';
     btnPF.style.opacity='1';btnPF.style.pointerEvents='auto';
     btnD.style.opacity='1';btnD.style.pointerEvents='auto';
   } else if(st.arrived){
-    if(line)line.innerHTML='<span style="color:#059669">🟢 Arrivé à '+st.arriveTime+'</span>';
+    if(line)line.innerHTML='<span style="color:#059669">🟢 Arrivé à '+st.arriveTime+'</span>'+planStr;
     btnA.style.opacity='0.3';btnA.style.pointerEvents='none';
     btnPD.style.opacity='1';btnPD.style.pointerEvents='auto';
     btnPF.style.opacity='0.3';btnPF.style.pointerEvents='none';
     btnD.style.opacity='1';btnD.style.pointerEvents='auto';
   } else {
-    if(line)line.textContent='Pointez votre arrivée pour commencer';
+    if(line)line.innerHTML='Pointez votre arrivée pour commencer'+planStr;
     btnA.style.opacity='1';btnA.style.pointerEvents='auto';
     btnD.style.opacity='0.3';btnD.style.pointerEvents='none';
     btnPD.style.opacity='0.3';btnPD.style.pointerEvents='none';
@@ -1586,6 +1602,41 @@ window.doPointage=async function(type){
   document.getElementById('pt-conf-text').textContent=labels[type]||'Pointage enregistré';
   document.getElementById('pt-conf-sub').textContent=(_emp.prenom||'')+' — '+ptNow();
   document.getElementById('pt-conf-time').textContent=ptNow();
+
+  // Planning alert
+  var alertEl=document.getElementById('pt-conf-alert');
+  alertEl.style.display='none';alertEl.innerHTML='';
+  var todayStr=ptFmt(new Date());
+  var planItems=window._planningCache?window._planningCache[todayStr]:null;
+  if(planItems&&planItems.length){
+    var allPlages=[];
+    planItems.forEach(function(it){
+      if(it.type!=='travail'&&it.type!=='partiel'&&it.type!=='formation') return;
+      var pl=it.plages&&it.plages.length?it.plages:(it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
+      allPlages=allPlages.concat(pl);
+    });
+    if(allPlages.length){
+      allPlages.sort(function(a,b){return ptToMin(a.deb)-ptToMin(b.deb);});
+      var planStart=allPlages[0].deb;
+      var planEnd=allPlages[allPlages.length-1].fin;
+      var nowM=ptToMin(ptNow());
+      var alertMsg=null,alertColor='#d97706',alertIcon='⚠️';
+      if(type==='arrivee'){
+        var lateMin=nowM-ptToMin(planStart);
+        if(lateMin>15){alertMsg='Retard de '+lateMin+' min (prévu à '+planStart+')';alertIcon='🕐';alertColor='#ef4444';}
+        else if(lateMin<-10){alertMsg='En avance de '+Math.abs(lateMin)+' min';alertIcon='👍';alertColor='#059669';}
+      }
+      if(type==='depart'){
+        var earlyMin=ptToMin(planEnd)-nowM;
+        if(earlyMin>15){alertMsg='Départ anticipé de '+earlyMin+' min (fin prévue à '+planEnd+')';alertIcon='🚪';alertColor='#ef4444';}
+      }
+      if(alertMsg){
+        alertEl.style.display='';
+        alertEl.innerHTML='<div style="padding:10px 14px;border-radius:10px;background:rgba('+( alertColor==='#ef4444'?'239,68,68':'245,158,11')+',0.08);border:1.5px solid '+alertColor+'33"><div style="font-size:13px;font-weight:700;color:'+alertColor+'">'+alertIcon+' '+alertMsg+'</div></div>';
+      }
+    }
+  }
+
   setTimeout(function(){
     actions.style.display='';confirm.style.display='none';
     updatePtStatus();renderPtHistory();

@@ -275,6 +275,7 @@ body{
       <div class="confirm-text" id="confText">Pointage enregistré</div>
       <div class="confirm-sub" id="confSub">Bonne journée !</div>
       <div class="confirm-time" id="confTime">08:02</div>
+      <div id="confAlert" style="margin-top:16px;max-width:380px;text-align:center;display:none"></div>
     </div>
   </div>
 
@@ -422,6 +423,56 @@ function getTodayShift(emp){
 function hasPlannedShift(emp){
   return getTodayShift(emp)!==null;
 }
+
+function getPlannedTimes(emp){
+  const dateStr=today();
+  const k=`${dateStr}_${emp.id}`;
+  const data=_cr[k];
+  if(!data||!data.items||!data.items.length) return null;
+  const workItems=data.items.filter(it=>it.type==='travail'||it.type==='partiel'||it.type==='formation');
+  if(!workItems.length) return null;
+  let allPlages=[];
+  workItems.forEach(it=>{
+    const plages=it.plages&&it.plages.length?it.plages:(it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
+    allPlages.push(...plages);
+  });
+  if(!allPlages.length) return null;
+  allPlages.sort((a,b)=>toMin(a.deb)-toMin(b.deb));
+  return {
+    start: allPlages[0].deb,
+    end: allPlages[allPlages.length-1].fin,
+    startMin: toMin(allPlages[0].deb),
+    endMin: toMin(allPlages[allPlages.length-1].fin),
+    plages: allPlages
+  };
+}
+
+function toMin(t){if(!t)return 0;const[h,m]=(t||'0:0').split(':').map(Number);return h*60+(m||0);}
+
+function buildPlanningAlert(type, emp){
+  const plan=getPlannedTimes(emp);
+  if(!plan) return null;
+  const nowMin=toMin(nowHM());
+  const lateThreshold=15; // minutes
+
+  if(type==='arrivee'){
+    const diff=nowMin-plan.startMin;
+    if(diff>lateThreshold){
+      return {level:'warn', icon:'🕐', msg:`Retard de ${diff} min`, detail:`Prévu à ${plan.start}, arrivée à ${nowHM()}`};
+    } else if(diff<-10){
+      return {level:'info', icon:'👍', msg:`En avance de ${Math.abs(diff)} min`, detail:`Prévu à ${plan.start}`};
+    }
+  }
+  if(type==='depart'){
+    const diff=plan.endMin-nowMin;
+    if(diff>15){
+      return {level:'warn', icon:'⚠️', msg:`Départ anticipé de ${diff} min`, detail:`Fin prévue à ${plan.end}, départ à ${nowHM()}`};
+    } else if(diff<-10){
+      return {level:'info', icon:'⏰', msg:`${Math.abs(diff)} min supplémentaires`, detail:`Fin prévue à ${plan.end}`};
+    }
+  }
+  return null;
+}
 async function loadPointages(){
   _pointages=[];
   const dateKey=today();
@@ -549,9 +600,34 @@ function showActionScreen(emp){
           style="width:100%;padding:10px 14px;border:1.5px solid rgba(245,158,11,0.3);border-radius:10px;background:rgba(0,0,0,0.3);color:white;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;outline:none;margin-bottom:4px"/>
         <div style="font-size:10px;color:var(--text3);margin-top:4px">Ce pointage sera marqué « hors planning » pour votre responsable.</div>
       </div>`;
+    } else {
+      // Check if late
+      const planTimes=getPlannedTimes(emp);
+      if(planTimes){
+        const nowMin=toMin(nowHM());
+        const lateMin=nowMin-planTimes.startMin;
+        if(lateMin>15){
+          h+=`<div style="grid-column:span 2;padding:12px 14px;background:rgba(239,68,68,0.08);border:2px solid rgba(239,68,68,0.25);border-radius:12px;margin-bottom:4px;text-align:center">
+            <div style="font-size:14px;font-weight:800;color:#ef4444">🕐 Retard de ${lateMin} minutes</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">Début prévu à ${planTimes.start}</div>
+          </div>`;
+        }
+      }
     }
     h+=actionBtn('arrivee','arrive','🟢','Pointer mon arrivée',planned?'Début de journée':'Pointage hors planning');
   } else if(state.arrived && !state.departed){
+    // Check if leaving early
+    const planTimes=getPlannedTimes(emp);
+    if(planTimes){
+      const nowMin=toMin(nowHM());
+      const earlyMin=planTimes.endMin-nowMin;
+      if(earlyMin>15){
+        h+=`<div style="grid-column:span 2;padding:12px 14px;background:rgba(245,158,11,0.08);border:2px solid rgba(245,158,11,0.25);border-radius:12px;margin-bottom:4px;text-align:center">
+          <div style="font-size:12px;font-weight:700;color:var(--orange)">⏰ Fin de shift prévue à ${planTimes.end}</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:2px">Encore ${Math.floor(earlyMin/60)>0?Math.floor(earlyMin/60)+'h':''}${earlyMin%60} min de travail planifié</div>
+        </div>`;
+      }
+    }
     if(!state.onPause){
       h+=actionBtn('pause_deb','pause','⏸️','Début de pause','Décompte pause');
       h+=actionBtn('depart','depart','🔴','Pointer mon départ','Fin de journée');
@@ -683,6 +759,12 @@ async function finalizeAction(){
   if(_pendingPhoto) _pendingAction.photo=_pendingPhoto;
   _pendingPhoto=null;
 
+  // Check planning alert BEFORE saving
+  const planAlert=buildPlanningAlert(_pendingAction.type, _currentEmp);
+  if(planAlert){
+    _pendingAction.planAlert=planAlert.msg; // Store in event for admin visibility
+  }
+
   await savePointage(_pendingAction);
 
   // Show confirmation
@@ -699,11 +781,28 @@ async function finalizeAction(){
   document.getElementById('confSub').textContent=`${empName(_currentEmp)} — ${subs[type]||''}`;
   document.getElementById('confTime').textContent=_pendingAction.heure;
 
+  // Planning alert
+  const alertEl=document.getElementById('confAlert');
+  if(planAlert){
+    const bgColor=planAlert.level==='warn'?'rgba(245,158,11,0.12)':'rgba(16,185,129,0.08)';
+    const borderColor=planAlert.level==='warn'?'rgba(245,158,11,0.4)':'rgba(16,185,129,0.3)';
+    const textColor=planAlert.level==='warn'?'#d97706':'#059669';
+    alertEl.style.display='';
+    alertEl.innerHTML=`<div style="padding:14px 18px;border-radius:14px;background:${bgColor};border:2px solid ${borderColor}">
+      <div style="font-size:22px;margin-bottom:4px">${planAlert.icon}</div>
+      <div style="font-size:14px;font-weight:800;color:${textColor}">${planAlert.msg}</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:4px">${planAlert.detail}</div>
+    </div>`;
+  } else {
+    alertEl.style.display='none';
+    alertEl.innerHTML='';
+  }
+
   _pendingAction=null;
   renderSidebar();
 
-  // Auto return
-  setTimeout(()=>goBack(),AUTO_RETURN);
+  // Auto return (longer if alert shown)
+  setTimeout(()=>goBack(), planAlert ? AUTO_RETURN * 2 : AUTO_RETURN);
 }
 
 function goBack(){
@@ -771,8 +870,6 @@ function renderSidebar(){
   list.innerHTML=html||'<div style="padding:20px;text-align:center;color:var(--text3)">Aucun employé</div>';
   document.getElementById('sbBadge').textContent=`${presentCount} présent${presentCount>1?'s':''}`;
 }
-
-function toMin(t){if(!t)return 0;const[h,m]=(t||'0:0').split(':').map(Number);return h*60+(m||0);}
 
 // ── ADMIN PANEL ──
 function openAdmin(){
