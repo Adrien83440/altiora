@@ -23,7 +23,7 @@
     'rh-temps.html', 'rh-paie.html', 'rh-dirigeant.html', 'rh-recrutement.html',
     'rh-onboarding.html', 'rh-entretiens.html',
     'rh-conformite.html', 'rh-modeles.html', 'rh-documents.html', 'rh-rapport.html',
-    'rh-contrats.html', 'rh-pointeuse.html', 'rh-pointages.html'
+    'rh-contrats.html', 'rh-pointages.html'
   ];
 
   // ════════════════════════════════════════════════
@@ -158,7 +158,6 @@
         <span style="flex:1">Pointages</span>
         <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.2);color:#6ee7b7;padding:1px 5px;border-radius:4px;flex-shrink:0">Nouveau</span>
       </div>
-      <div class="si rh-si${a('rh-pointeuse.html')}" onclick="location.href='rh-pointeuse.html'"><span class="dot rh-dot"></span>Pointeuse (kiosk)</div>
 
       <div class="rh-sub-group">Rémunération</div>
       <div class="si rh-si${a('rh-paie.html')}" onclick="location.href='rh-paie.html'">
