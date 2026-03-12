@@ -965,7 +965,10 @@ async function addAuditEntry(action, targetType, targetId, actorNom){
 function viewFiche(ficheId){
   const f=_fiches.find(x=>x._id===ficheId);
   if(!f) return;
-  const sig=_signatures.find(s=>s.ficheId===ficheId && s.type==='heures');
+  const sig=_signatures.find(s=>s.ficheId===ficheId && (s.type==='heures'||s.type==='daily'));
+  const empDailys=_daily.filter(d=>d.employeId===f.employeId && d.date>=f.periodeDebut && d.date<=f.periodeFin && d.status==='signed');
+  const dailyWithSig=empDailys.find(d=>d.signatureImage);
+  const bestSig=dailyWithSig||sig||empDailys[0]||null;
 
   document.getElementById('detailTitle').textContent='📋 '+f.employeNom+' — '+f.periodeLabel;
 
@@ -999,13 +1002,20 @@ function viewFiche(ficheId){
   h+=`<div style="margin-top:14px;font-size:11px;font-weight:700;margin-bottom:6px">🔐 Preuve cryptographique</div>
     <div class="proof">Content hash : ${f.contentHash||'—'}</div>`;
 
-  if(sig){
+  if(bestSig){
     h+=`<div style="margin-top:10px" class="proof">
-      Signature salarié : ${sig.proofHash||'—'}<br>
-      Signé le : ${fmtTS(sig.signedAt)}<br>
-      IP : ${sig.ip||'—'}<br>
-      User-Agent : ${(sig.userAgent||'—').slice(0,80)}
+      Signature salarié : ${bestSig.proofHash||bestSig.contentHash||'—'}<br>
+      Signé le : ${fmtTS(bestSig.signedAt)}<br>
+      IP : ${bestSig.ip||'—'}<br>
+      Source : ${bestSig.source||'—'}
+      ${f.daysSigned?' · '+f.daysSigned+'/'+f.daysTotal+' jour(s) émargé(s)':''}
     </div>`;
+    if(dailyWithSig?.signatureImage){
+      h+=`<div style="margin-top:10px;text-align:center">
+        <div style="font-size:10px;font-weight:700;color:var(--muted);margin-bottom:4px">🖊️ Signature manuscrite (tablette)</div>
+        <img src="${dailyWithSig.signatureImage}" style="max-width:300px;border:1px solid var(--border);border-radius:8px;background:white;padding:4px" alt="Signature"/>
+      </div>`;
+    }
   }
 
   document.getElementById('detailBody').innerHTML=h;
@@ -1053,13 +1063,20 @@ window.validateFiche=validateFiche;
 function exportFichePDF(ficheId){
   const f=_fiches.find(x=>x._id===ficheId);
   if(!f){showToast('Fiche introuvable');return;}
-  const sig=_signatures.find(s=>s.ficheId===ficheId && s.type==='heures');
+
+  // Chercher signature : d'abord dans _signatures (fiche mensuelle), puis dans _daily (quotidiens)
+  const sig=_signatures.find(s=>s.ficheId===ficheId && (s.type==='heures'||s.type==='daily'));
+  // Collecter les daily signés pour cet employé sur la période
+  const empDailys=_daily.filter(d=>d.employeId===f.employeId && d.date>=f.periodeDebut && d.date<=f.periodeFin && d.status==='signed');
+  // Prendre le daily le plus récent qui a une signatureImage
+  const dailyWithSig=empDailys.find(d=>d.signatureImage);
+  // Best signature info : daily > fiche sig
+  const bestSig=dailyWithSig||sig||empDailys[0]||null;
 
   const {jsPDF}=window.jspdf;
   const pdf=new jsPDF('p','mm','a4');
   const pw=210, ph=297, margin=15, cw=pw-2*margin, bottomLimit=ph-15;
 
-  // Helper : saut de page si pas assez de place
   function needPage(y,need){ if(y+need>bottomLimit){pdf.addPage();return 20;} return y; }
 
   // ── EN-TÊTE ──
@@ -1093,7 +1110,8 @@ function exportFichePDF(ficheId){
   // ── TABLEAU DES HEURES ──
   const rows=(f.lignes||[]).map(l=>{
     const dayName=l.date?new Date(l.date+'T12:00:00').toLocaleDateString('fr-FR',{weekday:'short'}):'';
-    return [dayName+' '+fmtFR(l.date), l.debut||'—', l.fin||'—', l.pause?fmtDur(l.pause):'—', fmtDur(l.totalMin)];
+    const srcBadge=l.source==='daily'?(l.signed?' ✓':''):'';
+    return [dayName+' '+fmtFR(l.date), l.debut||'—', l.fin||'—', l.pause?fmtDur(l.pause):'—', fmtDur(l.totalMin)+srcBadge];
   });
   rows.push([{content:'TOTAL PÉRIODE',colSpan:4,styles:{fontStyle:'bold',halign:'right'}},(f.totalHeures?.toFixed(1)||0)+'h']);
 
@@ -1104,14 +1122,15 @@ function exportFichePDF(ficheId){
     theme:'grid',
     headStyles:{fillColor:[5,150,105],textColor:255,fontStyle:'bold',fontSize:8,cellPadding:2.5},
     bodyStyles:{fontSize:8,cellPadding:2},
-    columnStyles:{0:{cellWidth:48},4:{fontStyle:'bold',cellWidth:22}},
+    columnStyles:{0:{cellWidth:48},4:{fontStyle:'bold',cellWidth:24}},
     margin:{left:margin,right:margin}
   });
 
   let y=pdf.lastAutoTable.finalY+8;
 
-  // ── BLOC SIGNATURES (côte à côte, même hauteur) ──
-  const sigBoxH=28;
+  // ── BLOC SIGNATURES (côte à côte) ──
+  const hasSigImg=!!dailyWithSig?.signatureImage;
+  const sigBoxH=hasSigImg?46:28; // plus grand si image signature
   y=needPage(y,sigBoxH+4);
   const halfW=(cw-6)/2;
   pdf.setDrawColor(190);pdf.setLineWidth(0.3);
@@ -1121,20 +1140,32 @@ function exportFichePDF(ficheId){
   pdf.setFontSize(8);pdf.setFont(undefined,'bold');pdf.setTextColor(5,100,70);
   pdf.text('SIGNATURE DU SALARIÉ',margin+4,y+5);
   pdf.setFont(undefined,'normal');pdf.setTextColor(50);pdf.setFontSize(7.5);
-  if(sig){
-    pdf.text('Date : '+fmtTS(sig.signedAt),margin+4,y+10);
-    pdf.text('IP : '+(sig.ip||'—'),margin+4,y+14);
-    // Hash tronqué proprement sur la largeur dispo
-    const hashTxt='Hash : '+(sig.proofHash||'—');
-    const hashLines=pdf.splitTextToSize(hashTxt,halfW-8);
+
+  if(bestSig){
+    const sigDate=bestSig.signedAt||bestSig.signedAt||'';
+    const sigIP=bestSig.ip||'—';
+    const sigHash=bestSig.proofHash||bestSig.contentHash||'—';
+    const sigSource=bestSig.source||'—';
+
+    pdf.text('Date : '+fmtTS(sigDate),margin+4,y+10);
+    pdf.text('IP : '+sigIP+'  |  Source : '+sigSource,margin+4,y+14);
     pdf.setFontSize(6.5);pdf.setTextColor(100);
-    pdf.text(hashLines,margin+4,y+18);
-    // Agent tronqué
-    const agentTxt='Agent : '+(sig.userAgent||'—').slice(0,55);
-    pdf.text(agentTxt,margin+4,y+24);
-    if(sig.status==='contested'){
-      pdf.setTextColor(200,0,0);pdf.setFontSize(7);pdf.setFont(undefined,'bold');
-      pdf.text('CONTESTÉ'+(sig.motifContestation?' — '+sig.motifContestation.slice(0,40):''),margin+4,y+27);
+    const hashShort='Hash : '+sigHash.slice(0,48)+(sigHash.length>48?'…':'');
+    pdf.text(hashShort,margin+4,y+18);
+
+    if(f.daysSigned>0){
+      pdf.setFontSize(7);pdf.setTextColor(5,100,70);
+      pdf.text(f.daysSigned+'/'+f.daysTotal+' jour(s) émargé(s) individuellement',margin+4,y+22);
+    }
+
+    // ── IMAGE SIGNATURE MANUSCRITE ──
+    if(hasSigImg){
+      try{
+        pdf.addImage(dailyWithSig.signatureImage,'PNG',margin+6,y+24,halfW-12,18);
+      }catch(e){
+        pdf.setFontSize(6.5);pdf.setTextColor(130);
+        pdf.text('[Signature manuscrite — erreur affichage]',margin+4,y+30);
+      }
     }
   } else {
     pdf.setTextColor(160);pdf.text('En attente de signature',margin+4,y+10);
