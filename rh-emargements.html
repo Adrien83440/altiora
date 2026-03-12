@@ -295,7 +295,84 @@ async function loadData(){
   const {label}=getPeriodRange();
   document.getElementById('periodLabel').textContent=label;
   await Promise.all([loadFiches(), loadDaily(), loadPlanningAcks(), loadSignatures(), loadAudit()]);
+  await syncMissingAudit();
   render();
+}
+
+// ── AUTO-SYNC AUDIT (pour les actions mobile/salarié sans auth) ──
+async function syncMissingAudit(){
+  const auditTargetIds=new Set(_auditLog.map(a=>a.targetId));
+  let synced=0;
+
+  // 1. Daily signés sans entrée audit
+  for(const d of _daily){
+    if(d.status!=='signed') continue;
+    const tid=d._id||d.date+'_'+d.employeId;
+    if(auditTargetIds.has(tid)) continue;
+    try{
+      const auditId='aud_sync_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+      const hash=await sha256('daily_signed'+tid+(d.signedAt||'')+d.employeId);
+      const entry={
+        action:'daily_signed',targetType:'daily',targetId:tid,
+        actorType:'employe',actorId:d.employeId,actorNom:d.employeNom||'—',
+        timestamp:d.createdAt||Date.now(),ip:d.ip||'—',hash,
+        detail:'Émargement quotidien '+(d.source||'mobile')+' — '+fmtFR(d.date)
+      };
+      await window._setDoc(window._doc(window._db,'rh_emargements',window._uid,'audit',auditId),entry);
+      _auditLog.push({...entry,_id:auditId});
+      auditTargetIds.add(tid);
+      synced++;
+    }catch(e){console.warn('[audit sync daily]',e);}
+  }
+
+  // 2. Planning acks accusés sans entrée audit
+  for(const a of _planningAcks){
+    if(a.status!=='acknowledged') continue;
+    if(auditTargetIds.has(a._id)) continue;
+    try{
+      const auditId='aud_sync_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+      const hash=await sha256('planning_acknowledged'+a._id+(a.signatureEmploye?.signedAt||'')+a.employeId);
+      const entry={
+        action:'planning_acknowledged',targetType:'planning_ack',targetId:a._id,
+        actorType:'employe',actorId:a.employeId,actorNom:a.employeNom||'—',
+        timestamp:a.updatedAt||Date.now(),ip:a.signatureEmploye?.ip||'—',hash,
+        detail:'Accusé réception planning — '+(a.periodeLabel||a.planningDebut||'')
+      };
+      await window._setDoc(window._doc(window._db,'rh_emargements',window._uid,'audit',auditId),entry);
+      _auditLog.push({...entry,_id:auditId});
+      auditTargetIds.add(a._id);
+      synced++;
+    }catch(e){console.warn('[audit sync ack]',e);}
+  }
+
+  // 3. Fiches signées/contestées par salarié sans entrée audit
+  for(const f of _fiches){
+    if(f.status!=='signed'&&f.status!=='contested') continue;
+    // Check si l'audit a déjà fiche_signed ou fiche_contested pour cette fiche
+    const hasAudit=_auditLog.find(a=>(a.action==='fiche_signed'||a.action==='fiche_contested')&&a.targetId===f._id);
+    if(hasAudit) continue;
+    // Auto-signed (daily_aggregate) → pas besoin d'audit individuel, les dailys suffisent
+    if(f.signatureEmploye?.status==='daily_aggregate') continue;
+    try{
+      const action=f.status==='contested'?'fiche_contested':'fiche_signed';
+      const auditId='aud_sync_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+      const hash=await sha256(action+f._id+(f.signatureEmploye?.signedAt||'')+f.employeId);
+      const entry={
+        action,targetType:'fiche',targetId:f._id,
+        actorType:'employe',actorId:f.employeId,actorNom:f.employeNom||'—',
+        timestamp:f.updatedAt||Date.now(),ip:f.signatureEmploye?.ip||'—',hash,
+        detail:action==='fiche_contested'?'Fiche contestée par le salarié':'Fiche signée par le salarié — '+f.periodeLabel
+      };
+      await window._setDoc(window._doc(window._db,'rh_emargements',window._uid,'audit',auditId),entry);
+      _auditLog.push({...entry,_id:auditId});
+      synced++;
+    }catch(e){console.warn('[audit sync fiche]',e);}
+  }
+
+  if(synced>0){
+    console.log(`[AUDIT] ${synced} entrée(s) synchronisée(s)`);
+    _auditLog.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));
+  }
 }
 
 async function loadFiches(){
@@ -607,12 +684,15 @@ function renderPlanningAcks(c){
 function renderAudit(c){
   const ACTION_LABELS={
     fiche_created:'Fiche créée',fiche_signed:'Fiche signée',fiche_validated:'Fiche validée',
-    fiche_contested:'Fiche contestée',fiche_updated:'Fiche actualisée',planning_published:'Planning publié',planning_acknowledged:'Planning accusé',
+    fiche_contested:'Fiche contestée',fiche_updated:'Fiche actualisée',
+    daily_signed:'Émargement quotidien',
+    planning_published:'Planning publié',planning_acknowledged:'Planning accusé',
     pointage_modified:'Pointage modifié'
   };
   const ACTION_ICONS={
     fiche_created:'📋',fiche_signed:'✍️',fiche_validated:'✅',fiche_contested:'⚠️',
-    fiche_updated:'🔄',planning_published:'📅',planning_acknowledged:'👁',pointage_modified:'✏️'
+    fiche_updated:'🔄',daily_signed:'📝',
+    planning_published:'📅',planning_acknowledged:'👁',pointage_modified:'✏️'
   };
 
   let h=`<div class="card">
@@ -628,14 +708,15 @@ function renderAudit(c){
     h+=`<div class="empty"><div class="empty-icon">🔍</div>Aucune entrée d'audit pour le moment.</div>`;
   } else {
     h+=`<div class="table-wrap"><table>
-      <thead><tr><th>Date/Heure</th><th>Action</th><th>Objet</th><th>Acteur</th><th>IP</th><th>Hash preuve</th></tr></thead>
+      <thead><tr><th>Date/Heure</th><th>Action</th><th>Objet</th><th>Acteur</th><th>Détail</th><th>IP</th><th>Hash preuve</th></tr></thead>
       <tbody>`;
-    _auditLog.slice(0,100).forEach(a=>{
+    _auditLog.slice(0,200).forEach(a=>{
       h+=`<tr>
         <td><span class="time-mono" style="font-size:11px">${a.timestamp?fmtTS(a.timestamp):'—'}</span></td>
         <td><span style="font-size:13px">${ACTION_ICONS[a.action]||'📌'}</span> ${ACTION_LABELS[a.action]||a.action}</td>
-        <td style="font-size:11px">${a.targetType||'—'} <code style="font-size:9px;color:#94a3b8">${(a.targetId||'').slice(0,10)}</code></td>
+        <td style="font-size:11px">${a.targetType||'—'} <code style="font-size:9px;color:#94a3b8">${(a.targetId||'').slice(0,15)}</code></td>
         <td style="font-size:11px">${a.actorNom||'—'} <span style="color:var(--muted)">(${a.actorType||'?'})</span></td>
+        <td style="font-size:10px;color:var(--muted);max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${a.detail||''}">${a.detail||'—'}</td>
         <td><code style="font-size:10px;color:#64748b">${a.ip||'—'}</code></td>
         <td>${a.hash?'<code style="font-size:9px;color:#64748b;background:#f1f5f9;padding:2px 5px;border-radius:4px">'+a.hash.slice(0,16)+'…</code>':'—'}</td>
       </tr>`;
@@ -652,7 +733,9 @@ function exportAuditPDF(){
 
   const ACTION_LABELS={
     fiche_created:'Fiche créée',fiche_signed:'Fiche signée',fiche_validated:'Fiche validée',
-    fiche_contested:'Fiche contestée',fiche_updated:'Fiche actualisée',planning_published:'Planning publié',planning_acknowledged:'Planning accusé',
+    fiche_contested:'Fiche contestée',fiche_updated:'Fiche actualisée',
+    daily_signed:'Émargement quotidien',
+    planning_published:'Planning publié',planning_acknowledged:'Planning accusé',
     pointage_modified:'Pointage modifié'
   };
 
@@ -681,26 +764,28 @@ function exportAuditPDF(){
     a.timestamp?fmtTS(a.timestamp):'—',
     ACTION_LABELS[a.action]||a.action,
     (a.targetType||'—')+' '+(a.targetId||'').slice(0,20),
-    (a.actorNom||'—')+' ('+( a.actorType||'?')+')',
+    (a.actorNom||'—')+' ('+(a.actorType||'?')+')',
+    (a.detail||'—').slice(0,40),
     a.ip||'—',
     a.hash?(a.hash.slice(0,24)+'…'):'—'
   ]);
 
   pdf.autoTable({
     startY:31,
-    head:[['Date / Heure','Action','Objet (type + ID)','Acteur','IP','Hash preuve (SHA-256)']],
+    head:[['Date / Heure','Action','Objet','Acteur','Détail','IP','Hash (SHA-256)']],
     body:rows,
     theme:'grid',
     headStyles:{fillColor:[30,41,59],textColor:255,fontStyle:'bold',fontSize:7,cellPadding:2.5},
-    bodyStyles:{fontSize:6.5,cellPadding:2,textColor:[50,50,50]},
+    bodyStyles:{fontSize:6,cellPadding:2,textColor:[50,50,50]},
     alternateRowStyles:{fillColor:[248,250,252]},
     columnStyles:{
-      0:{cellWidth:32,font:'courier',fontSize:6.5},
-      1:{cellWidth:28},
-      2:{cellWidth:52,fontSize:6},
-      3:{cellWidth:35},
-      4:{cellWidth:28,font:'courier',fontSize:6},
-      5:{cellWidth:50,font:'courier',fontSize:5.5,textColor:[100,116,139]}
+      0:{cellWidth:28,font:'courier',fontSize:6},
+      1:{cellWidth:24},
+      2:{cellWidth:36,fontSize:5.5},
+      3:{cellWidth:30},
+      4:{cellWidth:42,fontSize:5.5,textColor:[100,116,139]},
+      5:{cellWidth:22,font:'courier',fontSize:5.5},
+      6:{cellWidth:40,font:'courier',fontSize:5,textColor:[100,116,139]}
     },
     margin:{left:margin,right:margin},
     // Footer sur chaque page
