@@ -23,7 +23,7 @@
     'rh-temps.html', 'rh-paie.html', 'rh-dirigeant.html', 'rh-recrutement.html',
     'rh-onboarding.html', 'rh-entretiens.html',
     'rh-conformite.html', 'rh-modeles.html', 'rh-documents.html', 'rh-rapport.html',
-    'rh-contrats.html', 'rh-pointages.html', 'rh-emargements.html'
+    'rh-contrats.html', 'rh-pointages.html', 'rh-emargements.html', 'rh-urgence.html'
   ];
 
   // ════════════════════════════════════════════════
@@ -183,6 +183,11 @@
       <div class="si rh-si${a('rh-onboarding.html')}"  onclick="location.href='rh-onboarding.html'"><span class="dot rh-dot"></span>Onboarding / Offboarding</div>
       <div class="si rh-si${a('rh-entretiens.html')}"  onclick="location.href='rh-entretiens.html'"><span class="dot rh-dot"></span>Entretiens annuels</div>
       <div class="si rh-si${a('rh-conformite.html')}"  onclick="location.href='rh-conformite.html'"><span class="dot rh-dot"></span>Conformité &amp; Légal</div>
+      <div class="si rh-si${a('rh-urgence.html')}" onclick="location.href='rh-urgence.html'">
+        <span class="dot rh-dot"></span>
+        <span style="flex:1">Urgence Contrôle</span>
+        <span style="font-size:9px;font-weight:700;background:rgba(239,68,68,.2);color:#f87171;padding:1px 5px;border-radius:4px;flex-shrink:0">SOS</span>
+      </div>
       <div class="si rh-si${a('rh-contrats.html')}"   onclick="location.href='rh-contrats.html'"><span class="dot rh-dot"></span>Contrats de travail
         <span style="font-size:9px;font-weight:700;background:rgba(124,58,237,.2);color:#c084fc;padding:1px 5px;border-radius:4px;flex-shrink:0;margin-left:auto">IA</span>
       </div>
