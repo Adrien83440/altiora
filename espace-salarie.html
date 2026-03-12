@@ -5,7 +5,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
   <title>Mon espace — ALTEORE</title>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet"/>
   <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
     :root{
@@ -304,6 +304,7 @@
       
       <button class="tnav" onclick="showTab('conges',this)" id="tab-conges-btn">🏖️ Congés</button>
       <button class="tnav" onclick="showTab('planning',this)">📅 Planning</button>
+      <button class="tnav" onclick="showTab('pointage',this)">⏱ Pointage</button>
     </div>
   </div>
 
@@ -572,6 +573,57 @@
     <div class="card" id="horaires-card">
       <div class="card-head"><div class="card-title">⏰ Mes horaires habituels</div></div>
       <div class="card-body" id="horaires-body"></div>
+    </div>
+  </div>
+
+  <!-- ══ ONGLET POINTAGE ══ -->
+  <div class="tab-section" id="tab-pointage" style="margin-top:16px">
+    <!-- Horloge -->
+    <div class="card" style="text-align:center;padding:24px 16px">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:42px;font-weight:700;color:var(--g3);letter-spacing:2px" id="pt-clock">--:--</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:4px" id="pt-date">—</div>
+      <div style="margin-top:6px;font-size:11px;color:var(--muted)" id="pt-status-line">—</div>
+    </div>
+
+    <!-- Boutons d'action -->
+    <div id="pt-actions" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <button id="pt-btn-arrivee" onclick="doPointage('arrivee')" style="padding:18px 12px;border-radius:14px;border:2px solid #d1fae5;background:#f0fdf4;cursor:pointer;text-align:center;font-family:'Plus Jakarta Sans',sans-serif;transition:all .2s">
+        <div style="font-size:28px;margin-bottom:4px">🟢</div>
+        <div style="font-size:13px;font-weight:700;color:#166534">Mon arrivée</div>
+      </button>
+      <button id="pt-btn-depart" onclick="doPointage('depart')" style="padding:18px 12px;border-radius:14px;border:2px solid #fecaca;background:#fef2f2;cursor:pointer;text-align:center;font-family:'Plus Jakarta Sans',sans-serif;transition:all .2s">
+        <div style="font-size:28px;margin-bottom:4px">🔴</div>
+        <div style="font-size:13px;font-weight:700;color:#991b1b">Mon départ</div>
+      </button>
+      <button id="pt-btn-pause-deb" onclick="doPointage('pause_deb')" style="padding:14px 12px;border-radius:14px;border:2px solid #fde68a;background:#fffbeb;cursor:pointer;text-align:center;font-family:'Plus Jakarta Sans',sans-serif;transition:all .2s">
+        <div style="font-size:24px;margin-bottom:2px">⏸️</div>
+        <div style="font-size:12px;font-weight:700;color:#92400e">Début pause</div>
+      </button>
+      <button id="pt-btn-pause-fin" onclick="doPointage('pause_fin')" style="padding:14px 12px;border-radius:14px;border:2px solid #bfdbfe;background:#eff6ff;cursor:pointer;text-align:center;font-family:'Plus Jakarta Sans',sans-serif;transition:all .2s">
+        <div style="font-size:24px;margin-bottom:2px">▶️</div>
+        <div style="font-size:12px;font-weight:700;color:#1e40af">Fin pause</div>
+      </button>
+    </div>
+
+    <!-- Confirmation -->
+    <div id="pt-confirm" style="display:none;text-align:center;padding:20px;background:white;border-radius:14px;border:1px solid var(--border)">
+      <div style="font-size:48px;margin-bottom:8px" id="pt-conf-icon">✅</div>
+      <div style="font-size:16px;font-weight:800" id="pt-conf-text">Pointage enregistré</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:4px" id="pt-conf-sub">—</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:700;color:var(--g3);margin-top:8px" id="pt-conf-time">--:--</div>
+    </div>
+
+    <!-- Historique du jour -->
+    <div class="card" id="pt-history-card">
+      <div class="card-head"><div class="card-title">📋 Mes pointages aujourd'hui</div></div>
+      <div class="card-body" id="pt-history" style="padding:8px 12px">
+        <div style="text-align:center;padding:12px;color:var(--muted);font-size:11px">Aucun pointage</div>
+      </div>
+    </div>
+
+    <!-- Mode info -->
+    <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:8px;line-height:1.6" id="pt-mode-info">
+      Pointage mobile activé par votre employeur
     </div>
   </div>
 
@@ -1382,6 +1434,146 @@ window.submitDemande = async function() {
 };
 
 console.log('[PATCH v3] Congés public override chargé ✓');
+})();
+</script>
+
+<!-- ══ POINTAGE MOBILE ══ -->
+<script>
+(function(){
+var _ptEvents = [];
+var _ptLoaded = false;
+
+function ptFmt(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function ptNow(){var d=new Date();return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+function ptToMin(t){if(!t)return 0;var p=t.split(':').map(Number);return p[0]*60+(p[1]||0);}
+
+// Clock
+function ptTick(){
+  var now=new Date();
+  var el=document.getElementById('pt-clock');if(el)el.textContent=now.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  var el2=document.getElementById('pt-date');if(el2)el2.textContent=now.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  updatePtStatus();
+}
+setInterval(ptTick,10000);
+
+// Load today's pointages
+async function loadPtEvents(){
+  if(!window._dbReady||!_uid) return;
+  try{
+    var snap=await window._getDoc('rh_pointages_public',_uid,'events',ptFmt(new Date()));
+    _ptEvents=snap.exists()?(snap.data().events||[]).filter(function(e){return e.empId===_empId;}):[];
+  }catch(e){_ptEvents=[];}
+  _ptLoaded=true;
+  updatePtStatus();
+  renderPtHistory();
+}
+
+function getState(){
+  var arrived=_ptEvents.some(function(e){return e.type==='arrivee';});
+  var departed=_ptEvents.some(function(e){return e.type==='depart';});
+  var pauses=_ptEvents.filter(function(e){return e.type==='pause_deb'||e.type==='pause_fin';});
+  var onPause=pauses.length>0&&pauses[pauses.length-1].type==='pause_deb';
+  var arriveEvt=_ptEvents.find(function(e){return e.type==='arrivee';});
+  var departEvt=_ptEvents.find(function(e){return e.type==='depart';});
+  return {arrived:arrived,departed:departed,onPause:onPause,arriveTime:arriveEvt?arriveEvt.heure:'',departTime:departEvt?departEvt.heure:''};
+}
+
+function updatePtStatus(){
+  if(!_ptLoaded) return;
+  var st=getState();
+  var line=document.getElementById('pt-status-line');
+  var btnA=document.getElementById('pt-btn-arrivee');
+  var btnD=document.getElementById('pt-btn-depart');
+  var btnPD=document.getElementById('pt-btn-pause-deb');
+  var btnPF=document.getElementById('pt-btn-pause-fin');
+  if(!btnA) return;
+  if(st.departed){
+    if(line)line.innerHTML='<span style="color:#059669">✅ Journée terminée — '+st.arriveTime+' → '+st.departTime+'</span>';
+    btnA.style.opacity='0.3';btnA.style.pointerEvents='none';
+    btnD.style.opacity='0.3';btnD.style.pointerEvents='none';
+    btnPD.style.opacity='0.3';btnPD.style.pointerEvents='none';
+    btnPF.style.opacity='0.3';btnPF.style.pointerEvents='none';
+  } else if(st.onPause){
+    if(line)line.innerHTML='<span style="color:#f59e0b">⏸ En pause depuis '+_ptEvents.filter(function(e){return e.type==="pause_deb";}).pop().heure+'</span>';
+    btnA.style.opacity='0.3';btnA.style.pointerEvents='none';
+    btnPD.style.opacity='0.3';btnPD.style.pointerEvents='none';
+    btnPF.style.opacity='1';btnPF.style.pointerEvents='auto';
+    btnD.style.opacity='1';btnD.style.pointerEvents='auto';
+  } else if(st.arrived){
+    if(line)line.innerHTML='<span style="color:#059669">🟢 Arrivé à '+st.arriveTime+'</span>';
+    btnA.style.opacity='0.3';btnA.style.pointerEvents='none';
+    btnPD.style.opacity='1';btnPD.style.pointerEvents='auto';
+    btnPF.style.opacity='0.3';btnPF.style.pointerEvents='none';
+    btnD.style.opacity='1';btnD.style.pointerEvents='auto';
+  } else {
+    if(line)line.textContent='Pointez votre arrivée pour commencer';
+    btnA.style.opacity='1';btnA.style.pointerEvents='auto';
+    btnD.style.opacity='0.3';btnD.style.pointerEvents='none';
+    btnPD.style.opacity='0.3';btnPD.style.pointerEvents='none';
+    btnPF.style.opacity='0.3';btnPF.style.pointerEvents='none';
+  }
+}
+
+function renderPtHistory(){
+  var el=document.getElementById('pt-history');if(!el) return;
+  if(!_ptEvents.length){el.innerHTML='<div style="text-align:center;padding:12px;color:var(--muted);font-size:11px">Aucun pointage aujourd\'hui</div>';return;}
+  var labels={arrivee:'🟢 Arrivée',depart:'🔴 Départ',pause_deb:'⏸ Début pause',pause_fin:'▶️ Fin pause'};
+  el.innerHTML=_ptEvents.map(function(ev){
+    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">'
+      +'<span style="font-size:12px;font-weight:600">'+(labels[ev.type]||ev.type)+'</span>'
+      +'<span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:var(--g3)">'+ev.heure+'</span>'
+    +'</div>';
+  }).join('');
+}
+
+window.doPointage=async function(type){
+  if(!_uid||!_empId){window.showToast('Erreur de session','err');return;}
+  var evt={empId:_empId,type:type,heure:ptNow(),timestamp:Date.now(),source:'mobile'};
+
+  // GPS if available
+  if(navigator.geolocation){
+    try{
+      var pos=await new Promise(function(ok,fail){navigator.geolocation.getCurrentPosition(ok,fail,{timeout:5000,maximumAge:60000});});
+      evt.lat=pos.coords.latitude;evt.lng=pos.coords.longitude;evt.accuracy=pos.coords.accuracy;
+    }catch(e){}
+  }
+
+  _ptEvents.push(evt);
+
+  // Save to public collection
+  try{
+    await window._setDocPath(['rh_pointages_public',_uid,'events',ptFmt(new Date())],{events:_ptEvents.filter(function(e){return e.empId===_empId;}),updatedAt:Date.now()},{merge:true});
+  }catch(e){console.error('pointage save',e);window.showToast('Erreur : '+e.message,'err');return;}
+
+  // Show confirmation
+  var labels={arrivee:'Arrivée enregistrée !',depart:'Départ enregistré !',pause_deb:'Pause démarrée',pause_fin:'Pause terminée'};
+  var icons={arrivee:'✅',depart:'👋',pause_deb:'⏸️',pause_fin:'▶️'};
+  var actions=document.getElementById('pt-actions');
+  var confirm=document.getElementById('pt-confirm');
+  actions.style.display='none';
+  confirm.style.display='';
+  document.getElementById('pt-conf-icon').textContent=icons[type]||'✅';
+  document.getElementById('pt-conf-text').textContent=labels[type]||'Pointage enregistré';
+  document.getElementById('pt-conf-sub').textContent=(_emp.prenom||'')+' — '+ptNow();
+  document.getElementById('pt-conf-time').textContent=ptNow();
+  setTimeout(function(){
+    actions.style.display='';confirm.style.display='none';
+    updatePtStatus();renderPtHistory();
+  },3000);
+};
+
+// Init: load pointages when tab is shown or on start
+var origShowTab=window.showTab;
+window.showTab=function(id,btn){
+  origShowTab(id,btn);
+  if(id==='pointage'&&!_ptLoaded){
+    ptTick();
+    var t2=setInterval(function(){if(_uid&&window._dbReady){clearInterval(t2);loadPtEvents();}},200);
+  }
+};
+
+// Also try loading at page load after a delay
+setTimeout(function(){if(_uid&&window._dbReady)loadPtEvents();},3000);
 })();
 </script>
 </body>

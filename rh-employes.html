@@ -534,6 +534,19 @@
 
       <!-- Compétences / Postes (utilisé par le Planning & Polyvalence) -->
       <div class="msep">🎯 Compétences & Postes <span style="font-size:10px;font-weight:400;color:var(--muted)">— utilisées dans le Planning & la Polyvalence</span></div>
+      <div style="margin-bottom:14px">
+        <div class="mrow">
+          <div class="mfield">
+            <label>🔐 Code PIN Pointeuse (4 chiffres)</label>
+            <input class="minput" id="f-pin" type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="Ex: 1234" style="font-family:'JetBrains Mono',monospace;font-size:18px;letter-spacing:6px;text-align:center"/>
+          </div>
+          <div class="mfield">
+            <label>&nbsp;</label>
+            <button type="button" onclick="generatePin()" class="btn btn-outline btn-sm" style="height:40px;width:100%">🎲 Générer un PIN aléatoire</button>
+          </div>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:4px">Le code PIN est utilisé pour identifier le salarié sur la <b>Pointeuse tablette</b>. Chaque PIN doit être unique.</div>
+      </div>
       <div id="comp-editor" style="margin-bottom:14px">
         <div id="comp-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
         <div style="display:flex;gap:6px;align-items:end">
@@ -1145,6 +1158,7 @@ function renderFiche(e) {
             ${infoField('Fréquence',e.frequence||'mensuel')}
             ${infoField('Heures hebdo',(e.heuresHebdo||35)+'h')}
             ${infoField('IBAN',e.iban ? maskIBAN(e.iban) : null)}
+            ${infoField('PIN Pointeuse',e.pin ? '••••' : null)}
           </div>
         </div>
         <!-- Administratif & Conformité -->
@@ -2448,6 +2462,18 @@ async function loadCCNCustomNotes() {
 }
 
 // ── COMPÉTENCES ──
+// ── PIN ──
+window.generatePin = function(){
+  const existing = Object.values(_employes).map(e=>e.pin).filter(Boolean);
+  let pin;
+  let attempts=0;
+  do{
+    pin=String(Math.floor(1000+Math.random()*9000)); // 4 digits, never starts with 0
+    attempts++;
+  }while(existing.includes(pin)&&attempts<100);
+  document.getElementById('f-pin').value=pin;
+};
+
 function renderCompetences(){
   const list = document.getElementById('comp-list');
   if(!list) return;
@@ -2495,7 +2521,7 @@ window.openModalNouvelEmploye = function() {
   const ii = document.getElementById('f-ccn-idcc-direct'); if(ii) ii.value='';
   const rd = document.getElementById('f-ccn-search-results'); if(rd) rd.style.display='none';
   ['prenom','nom','naissance','nationalite','adresse','tel','email','nss',
-   'poste','dept','entree','fin','brut','net','heures','iban','note','superbrut'].forEach(k => {
+   'poste','dept','entree','fin','brut','net','heures','iban','note','superbrut','pin'].forEach(k => {
     const el = document.getElementById('f-'+k);
     if (el) el.value = '';
   });
@@ -2532,6 +2558,7 @@ window.openModalEdit = function(id) {
   set('entree',e.dateEntree); set('fin',e.dateFinContrat);
   set('brut',e.salaireBrut); set('net',e.salaireNet); set('heures',e.heuresHebdo||35);
   set('iban',e.iban); set('note',e.noteMoyenne||'');
+  set('pin',e.pin||'');
   // Champs Administratif & Conformité
   const setEl = (id, val) => { const el=document.getElementById(id); if(el) el.value=val||''; };
   const setChk = (id, val) => { const el=document.getElementById(id); if(el) el.checked=!!val; };
@@ -2623,6 +2650,7 @@ window.saveEmploye = async function() {
     docContratRecu:  document.getElementById('f-doc-contrat')?.checked||false,
     ccn:             document.getElementById('f-ccn').value||null,
     couleur:         document.getElementById('f-couleur').value,
+    pin:             document.getElementById('f-pin').value.trim()||null,
     competences:     _tempCompetences.map(c=>({nom:c.nom,niveau:c.niveau})),
     // Période d'essai
     periodeEssai: document.getElementById('pe-active')?.checked ? {
