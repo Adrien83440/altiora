@@ -755,34 +755,38 @@ function exportFichePDF(ficheId){
 
   const {jsPDF}=window.jspdf;
   const pdf=new jsPDF('p','mm','a4');
-  const pw=210, margin=15, cw=pw-2*margin;
+  const pw=210, ph=297, margin=15, cw=pw-2*margin, bottomLimit=ph-15;
+
+  // Helper : saut de page si pas assez de place
+  function needPage(y,need){ if(y+need>bottomLimit){pdf.addPage();return 20;} return y; }
 
   // ── EN-TÊTE ──
-  pdf.setFontSize(16);pdf.setFont(undefined,'bold');
+  pdf.setFontSize(15);pdf.setFont(undefined,'bold');pdf.setTextColor(20,20,20);
   pdf.text('FICHE DE DÉCOMPTE DES HEURES DE TRAVAIL',margin,20);
-  pdf.setFontSize(9);pdf.setFont(undefined,'normal');pdf.setTextColor(80);
-  pdf.text('Document établi conformément aux articles L.3171-2, D.3171-8 et D.3171-16 du Code du travail',margin,26);
+  pdf.setFontSize(8);pdf.setFont(undefined,'normal');pdf.setTextColor(100);
+  pdf.text('Articles L.3171-2, D.3171-8 et D.3171-16 du Code du travail',margin,25);
 
-  // Cadre identification
-  pdf.setDrawColor(200);pdf.setLineWidth(0.3);
-  pdf.roundedRect(margin,30,cw,26,2,2);
-  pdf.setTextColor(0);pdf.setFontSize(10);pdf.setFont(undefined,'bold');
-  pdf.text('Salarié :',margin+4,38);
+  // ── CADRE IDENTIFICATION ──
+  pdf.setDrawColor(180);pdf.setLineWidth(0.4);
+  pdf.roundedRect(margin,29,cw,22,2,2);
+  const col1=margin+4, col2=margin+35, col3=margin+cw/2+4, col4=margin+cw/2+35;
+
+  pdf.setTextColor(0);pdf.setFontSize(9);
+  pdf.setFont(undefined,'bold');pdf.text('Salarié :',col1,36);
+  pdf.setFont(undefined,'normal');pdf.text(f.employeNom||'—',col2,36);
+
+  pdf.setFont(undefined,'bold');pdf.text('Période :',col1,42);
+  pdf.setFont(undefined,'normal');pdf.text(f.periodeLabel||f.periode||'—',col2,42);
+
+  pdf.setFont(undefined,'bold');pdf.text('Total :',col1,48);
+  pdf.setFont(undefined,'normal');pdf.text((f.totalHeures?.toFixed(1)||0)+'h ('+(f.totalMinutes||0)+' min)',col2,48);
+
+  pdf.setFont(undefined,'bold');pdf.text('Statut :',col3,36);
+  pdf.setFont(undefined,'normal');pdf.text(STATUS_LABELS[f.status]||f.status,col4,36);
+
+  pdf.setFont(undefined,'bold');pdf.text('Émis le :',col3,42);
   pdf.setFont(undefined,'normal');
-  pdf.text(f.employeNom||'—',margin+30,38);
-  pdf.setFont(undefined,'bold');
-  pdf.text('Période :',margin+4,44);
-  pdf.setFont(undefined,'normal');
-  pdf.text(f.periodeLabel||f.periode||'—',margin+30,44);
-  pdf.setFont(undefined,'bold');
-  pdf.text('Total heures :',margin+4,50);
-  pdf.setFont(undefined,'normal');
-  pdf.text((f.totalHeures?.toFixed(1)||0)+'h ('+(f.totalMinutes||0)+' min)',margin+36,50);
-  // Statut à droite
-  pdf.setFont(undefined,'bold');
-  pdf.text('Statut : '+(STATUS_LABELS[f.status]||f.status),margin+cw-55,38);
-  pdf.setFontSize(8);pdf.setFont(undefined,'normal');
-  pdf.text('Émis le : '+new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}),margin+cw-55,44);
+  pdf.text(new Date().toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}),col4,42);
 
   // ── TABLEAU DES HEURES ──
   const rows=(f.lignes||[]).map(l=>{
@@ -792,88 +796,106 @@ function exportFichePDF(ficheId){
   rows.push([{content:'TOTAL PÉRIODE',colSpan:4,styles:{fontStyle:'bold',halign:'right'}},(f.totalHeures?.toFixed(1)||0)+'h']);
 
   pdf.autoTable({
-    startY:60,
-    head:[['Jour / Date','Début','Fin','Pause','Durée travaillée']],
+    startY:55,
+    head:[['Jour / Date','Début','Fin','Pause','Durée']],
     body:rows,
     theme:'grid',
-    headStyles:{fillColor:[5,150,105],textColor:255,fontStyle:'bold',fontSize:8,cellPadding:3},
-    bodyStyles:{fontSize:8,cellPadding:2.5},
-    columnStyles:{0:{cellWidth:50},4:{fontStyle:'bold'}},
+    headStyles:{fillColor:[5,150,105],textColor:255,fontStyle:'bold',fontSize:8,cellPadding:2.5},
+    bodyStyles:{fontSize:8,cellPadding:2},
+    columnStyles:{0:{cellWidth:48},4:{fontStyle:'bold',cellWidth:22}},
     margin:{left:margin,right:margin}
   });
 
-  let y=pdf.lastAutoTable.finalY+10;
+  let y=pdf.lastAutoTable.finalY+8;
 
-  // ── BLOC SIGNATURES (côte à côte) ──
-  const halfW=cw/2-3;
-  pdf.setDrawColor(200);pdf.setLineWidth(0.3);
+  // ── BLOC SIGNATURES (côte à côte, même hauteur) ──
+  const sigBoxH=28;
+  y=needPage(y,sigBoxH+4);
+  const halfW=(cw-6)/2;
+  pdf.setDrawColor(190);pdf.setLineWidth(0.3);
 
-  // Signature salarié (gauche)
-  pdf.roundedRect(margin,y,halfW,sig?32:22,2,2);
-  pdf.setFontSize(9);pdf.setFont(undefined,'bold');pdf.setTextColor(0);
-  pdf.text('SIGNATURE DU SALARIÉ',margin+4,y+6);
-  pdf.setFont(undefined,'normal');pdf.setFontSize(8);
+  // Gauche — Salarié
+  pdf.roundedRect(margin,y,halfW,sigBoxH,2,2);
+  pdf.setFontSize(8);pdf.setFont(undefined,'bold');pdf.setTextColor(5,100,70);
+  pdf.text('SIGNATURE DU SALARIÉ',margin+4,y+5);
+  pdf.setFont(undefined,'normal');pdf.setTextColor(50);pdf.setFontSize(7.5);
   if(sig){
-    pdf.text('Signé le : '+fmtTS(sig.signedAt),margin+4,y+12);
-    pdf.text('Adresse IP : '+(sig.ip||'—'),margin+4,y+17);
-    pdf.setTextColor(80);pdf.setFontSize(7);
-    pdf.text('Hash preuve : '+(sig.proofHash||'—'),margin+4,y+22);
-    pdf.text('Agent : '+(sig.userAgent||'—').slice(0,60),margin+4,y+26);
+    pdf.text('Date : '+fmtTS(sig.signedAt),margin+4,y+10);
+    pdf.text('IP : '+(sig.ip||'—'),margin+4,y+14);
+    // Hash tronqué proprement sur la largeur dispo
+    const hashTxt='Hash : '+(sig.proofHash||'—');
+    const hashLines=pdf.splitTextToSize(hashTxt,halfW-8);
+    pdf.setFontSize(6.5);pdf.setTextColor(100);
+    pdf.text(hashLines,margin+4,y+18);
+    // Agent tronqué
+    const agentTxt='Agent : '+(sig.userAgent||'—').slice(0,55);
+    pdf.text(agentTxt,margin+4,y+24);
     if(sig.status==='contested'){
-      pdf.setTextColor(200,0,0);pdf.setFontSize(8);pdf.setFont(undefined,'bold');
-      pdf.text('⚠ CONTESTÉ'+(sig.motifContestation?' — Motif : '+sig.motifContestation.slice(0,50):''),margin+4,y+31);
+      pdf.setTextColor(200,0,0);pdf.setFontSize(7);pdf.setFont(undefined,'bold');
+      pdf.text('CONTESTÉ'+(sig.motifContestation?' — '+sig.motifContestation.slice(0,40):''),margin+4,y+27);
     }
   } else {
-    pdf.setTextColor(150);pdf.text('En attente de signature',margin+4,y+12);
+    pdf.setTextColor(160);pdf.text('En attente de signature',margin+4,y+10);
   }
 
-  // Contresignature employeur (droite)
+  // Droite — Employeur
   const rx=margin+halfW+6;
-  pdf.setTextColor(0);pdf.setDrawColor(200);
-  pdf.roundedRect(rx,y,halfW,sig?32:22,2,2);
-  pdf.setFontSize(9);pdf.setFont(undefined,'bold');
-  pdf.text('CONTRESIGNATURE EMPLOYEUR',rx+4,y+6);
-  pdf.setFont(undefined,'normal');pdf.setFontSize(8);
+  pdf.setDrawColor(190);
+  pdf.roundedRect(rx,y,halfW,sigBoxH,2,2);
+  pdf.setFontSize(8);pdf.setFont(undefined,'bold');pdf.setTextColor(5,70,100);
+  pdf.text('CONTRESIGNATURE EMPLOYEUR',rx+4,y+5);
+  pdf.setFont(undefined,'normal');pdf.setTextColor(50);pdf.setFontSize(7.5);
   if(f.signatureAdmin){
-    pdf.text('Validé le : '+fmtTS(f.signatureAdmin.validatedAt),rx+4,y+12);
-    pdf.text('Statut : '+(f.signatureAdmin.status==='validated'?'Validé':'Rejeté'),rx+4,y+17);
+    pdf.text('Date : '+fmtTS(f.signatureAdmin.validatedAt),rx+4,y+10);
+    pdf.text('Statut : '+(f.signatureAdmin.status==='validated'?'Validé':'Rejeté'),rx+4,y+14);
   } else {
-    pdf.setTextColor(150);pdf.text('En attente de validation',rx+4,y+12);
+    pdf.setTextColor(160);pdf.text('En attente de validation',rx+4,y+10);
   }
 
-  y+=(sig?36:26);
+  y+=sigBoxH+5;
 
-  // ── BLOC INTÉGRITÉ CRYPTOGRAPHIQUE ──
-  pdf.setDrawColor(220);pdf.setFillColor(248,250,252);
-  pdf.roundedRect(margin,y,cw,14,2,2,'FD');
-  pdf.setFontSize(7);pdf.setTextColor(100);pdf.setFont(undefined,'bold');
-  pdf.text('INTÉGRITÉ DU DOCUMENT',margin+4,y+5);
-  pdf.setFont(undefined,'normal');
-  pdf.text('Hash contenu (SHA-256) : '+(f.contentHash||'—'),margin+4,y+9);
-  pdf.text('ID fiche : '+(f._id||'—')+'  |  Créé le : '+(f.createdAt?fmtTS(f.createdAt):'—'),margin+4,y+12);
+  // ── BLOC INTÉGRITÉ ──
+  y=needPage(y,16);
+  pdf.setDrawColor(210);pdf.setFillColor(245,247,250);
+  pdf.roundedRect(margin,y,cw,12,1.5,1.5,'FD');
+  pdf.setFontSize(7);pdf.setFont(undefined,'bold');pdf.setTextColor(80);
+  pdf.text('INTÉGRITÉ DU DOCUMENT',margin+4,y+4.5);
+  pdf.setFont(undefined,'normal');pdf.setFontSize(6.5);pdf.setTextColor(110);
+  // Hash tronqué pour rentrer dans la boîte
+  const contentHashShort=(f.contentHash||'—').slice(0,64);
+  pdf.text('SHA-256 : '+contentHashShort+(f.contentHash&&f.contentHash.length>64?'…':''),margin+4,y+8);
+  pdf.text('ID : '+(f._id||'—').slice(0,50)+'   |   Créé : '+(f.createdAt?fmtTS(f.createdAt):'—'),margin+4,y+11);
 
-  y+=18;
+  y+=16;
 
   // ── MENTIONS LÉGALES ──
-  pdf.setFontSize(7);pdf.setTextColor(130);pdf.setFont(undefined,'normal');
+  y=needPage(y,38);
+  pdf.setDrawColor(220);pdf.setLineWidth(0.2);
+  pdf.line(margin,y,margin+cw,y);
+  y+=3;
+
+  pdf.setFontSize(6.5);pdf.setFont(undefined,'bold');pdf.setTextColor(140);
+  pdf.text('MENTIONS LÉGALES',margin,y);
+  y+=3;
+
+  pdf.setFont(undefined,'normal');pdf.setFontSize(6);pdf.setTextColor(140);
   const mentions=[
-    'MENTIONS LÉGALES',
-    '• Ce document constitue le décompte individuel du temps de travail prévu par l\'article L.3171-2 du Code du travail.',
-    '• Signature électronique simple au sens de l\'article 1366 du Code civil et du règlement (UE) n°910/2014 (eIDAS, niveau 1).',
-    '• Conservation obligatoire : 5 ans à compter de l\'établissement, conformément à l\'article D.3171-16 du Code du travail.',
-    '• Ce document est tenu à la disposition de l\'inspecteur ou du contrôleur du travail (art. D.3171-14).',
-    '• Le salarié dispose d\'un droit de contestation (art. L.3171-4). Toute contestation est horodatée et tracée.',
-    '• Données personnelles traitées conformément au RGPD (art. 6.1.c — obligation légale). Responsable : l\'employeur.',
-    '• Système de décompte du temps de travail mis en œuvre après information des salariés (art. L.1222-4).',
-    '',
-    'Document généré par ALTEORE (alteore.com) — Outil de gestion pour TPE/PME'
+    'Ce document constitue le décompte individuel du temps de travail prévu par l\'article L.3171-2 du Code du travail.',
+    'Signature électronique simple au sens de l\'article 1366 du Code civil et du règlement (UE) n°910/2014 (eIDAS, niveau 1).',
+    'Conservation obligatoire : 5 ans à compter de l\'établissement, conformément à l\'article D.3171-16 du Code du travail.',
+    'Ce document est tenu à la disposition de l\'inspecteur ou du contrôleur du travail (art. D.3171-14).',
+    'Le salarié dispose d\'un droit de contestation (art. L.3171-4). Toute contestation est horodatée et tracée.',
+    'Données personnelles traitées conformément au RGPD (art. 6.1.c — obligation légale). Responsable : l\'employeur.',
+    'Système de décompte du temps de travail mis en œuvre après information des salariés (art. L.1222-4).',
   ];
-  pdf.setFont(undefined,'bold');
-  pdf.text(mentions[0],margin,y);
-  pdf.setFont(undefined,'normal');
-  for(let i=1;i<mentions.length;i++){
-    pdf.text(mentions[i],margin,y+i*3.5);
-  }
+  mentions.forEach(m=>{
+    y=needPage(y,4);
+    pdf.text('• '+m,margin,y);
+    y+=3;
+  });
+  y+=2;
+  pdf.setFontSize(6);pdf.setTextColor(160);
+  pdf.text('Document généré par ALTEORE (alteore.com)',margin,y);
 
   pdf.save(`emargement_${f.employeNom.replace(/\s+/g,'_')}_${f.periode}.pdf`);
   showToast('📄 PDF exporté');
