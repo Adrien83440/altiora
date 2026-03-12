@@ -757,6 +757,7 @@ const COLORS = ['#059669','#0891b2','#7c3aed','#db2777','#ea580c','#ca8a04'];
 window.initEmployes = async function() {
   await loadRHParams();
   await loadEmployes();
+  await loadSmsCredits();
 };
 
 // Charger les paramètres RH entreprise (CCN défaut, etc.)
@@ -1186,13 +1187,18 @@ function renderFiche(e) {
 
         <!-- LIEN PORTAIL SALARIÉ -->
         <div style="margin-top:14px;padding:13px 15px;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px">
-          <div style="font-size:11px;font-weight:700;color:#065f46;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🔗 Portail salarié — Espace congés</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div style="font-size:11px;font-weight:700;color:#065f46;text-transform:uppercase;letter-spacing:.5px">🔗 Portail salarié</div>
+            <div style="font-size:10px;color:var(--muted)" id="sms-badge-${e.id}"></div>
+          </div>
           ${e.publicId ? `
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <code id="lien-sal-${e.id}" style="font-size:11px;background:white;border:1px solid #d1fae5;padding:5px 9px;border-radius:6px;color:#047857;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">https://alteore.com/espace-salarie.html?id=${e.publicId}</code>
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+              <code id="lien-sal-${e.id}" style="font-size:10px;background:white;border:1px solid #d1fae5;padding:5px 9px;border-radius:6px;color:#047857;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">https://alteore.com/espace-salarie.html?id=${e.publicId}</code>
+              <a href="https://alteore.com/espace-salarie.html?id=${e.publicId}" target="_blank" class="btn btn-rh btn-xs" style="flex-shrink:0;text-decoration:none">↗ Ouvrir</a>
               <button class="btn btn-rh btn-xs" style="flex-shrink:0" onclick="copyLienSalarie('${e.id}','${e.publicId}')">📋 Copier</button>
+              ${e.telephone ? `<button class="btn btn-xs" style="flex-shrink:0;background:#eff6ff;color:#1e40af;border:1.5px solid #bfdbfe" onclick="sendLienSMS('${e.id}','${e.publicId}','${(e.telephone||'').replace(/'/g,"\\'")}','${(e.prenom||'').replace(/'/g,"\\'")}')">📱 Envoyer par SMS</button>` : `<span style="font-size:9px;color:var(--muted);flex-shrink:0">📱 Ajoutez un n° pour envoyer par SMS</span>`}
             </div>
-            <div style="font-size:10px;color:#6b7280;margin-top:5px">Envoyez ce lien à l\'employé · Il accède à ses soldes et peut faire ses demandes de congés.</div>
+            <div style="font-size:10px;color:#6b7280;margin-top:5px">Planning, congés, pointage — tout-en-un pour le salarié.</div>
           ` : `
             <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
               <div style="font-size:12px;color:#6b7280">Cet employé n\'a pas encore de lien portail (créé avant la mise à jour).</div>
@@ -3169,6 +3175,53 @@ window.copyLienSalarie = function(empId, publicId) {
     document.body.removeChild(ta);
     showToast('📋 Lien copié !', 'ok');
   });
+};
+
+// ═══ SMS — Envoi lien portail ═══
+var _smsCredits = 0;
+
+async function loadSmsCredits() {
+  try {
+    const snap = await window._getDoc(window._doc(window._db, 'sms_credits', window._uid));
+    _smsCredits = snap.exists() ? (parseInt(snap.data().credits) || 0) : 0;
+  } catch(e) { _smsCredits = 0; }
+}
+
+window.sendLienSMS = async function(empId, publicId, telephone, prenom) {
+  if (!telephone) { showToast('⚠️ Pas de numéro de téléphone renseigné', 'warn'); return; }
+  if (_smsCredits < 1) { showToast('⚠️ Crédits SMS insuffisants ('+_smsCredits+' restant)', 'warn'); return; }
+
+  const lien = 'https://alteore.com/espace-salarie.html?id=' + publicId;
+  const msg = (prenom ? prenom + ', v' : 'V') + 'oici votre espace salarie ALTEORE : ' + lien + ' — Planning, conges, pointage.';
+
+  if (!confirm('Envoyer le lien portail par SMS à ' + (prenom||'?') + ' (' + telephone + ') ?\n\n' + msg + '\n\n1 crédit SMS sera utilisé (' + _smsCredits + ' restants)')) return;
+
+  try {
+    let token = '';
+    try { if (window._auth && window._auth.currentUser) token = await window._auth.currentUser.getIdToken(); } catch(e) {}
+
+    const res = await fetch('/api/send-sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({
+        uid: window._uid,
+        recipients: [telephone],
+        message: msg,
+        sender: 'ALTEORE',
+        clientCredits: _smsCredits
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      _smsCredits = data.remaining || (_smsCredits - 1);
+      showToast('📱 SMS envoyé à ' + (prenom||telephone) + ' ! (' + _smsCredits + ' crédits restants)', 'ok');
+    } else {
+      showToast('Erreur SMS : ' + (data.error || 'Échec envoi'), 'warn');
+    }
+  } catch(e) {
+    console.error('sendLienSMS', e);
+    showToast('Erreur réseau SMS', 'warn');
+  }
 };
 
 // Génère un publicId pour un employé existant qui n'en a pas encore
