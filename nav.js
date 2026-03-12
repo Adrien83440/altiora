@@ -601,7 +601,7 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
   // ════════════════════════════════════════════════
   (function loadChatbot() {
     var s = document.createElement('script');
-    s.src = 'api/chatbot.js';
+    s.src = 'chatbot.js';
     s.defer = true;
     document.body.appendChild(s);
   })();
