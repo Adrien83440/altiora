@@ -661,13 +661,11 @@ async function loadTemps() {
     console.log('[Temps] Saisie manuelle:', _tempsData.length, 'docs');
   } catch(e) { console.warn('[Temps] manuelle:', e.message||e); }
 
-  // 2. Si pas de saisie manuelle, agréger depuis les pointages du mois
-  if (_tempsData.length === 0) {
+  // 2. Agréger depuis les pointages du mois (complète la saisie manuelle)
+  {
     const toMin = t => { if(!t) return 0; const p=(t||'0:0').split(':').map(Number); return p[0]*60+(p[1]||0); };
     const now = new Date();
     const y = now.getFullYear(), m = now.getMonth();
-    const last = Math.min(new Date(y, m + 1, 0).getDate(), now.getDate());
-    const fmt = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 
     // Read all pointage docs in batch (private collection stores per-day)
     let allDayEvents = {}; // {dateStr: [events]}
@@ -684,6 +682,8 @@ async function loadTemps() {
       });
       console.log('[Temps] Pointages publics:', snap2.size, 'jours');
     } catch(e) { console.warn('[Temps] pointages publics:', e.message||e); }
+
+    console.log('[Temps] Jours chargés:', Object.keys(allDayEvents).length, Object.keys(allDayEvents));
 
     // Filter current month only and deduplicate
     const moisPrefix = y + '-' + String(m+1).padStart(2,'0');
@@ -731,6 +731,7 @@ async function loadTemps() {
 
   renderTemps();
   renderTopSalaries('temps');
+  buildAlertes(); // Refresh alerts with heures data
 }
 
 function renderTemps() {
@@ -1150,17 +1151,22 @@ function renderKpis() {
 // ══════════════════════════════════════════════
 function buildAlertes() {
   const alertes = [];
-
-  // Congés en attente depuis > 3 jours
   const now = Date.now();
+  const todayStr = new Date().toISOString().slice(0,10);
+
+  // 1. Congés en attente depuis > 3 jours
   _congesEnAttente.forEach(c => {
-    const since = c.createdAt ? (now - c.createdAt) / 86400000 : 0;
+    let created = 0;
+    if (typeof c.createdAt === 'number') created = c.createdAt;
+    else if (typeof c.createdAt === 'string') created = new Date(c.createdAt).getTime();
+    else if (c.timestamp) created = c.timestamp;
+    const since = created ? (now - created) / 86400000 : 0;
     if (since > 3) {
-      alertes.push({ type:'warn', text:`Congé en attente depuis ${Math.floor(since)} jours`, sub:`${c.employeNom||'Employé'} · ${c.dateDebut||''} → ${c.dateFin||''}`, action: () => openCongeModal(c.id) });
+      alertes.push({ type:'warn', text:`Congé en attente depuis ${Math.floor(since)} jours`, sub:`${c.employeNom||'Employé'} · ${c.dateDebut||''} → ${c.dateFin||''}` });
     }
   });
 
-  // Contrats CDD expirant dans < 30 jours
+  // 2. Contrats CDD expirant dans < 30 jours
   _employes.forEach(e => {
     if (e.typeContrat === 'CDD' && e.dateFinContrat) {
       const fin = new Date(e.dateFinContrat).getTime();
@@ -1171,14 +1177,43 @@ function buildAlertes() {
     }
   });
 
-  // Anniversaires à venir (7 jours)
+  // 3. Heures excessives ce mois (basé sur _tempsData)
+  const moisKey = new Date().toISOString().slice(0, 7);
+  const heuresParEmp = {};
+  _tempsData.forEach(t => {
+    if (t.mois !== moisKey) return;
+    const empId = t.employeId || t.id;
+    if (!heuresParEmp[empId]) heuresParEmp[empId] = 0;
+    heuresParEmp[empId] += parseFloat(t.heuresTravaillees) || 0;
+  });
+  _employes.forEach(e => {
+    const hrs = heuresParEmp[e.id] || 0;
+    const mensuel = (parseFloat(e.heuresHebdo) || 35) * 52 / 12; // ~151h pour 35h/sem
+    if (hrs > mensuel * 1.1 && hrs > 0) {
+      const depassement = (hrs - mensuel).toFixed(0);
+      alertes.push({ type:'warn', text:`${e.prenom||''} ${e.nom||''} dépasse son quota`, sub:`${hrs.toFixed(0)}h travaillées / ${mensuel.toFixed(0)}h contrat · +${depassement}h ce mois` });
+    }
+  });
+
+  // 4. Salariés sans pointage hier (jour ouvré)
+  const hier = new Date(); hier.setDate(hier.getDate() - 1);
+  if (hier.getDay() > 0 && hier.getDay() < 6) {
+    const hierStr = hier.toISOString().slice(0,10);
+    const hierEvts = _tempsData.filter(t => t.id && t.id.startsWith(hierStr));
+    const empIdsHier = new Set(hierEvts.map(t => t.employeId));
+    _employes.filter(e => e.statut !== 'inactif').forEach(e => {
+      if (!empIdsHier.has(e.id) && hierEvts.length > 0) { // Only alert if SOME people pointed
+        alertes.push({ type:'info', text:`${e.prenom||''} ${e.nom||''} non pointé hier`, sub:`${hier.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'short'})}` });
+      }
+    });
+  }
+
+  // 5. Anniversaires à venir (7 jours)
   _employes.forEach(e => {
     if (e.dateNaissance) {
       const birth = new Date(e.dateNaissance);
-      const next = new Date(now);
-      next.setFullYear(new Date(now).getFullYear());
-      next.setMonth(birth.getMonth());
-      next.setDate(birth.getDate());
+      const thisYear = new Date();
+      const next = new Date(thisYear.getFullYear(), birth.getMonth(), birth.getDate());
       const jours = Math.ceil((next.getTime() - now) / 86400000);
       if (jours >= 0 && jours <= 7) {
         alertes.push({ type:'info', text:`Anniversaire dans ${jours} jour${jours>1?'s':''}`, sub:`${e.prenom||''} ${e.nom||''}` });
@@ -1192,20 +1227,16 @@ function buildAlertes() {
   }
 
   // Badge
-  const nb = alertes.filter(a => a.type !== 'success').length;
+  const nb = alertes.filter(a => a.type !== 'success' && a.type !== 'info').length;
   const badge = document.getElementById('alert-badge');
-  badge.textContent = nb;
+  badge.textContent = alertes.filter(a => a.type !== 'success').length;
   badge.style.background = nb > 0 ? '#fee2e2' : '#d1fae5';
   badge.style.color = nb > 0 ? '#991b1b' : '#065f46';
 
-  // Render (max 3 dans le dashboard)
+  // Render (max 5 dans le dashboard)
   const body = document.getElementById('alertes-body');
-  if (alertes.length === 0) {
-    body.innerHTML = `<div class="empty-sm"><div class="empty-icon">✅</div>Aucune alerte</div>`;
-    return;
-  }
-  body.innerHTML = alertes.slice(0, 3).map(a => `
-    <div class="alert-item ${a.type}" ${a.action?'onclick="'+a.action.toString()+'()"':''}>
+  body.innerHTML = alertes.slice(0, 5).map(a => `
+    <div class="alert-item ${a.type}">
       <div class="alert-dot ${a.type}"></div>
       <div>
         <div class="alert-text">${a.text}</div>
