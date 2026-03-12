@@ -532,6 +532,32 @@
         </div>
       </div>
 
+      <!-- Compétences / Postes (utilisé par le Planning & Polyvalence) -->
+      <div class="msep">🎯 Compétences & Postes <span style="font-size:10px;font-weight:400;color:var(--muted)">— utilisées dans le Planning & la Polyvalence</span></div>
+      <div id="comp-editor" style="margin-bottom:14px">
+        <div id="comp-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+        <div style="display:flex;gap:6px;align-items:end">
+          <div style="flex:1">
+            <label style="font-size:10px;font-weight:600;color:var(--muted);display:block;margin-bottom:3px">Poste / Compétence</label>
+            <input class="minput" id="comp-new-nom" placeholder="Ex: Caisse, Cuisine, Serveur, Accueil…" style="font-size:13px" onkeydown="if(event.key==='Enter'){event.preventDefault();addCompetence()}"/>
+          </div>
+          <div style="width:120px">
+            <label style="font-size:10px;font-weight:600;color:var(--muted);display:block;margin-bottom:3px">Niveau</label>
+            <select class="minput" id="comp-new-niv" style="font-size:13px">
+              <option value="1">⭐ Débutant</option>
+              <option value="2">⭐⭐ Intermédiaire</option>
+              <option value="3" selected>⭐⭐⭐ Confirmé</option>
+              <option value="4">⭐⭐⭐⭐ Expert</option>
+              <option value="5">⭐⭐⭐⭐⭐ Référent</option>
+            </select>
+          </div>
+          <button type="button" class="btn btn-rh btn-sm" onclick="addCompetence()" style="height:38px;white-space:nowrap">+ Ajouter</button>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:6px;line-height:1.5">
+          💡 Les compétences sont utilisées par le <b>Planning</b> pour la polyvalence, le filtre par poste et la génération IA.
+        </div>
+      </div>
+
       <!-- Divers -->
       <div class="msep">📝 Divers</div>
       <div class="mrow">
@@ -705,6 +731,7 @@
 let _employes    = {};   // { id: {...data} }
 let _currentId   = null;
 let _editId      = null; // null = nouveau, sinon ID
+let _tempCompetences = []; // [{nom, niveau}]
 let _showArchived = false;
 let _photoDataURL = null;
 let _photoFile    = null;
@@ -1086,6 +1113,15 @@ function renderFiche(e) {
           ${infoField('N° Sécurité sociale',e.nss ? maskNSS(e.nss) : null)}
         </div>
       </div>
+      <!-- Compétences -->
+      ${(e.competences&&e.competences.length>0)?`
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+        <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">🎯 Compétences & Postes</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${(e.competences||[]).map(c=>'<span style="display:inline-flex;align-items:center;gap:5px;padding:5px 10px;background:#f0fdf4;border:1px solid #d1fae5;border-radius:8px;font-size:11px;font-weight:600">'+(c.nom||c)+' <span style="font-size:10px;color:#6b7280">'+'⭐'.repeat(Math.min(parseInt(c.niveau)||3,5))+'</span></span>').join('')}
+        </div>
+      </div>
+      `:''}
     </div>
 
     <!-- TAB CONTRAT -->
@@ -2411,6 +2447,44 @@ async function loadCCNCustomNotes() {
   } catch(e) { /* ignore */ }
 }
 
+// ── COMPÉTENCES ──
+function renderCompetences(){
+  const list = document.getElementById('comp-list');
+  if(!list) return;
+  if(_tempCompetences.length===0){
+    list.innerHTML='<div style="font-size:11px;color:var(--muted);font-style:italic;padding:6px 0">Aucune compétence ajoutée</div>';
+    return;
+  }
+  const stars = n => '⭐'.repeat(Math.min(n,5));
+  const nivLabels = {1:'Débutant',2:'Intermédiaire',3:'Confirmé',4:'Expert',5:'Référent'};
+  list.innerHTML = _tempCompetences.map((c,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8faff;border:1px solid #e2e8f0;border-radius:8px">
+      <div style="flex:1;font-size:12px;font-weight:600">${c.nom}</div>
+      <div style="font-size:11px;color:var(--muted)" title="${nivLabels[c.niveau]||''}">${stars(c.niveau)} <span style="font-size:9px">${nivLabels[c.niveau]||''}</span></div>
+      <button type="button" onclick="removeCompetence(${i})" style="background:#fee2e2;color:#dc2626;border:none;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center">✕</button>
+    </div>
+  `).join('');
+}
+window.renderCompetences = renderCompetences;
+
+window.addCompetence = function(){
+  const nomEl = document.getElementById('comp-new-nom');
+  const nivEl = document.getElementById('comp-new-niv');
+  const nom = (nomEl?.value||'').trim();
+  if(!nom){ nomEl?.focus(); return; }
+  if(_tempCompetences.some(c=>c.nom.toLowerCase()===nom.toLowerCase())){
+    showToast('Compétence déjà ajoutée','err'); return;
+  }
+  _tempCompetences.push({nom, niveau:parseInt(nivEl?.value)||3});
+  nomEl.value='';
+  renderCompetences();
+};
+
+window.removeCompetence = function(i){
+  _tempCompetences.splice(i,1);
+  renderCompetences();
+};
+
 window.openModalNouvelEmploye = function() {
   _editId = null;
   _photoDataURL = null;
@@ -2439,6 +2513,8 @@ window.openModalNouvelEmploye = function() {
   if (peDetails) peDetails.style.display = 'none';
   if (peDuree) peDuree.value = '';
   clearSalRecap();
+  _tempCompetences = [];
+  renderCompetences();
   setTimeout(()=>onContratChange(), 50);
   openModal('modalEmploye');
 };
@@ -2505,6 +2581,9 @@ window.openModalEdit = function(id) {
   if (e.salaireBrut) setTimeout(()=>calcSalaire('brut'), 50);
   // Déclencher recalcul PE
   setTimeout(()=>onContratChange(), 50);
+  // Charger compétences
+  _tempCompetences = (e.competences||[]).map(c=>({nom:c.nom||c, niveau:parseInt(c.niveau)||3}));
+  renderCompetences();
   openModal('modalEmploye');
 };
 
@@ -2544,6 +2623,7 @@ window.saveEmploye = async function() {
     docContratRecu:  document.getElementById('f-doc-contrat')?.checked||false,
     ccn:             document.getElementById('f-ccn').value||null,
     couleur:         document.getElementById('f-couleur').value,
+    competences:     _tempCompetences.map(c=>({nom:c.nom,niveau:c.niveau})),
     // Période d'essai
     periodeEssai: document.getElementById('pe-active')?.checked ? {
       active:    true,
