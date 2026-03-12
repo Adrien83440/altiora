@@ -382,22 +382,45 @@ async function loadEmps(){
   _emps.sort((a,b)=>empName(a).localeCompare(empName(b)));
 }
 
-// ── LOAD TODAY'S POINTAGES ──
+// ── LOAD TODAY'S POINTAGES (merged: private + public) ──
 async function loadPointages(){
   _pointages=[];
+  const dateKey=today();
   try{
-    const ref=window._doc(window._db,'rh',window._uid,'pointages',today());
-    const snap=await window._getDoc(ref);
-    if(snap.exists()) _pointages=snap.data().events||[];
+    // Private collection (kiosk writes here)
+    const ref1=window._doc(window._db,'rh',window._uid,'pointages',dateKey);
+    const snap1=await window._getDoc(ref1);
+    const evts1=snap1.exists()?(snap1.data().events||[]):[];
+    // Public collection (mobile writes here)
+    let evts2=[];
+    try{
+      const ref2=window._doc(window._db,'rh_pointages_public',window._uid,'events',dateKey);
+      const snap2=await window._getDoc(ref2);
+      if(snap2.exists()) evts2=snap2.data().events||[];
+    }catch(e){}
+    // Merge + deduplicate by empId+type+heure
+    const seen=new Set();
+    [...evts1,...evts2].forEach(ev=>{
+      const key=ev.empId+'_'+ev.type+'_'+ev.heure;
+      if(!seen.has(key)){seen.add(key);_pointages.push(ev);}
+    });
   }catch(err){console.error('loadPointages',err);}
 }
 
-// ── SAVE POINTAGE ──
+// ── SAVE POINTAGE (dual-write: private + public) ──
 async function savePointage(evt){
   _pointages.push(evt);
+  const dateKey=today();
   try{
-    const ref=window._doc(window._db,'rh',window._uid,'pointages',today());
-    await window._setDoc(ref,{events:_pointages,updatedAt:Date.now()},{merge:true});
+    // 1. Collection privée (admin dashboard lit ici)
+    const ref1=window._doc(window._db,'rh',window._uid,'pointages',dateKey);
+    await window._setDoc(ref1,{events:_pointages,updatedAt:Date.now()},{merge:true});
+    // 2. Collection publique (espace salarié lit ici)
+    const ref2=window._doc(window._db,'rh_pointages_public',window._uid,'events',dateKey);
+    const pubSnap=await window._getDoc(ref2);
+    const pubEvents=pubSnap.exists()?(pubSnap.data().events||[]):[];
+    pubEvents.push(evt);
+    await window._setDoc(ref2,{events:pubEvents,updatedAt:Date.now()},{merge:true});
   }catch(err){console.error('savePointage',err);}
 }
 
@@ -705,8 +728,13 @@ document.addEventListener('keydown',(e)=>{
   else if(e.key==='Escape') pinClear();
 });
 
-// ── Refresh sidebar every minute ──
-setInterval(()=>{if(_emps.length)renderSidebar();},60000);
+// ── Refresh sidebar + data every minute ──
+setInterval(async ()=>{
+  if(_emps.length){
+    await loadPointages();
+    renderSidebar();
+  }
+},60000);
 </script>
 </body>
 </html>

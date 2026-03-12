@@ -1542,7 +1542,14 @@ window.doPointage=async function(type){
 
   // Save to public collection
   try{
-    await window._setDocPath(['rh_pointages_public',_uid,'events',ptFmt(new Date())],{events:_ptEvents.filter(function(e){return e.empId===_empId;}),updatedAt:Date.now()},{merge:true});
+    // Read existing, merge, write back (don't overwrite other employees)
+    var dateKey=ptFmt(new Date());
+    var allSnap=await window._getDoc('rh_pointages_public',_uid,'events',dateKey);
+    var allEvts=allSnap.exists()?(allSnap.data().events||[]):[];
+    // Remove this employee's old events, add fresh ones
+    allEvts=allEvts.filter(function(e){return e.empId!==_empId;});
+    _ptEvents.forEach(function(e){allEvts.push(e);});
+    await window._setDocPath(['rh_pointages_public',_uid,'events',dateKey],{events:allEvts,updatedAt:Date.now()});
   }catch(e){console.error('pointage save',e);window.showToast('Erreur : '+e.message,'err');return;}
 
   // Show confirmation
