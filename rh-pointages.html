@@ -453,19 +453,25 @@ function renderJour(c){
   if(events.length===0){
     h+=`<div class="empty">Aucun pointage enregistré${isToday?' pour le moment':''}.</div>`;
   } else {
-    h+=`<div class="table-wrap"><table><thead><tr><th>Employé</th><th>Type</th><th>Heure</th><th>Source</th><th>Notes</th><th>Photo</th></tr></thead><tbody>`;
-    events.forEach(ev=>{
+    h+=`<div class="table-wrap"><table><thead><tr><th>Employé</th><th>Type</th><th>Heure</th><th>Source</th><th>Notes</th><th>Photo</th><th style="width:90px">Actions</th></tr></thead><tbody>`;
+    events.forEach((ev,idx)=>{
       const emp=_emps.find(e=>e.id===ev.empId);
       const ci=emp?COLORS[_emps.indexOf(emp)%COLORS.length]:'#666';
       const src=ev.source==='mobile'?'<span class="tag" style="background:#eff6ff;color:#1e40af">📱 Mobile</span>':'<span class="tag" style="background:#f3e8ff;color:#6b21a8">📟 Kiosk</span>';
-      const gps=ev.lat?`<div style="font-size:9px;color:var(--muted)">📍 ${ev.lat.toFixed(4)}, ${ev.lng.toFixed(4)}</div>`:'';
+      const gps=ev.lat?`<a href="https://www.google.com/maps?q=${ev.lat},${ev.lng}" target="_blank" style="font-size:9px;color:var(--blue);text-decoration:none;display:flex;align-items:center;gap:3px" title="Ouvrir dans Google Maps">📍 ${ev.lat.toFixed(4)}, ${ev.lng.toFixed(4)}</a>`:'';
       h+=`<tr>
         <td><div class="emp-chip"><div class="emp-av" style="background:${ci}">${emp?empInit(emp):'?'}</div>${emp?empName(emp):'Inconnu'}</div></td>
         <td><span class="tag ${TYPE_CLS[ev.type]||''}">${TYPE_LABELS[ev.type]||ev.type}</span>${ev.horsPlan?'<span class="tag" style="background:#fef3c7;color:#92400e;margin-left:4px">Hors planning</span>':''}</td>
-        <td class="time-mono">${ev.heure||'—'}</td>
+        <td class="time-mono">${ev.heure||'—'}${ev.correctedFrom?`<div style="font-size:9px;color:var(--orange);font-family:'Plus Jakarta Sans',sans-serif;font-weight:600">✏️ était ${ev.correctedFrom}</div>`:''}</td>
         <td>${src}${gps}</td>
         <td style="font-size:11px;color:var(--muted)">${ev.motifHorsPlan||'—'}</td>
         <td>${ev.photo?`<button class="btn btn-xs btn-outline" onclick="showPhoto('${escB64(ev.photo)}')">📷</button>`:'—'}</td>
+        <td>
+          <div style="display:flex;gap:4px">
+            <button class="btn btn-xs btn-outline" onclick="editPointage('${d}',${ev.timestamp})" title="Modifier l'heure">✏️</button>
+            <button class="btn btn-xs" style="background:#fee2e2;color:#dc2626;border:1px solid #fecaca" onclick="deletePointage('${d}',${ev.timestamp})" title="Supprimer ce pointage">✕</button>
+          </div>
+        </td>
       </tr>`;
     });
     h+=`</tbody></table></div>`;
@@ -712,6 +718,67 @@ function exportCSV(){
   URL.revokeObjectURL(url);
 }
 window.exportCSV=exportCSV;
+
+// ═══ CORRECTION POINTAGES ═══
+async function deletePointage(dateStr, timestamp){
+  const evts=getEvents(dateStr);
+  const evt=evts.find(e=>e.timestamp===timestamp);
+  if(!evt) return;
+  const emp=_emps.find(e=>e.id===evt.empId);
+  const label=`${TYPE_LABELS[evt.type]||evt.type} de ${emp?empName(emp):'?'} à ${evt.heure}`;
+  if(!confirm(`Supprimer ce pointage ?\n\n${label}\n\nCette action est irréversible.`)) return;
+  // Remove from cache
+  _cache[dateStr]=evts.filter(e=>e.timestamp!==timestamp);
+  // Save to both collections
+  await saveBothCollections(dateStr,_cache[dateStr]);
+  render();
+  showToast(`✅ Pointage supprimé : ${label}`);
+}
+
+async function editPointage(dateStr, timestamp){
+  const evts=getEvents(dateStr);
+  const idx=evts.findIndex(e=>e.timestamp===timestamp);
+  if(idx===-1) return;
+  const evt=evts[idx];
+  const emp=_emps.find(e=>e.id===evt.empId);
+  const label=`${TYPE_LABELS[evt.type]||evt.type} de ${emp?empName(emp):'?'}`;
+
+  const newHeure=prompt(`Modifier l'heure de :\n${label} (actuellement ${evt.heure})\n\nNouvelle heure (HH:MM) :`, evt.heure);
+  if(!newHeure||newHeure===evt.heure) return;
+  // Validate format
+  if(!/^\d{1,2}:\d{2}$/.test(newHeure)){alert('Format invalide. Utilisez HH:MM (ex: 09:15)');return;}
+  const[hh,mm]=newHeure.split(':').map(Number);
+  if(hh<0||hh>23||mm<0||mm>59){alert('Heure invalide.');return;}
+  const correctedHeure=String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
+
+  // Update in cache
+  evts[idx]={...evt, heure:correctedHeure, correctedAt:Date.now(), correctedFrom:evt.heure};
+  _cache[dateStr]=evts;
+  await saveBothCollections(dateStr,evts);
+  render();
+  showToast(`✅ Heure modifiée : ${evt.heure} → ${correctedHeure}`);
+}
+
+async function saveBothCollections(dateStr, events){
+  try{
+    // Private collection
+    const ref1=window._doc(window._db,'rh',window._uid,'pointages',dateStr);
+    await window._setDoc(ref1,{events,updatedAt:Date.now()});
+    // Public collection
+    const ref2=window._doc(window._db,'rh_pointages_public',window._uid,'events',dateStr);
+    await window._setDoc(ref2,{events,updatedAt:Date.now()});
+  }catch(e){console.error('saveBothCollections',e);alert('Erreur : '+e.message);}
+}
+
+function showToast(msg){
+  const t=document.createElement('div');
+  t.textContent=msg;
+  t.style.cssText='position:fixed;bottom:24px;right:24px;background:linear-gradient(135deg,#059669,#10b981);color:white;padding:12px 20px;border-radius:14px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 8px 32px rgba(0,0,0,.2);animation:fadeInUp .3s ease';
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(),3500);
+}
+
+window.deletePointage=deletePointage;window.editPointage=editPointage;
 
 // ═══ CONFIG POINTAGE ═══
 let _ptConfig={methods:{pin:true,mobile:true,qr:false},photo:true,pause:true,horsPlan:true,lateMin:15};
