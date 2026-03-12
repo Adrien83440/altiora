@@ -423,7 +423,7 @@
 
       <!-- Récapitulatif dynamique des cotisations -->
       <div id="sal-recap" style="display:none;background:#1e293b;border-radius:10px;padding:14px 16px;margin-bottom:12px;color:white">
-        <div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">📊 Détail des cotisations 2025 — <span id="sal-recap-statut" style="color:#34d399"></span></div>
+        <div style="font-size:10px;font-weight:700;color:rgba(255,255,255,.5);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">📊 Détail des cotisations 2026 — <span id="sal-recap-statut" style="color:#34d399"></span></div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
           <div style="text-align:center">
             <div style="font-size:9px;color:rgba(255,255,255,.4);margin-bottom:2px">COTIS. SALARIALES</div>
@@ -441,9 +441,11 @@
             <div id="rc-net-pct" style="font-size:10px;color:rgba(255,255,255,.4)">~77% du brut</div>
           </div>
         </div>
-        <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);font-size:10px;color:rgba(255,255,255,.35)">
-          ⚠️ Estimation indicative basée sur les taux légaux 2025 (URSSAF). Hors réduction Fillon, convention collective, mutuelle obligatoire et prélèvement à la source.
+        <div style="margin-top:10px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <div style="font-size:10px;color:rgba(255,255,255,.35)">⚠️ Estimation taux légaux 2026 (URSSAF). Hors réduction Fillon, convention collective.</div>
+          <button onclick="verifyURSSAF()" style="background:rgba(16,185,129,.2);border:1px solid rgba(16,185,129,.4);color:#34d399;padding:5px 12px;border-radius:8px;font-size:10px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0" id="urssaf-btn">🔄 Vérifier URSSAF</button>
         </div>
+        <div id="urssaf-result" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);border-radius:8px;font-size:11px;color:#34d399"></div>
       </div>
 
       <!-- Ligne du bas : fréquence + heures + IBAN -->
@@ -2564,6 +2566,7 @@ window.openModalEdit = function(id) {
   set('email',e.email); set('nss',e.nss); set('poste',e.poste); set('dept',e.departement);
   set('entree',e.dateEntree); set('fin',e.dateFinContrat);
   set('brut',e.salaireBrut); set('net',e.salaireNet); set('heures',e.heuresHebdo||35);
+  window._currentTauxCharges = e.tauxCharges || null;
   set('iban',e.iban); set('note',e.noteMoyenne||'');
   set('pin',e.pin||'');
   // Champs Administratif & Conformité
@@ -2644,6 +2647,7 @@ window.saveEmploye = async function() {
     salaireBrut:     parseFloat(document.getElementById('f-brut').value.replace(',','.'))||null,
     salaireNet:      parseFloat(document.getElementById('f-net').value.replace(',','.'))||null,
     salaireSuperBrut:parseFloat(document.getElementById('f-superbrut').value.replace(',','.'))||null,
+    tauxCharges:     window._currentTauxCharges || null,
     frequence:       document.getElementById('f-freq').value,
     heuresHebdo:     parseFloat(document.getElementById('f-heures').value)||35,
     iban:            document.getElementById('f-iban').value.trim()||null,
@@ -3402,7 +3406,7 @@ window.calcPEFin = function() {
 // CALCULATEUR SALAIRE BIDIRECTIONNEL — Taux 2025
 // ══════════════════════════════════════════════════
 
-// Sources : URSSAF 2025, PMSS = 3 925 €/mois, SMIC = 11,88 €/h
+// Sources : URSSAF 2026, PMSS = 4 005 €/mois, SMIC = 12,02 €/h
 // Cotisations SALARIALES (en % du brut) :
 //   Maladie :       0% (sauf Alsace-Moselle +1.30%)
 //   Vieillesse plaf: 6.90% (sur min(brut, PMSS))
@@ -3430,8 +3434,8 @@ window.calcPEFin = function() {
 //   CEG T1 :         1.29% + CEG T2 2.16% (si>PMSS)
 //   APEC patronal (cadres) : 0.036%
 
-const PMSS = 3925; // Plafond mensuel SS 2025
-const SMIC_H = 11.88;
+const PMSS = 4005; // Plafond mensuel SS 2026
+const SMIC_H = 12.02;
 const SMIC_M = SMIC_H * 35 * 52 / 12; // ≈ 1801.80 €
 
 function calcCotisations(brut, estCadre) {
@@ -3463,7 +3467,7 @@ function calcCotisations(brut, estCadre) {
   pat += b     * 0.015;               // AT/MP (taux moyen)
   pat += b     * (b <= seuil_af ? 0.0345 : 0.0525); // allocations fam.
   pat += plaf1 * 0.0855;              // vieillesse plafonnée
-  pat += b     * 0.0202;              // vieillesse déplafonnée
+  pat += b     * 0.0211;              // vieillesse déplafonnée (2026)
   pat += Math.min(b, 4 * PMSS) * 0.04; // chômage (mai 2025)
   pat += Math.min(b, 4 * PMSS) * 0.0025; // AGS (juil 2025)
   pat += b     * 0.001;               // FNAL (taux <50 sal.)
@@ -3570,6 +3574,8 @@ window.calcSalaire = function(source) {
     document.getElementById('rc-pat-pct').textContent = `${(c.pat/brut*100).toFixed(1)}% du brut`;
     document.getElementById('rc-net').textContent = f2(c.net);
     document.getElementById('rc-net-pct').textContent = `${(c.net/brut*100).toFixed(1)}% du brut`;
+    // Store effective taux for saving
+    window._currentTauxCharges = Math.round(c.pat / brut * 10000) / 100;
   }
 };
 
@@ -3588,6 +3594,46 @@ document.addEventListener('change', e => {
 
 window.setSalMode = window.setSalMode;
 window.calcSalaire = window.calcSalaire;
+
+// ── URSSAF API VERIFICATION ──
+window.verifyURSSAF = async function() {
+  const brut = parseFloat(document.getElementById('f-brut')?.value) || 0;
+  if (!brut) { return; }
+  const cat = document.getElementById('f-categorie')?.value || 'employe';
+  const contrat = document.getElementById('f-contrat')?.value || 'CDI';
+  const btn = document.getElementById('urssaf-btn');
+  const result = document.getElementById('urssaf-result');
+  btn.textContent = '⏳ Vérification...'; btn.disabled = true;
+  try {
+    const resp = await fetch('/api/urssaf-cost', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        brutMensuel: brut,
+        cadre: cat === 'cadre',
+        apprenti: contrat === 'Apprentissage',
+        cdd: contrat === 'CDD'
+      })
+    });
+    if (!resp.ok) throw new Error('API indisponible');
+    const d = await resp.json();
+    if (d.tauxEffectif !== null && d.tauxEffectif !== undefined) {
+      window._currentTauxCharges = d.tauxEffectif;
+      result.innerHTML = '✅ <strong>Taux URSSAF officiel ' + d.annee + ' : ' + d.tauxEffectif.toFixed(1) + '%</strong>'
+        + ' · Coût employeur : <strong>' + (d.coutEmployeur||0).toLocaleString('fr-FR',{minimumFractionDigits:2}) + ' €</strong>'
+        + (d.netAvantImpot ? ' · Net avant impôt : ' + d.netAvantImpot.toLocaleString('fr-FR',{minimumFractionDigits:2}) + ' €' : '')
+        + '<br><span style="font-size:9px;opacity:.6">Source : mon-entreprise.urssaf.fr — inclut réductions Fillon/RGDU</span>';
+      result.style.display = '';
+    } else {
+      result.innerHTML = '⚠️ Réponse URSSAF incomplète. Taux local conservé.';
+      result.style.display = '';
+    }
+  } catch(e) {
+    result.innerHTML = '⚠️ API URSSAF indisponible. Le calcul local est utilisé (taux : ' + (window._currentTauxCharges||42).toFixed(1) + '%).';
+    result.style.display = '';
+  }
+  btn.textContent = '🔄 Vérifier URSSAF'; btn.disabled = false;
+};
 window.onContratChange = window.onContratChange;
 window.onPEChange = window.onPEChange;
 window.calcPEFin = window.calcPEFin;

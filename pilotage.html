@@ -355,7 +355,7 @@
       <div class="sum-card orange">
         <div class="sum-label">Charges totales HT</div>
         <div class="sum-value" x-text="fmtSigned(t.chargesHT)" id="s-ch"></div>
-        <div class="sum-sub" x-text="'Fixes ' + fmtE(t.fixesHT) + ' · Var. ' + fmtE(t.varHT)"></div>
+        <div class="sum-sub" x-text="'Fixes ' + fmtE(t.fixesHT) + ' · Var. ' + fmtE(t.varHT) + (t.masseSalHT > 0 ? ' · Sal. ' + fmtE(t.masseSalHT) : '')"></div>
       </div>
       <div class="sum-card" :class="t.resultat >= 0 ? 'green' : 'red'">
         <div class="sum-label">Résultat HT</div>
@@ -705,7 +705,7 @@ function pilotageApp() {
   return {
     // État réactif des KPIs
     t: {
-      caHT: 0, caHT_j: 0, caFP_HT: 0, chargesHT: 0, fixesHT: 0, varHT: 0,
+      caHT: 0, caHT_j: 0, caFP_HT: 0, chargesHT: 0, fixesHT: 0, varHT: 0, masseSalHT: 0,
       resultat: 0, tvaCollectee: 0, tvaDue: 0, tvaDed: 0,
       creditsPrincipal: 0, creditsInteret: 0, cashflow: 0, delta: 0, prevCA: 0
     },
@@ -825,7 +825,12 @@ function defaultData(year, month) {
     chargesVar:   [{fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non'}],
     credits:      [{fournisseur:'', nom:'', ligneType:'principal', montant:'', tvaRate:20, tvaAuto:false, tauxInteret:'', pointe:'Non', amort:'constant'}],
     leasing:      [{fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non'}],
-    facturesPro:  [{client:'', description:'', ht055:'', ht10:'', ht20:''}]
+    facturesPro:  [{client:'', description:'', ht055:'', ht10:'', ht20:''}],
+    masseSalariale: {
+      mode: 'manuel',
+      lignes: [{label:'', brut:'', tauxCharges:42}],
+      dirigeant: {type:'tns', remuneration:'', tauxCharges:45, dividendes:'', tauxDividendes:30}
+    }
   };
 }
 
@@ -870,11 +875,30 @@ async function loadMonth() {
         if (s.credits)       data.credits       = s.credits;
         if (s.leasing)       data.leasing       = s.leasing;
         if (s.facturesPro)   data.facturesPro   = s.facturesPro;
+        if (s.masseSalariale) data.masseSalariale = Object.assign({}, data.masseSalariale, s.masseSalariale);
       }
     } catch(e) { console.warn('loadMonth Firestore error:', e); }
   }
 
   _data = data;
+
+  // Charger employés RH une seule fois (mode auto)
+  if (!window._rhEmployesLoaded) {
+    window._rhEmployesLoaded = true;
+    window._rhEmployes = [];
+    try {
+      if (window._uid && window._getDocs && window._collection) {
+        var empSnap = await window._getDocs(window._collection(window._db,'rh',window._uid,'employes'));
+        empSnap.forEach(function(d){ var e=d.data(); e.id=d.id; if(e.statut!=='inactif') window._rhEmployes.push(e); });
+      }
+    } catch(e) { /* pas de module RH ou pas accès */ }
+    // Si mode auto ET des employés trouvés, pré-remplir
+    if (window._rhEmployes.length > 0 && (!data.masseSalariale.mode || data.masseSalariale.mode === 'manuel')) {
+      // Ne forcer auto QUE si aucune ligne manuelle n'a été saisie
+      var hasManuel = data.masseSalariale.lignes && data.masseSalariale.lignes.some(function(l){ return l.label && l.brut; });
+      if (!hasManuel) data.masseSalariale.mode = 'auto';
+    }
+  }
 
   // Auto-sync : injecter les crédits/leasings depuis Dettes si absents ce mois
   await syncDettesToMonth(data, key);
@@ -1300,6 +1324,8 @@ function renderPage(data, month) {
       '</table>' +
     '</div>' +
 
+    renderMasseSalariale(data, t) +
+
     '<div class="section-card full" style="margin-bottom:16px">' +
         '<div class="section-head"><div class="section-title">🏦 Crédits & Emprunts <span class="section-title-badge badge-purple">Mensualité auto</span></div>' +
           '<div class="section-actions"><button class="btn btn-outline btn-sm" onclick="addCredit()">+ Crédit</button><button class="btn btn-outline btn-sm" style="color:#6366f1;border-color:#6366f1" onclick="forceSyncDettes()">🔗 Sync → Dettes</button></div>' +
@@ -1419,6 +1445,246 @@ function renderPrevCA(rows, caReelTotal) {
       '<td style="text-align:right;padding:4px 8px" id="prev-ecart-' + i + '">' + ecartDisp + '</td>' +
     '</tr>';
   }).join('');
+}
+
+/* ─── MASSE SALARIALE ─── */
+var TAUX_DEFAUT = {CDI:42, CDD:52, Apprenti:5, Alternant:20, Stage:0, TNS:45, 'Assimilé salarié':75};
+
+function getMSTaux(emp) {
+  if (emp.tauxCharges !== undefined && emp.tauxCharges !== '' && emp.tauxCharges !== null) return parseFloat(emp.tauxCharges) || 42;
+  var contrat = emp.typeContrat || '';
+  for (var k in TAUX_DEFAUT) { if (contrat.toLowerCase().indexOf(k.toLowerCase()) >= 0) return TAUX_DEFAUT[k]; }
+  return 42;
+}
+
+function calcMasseSalariale(ms) {
+  var totalSal = 0, totalDir = 0;
+  if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
+    window._rhEmployes.forEach(function(e) {
+      var brut = parseFloat(e.salaireBrut) || 0;
+      var taux = getMSTaux(e);
+      totalSal += brut * (1 + taux / 100);
+    });
+  } else {
+    (ms.lignes || []).forEach(function(l) {
+      var brut = pf(l.brut);
+      var taux = parseFloat(l.tauxCharges) || 42;
+      totalSal += brut * (1 + taux / 100);
+    });
+  }
+  // Dirigeant (toujours manuel)
+  var dir = ms.dirigeant || {};
+  var remDir = pf(dir.remuneration);
+  var tauxDir = parseFloat(dir.tauxCharges) || 45;
+  totalDir += remDir * (1 + tauxDir / 100);
+  var divid = pf(dir.dividendes);
+  var tauxDiv = parseFloat(dir.tauxDividendes) || 30;
+  totalDir += divid * (1 + tauxDiv / 100);
+  return { salaries: totalSal, dirigeant: totalDir, total: totalSal + totalDir };
+}
+
+function renderMasseSalariale(data, t) {
+  var ms = data.masseSalariale || {};
+  var hasRH = window._rhEmployes && window._rhEmployes.length > 0;
+  var isAuto = ms.mode === 'auto' && hasRH;
+  var msCalc = calcMasseSalariale(ms);
+
+  var html = '<div class="section-card full" style="margin-bottom:16px">' +
+    '<div class="section-head">' +
+      '<div class="section-title">👥 Masse salariale & Rémunération <span class="section-title-badge" style="background:#fef3c7;color:#b45309">' + (isAuto ? '🔗 Auto RH' : '✏️ Manuel') + '</span></div>' +
+      '<div class="section-actions">' +
+        (hasRH ? '<button class="btn btn-outline btn-sm" onclick="toggleMSMode()" id="ms-mode-btn">' + (isAuto ? '✏️ Passer en manuel' : '🔗 Mode auto RH') + '</button>' : '') +
+        '<button class="btn btn-outline btn-sm" style="color:#059669;border-color:#059669" onclick="fetchAllURSSAF()" id="ms-urssaf-btn">🔄 Taux URSSAF 2026</button>' +
+        (!isAuto ? '<button class="btn btn-outline btn-sm" onclick="addMSLigne()">+ Salarié</button>' : '') +
+      '</div>' +
+    '</div>';
+
+  // Tableau salariés
+  html += '<table class="data-table"><thead><tr>' +
+    '<th>Salarié</th>' +
+    (isAuto ? '<th>Poste</th><th>Contrat</th>' : '') +
+    '<th>Brut mensuel (€)</th>' +
+    '<th>Taux charges (%)</th>' +
+    '<th>Coût employeur (€)</th>' +
+    (!isAuto ? '<th></th>' : '') +
+    '</tr></thead><tbody id="ms-tbody">';
+
+  if (isAuto) {
+    window._rhEmployes.forEach(function(e) {
+      var brut = parseFloat(e.salaireBrut) || 0;
+      var taux = getMSTaux(e);
+      var cout = brut * (1 + taux / 100);
+      html += '<tr>' +
+        '<td style="font-weight:600">' + (e.prenom || '') + ' ' + (e.nom || '') + '</td>' +
+        '<td>' + (e.poste || '—') + '</td>' +
+        '<td>' + (e.typeContrat || 'CDI') + ' ' + (e.heuresHebdo || 35) + 'h</td>' +
+        '<td style="text-align:right">' + fmtN(brut) + '</td>' +
+        '<td style="text-align:center"><input class="cell-input" style="width:55px;text-align:center" type="number" value="' + taux + '" min="0" max="100" step="1" oninput="updateMSTaux(\'' + e.id + '\',this.value)" onchange="updateMSTaux(\'' + e.id + '\',this.value)"/></td>' +
+        '<td style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(cout) + '</td>' +
+        '</tr>';
+    });
+  } else {
+    (ms.lignes || []).forEach(function(l, i) {
+      var brut = pf(l.brut);
+      var taux = parseFloat(l.tauxCharges) || 42;
+      var cout = brut * (1 + taux / 100);
+      html += '<tr>' +
+        '<td><input class="cell-input" style="width:140px" value="' + (l.label || '') + '" placeholder="Nom salarié" oninput="_data.masseSalariale.lignes[' + i + '].label=this.value;refreshTotals()"/></td>' +
+        '<td><input class="cell-input" style="width:80px;text-align:right" type="text" inputmode="decimal" value="' + (l.brut || '') + '" placeholder="0.00" oninput="_data.masseSalariale.lignes[' + i + '].brut=this.value;refreshTotals()"/></td>' +
+        '<td style="text-align:center"><input class="cell-input" style="width:55px;text-align:center" type="number" value="' + taux + '" min="0" max="100" step="1" oninput="_data.masseSalariale.lignes[' + i + '].tauxCharges=parseFloat(this.value)||42;refreshTotals()"/></td>' +
+        '<td style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(cout) + '</td>' +
+        '<td><button class="btn-del" onclick="delMSLigne(' + i + ')" title="Supprimer">✕</button></td>' +
+        '</tr>';
+    });
+  }
+
+  html += '</tbody>' +
+    '<tfoot><tr><td colspan="' + (isAuto ? 3 : 1) + '">TOTAL SALARIÉS</td>' +
+    '<td></td><td></td>' +
+    '<td style="text-align:right;font-weight:800;color:#f59e0b"><span id="tot-msSal">' + fmtN(msCalc.salaries) + '</span> €</td>' +
+    (!isAuto ? '<td></td>' : '') +
+    '</tr></tfoot></table>';
+
+  // Section Dirigeant
+  var dir = ms.dirigeant || {};
+  var remDir = pf(dir.remuneration);
+  var tauxDir = parseFloat(dir.tauxCharges) || 45;
+  var coutDir = remDir * (1 + tauxDir / 100);
+  var divid = pf(dir.dividendes);
+  var tauxDiv = parseFloat(dir.tauxDividendes) || 30;
+  var coutDiv = divid * (1 + tauxDiv / 100);
+
+  html += '<div style="border-top:2px solid var(--border);padding:14px 0 0">' +
+    '<div style="font-size:12px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px">👔 Rémunération dirigeant' +
+    '<select class="cell-input" style="width:auto;font-size:11px;padding:3px 8px" onchange="onDirTypeChange(this.value)">' +
+    '<option value="tns"' + (dir.type === 'tns' ? ' selected' : '') + '>TNS (SARL/EURL) ~45%</option>' +
+    '<option value="Assimilé salarié"' + (dir.type === 'Assimilé salarié' ? ' selected' : '') + '>Assimilé salarié (SAS/SASU) ~75%</option>' +
+    '</select></div>' +
+    '<table class="data-table"><thead><tr><th>Type</th><th>Montant mensuel (€)</th><th>Taux charges (%)</th><th>Coût total (€)</th></tr></thead><tbody>' +
+    '<tr><td style="font-weight:600">💰 Rémunération</td>' +
+    '<td><input class="cell-input" style="width:90px;text-align:right" type="text" inputmode="decimal" value="' + (dir.remuneration || '') + '" placeholder="0.00" oninput="_data.masseSalariale.dirigeant.remuneration=this.value;refreshTotals()"/></td>' +
+    '<td style="text-align:center"><input class="cell-input" id="ms-dir-taux" style="width:55px;text-align:center" type="number" value="' + tauxDir + '" min="0" max="100" step="1" oninput="_data.masseSalariale.dirigeant.tauxCharges=parseFloat(this.value)||45;refreshTotals()"/></td>' +
+    '<td style="text-align:right;font-weight:700;color:#f59e0b"><span id="ms-dir-cout">' + fmtN(coutDir) + '</span> €</td></tr>' +
+    '<tr><td style="font-weight:600">💸 Dividendes /mois</td>' +
+    '<td><input class="cell-input" style="width:90px;text-align:right" type="text" inputmode="decimal" value="' + (dir.dividendes || '') + '" placeholder="0.00" oninput="_data.masseSalariale.dirigeant.dividendes=this.value;refreshTotals()"/></td>' +
+    '<td style="text-align:center"><input class="cell-input" style="width:55px;text-align:center" type="number" value="' + (dir.tauxDividendes || 30) + '" min="0" max="100" step="1" oninput="_data.masseSalariale.dirigeant.tauxDividendes=parseFloat(this.value)||30;refreshTotals()"/></td>' +
+    '<td style="text-align:right;font-weight:700;color:#f59e0b"><span id="ms-dir-divCout">' + fmtN(coutDiv) + '</span> €</td></tr>' +
+    '<tr style="border-top:2px solid var(--border);font-weight:800"><td>TOTAL DIRIGEANT</td><td></td><td></td><td style="text-align:right;color:#f59e0b"><span id="tot-msDir">' + fmtN(msCalc.dirigeant) + '</span> €</td></tr>' +
+    '</tbody></table></div>';
+
+  // Total global
+  html += '<div style="border-top:2px solid var(--border);padding:12px 0 4px;display:flex;justify-content:space-between;align-items:center">' +
+    '<span style="font-size:13px;font-weight:800">TOTAL MASSE SALARIALE</span>' +
+    '<span style="font-size:16px;font-weight:800;color:#f59e0b"><span id="tot-msTotal">' + fmtN(msCalc.total) + '</span> €</span>' +
+    '</div>';
+
+  // Info
+  if (msCalc.total > 0 && t.caHT > 0) {
+    var ratio = msCalc.total / t.caHT * 100;
+    html += '<div style="padding:8px 12px;background:' + (ratio <= 30 ? '#f0fdf4;border:1px solid #bbf7d0' : ratio <= 40 ? '#fffbeb;border:1px solid #fcd34d' : '#fef2f2;border:1px solid #fecaca') + ';border-radius:8px;font-size:11px;margin-top:8px">' +
+      '📊 Ratio masse salariale / CA : <strong style="color:' + (ratio <= 30 ? '#059669' : ratio <= 40 ? '#d97706' : '#dc2626') + '">' + ratio.toFixed(1) + '%</strong>' +
+      (ratio <= 30 ? ' — ✅ Maîtrisé' : ratio <= 40 ? ' — ⚠️ À surveiller' : ' — 🔴 Élevé') +
+      ' <span style="color:var(--muted)">(Commerce &lt;20% · Restauration &lt;35%)</span></div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function addMSLigne() {
+  if (!_data.masseSalariale) _data.masseSalariale = defaultData(0,0).masseSalariale;
+  _data.masseSalariale.lignes.push({label:'', brut:'', tauxCharges:42});
+  renderPage(_data, parseInt(document.getElementById('monthSelect').value));
+}
+
+function delMSLigne(i) {
+  _data.masseSalariale.lignes.splice(i, 1);
+  if (_data.masseSalariale.lignes.length === 0) _data.masseSalariale.lignes.push({label:'', brut:'', tauxCharges:42});
+  renderPage(_data, parseInt(document.getElementById('monthSelect').value));
+}
+
+function toggleMSMode() {
+  if (!_data.masseSalariale) return;
+  _data.masseSalariale.mode = _data.masseSalariale.mode === 'auto' ? 'manuel' : 'auto';
+  renderPage(_data, parseInt(document.getElementById('monthSelect').value));
+}
+
+function updateMSTaux(empId, val) {
+  // Sauvegarder le taux personnalisé sur l'employé RH
+  var emp = (window._rhEmployes || []).find(function(e){ return e.id === empId; });
+  if (emp) {
+    emp.tauxCharges = parseFloat(val) || 42;
+    // Sauver dans Firestore rh/{uid}/employes/{id}
+    if (window._uid && window._setDoc) {
+      window._setDoc(window._doc(window._db, 'rh', window._uid, 'employes', empId), {tauxCharges: emp.tauxCharges}, {merge:true}).catch(function(){});
+    }
+  }
+  refreshTotals();
+}
+
+function onDirTypeChange(val) {
+  _data.masseSalariale.dirigeant.type = val;
+  var d = TAUX_DEFAUT[val] || 45;
+  _data.masseSalariale.dirigeant.tauxCharges = d;
+  var el = document.getElementById('ms-dir-taux');
+  if (el) el.value = d;
+  refreshTotals();
+}
+
+async function fetchAllURSSAF() {
+  var btn = document.getElementById('ms-urssaf-btn');
+  if (!btn) return;
+  btn.textContent = '⏳ Vérification...'; btn.disabled = true;
+
+  var empList = [];
+  var ms = _data.masseSalariale || {};
+  if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
+    empList = window._rhEmployes;
+  } else {
+    empList = (ms.lignes || []).filter(function(l){ return l.label && pf(l.brut) > 0; }).map(function(l,i){
+      return {id:'manual_'+i, salaireBrut: pf(l.brut), categoriePoste: 'employe', typeContrat: 'CDI', _manual: true, _idx: i};
+    });
+  }
+
+  var updated = 0, errors = 0;
+  for (var i = 0; i < empList.length; i++) {
+    var emp = empList[i];
+    var brut = parseFloat(emp.salaireBrut) || 0;
+    if (brut <= 0) continue;
+    try {
+      var resp = await fetch('/api/urssaf-cost', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          brutMensuel: brut,
+          cadre: (emp.categoriePoste || '') === 'cadre',
+          apprenti: (emp.typeContrat || '').toLowerCase().indexOf('apprenti') >= 0,
+          cdd: (emp.typeContrat || '') === 'CDD'
+        })
+      });
+      if (!resp.ok) { errors++; continue; }
+      var d = await resp.json();
+      if (d.tauxEffectif !== null && d.tauxEffectif !== undefined) {
+        if (emp._manual) {
+          _data.masseSalariale.lignes[emp._idx].tauxCharges = d.tauxEffectif;
+        } else {
+          emp.tauxCharges = d.tauxEffectif;
+          if (window._uid && window._setDoc) {
+            window._setDoc(window._doc(window._db, 'rh', window._uid, 'employes', emp.id), {tauxCharges: d.tauxEffectif}, {merge:true}).catch(function(){});
+          }
+        }
+        updated++;
+      }
+    } catch(e) { errors++; }
+  }
+
+  btn.textContent = '🔄 Taux URSSAF 2026'; btn.disabled = false;
+  if (updated > 0) {
+    renderPage(_data, parseInt(document.getElementById('monthSelect').value));
+    showToast('✅ ' + updated + ' taux mis à jour via URSSAF officiel' + (errors > 0 ? ' (' + errors + ' erreur(s))' : ''), 'success');
+  } else if (errors > 0) {
+    showToast('⚠️ API URSSAF indisponible — taux locaux conservés', 'warning');
+  }
 }
 
 function renderCharges(rows, key) {
@@ -2035,12 +2301,16 @@ function calcTotals(data) {
     creditsInteret   += interet;
   });
   var chargesHT = fixesHT+varHT+creditsPrincipal+creditsInteret+leasingHT;
+  // Masse salariale
+  var msCalc = calcMasseSalariale(data.masseSalariale || {});
+  var masseSalHT = msCalc.total;
+  chargesHT += masseSalHT;
   var tvaDed = fixesTVA+varTVA+leasingTVA;
   var tvaDue = tvaCollectee-tvaDed;
   var resultat = caHT+rentreesSupp-chargesHT;
-  var cashflow = caHT+rentreesSupp-(fixesTTC+varTTC+creditsPrincipal+creditsInteret+leasingTTC);
+  var cashflow = caHT+rentreesSupp-(fixesTTC+varTTC+creditsPrincipal+creditsInteret+leasingTTC+masseSalHT);
   var delta = resultat-(prevCA-chargesHT);
-  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caTTC,tvaCollectee,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,varHT_excep,varTTC_excep,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta,caFP055,caFP10,caFP20};
+  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caTTC,tvaCollectee,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,varHT_excep,varTTC_excep,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta,caFP055,caFP10,caFP20,masseSalHT};
 }
 
 function refreshTotals() {
@@ -2055,9 +2325,9 @@ function refreshTotals() {
   s('tot-caHT', t.caHT_j);
   s('tot-caTTC', t.caHT055*1.055 + t.caHT10*1.10 + t.caHT20*1.20);
   s('tot-tvaC',  t.caHT055*0.055 + t.caHT10*0.10 + t.caHT20*0.20);
-  var fp055=fpR.reduce(function(s,r){return s+(parseFloat(r.ht055)||0);},0);
-  var fp10=fpR.reduce(function(s,r){return s+(parseFloat(r.ht10)||0);},0);
-  var fp20=fpR.reduce(function(s,r){return s+(parseFloat(r.ht20)||0);},0);
+  var fp055=(_data.facturesPro||[]).reduce(function(s,r){return s+(parseFloat(r.ht055)||0);},0);
+  var fp10=(_data.facturesPro||[]).reduce(function(s,r){return s+(parseFloat(r.ht10)||0);},0);
+  var fp20=(_data.facturesPro||[]).reduce(function(s,r){return s+(parseFloat(r.ht20)||0);},0);
   s('tot-fp055',fp055);s('tot-fp10',fp10);s('tot-fp20',fp20);
   s('tot-fpHT',fp055+fp10+fp20);
   s('tot-fpTTC',fp055*1.055+fp10*1.10+fp20*1.20);
@@ -2111,6 +2381,15 @@ function refreshTotals() {
   }
   s('tot-leasHT',t.leasingHT);s('tot-leasTTC',t.leasingTTC);
   s('tot-credP',t.creditsPrincipal);s('tot-credMens',t.creditsPrincipal+t.creditsInteret);s('tot-credInt',t.creditsInteret);
+  // Masse salariale
+  var msC = calcMasseSalariale(_data.masseSalariale || {});
+  s('tot-msSal',msC.salaries);s('tot-msDir',msC.dirigeant);s('tot-msTotal',msC.total);
+  var dirR=pf((_data.masseSalariale||{}).dirigeant&&_data.masseSalariale.dirigeant.remuneration);
+  var dirT=parseFloat(((_data.masseSalariale||{}).dirigeant||{}).tauxCharges)||45;
+  s('ms-dir-cout',dirR*(1+dirT/100));
+  var divR=pf(((_data.masseSalariale||{}).dirigeant||{}).dividendes);
+  var divT=parseFloat(((_data.masseSalariale||{}).dirigeant||{}).tauxDividendes)||30;
+  s('ms-dir-divCout',divR*(1+divT/100));
   s('tva-c',fmtN(t.tvaCollectee)+' €');s('tva-d',fmtN(t.tvaDed)+' €');s('tva-due',fmtN(Math.abs(t.tvaDue))+' €');
   s('cf-val',fmt(t.cashflow),t.cashflow>=0?'positive':'negative');
   s('cf-prev',fmt(t.prevCA-t.chargesHT));
