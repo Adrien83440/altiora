@@ -673,6 +673,24 @@
 
   <!-- ══ ONGLET ÉMARGEMENTS ══ -->
   <div class="tab-section" id="tab-emargements" style="margin-top:16px">
+
+    <!-- BANDEAU INFO RGPD — Article L.1222-4 + RGPD Art. 13 -->
+    <div style="background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:12px;padding:12px 14px;margin-bottom:12px">
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <span style="font-size:18px;flex-shrink:0">🔒</span>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:#1e40af;margin-bottom:4px">Information sur le traitement de vos données</div>
+          <div style="font-size:10.5px;color:#3b82f6;line-height:1.6">
+            Conformément aux articles L.3171-2 et L.1222-4 du Code du travail et au RGPD (art. 6.1.c), votre employeur
+            met en place un système de décompte du temps de travail. Lors de la signature, les données suivantes sont collectées :
+            <b>horodatage, adresse IP, identifiant navigateur</b>. Ces données sont conservées <b>5 ans</b> (art. D.3171-16 du Code du travail)
+            et ne sont accessibles qu'à votre employeur et à l'inspection du travail. Vous disposez d'un droit d'accès, de rectification
+            et de contestation (bouton « Contester » ci-dessous).
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="card">
       <div class="card-head">
         <div class="card-title">📝 Documents à signer</div>
@@ -690,6 +708,13 @@
       <div class="card-body" id="emarg-history" style="padding:8px 12px">
         <div style="text-align:center;padding:16px;color:var(--muted);font-size:11px">Chargement...</div>
       </div>
+    </div>
+
+    <!-- MENTIONS LÉGALES BAS -->
+    <div style="font-size:9.5px;color:var(--muted);line-height:1.6;text-align:center;padding:8px 12px;margin-top:4px">
+      Signature électronique simple au sens de l'article 1366 du Code civil et du règlement eIDAS (niveau 1).<br>
+      Chaque signature génère une preuve cryptographique SHA-256 horodatée, conservée 5 ans conformément à l'art. D.3171-16 du Code du travail.<br>
+      En cas de désaccord, utilisez le bouton « Contester » — votre employeur sera notifié (art. L.3171-4).
     </div>
   </div>
 
@@ -2136,8 +2161,12 @@ var _swapTimer=setInterval(function(){
     if(!confirm('Signer cette fiche d\'heures ?\n\nP\u00e9riode : '+(f.periodeLabel||'')+'\nTotal : '+(f.totalHeures||0).toFixed(1)+'h\n\nCette action est irr\u00e9versible et fait preuve l\u00e9gale.')) return;
 
     var pid=new URLSearchParams(window.location.search).get('id')||'';
-    var now=new Date();
-    var proofInput=(f.contentHash||'')+pid+now.toISOString();
+
+    // Server-side timestamp + IP (non manipulable côté client)
+    var serverData={timestamp:Date.now(),iso:new Date().toISOString(),ip:'\u2014'};
+    try{var r=await fetch('/api/server-timestamp');var j=await r.json();serverData=j;}catch(e){console.warn('server-timestamp fallback client',e);}
+
+    var proofInput=(f.contentHash||'')+pid+serverData.iso;
     var proofHash=await sha256(proofInput);
 
     var sigData={
@@ -2145,27 +2174,26 @@ var _swapTimer=setInterval(function(){
       type:'heures',
       publicId:pid,
       employeNom:(_emp?((_emp.prenom||'')+' '+(_emp.nom||'')):'').trim(),
-      signedAt:now.toISOString(),
-      ip:'\u2014',
+      signedAt:serverData.iso,
+      signedAtMs:serverData.timestamp,
+      ip:serverData.ip,
       userAgent:navigator.userAgent||'\u2014',
       proofHash:proofHash,
       status:'signed',
-      motifContestation:null
+      motifContestation:null,
+      timestampSource:'server'
     };
 
     try{
-      // Get IP
-      try{var r=await fetch('https://api.ipify.org?format=json');var j=await r.json();sigData.ip=j.ip||'\u2014';}catch(e){}
-
-      var sigId='sig_'+ficheId+'_'+Date.now();
+      var sigId='sig_'+ficheId+'_'+serverData.timestamp;
       await window._setDocPublic('rh_emargements_public',_uid,'signatures',sigId,sigData);
 
       // Update fiche status — only allowed fields (Firestore rules restrict public updates)
       await window._setDocPath(['rh_emargements',_uid,'fiches',ficheId],{
         status:'signed',
-        signatureEmploye:{signedAt:now.toISOString(),ip:sigData.ip,hash:proofHash,status:'signed'},
+        signatureEmploye:{signedAt:serverData.iso,ip:serverData.ip,hash:proofHash,status:'signed'},
         locked:true,
-        updatedAt:Date.now()
+        updatedAt:serverData.timestamp
       },{merge:true});
 
       window.showToast('\u2705 Fiche sign\u00e9e avec succ\u00e8s !','ok');
@@ -2184,24 +2212,27 @@ var _swapTimer=setInterval(function(){
     if(!motif) return;
 
     var pid=new URLSearchParams(window.location.search).get('id')||'';
-    var now=new Date();
-    var proofHash=await sha256((f.contentHash||'')+pid+now.toISOString()+'CONTESTED');
+    var serverData={timestamp:Date.now(),iso:new Date().toISOString(),ip:'\u2014'};
+    try{var r=await fetch('/api/server-timestamp');var j=await r.json();serverData=j;}catch(e){}
+
+    var proofHash=await sha256((f.contentHash||'')+pid+serverData.iso+'CONTESTED');
 
     var sigData={
       ficheId:ficheId, type:'heures', publicId:pid,
       employeNom:(_emp?((_emp.prenom||'')+' '+(_emp.nom||'')):'').trim(),
-      signedAt:now.toISOString(), ip:'\u2014', userAgent:navigator.userAgent||'\u2014',
-      proofHash:proofHash, status:'contested', motifContestation:motif
+      signedAt:serverData.iso, signedAtMs:serverData.timestamp,
+      ip:serverData.ip, userAgent:navigator.userAgent||'\u2014',
+      proofHash:proofHash, status:'contested', motifContestation:motif,
+      timestampSource:'server'
     };
 
     try{
-      try{var r=await fetch('https://api.ipify.org?format=json');var j=await r.json();sigData.ip=j.ip||'\u2014';}catch(e){}
-      var sigId='sig_'+ficheId+'_'+Date.now();
+      var sigId='sig_'+ficheId+'_'+serverData.timestamp;
       await window._setDocPublic('rh_emargements_public',_uid,'signatures',sigId,sigData);
       // Only allowed fields
       await window._setDocPath(['rh_emargements',_uid,'fiches',ficheId],{
         status:'contested',
-        updatedAt:Date.now()
+        updatedAt:serverData.timestamp
       },{merge:true});
       window.showToast('\u26a0\ufe0f Fiche contest\u00e9e — Votre employeur sera notifi\u00e9','ok');
       loadEmargData();
@@ -2215,25 +2246,28 @@ var _swapTimer=setInterval(function(){
     if(!confirm('Confirmer la prise de connaissance de ce planning ?\n\n'+(a.planningDebut||'')+' \u2192 '+(a.planningFin||''))) return;
 
     var pid=new URLSearchParams(window.location.search).get('id')||'';
-    var now=new Date();
-    var proofHash=await sha256((a.contentHash||'')+pid+now.toISOString());
+    var serverData={timestamp:Date.now(),iso:new Date().toISOString(),ip:'\u2014'};
+    try{var sr=await fetch('/api/server-timestamp');var sj=await sr.json();serverData=sj;}catch(e){}
+
+    var proofHash=await sha256((a.contentHash||'')+pid+serverData.iso);
 
     var sigData={
       ficheId:ackId, type:'planning', publicId:pid,
       employeNom:(_emp?((_emp.prenom||'')+' '+(_emp.nom||'')):'').trim(),
-      signedAt:now.toISOString(), ip:'\u2014', userAgent:navigator.userAgent||'\u2014',
-      proofHash:proofHash, status:'acknowledged', motifContestation:null
+      signedAt:serverData.iso, signedAtMs:serverData.timestamp,
+      ip:serverData.ip, userAgent:navigator.userAgent||'\u2014',
+      proofHash:proofHash, status:'acknowledged', motifContestation:null,
+      timestampSource:'server'
     };
 
     try{
-      try{var r=await fetch('https://api.ipify.org?format=json');var j=await r.json();sigData.ip=j.ip||'\u2014';}catch(e){}
-      var sigId='sig_'+ackId+'_'+Date.now();
+      var sigId='sig_'+ackId+'_'+serverData.timestamp;
       await window._setDocPublic('rh_emargements_public',_uid,'signatures',sigId,sigData);
       // Only allowed fields
       await window._setDocPath(['rh_emargements',_uid,'planning_acks',ackId],{
         status:'acknowledged',
-        signatureEmploye:{signedAt:now.toISOString(),ip:sigData.ip,hash:proofHash},
-        updatedAt:Date.now()
+        signatureEmploye:{signedAt:serverData.iso,ip:serverData.ip,hash:proofHash},
+        updatedAt:serverData.timestamp
       },{merge:true});
       window.showToast('\u2705 Planning accus\u00e9 r\u00e9ception !','ok');
       loadEmargData();
