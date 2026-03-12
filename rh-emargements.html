@@ -499,7 +499,7 @@ function renderFiches(c){
       h+=`<tr>
         <td><div class="emp-chip"><div class="emp-av" style="background:${color}">${emp?empInit(emp):'?'}</div>${f.employeNom||'?'}</div></td>
         <td><span class="time-mono">${f.periodeLabel||f.periode||'—'}</span></td>
-        <td><span class="time-mono" style="color:var(--rh-main)">${f.totalHeures?f.totalHeures.toFixed(1)+'h':'—'}</span></td>
+        <td><span class="time-mono" style="color:var(--rh-main)">${f.totalHeures?f.totalHeures.toFixed(1)+'h':'—'}</span>${f.daysTotal?` <span style="font-size:9px;color:var(--muted)">(${f.daysSigned||0}/${f.daysTotal}j signés)</span>`:''}</td>
         <td><span class="tag ${STATUS_CLS[f.status]||'tag-pending'}">${STATUS_LABELS[f.status]||f.status}</span></td>
         <td style="font-size:11px">${sig?fmtTS(sig.signedAt):'—'}</td>
         <td>${sig?'<code style="font-size:9px;color:#64748b;background:#f1f5f9;padding:2px 5px;border-radius:4px" title="'+sig.proofHash+'">'+sig.proofHash.slice(0,12)+'…</code>':'—'}</td>
@@ -697,7 +697,7 @@ function exportAuditPDF(){
 window.exportAuditPDF=exportAuditPDF;
 
 // ══════════════════════════════════════════
-//   GÉNÉRATION DE FICHES DEPUIS POINTAGES
+//   GÉNÉRATION DE FICHES DEPUIS DAILY + POINTAGES
 // ══════════════════════════════════════════
 async function generateFiches(){
   if(!window._uid) return;
@@ -706,12 +706,22 @@ async function generateFiches(){
   if(btn){btn.disabled=true;btn.textContent='⏳ Génération...';}
 
   try{
-    // Load pointage data for the period
-    const days=[];
-    const d=new Date(start);d.setHours(12);
-    while(d<=end){days.push(fmt(d));d.setDate(d.getDate()+1);}
+    // 1. Load daily émargements for the period (source primaire — déjà signés)
+    const dailyByEmp={}; // {empId: {date: dailyDoc}}
+    _daily.filter(d=>{
+      if(!d.date) return false;
+      return d.date>=fmt(start) && d.date<=fmt(end);
+    }).forEach(d=>{
+      if(!dailyByEmp[d.employeId]) dailyByEmp[d.employeId]={};
+      dailyByEmp[d.employeId][d.date]=d;
+    });
 
-    const pointagesMap={}; // {dateStr: events[]}
+    // 2. Load pointages bruts pour compléter les jours sans émargement quotidien
+    const days=[];
+    const dd=new Date(start);dd.setHours(12);
+    while(dd<=end){days.push(fmt(dd));dd.setDate(dd.getDate()+1);}
+
+    const pointagesMap={};
     for(const ds of days){
       try{
         const ref=window._doc(window._db,'rh_pointages_public',window._uid,'events',ds);
@@ -720,109 +730,124 @@ async function generateFiches(){
       }catch(e){}
     }
 
-    // Group by employee
-    const empDays={}; // {empId: {date: {arrivee,depart,pause_deb,pause_fin}}}
+    // Group pointages by employee (fallback)
+    const ptByEmp={};
     for(const [ds,events] of Object.entries(pointagesMap)){
       events.forEach(evt=>{
         if(!evt.empId) return;
-        if(!empDays[evt.empId]) empDays[evt.empId]={};
-        if(!empDays[evt.empId][ds]) empDays[evt.empId][ds]={};
-        // Keep first arrivee, last depart
-        if(evt.type==='arrivee' && !empDays[evt.empId][ds].arrivee) empDays[evt.empId][ds].arrivee=evt.heure;
-        if(evt.type==='depart') empDays[evt.empId][ds].depart=evt.heure;
-        if(evt.type==='pause_deb') empDays[evt.empId][ds].pause_deb=evt.heure;
-        if(evt.type==='pause_fin') empDays[evt.empId][ds].pause_fin=evt.heure;
+        if(!ptByEmp[evt.empId]) ptByEmp[evt.empId]={};
+        if(!ptByEmp[evt.empId][ds]) ptByEmp[evt.empId][ds]={};
+        if(evt.type==='arrivee' && !ptByEmp[evt.empId][ds].arrivee) ptByEmp[evt.empId][ds].arrivee=evt.heure;
+        if(evt.type==='depart') ptByEmp[evt.empId][ds].depart=evt.heure;
+        if(evt.type==='pause_deb') ptByEmp[evt.empId][ds].pause_deb=evt.heure;
+        if(evt.type==='pause_fin') ptByEmp[evt.empId][ds].pause_fin=evt.heure;
       });
     }
+
+    // 3. Pre-load publicIds
+    const publicIdMap={};
+    try{
+      const pubSnap=await window._getDocs(window._col(window._db,'rh_employes_public'));
+      pubSnap.forEach(d=>{const p=d.data();if(p.uid===window._uid) publicIdMap[p.empId]=d.id;});
+    }catch(e){}
 
     let created=0, updated=0;
     const periode=_periodType==='mois'?fmt(start).slice(0,7):'W'+getISOWeek(start);
     const periodeLabel=_periodType==='mois'?MOIS_FR[start.getMonth()]+' '+start.getFullYear():'Semaine '+getISOWeek(start);
 
-    // Pre-load publicIds to avoid N queries
-    const publicIdMap={};
-    try{
-      const pubSnap=await window._getDocs(window._col(window._db,'rh_employes_public'));
-      pubSnap.forEach(d=>{
-        const p=d.data();
-        if(p.uid===window._uid) publicIdMap[p.empId]=d.id;
-      });
-    }catch(e){}
+    // 4. Merge all employee IDs (from daily + pointages)
+    const allEmpIds=new Set([...Object.keys(dailyByEmp),...Object.keys(ptByEmp)]);
 
-    for(const emp of _emps){
-      const data=empDays[emp.id];
-      if(!data||Object.keys(data).length===0) continue;
+    for(const empId of allEmpIds){
+      const emp=_emps.find(e=>e.id===empId);
+      if(!emp) continue;
 
-      // Check if fiche already exists
-      const existing=_fiches.find(f=>f.employeId===emp.id && f.periode===periode);
-
-      // Si signée/validée/contestée → ne pas toucher
+      // Check existing fiche
+      const existing=_fiches.find(f=>f.employeId===empId && f.periode===periode);
       if(existing && existing.status!=='pending') continue;
 
-      // Build lines
+      // Build lignes : daily first, pointage fallback
+      const empDaily=dailyByEmp[empId]||{};
+      const empPt=ptByEmp[empId]||{};
+      const allDates=new Set([...Object.keys(empDaily),...Object.keys(empPt)]);
+      if(allDates.size===0) continue;
+
       const lignes=[];
       let totalMin=0;
-      const sortedDays=Object.keys(data).sort();
-      for(const ds of sortedDays){
-        const day=data[ds];
-        const debut=day.arrivee||'';
-        const fin=day.depart||'';
-        const pauseDebMin=toMin(day.pause_deb);
-        const pauseFinMin=toMin(day.pause_fin);
-        const pauseMin=(day.pause_deb&&day.pause_fin)?Math.max(0,pauseFinMin-pauseDebMin):0;
-        const workMin=debut&&fin?Math.max(0,toMin(fin)-toMin(debut)-pauseMin):0;
-        totalMin+=workMin;
-        lignes.push({date:ds, debut, fin, pause:pauseMin, totalMin:workMin});
-      }
+      let allSigned=true;
 
-      // Generate content hash
-      const hashInput=JSON.stringify(lignes)+emp.id+periode;
+      Array.from(allDates).sort().forEach(ds=>{
+        const daily=empDaily[ds];
+        if(daily){
+          // Source : émargement quotidien signé
+          lignes.push({
+            date:ds,
+            debut:daily.arrivee||'',
+            fin:daily.depart||'',
+            pause:daily.pauseMin||0,
+            totalMin:daily.totalMinutes||0,
+            signed:daily.status==='signed',
+            source:'daily'
+          });
+          totalMin+=daily.totalMinutes||0;
+          if(daily.status!=='signed') allSigned=false;
+        } else {
+          // Fallback : pointages bruts (non signé)
+          const pt=empPt[ds];
+          if(!pt) return;
+          const debut=pt.arrivee||'';
+          const fin=pt.depart||'';
+          const pauseDebMin=toMin(pt.pause_deb);
+          const pauseFinMin=toMin(pt.pause_fin);
+          const pauseMin=(pt.pause_deb&&pt.pause_fin)?Math.max(0,pauseFinMin-pauseDebMin):0;
+          const workMin=debut&&fin?Math.max(0,toMin(fin)-toMin(debut)-pauseMin):0;
+          lignes.push({date:ds, debut, fin, pause:pauseMin, totalMin:workMin, signed:false, source:'pointage'});
+          totalMin+=workMin;
+          allSigned=false;
+        }
+      });
+
+      const hashInput=JSON.stringify(lignes)+empId+periode;
       const contentHash=await sha256(hashInput);
 
-      // Si fiche pending existante → écraser (supprimer + recréer)
       let ficheId;
-      if(existing){
-        ficheId=existing._id;
-        updated++;
-      } else {
-        ficheId='fiche_'+emp.id+'_'+periode+'_'+Date.now();
-        created++;
-      }
+      if(existing){ficheId=existing._id;updated++;}
+      else{ficheId='fiche_'+empId+'_'+periode+'_'+Date.now();created++;}
+
+      // Si tous les jours sont signés via daily → fiche auto-signée
+      const daysSignedCount=lignes.filter(l=>l.signed).length;
+      const autoSigned=allSigned && daysSignedCount>0;
 
       const fiche={
-        employeId:emp.id,
-        publicId:publicIdMap[emp.id]||'',
+        employeId:empId,
+        publicId:publicIdMap[empId]||'',
         employeNom:empName(emp),
         type:_periodType==='mois'?'heures_mois':'heures_semaine',
-        periode,
-        periodeLabel,
-        periodeDebut:fmt(start),
-        periodeFin:fmt(end),
+        periode, periodeLabel,
+        periodeDebut:fmt(start), periodeFin:fmt(end),
         lignes,
         totalMinutes:totalMin,
         totalHeures:Math.round(totalMin/60*10)/10,
+        daysTotal:lignes.length,
+        daysSigned:daysSignedCount,
         contentHash,
-        signatureEmploye:null,
+        signatureEmploye:autoSigned?{status:'daily_aggregate',daysSigned:daysSignedCount}:null,
         signatureAdmin:null,
-        status:'pending',
-        locked:false,
+        status:autoSigned?'signed':'pending',
+        locked:autoSigned,
         createdAt:existing?existing.createdAt:Date.now(),
         updatedAt:Date.now()
       };
 
       await window._setDoc(window._doc(window._db,'rh_emargements',window._uid,'fiches',ficheId),fiche);
-
-      // Audit entry
       await addAuditEntry(existing?'fiche_updated':'fiche_created','fiche',ficheId,empName(emp));
     }
 
     const msg=[];
     if(created>0) msg.push(created+' créée(s)');
     if(updated>0) msg.push(updated+' actualisée(s)');
-    showToast(msg.length>0?'✅ Fiches : '+msg.join(', '):'Aucune nouvelle fiche (fiches déjà signées ou pas de pointages)');
-    await loadFiches();
-    await loadAudit();
-    render();
+    showToast(msg.length>0?'✅ Fiches : '+msg.join(', '):'Aucune nouvelle fiche (pas de pointages/émargements sur la période)');
+    await loadFiches();await loadAudit();render();
   }catch(e){
     console.error('generateFiches',e);
     showToast('❌ Erreur : '+e.message);
@@ -837,62 +862,82 @@ async function refreshFiche(ficheId){
   if(!f||f.status!=='pending'){showToast('Seules les fiches en attente peuvent être actualisées');return;}
 
   try{
-    // Reload pointage data for the fiche's period
     const start=new Date(f.periodeDebut+'T12:00:00');
     const end=new Date(f.periodeFin+'T12:00:00');
     const days=[];
     const d=new Date(start);d.setHours(12);
     while(d<=end){days.push(fmt(d));d.setDate(d.getDate()+1);}
 
-    const dayData={};
+    // Daily first
+    const empDaily={};
+    _daily.filter(dd=>dd.employeId===f.employeId && dd.date>=fmt(start) && dd.date<=fmt(end))
+      .forEach(dd=>{empDaily[dd.date]=dd;});
+
+    // Pointage fallback
+    const empPt={};
     for(const ds of days){
+      if(empDaily[ds]) continue; // daily exists, skip pointage
       try{
         const ref=window._doc(window._db,'rh_pointages_public',window._uid,'events',ds);
         const snap=await window._getDoc(ref);
         if(snap.exists()){
           (snap.data().events||[]).forEach(evt=>{
             if(evt.empId!==f.employeId) return;
-            if(!dayData[ds]) dayData[ds]={};
-            if(evt.type==='arrivee' && !dayData[ds].arrivee) dayData[ds].arrivee=evt.heure;
-            if(evt.type==='depart') dayData[ds].depart=evt.heure;
-            if(evt.type==='pause_deb') dayData[ds].pause_deb=evt.heure;
-            if(evt.type==='pause_fin') dayData[ds].pause_fin=evt.heure;
+            if(!empPt[ds]) empPt[ds]={};
+            if(evt.type==='arrivee' && !empPt[ds].arrivee) empPt[ds].arrivee=evt.heure;
+            if(evt.type==='depart') empPt[ds].depart=evt.heure;
+            if(evt.type==='pause_deb') empPt[ds].pause_deb=evt.heure;
+            if(evt.type==='pause_fin') empPt[ds].pause_fin=evt.heure;
           });
         }
       }catch(e){}
     }
 
-    // Rebuild lines
     const lignes=[];
     let totalMin=0;
-    Object.keys(dayData).sort().forEach(ds=>{
-      const day=dayData[ds];
-      const debut=day.arrivee||'';
-      const fin=day.depart||'';
-      const pauseDebMin=toMin(day.pause_deb);
-      const pauseFinMin=toMin(day.pause_fin);
-      const pauseMin=(day.pause_deb&&day.pause_fin)?Math.max(0,pauseFinMin-pauseDebMin):0;
-      const workMin=debut&&fin?Math.max(0,toMin(fin)-toMin(debut)-pauseMin):0;
-      totalMin+=workMin;
-      lignes.push({date:ds, debut, fin, pause:pauseMin, totalMin:workMin});
+    let allSigned=true;
+    const allDates=new Set([...Object.keys(empDaily),...Object.keys(empPt)]);
+
+    Array.from(allDates).sort().forEach(ds=>{
+      const daily=empDaily[ds];
+      if(daily){
+        lignes.push({date:ds,debut:daily.arrivee||'',fin:daily.depart||'',pause:daily.pauseMin||0,totalMin:daily.totalMinutes||0,signed:daily.status==='signed',source:'daily'});
+        totalMin+=daily.totalMinutes||0;
+        if(daily.status!=='signed') allSigned=false;
+      } else {
+        const pt=empPt[ds];
+        if(!pt) return;
+        const debut=pt.arrivee||'';const fin=pt.depart||'';
+        const pauseMin=(pt.pause_deb&&pt.pause_fin)?Math.max(0,toMin(pt.pause_fin)-toMin(pt.pause_deb)):0;
+        const workMin=debut&&fin?Math.max(0,toMin(fin)-toMin(debut)-pauseMin):0;
+        lignes.push({date:ds,debut,fin,pause:pauseMin,totalMin:workMin,signed:false,source:'pointage'});
+        totalMin+=workMin;
+        allSigned=false;
+      }
     });
 
     const contentHash=await sha256(JSON.stringify(lignes)+f.employeId+f.periode);
+    const daysSignedCount=lignes.filter(l=>l.signed).length;
+    const autoSigned=allSigned && daysSignedCount>0;
 
-    // Update fiche in place
-    const {_id:_rm, ...ficheData}=f;
+    const {_id:_rm,...ficheData}=f;
     await window._setDoc(window._doc(window._db,'rh_emargements',window._uid,'fiches',ficheId),{
       ...ficheData,
       lignes,
       totalMinutes:totalMin,
       totalHeures:Math.round(totalMin/60*10)/10,
+      daysTotal:lignes.length,
+      daysSigned:daysSignedCount,
       contentHash,
+      status:autoSigned?'signed':ficheData.status,
+      signatureEmploye:autoSigned?{status:'daily_aggregate',daysSigned:daysSignedCount}:ficheData.signatureEmploye,
+      locked:autoSigned||ficheData.locked,
       updatedAt:Date.now()
     });
 
     await addAuditEntry('fiche_updated','fiche',ficheId,f.employeNom);
-    showToast(`✅ ${f.employeNom} : ${Math.round(totalMin/60*10)/10}h actualisé`);
-    await loadFiches();await loadAudit();render();
+    showToast(`✅ ${f.employeNom} : ${Math.round(totalMin/60*10)/10}h (${daysSignedCount}/${lignes.length} jours signés)`);
+    await loadFiches();await loadDaily();await loadAudit();render();
   }catch(e){
     console.error('refreshFiche',e);
     showToast('❌ Erreur : '+e.message);
