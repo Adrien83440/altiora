@@ -411,19 +411,25 @@ async function loadAudit(){
 
 async function loadDaily(){
   _daily=[];
-  // Source 1 : rh_emargements/{uid}/daily/ (tablette kiosk, admin auth)
+  const collected=[]; // temp array before dedup
+
+  const {start,end}=getPeriodRange();
+  const startStr=fmt(start), endStr=fmt(end);
+  const days=[];
+  const dd2=new Date(start);dd2.setHours(12);
+  while(dd2<=end){days.push(fmt(dd2));dd2.setDate(dd2.getDate()+1);}
+
+  // ── Source 1 : rh_emargements/{uid}/daily/ (tablette kiosk) ──
   try{
     const snap=await window._getDocs(window._col(window._db,'rh_emargements',window._uid,'daily'));
-    snap.forEach(d=>{const dd=d.data();dd._id=d.id;dd._src='emarg';_daily.push(dd);});
+    snap.forEach(d=>{
+      const dd=d.data();dd._id=d.id;dd._src='emarg';dd._ts=dd.createdAt||0;
+      if(dd.date>=startStr && dd.date<=endStr) collected.push(dd);
+    });
   }catch(e){console.warn('loadDaily emarg',e);}
 
-  // Source 2 : rh_pointages_public/{uid}/events/{date} → champs emarg_*  (mobile, public)
-  const {start,end}=getPeriodRange();
-  const days=[];
-  const dd=new Date(start);dd.setHours(12);
-  while(dd<=end){days.push(fmt(dd));dd.setDate(dd.getDate()+1);}
-
-  const pointagesCache={}; // {dateStr: events[]}
+  // ── Source 2 : rh_pointages_public events → emarg_* fields (mobile) ──
+  const pointagesCache={};
   try{
     for(const ds of days){
       try{
@@ -432,43 +438,38 @@ async function loadDaily(){
         if(!snap.exists()) continue;
         const data=snap.data();
         pointagesCache[ds]=data.events||[];
-        // Scan for emarg_* fields
         Object.keys(data).forEach(k=>{
           if(!k.startsWith('emarg_')) return;
           const ed=data[k];
           if(!ed||!ed.date) return;
-          const exists=_daily.find(x=>x.employeId===ed.employeId && x.date===ed.date);
-          if(!exists){
-            ed._id=ds+'_'+ed.employeId;
-            ed._src='pointage';
-            _daily.push(ed);
-          }
+          ed._id=ds+'_'+ed.employeId;
+          ed._src='pointage_emarg';
+          ed._ts=ed.createdAt||0;
+          collected.push(ed);
         });
       }catch(e){}
     }
   }catch(e){console.warn('loadDaily pointage',e);}
 
-  // Source 3 : _signatures type='daily' → construire des entrées quand aucun daily/ n'existe
-  // (cas : tablette a enregistré la signature mais le daily/ n'a pas été créé — ancienne version)
-  for(const sig of _signatures){
-    if(sig.type!=='daily') continue;
-    const empId=sig.employeNom?null:null; // on a besoin de l'empId
-    // Le ficheId du sig contient la date et l'empId : "dateStr_empId"
-    const parts=(sig.ficheId||'').split('_');
-    if(parts.length<2) continue;
-    const sigDate=parts[0]; // format YYYY-MM-DD
-    const sigEmpId=parts.slice(1).join('_'); // tout après la date
-    if(!sigDate||!sigEmpId) continue;
-    if(sigDate<fmt(start)||sigDate>fmt(end)) continue;
+  // ── Source 3 : _signatures type='daily' → reconstruct from pointages ──
+  // Sort signatures most recent first
+  const dailySigs=[..._signatures].filter(s=>s.type==='daily').sort((a,b)=>{
+    const ta=new Date(a.signedAt||0).getTime(), tb=new Date(b.signedAt||0).getTime();
+    return tb-ta;
+  });
 
-    // Vérifier si un daily existe déjà pour cet emp+date
-    const exists=_daily.find(x=>x.employeId===sigEmpId && x.date===sigDate);
-    if(exists) continue;
+  for(const sig of dailySigs){
+    const fid=sig.ficheId||'';
+    // ficheId format: "YYYY-MM-DD_empId" where empId can contain underscores
+    const dateMatch=fid.match(/^(\d{4}-\d{2}-\d{2})_(.+)$/);
+    if(!dateMatch) continue;
+    const sigDate=dateMatch[1], sigEmpId=dateMatch[2];
+    if(sigDate<startStr||sigDate>endStr) continue;
 
-    // Construire un daily depuis les pointages + la signature
+    // Build from pointages
     const ptEvents=(pointagesCache[sigDate]||[]).filter(e=>e.empId===sigEmpId);
-    const arrives=ptEvents.filter(e=>e.type==='arrivee');
-    const departs=ptEvents.filter(e=>e.type==='depart');
+    const arrives=ptEvents.filter(e=>e.type==='arrivee').sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
+    const departs=ptEvents.filter(e=>e.type==='depart').sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
     const arrTime=arrives.length?arrives[0].heure:'—';
     const depTime=departs.length?departs[departs.length-1].heure:'—';
     let pauseMin=0,lastPD=null;
@@ -478,9 +479,10 @@ async function loadDaily(){
     });
     const totalMin=arrTime!=='—'&&depTime!=='—'?Math.max(0,toMin(depTime)-toMin(arrTime)-pauseMin):0;
 
-    _daily.push({
-      _id:sig.ficheId,
+    collected.push({
+      _id:fid,
       _src:'signature',
+      _ts:new Date(sig.signedAt||0).getTime(),
       employeId:sigEmpId,
       employeNom:sig.employeNom||'—',
       date:sigDate,
@@ -495,10 +497,19 @@ async function loadDaily(){
       contentHash:'',
       status:'signed',
       source:sig.hasSignatureImage?'tablette':'mobile',
-      signatureImage:null // pas dispo ici, elle est dans le doc daily/ qui n'existe pas
+      signatureImage:null
     });
   }
 
+  // ── DEDUP : par employeId+date, garder le plus récent (_ts) ──
+  const best={};
+  collected.forEach(d=>{
+    const key=(d.employeId||'')+'|'+(d.date||'');
+    if(!best[key] || (d._ts||0)>(best[key]._ts||0)){
+      best[key]=d;
+    }
+  });
+  _daily=Object.values(best);
   _daily.sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(a.employeNom||'').localeCompare(b.employeNom||''));
 }
 
