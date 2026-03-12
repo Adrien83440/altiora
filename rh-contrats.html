@@ -970,6 +970,8 @@ async function generateContract(){
     _generatedHTML = cleanContractHTML(data.html || '');
     document.getElementById('previewBody').innerHTML = _generatedHTML;
     showToast('✅ Contrat généré avec succès !','success');
+    // Auto-save
+    saveContract(true);
   }catch(e){
     overlay.classList.remove('show');
     console.error(e);
@@ -1002,7 +1004,7 @@ function regenerateContract(){
 // ═══════════════════════════════════════════════════
 // SAVE CONTRACT
 // ═══════════════════════════════════════════════════
-async function saveContract(){
+async function saveContract(silent){
   if(!window._uid || !_generatedHTML) return;
   try{
     const contrat = {
@@ -1014,18 +1016,26 @@ async function saveContract(){
       idcc: gv('emp-idcc'),
       ccn: gv('emp-ccn'),
       status: 'brouillon',
-      createdAt: Date.now(),
       updatedAt: Date.now()
     };
-    const ref = await window._addDoc(window._collection(window._db,'rh',window._uid,'contrats'), contrat);
-    contrat._id = ref.id;
-    _contracts.unshift(contrat);
-    _currentContractId = ref.id;
+    if(_currentContractId){
+      // Update existing
+      await window._setDoc(window._doc(window._db,'rh',window._uid,'contrats',_currentContractId), contrat, {merge:true});
+      const idx = _contracts.findIndex(c=>c._id===_currentContractId);
+      if(idx >= 0) Object.assign(_contracts[idx], contrat);
+    } else {
+      // Create new
+      contrat.createdAt = Date.now();
+      const ref = await window._addDoc(window._collection(window._db,'rh',window._uid,'contrats'), contrat);
+      contrat._id = ref.id;
+      _contracts.unshift(contrat);
+      _currentContractId = ref.id;
+    }
     renderHistory();
-    showToast('✅ Contrat sauvegardé !','success');
+    if(!silent) showToast('✅ Contrat sauvegardé !','success');
   }catch(e){
     console.error(e);
-    showToast('Erreur sauvegarde : '+e.message,'error');
+    if(!silent) showToast('Erreur sauvegarde : '+e.message,'error');
   }
 }
 
@@ -1358,13 +1368,16 @@ function renderHistory(){
     const d = c.createdAt ? new Date(c.createdAt) : null;
     const dateStr = d ? d.toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'}) : '';
     const active = c._id === _currentContractId ? 'active':'';
-    return `<div class="hist-item ${active}" onclick="openSavedContract('${c._id}')">
-      <span class="hist-icon">📄</span>
-      <div class="hist-info">
-        <div class="hist-name">${c.salarie||'Sans nom'}</div>
-        <div class="hist-sub">${c.poste||''} · ${dateStr}</div>
+    return `<div class="hist-item ${active}" style="position:relative">
+      <div style="flex:1;display:flex;align-items:center;gap:10px;cursor:pointer" onclick="openSavedContract('${c._id}')">
+        <span class="hist-icon">📄</span>
+        <div class="hist-info">
+          <div class="hist-name">${c.salarie||'Sans nom'}</div>
+          <div class="hist-sub">${c.poste||''} · ${dateStr}</div>
+        </div>
+        <span class="hist-badge ${badge}">${c.typeLabel||c.type}</span>
       </div>
-      <span class="hist-badge ${badge}">${c.typeLabel||c.type}</span>
+      <button onclick="event.stopPropagation();deleteContract('${c._id}')" style="background:none;border:none;cursor:pointer;color:#d1d5db;font-size:14px;padding:4px 6px;border-radius:6px;transition:.15s;flex-shrink:0" onmouseover="this.style.color='#ef4444';this.style.background='#fef2f2'" onmouseout="this.style.color='#d1d5db';this.style.background='none'" title="Supprimer ce contrat">🗑</button>
     </div>`;
   }).join('');
 }
@@ -1394,6 +1407,25 @@ function sv(id,val){const el=document.getElementById(id);if(el)el.value=val;}
 function show(id,visible){const el=document.getElementById(id);if(el)el.style.display=visible?'':'none';}
 function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');setTimeout(()=>t.className='toast',3200);}
 
+async function deleteContract(id){
+  if(!confirm('Supprimer ce contrat définitivement ?')) return;
+  try{
+    await window._deleteDoc(window._doc(window._db,'rh',window._uid,'contrats',id));
+    _contracts = _contracts.filter(c=>c._id!==id);
+    if(_currentContractId === id){
+      _currentContractId = null;
+      _generatedHTML = '';
+      document.getElementById('emptyState').style.display = '';
+      document.getElementById('wizardWrap').style.display = 'none';
+    }
+    renderHistory();
+    showToast('Contrat supprimé','success');
+  }catch(e){
+    console.error(e);
+    showToast('Erreur : '+e.message,'error');
+  }
+}
+
 // ── EXPOSE ──
 window.startNewContract=startNewContract;
 window.selectType=selectType;
@@ -1408,6 +1440,7 @@ window.exportPDF=exportPDF;
 window.exportDOCX=exportDOCX;
 window.printContract=printContract;
 window.openSavedContract=openSavedContract;
+window.deleteContract=deleteContract;
 </script>
 
 <script src="nav.js"></script>
