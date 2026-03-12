@@ -1821,7 +1821,7 @@ window.confirmDailyEmarg=async function(){
       depart:recap.depTime,
       pauseMin:recap.pauseMin,
       totalMinutes:recap.totalMinutes,
-      totalHeures:Math.round(recap.totalMinutes/60*100)/100,
+      totalHeures:Math.round(recap.totalMinutes/60*10)/10,
       contentHash:contentHash,
       signedAt:serverData.iso,
       ip:serverData.ip,
@@ -1831,20 +1831,21 @@ window.confirmDailyEmarg=async function(){
       createdAt:serverData.timestamp
     };
 
-    // Save daily émargement
+    // Save daily émargement — merged into pointage doc (same path that already works for salarié)
     try{
-      console.log('[EMARG] Writing daily →','rh_emargements/'+_uid+'/daily/'+dailyId);
-      await window._setDocPath(['rh_emargements',_uid,'daily',dailyId],dailyData);
+      var emargField={};
+      emargField['emarg_'+_empId]=dailyData;
+      console.log('[EMARG] Writing daily → rh_pointages_public/'+_uid+'/events/'+dateStr+' (emarg field)');
+      await window._setDocPath(['rh_pointages_public',_uid,'events',dateStr],emargField,{merge:true});
       console.log('[EMARG] ✅ daily OK');
     }catch(e1){
       console.error('[EMARG] ❌ daily FAILED',e1.code,e1.message);
       throw e1;
     }
 
-    // Save signature in public collection (immutable bonus — daily/ is the primary proof)
-    var sigId='sig_daily_'+dailyId+'_'+serverData.timestamp;
+    // Signature in public collection (non-blocking bonus)
     try{
-      console.log('[EMARG] Writing signature →','rh_emargements_public/'+_uid+'/signatures/'+sigId);
+      var sigId='sig_daily_'+dailyId+'_'+serverData.timestamp;
       await window._setDocPath(['rh_emargements_public',_uid,'signatures',sigId],{
         ficheId:dailyId,type:'daily',publicId:pid,
         employeNom:dailyData.employeNom,
@@ -1853,11 +1854,7 @@ window.confirmDailyEmarg=async function(){
         proofHash:proofHash,status:'signed',
         motifContestation:null,timestampSource:'server'
       });
-      console.log('[EMARG] ✅ signature OK');
-    }catch(e2){
-      console.warn('[EMARG] ⚠️ signature non enregistrée (non bloquant)',e2.code||e2.message);
-      // Non bloquant : le daily/ signé est la preuve principale
-    }
+    }catch(e2){console.warn('[EMARG] signature non enregistrée (non bloquant)',e2.code);}
 
     window.showToast('\u2705 Heures valid\u00e9es !','ok');
   }catch(e){

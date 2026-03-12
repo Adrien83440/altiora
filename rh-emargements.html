@@ -334,10 +334,41 @@ async function loadAudit(){
 
 async function loadDaily(){
   _daily=[];
+  // Source 1 : rh_emargements/{uid}/daily/ (tablette kiosk, admin auth)
   try{
     const snap=await window._getDocs(window._col(window._db,'rh_emargements',window._uid,'daily'));
-    snap.forEach(d=>{const dd=d.data();dd._id=d.id;_daily.push(dd);});
-  }catch(e){console.warn('loadDaily',e);}
+    snap.forEach(d=>{const dd=d.data();dd._id=d.id;dd._src='emarg';_daily.push(dd);});
+  }catch(e){console.warn('loadDaily emarg',e);}
+
+  // Source 2 : rh_pointages_public/{uid}/events/{date} → champs emarg_*  (mobile, public)
+  try{
+    const {start,end}=getPeriodRange();
+    const days=[];
+    const d=new Date(start);d.setHours(12);
+    while(d<=end){days.push(fmt(d));d.setDate(d.getDate()+1);}
+    for(const ds of days){
+      try{
+        const ref=window._doc(window._db,'rh_pointages_public',window._uid,'events',ds);
+        const snap=await window._getDoc(ref);
+        if(!snap.exists()) continue;
+        const data=snap.data();
+        // Scan for emarg_* fields
+        Object.keys(data).forEach(k=>{
+          if(!k.startsWith('emarg_')) return;
+          const dd=data[k];
+          if(!dd||!dd.date) return;
+          // Avoid duplicates (same emp+date)
+          const exists=_daily.find(x=>x.employeId===dd.employeId && x.date===dd.date);
+          if(!exists){
+            dd._id=ds+'_'+dd.employeId;
+            dd._src='pointage';
+            _daily.push(dd);
+          }
+        });
+      }catch(e){}
+    }
+  }catch(e){console.warn('loadDaily pointage',e);}
+
   _daily.sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(a.employeNom||'').localeCompare(b.employeNom||''));
 }
 
@@ -764,7 +795,12 @@ async function generateFiches(){
 
       // Check existing fiche
       const existing=_fiches.find(f=>f.employeId===empId && f.periode===periode);
-      if(existing && existing.status!=='pending') continue;
+      // Only lock fiches manually signed/validated/contested by a human
+      // Auto-signed (daily_aggregate) can be refreshed with fresh data
+      if(existing && existing.status!=='pending'){
+        const isAutoSigned=existing.signatureEmploye&&existing.signatureEmploye.status==='daily_aggregate';
+        if(!isAutoSigned) continue;
+      }
 
       // Build lignes : daily first, pointage fallback
       const empDaily=dailyByEmp[empId]||{};
