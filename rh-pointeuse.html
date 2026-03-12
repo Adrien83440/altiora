@@ -303,7 +303,7 @@ body{
     </div>
     <div class="admin-body">
       <table class="admin-table">
-        <thead><tr><th>Employé</th><th>Type</th><th>Heure</th><th>Photo</th></tr></thead>
+        <thead><tr><th>Employé</th><th>Type</th><th>Heure</th><th>Notes</th><th>Photo</th></tr></thead>
         <tbody id="adminTbody"></tbody>
       </table>
       <div id="adminEmpty" style="display:none;padding:30px;text-align:center;color:var(--text3)">Aucun pointage enregistré aujourd'hui</div>
@@ -338,7 +338,7 @@ const PHOTO_CHANCE = 0.3; // 30% chance de photo
 const AUTO_RETURN  = 5000; // ms avant retour PIN
 const COLORS=['#059669','#2563eb','#7c3aed','#d97706','#dc2626','#0d9488','#ea580c','#4f46e5','#059669','#0284c7'];
 
-let _emps=[], _pointages=[], _pin='', _currentEmp=null, _camStream=null;
+let _emps=[], _cr={}, _pointages=[], _pin='', _currentEmp=null, _camStream=null;
 let _pendingAction=null, _pendingPhoto=null;
 
 // ── CLOCK ──
@@ -364,6 +364,7 @@ function empInit(e){return ((e.prenom||'?')[0]+(e.nom||'')[0]).toUpperCase();}
 async function initPointeuse(){
   if(!window._uid||!window._col){setTimeout(initPointeuse,400);return;}
   await loadEmps();
+  await loadPlanning();
   await loadPointages();
   renderSidebar();
 }
@@ -382,7 +383,45 @@ async function loadEmps(){
   _emps.sort((a,b)=>empName(a).localeCompare(empName(b)));
 }
 
-// ── LOAD TODAY'S POINTAGES (merged: private + public) ──
+// ── LOAD TODAY'S PLANNING ──
+async function loadPlanning(){
+  _cr={};
+  try{
+    const d=new Date();
+    // Compute monday of current week
+    const dt=new Date(d);dt.setHours(12,0,0,0);
+    const day=dt.getDay(), diff=day===0?-6:1-day;
+    dt.setDate(dt.getDate()+diff);
+    const wk=dt.getFullYear()+String(dt.getMonth()+1).padStart(2,'0')+String(dt.getDate()).padStart(2,'0');
+    const snap=await window._getDocs(window._col(window._db,'rh',window._uid,'plan_'+wk));
+    snap.forEach(doc=>{_cr[doc.id]=doc.data();});
+  }catch(err){console.warn('loadPlanning',err);}
+}
+
+function getTodayShift(emp){
+  const dateStr=today();
+  const k=`${dateStr}_${emp.id}`;
+  const data=_cr[k];
+  if(!data||!data.items||data.items.length===0) return null;
+  const workItems=data.items.filter(it=>it.type==='travail'||it.type==='partiel'||it.type==='formation'||it.type==='astreinte');
+  if(workItems.length===0) return null;
+  // Build readable string
+  return workItems.map(it=>{
+    const plages=it.plages&&it.plages.length>0?it.plages:(it.deb&&it.fin?[{deb:it.deb,fin:it.fin}]:[]);
+    const totalH=plages.reduce((s,p)=>{
+      const[ah,am]=(p.deb||'0:0').split(':').map(Number);
+      const[bh,bm]=(p.fin||'0:0').split(':').map(Number);
+      return s+Math.max(0,((bh*60+bm)-(ah*60+am))/60);
+    },0);
+    const timeStr=plages.map(p=>`${p.deb}–${p.fin}`).join(' | ');
+    const note=it.note||'';
+    return `${timeStr} (${totalH.toFixed(0)}h)${note?' · '+note:''}`;
+  }).join(' + ');
+}
+
+function hasPlannedShift(emp){
+  return getTodayShift(emp)!==null;
+}
 async function loadPointages(){
   _pointages=[];
   const dateKey=today();
@@ -477,15 +516,41 @@ function showActionScreen(emp){
 
   // Today's shifts from planning
   const shiftInfo=getTodayShift(emp);
-  document.getElementById('actShift').textContent=shiftInfo||'Aucun shift planifié aujourd\'hui';
+  const planned=!!shiftInfo;
+  const shiftEl=document.getElementById('actShift');
+  if(planned){
+    shiftEl.innerHTML=`<span style="color:var(--accent)">📅 Prévu : ${shiftInfo}</span>`;
+  } else {
+    shiftEl.innerHTML=`<span style="color:var(--orange)">⚠️ Aucun horaire prévu aujourd'hui</span>`;
+  }
 
   // Determine available actions based on current state
   const state=getEmpState(emp.id);
   const btns=document.getElementById('actBtns');
+
+  // Hide/show warning panel
+  const warnEl=document.getElementById('actWarning');
+  if(warnEl) warnEl.remove();
+
   let h='';
 
   if(!state.arrived){
-    h+=actionBtn('arrivee','arrive','🟢','Pointer mon arrivée','Début de journée');
+    // Show unplanned warning BEFORE action buttons
+    if(!planned){
+      h+=`<div id="actWarning" style="grid-column:span 2;background:linear-gradient(135deg,rgba(245,158,11,0.08),rgba(245,158,11,0.02));border:2px solid rgba(245,158,11,0.3);border-radius:14px;padding:16px;margin-bottom:4px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-size:22px">⚠️</span>
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--orange)">Vous n'êtes pas planifié(e) aujourd'hui</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:2px">Si vous devez quand même travailler, indiquez un motif :</div>
+          </div>
+        </div>
+        <input id="actMotifHorsPlan" type="text" placeholder="Ex: Remplacement de Marie, Extra du jour…"
+          style="width:100%;padding:10px 14px;border:1.5px solid rgba(245,158,11,0.3);border-radius:10px;background:rgba(0,0,0,0.3);color:white;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;outline:none;margin-bottom:4px"/>
+        <div style="font-size:10px;color:var(--text3);margin-top:4px">Ce pointage sera marqué « hors planning » pour votre responsable.</div>
+      </div>`;
+    }
+    h+=actionBtn('arrivee','arrive','🟢','Pointer mon arrivée',planned?'Début de journée':'Pointage hors planning');
   } else if(state.arrived && !state.departed){
     if(!state.onPause){
       h+=actionBtn('pause_deb','pause','⏸️','Début de pause','Décompte pause');
@@ -524,14 +589,27 @@ function getEmpState(empId){
   return {arrived,departed,onPause,arriveTime:arriveEvt?.heure||'',departTime:departEvt?.heure||''};
 }
 
-function getTodayShift(emp){
-  // Read from planning data if loaded — simplified for V1
-  return null;
-}
+// (getTodayShift is defined above with loadPlanning)
 
 // ── DO ACTION ──
 function doAction(type){
+  const planned=hasPlannedShift(_currentEmp);
+  let motifHP=null;
+
+  // If arrival and not planned → check motif
+  if(type==='arrivee' && !planned){
+    const motifEl=document.getElementById('actMotifHorsPlan');
+    motifHP=(motifEl?.value||'').trim();
+    if(!motifHP){
+      // Shake the input
+      if(motifEl){motifEl.style.borderColor='#ef4444';motifEl.placeholder='⚠️ Motif obligatoire pour un pointage hors planning';motifEl.focus();}
+      return;
+    }
+  }
+
   _pendingAction={empId:_currentEmp.id,type,heure:nowHM(),timestamp:Date.now(),photo:null};
+  if(!planned) _pendingAction.horsPlan=true;
+  if(motifHP) _pendingAction.motifHorsPlan=motifHP;
 
   // Random photo check
   if(Math.random()<PHOTO_CHANCE){
@@ -669,6 +747,10 @@ function renderSidebar(){
     }
 
     const ci=COLORS[i%COLORS.length];
+    const shift=getTodayShift(e);
+    const planned=!!shift;
+    // Compact shift display for sidebar
+    const shiftShort=planned?shift.split('(')[0].trim():'';
     return `<div class="sb-emp">
       <div class="sb-av" style="background:linear-gradient(135deg,${ci},${ci}cc)">${empInit(e)}
         <div class="sb-status ${statusCls}"></div>
@@ -676,6 +758,8 @@ function renderSidebar(){
       <div class="sb-info">
         <div class="sb-name">${empName(e)}</div>
         <div class="sb-meta">${statusTxt}</div>
+        ${!st.arrived&&planned?`<div style="font-size:9px;color:var(--accent);margin-top:1px">📅 ${shiftShort}</div>`:''}
+        ${!st.arrived&&!planned?`<div style="font-size:9px;color:var(--text3);margin-top:1px">Pas planifié</div>`:''}
       </div>
       ${hrs?`<div class="sb-hours">${hrs}</div>`:''}
     </div>`;
@@ -703,8 +787,9 @@ function openAdmin(){
     const typeCls={arrivee:'tag-arrive',depart:'tag-depart',pause_deb:'tag-pause-deb',pause_fin:'tag-pause-fin'};
     return `<tr>
       <td>${emp?empName(emp):'Inconnu'}</td>
-      <td><span class="tag ${typeCls[p.type]||''}">${typeLabels[p.type]||p.type}</span></td>
+      <td><span class="tag ${typeCls[p.type]||''}">${typeLabels[p.type]||p.type}</span>${p.horsPlan?'<span style="display:inline-block;margin-left:4px;font-size:9px;font-weight:700;padding:2px 6px;border-radius:5px;background:rgba(245,158,11,0.15);color:#d97706">Hors planning</span>':''}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-weight:700">${p.heure||'—'}</td>
+      <td style="font-size:11px;color:var(--text3)">${p.motifHorsPlan||'—'}</td>
       <td>${p.photo?'📷':'—'}</td>
     </tr>`;
   }).join('');
