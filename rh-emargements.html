@@ -418,33 +418,86 @@ async function loadDaily(){
   }catch(e){console.warn('loadDaily emarg',e);}
 
   // Source 2 : rh_pointages_public/{uid}/events/{date} → champs emarg_*  (mobile, public)
+  const {start,end}=getPeriodRange();
+  const days=[];
+  const dd=new Date(start);dd.setHours(12);
+  while(dd<=end){days.push(fmt(dd));dd.setDate(dd.getDate()+1);}
+
+  const pointagesCache={}; // {dateStr: events[]}
   try{
-    const {start,end}=getPeriodRange();
-    const days=[];
-    const d=new Date(start);d.setHours(12);
-    while(d<=end){days.push(fmt(d));d.setDate(d.getDate()+1);}
     for(const ds of days){
       try{
         const ref=window._doc(window._db,'rh_pointages_public',window._uid,'events',ds);
         const snap=await window._getDoc(ref);
         if(!snap.exists()) continue;
         const data=snap.data();
+        pointagesCache[ds]=data.events||[];
         // Scan for emarg_* fields
         Object.keys(data).forEach(k=>{
           if(!k.startsWith('emarg_')) return;
-          const dd=data[k];
-          if(!dd||!dd.date) return;
-          // Avoid duplicates (same emp+date)
-          const exists=_daily.find(x=>x.employeId===dd.employeId && x.date===dd.date);
+          const ed=data[k];
+          if(!ed||!ed.date) return;
+          const exists=_daily.find(x=>x.employeId===ed.employeId && x.date===ed.date);
           if(!exists){
-            dd._id=ds+'_'+dd.employeId;
-            dd._src='pointage';
-            _daily.push(dd);
+            ed._id=ds+'_'+ed.employeId;
+            ed._src='pointage';
+            _daily.push(ed);
           }
         });
       }catch(e){}
     }
   }catch(e){console.warn('loadDaily pointage',e);}
+
+  // Source 3 : _signatures type='daily' → construire des entrées quand aucun daily/ n'existe
+  // (cas : tablette a enregistré la signature mais le daily/ n'a pas été créé — ancienne version)
+  for(const sig of _signatures){
+    if(sig.type!=='daily') continue;
+    const empId=sig.employeNom?null:null; // on a besoin de l'empId
+    // Le ficheId du sig contient la date et l'empId : "dateStr_empId"
+    const parts=(sig.ficheId||'').split('_');
+    if(parts.length<2) continue;
+    const sigDate=parts[0]; // format YYYY-MM-DD
+    const sigEmpId=parts.slice(1).join('_'); // tout après la date
+    if(!sigDate||!sigEmpId) continue;
+    if(sigDate<fmt(start)||sigDate>fmt(end)) continue;
+
+    // Vérifier si un daily existe déjà pour cet emp+date
+    const exists=_daily.find(x=>x.employeId===sigEmpId && x.date===sigDate);
+    if(exists) continue;
+
+    // Construire un daily depuis les pointages + la signature
+    const ptEvents=(pointagesCache[sigDate]||[]).filter(e=>e.empId===sigEmpId);
+    const arrives=ptEvents.filter(e=>e.type==='arrivee');
+    const departs=ptEvents.filter(e=>e.type==='depart');
+    const arrTime=arrives.length?arrives[0].heure:'—';
+    const depTime=departs.length?departs[departs.length-1].heure:'—';
+    let pauseMin=0,lastPD=null;
+    ptEvents.forEach(e=>{
+      if(e.type==='pause_deb') lastPD=toMin(e.heure);
+      else if(e.type==='pause_fin'&&lastPD!==null){pauseMin+=toMin(e.heure)-lastPD;lastPD=null;}
+    });
+    const totalMin=arrTime!=='—'&&depTime!=='—'?Math.max(0,toMin(depTime)-toMin(arrTime)-pauseMin):0;
+
+    _daily.push({
+      _id:sig.ficheId,
+      _src:'signature',
+      employeId:sigEmpId,
+      employeNom:sig.employeNom||'—',
+      date:sigDate,
+      arrivee:arrTime,
+      depart:depTime,
+      pauseMin,
+      totalMinutes:totalMin,
+      totalHeures:Math.round(totalMin/60*10)/10,
+      signedAt:sig.signedAt,
+      ip:sig.ip||'—',
+      proofHash:sig.proofHash||'',
+      contentHash:'',
+      status:'signed',
+      source:sig.hasSignatureImage?'tablette':'mobile',
+      signatureImage:null // pas dispo ici, elle est dans le doc daily/ qui n'existe pas
+    });
+  }
 
   _daily.sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(a.employeNom||'').localeCompare(b.employeNom||''));
 }
