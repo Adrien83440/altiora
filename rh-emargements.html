@@ -294,7 +294,9 @@ async function loadEmps(){
 async function loadData(){
   const {label}=getPeriodRange();
   document.getElementById('periodLabel').textContent=label;
-  await Promise.all([loadFiches(), loadDaily(), loadPlanningAcks(), loadSignatures(), loadAudit()]);
+  // Signatures MUST load before daily (Source 3 depends on _signatures)
+  await Promise.all([loadFiches(), loadPlanningAcks(), loadSignatures(), loadAudit()]);
+  await loadDaily();
   await syncMissingAudit();
   render();
 }
@@ -501,16 +503,32 @@ async function loadDaily(){
     });
   }
 
-  // ── DEDUP : par employeId+date, garder le plus récent (_ts) ──
+  // Debug: log collected entries by source
+  const bySrc={};
+  collected.forEach(d=>{bySrc[d._src]=(bySrc[d._src]||0)+1;});
+  console.log('[DAILY] Collectés par source:',JSON.stringify(bySrc),
+    '| Détail:',collected.map(d=>d.employeNom+' '+d.date+' src='+d._src+' ts='+d._ts).join(' | '));
+
+  // ── DEDUP : par employeId+date, priorité source réelle > reconstruite, puis le plus récent ──
+  const SRC_PRIORITY={'emarg':3,'pointage_emarg':2,'signature':1};
   const best={};
   collected.forEach(d=>{
     const key=(d.employeId||'')+'|'+(d.date||'');
-    if(!best[key] || (d._ts||0)>(best[key]._ts||0)){
+    const existing=best[key];
+    if(!existing){
+      best[key]=d;
+      return;
+    }
+    const existPri=SRC_PRIORITY[existing._src]||0;
+    const newPri=SRC_PRIORITY[d._src]||0;
+    // Higher source priority wins. If same priority, newer timestamp wins.
+    if(newPri>existPri || (newPri===existPri && (d._ts||0)>(existing._ts||0))){
       best[key]=d;
     }
   });
   _daily=Object.values(best);
   _daily.sort((a,b)=>(b.date||'').localeCompare(a.date||'')||(a.employeNom||'').localeCompare(b.employeNom||''));
+  console.log(`[DAILY] ${_daily.length} entrée(s) chargées (${collected.length} collectées avant dedup)`);
 }
 
 // ── VIEW SWITCHING ──
