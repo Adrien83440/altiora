@@ -308,20 +308,64 @@ const TYPE_CLS={arrivee:'tag-arrive',depart:'tag-depart',pause_deb:'tag-pause-de
 
 let _emps=[], _view='jour', _cur=new Date(), _cache={}, _selEmp=null;
 let _planning={}; // {dateStr_empId: {items:[...]}}
+let _caData={}; // {dateStr: caHT} from pilotage
 
 function fmt(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function empName(e){return `${e.prenom||''} ${e.nom||''}`.trim()||'?';}
 function empInit(e){return ((e.prenom||'?')[0]+(e.nom||'')[0]).toUpperCase();}
 function toMin(t){if(!t)return 0;const[h,m]=(t||'0:0').split(':').map(Number);return h*60+(m||0);}
-function fmtDur(mins){const h=Math.floor(mins/60),m=mins%60;return `${h}h${String(m).padStart(2,'0')}`;}
+function fmtDur(mins){const h=Math.floor(Math.abs(mins)/60),m=Math.abs(mins)%60;return `${h}h${String(m).padStart(2,'0')}`;}
 function weekDays(d){const dt=new Date(d),day=dt.getDay(),diff=day===0?-6:1-day;dt.setDate(dt.getDate()+diff);dt.setHours(12);return Array.from({length:7},(_,i)=>{const dd=new Date(dt);dd.setDate(dt.getDate()+i);return dd;});}
 
+// ── COÛT HORAIRE CHARGÉ ──
+function getEmpCostPerHour(emp){
+  const brut=parseFloat(emp.salaireBrut)||0;
+  if(brut<=0) return 0;
+  const hebdo=parseFloat(emp.heuresHebdo)||35;
+  const horaireCharge=(brut*12/52/hebdo)*1.42; // +42% charges patronales
+  return horaireCharge;
+}
+function getEmpDayCost(emp,minutes){
+  return getEmpCostPerHour(emp)*(minutes/60);
+}
+function fmtE(n){return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:0,maximumFractionDigits:0})+' €';}
+function fmtE2(n){return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
+
+// ── CA DU JOUR depuis Pilotage ──
+function getDayCA(dateStr){return _caData[dateStr]||0;}
+
+async function loadCA(){
+  _caData={};
+  try{
+    const y=_cur.getFullYear(), m=_cur.getMonth();
+    const monthKey=y+'-'+String(m+1).padStart(2,'0');
+    const ref=window._doc(window._db,'pilotage',window._uid,'months',monthKey);
+    const snap=await window._getDoc(ref);
+    if(!snap.exists()) return;
+    const data=snap.data();
+    const ca=data.ca||[];
+    ca.forEach(r=>{
+      if(!r.date) return;
+      const parts=r.date.split('/');
+      if(parts.length<3) return;
+      const day=parseInt(parts[0]),month=parseInt(parts[1])-1,year=parseInt(parts[2]);
+      const ds=year+'-'+String(month+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+      // Multi-TVA format
+      const h055=parseFloat(r.ht055)||0, h10=parseFloat(r.ht10)||0, h20=parseFloat(r.ht20)||0;
+      const multi=h055+h10+h20;
+      const caHT=multi>0?multi:(parseFloat(r.montantHT)||0);
+      _caData[ds]=caHT;
+    });
+    console.log('[CA] Chargé',Object.keys(_caData).length,'jours pour',monthKey);
+  }catch(e){console.warn('[CA]',e);}
+}
 // ── INIT ──
 async function initPointages(){
   if(!window._uid||!window._col){setTimeout(initPointages,400);return;}
   await loadEmps();
   await loadConfig();
   await loadPlanning();
+  await loadCA();
   await loadData();
   render();
 }
@@ -457,7 +501,7 @@ function navNext(){
   refresh();
 }
 function goToday(){_cur=new Date();refresh();}
-async function refresh(){_cache={};await loadPlanning();await loadData();render();}
+async function refresh(){_cache={};await loadPlanning();await loadCA();await loadData();render();}
 window.navPrev=navPrev;window.navNext=navNext;window.goToday=goToday;
 
 function setView(v){
@@ -507,12 +551,29 @@ function renderJour(c){
   const lateCount=computeLate(d).length;
   const totalHours=computeTotalHours(d);
 
-  let h=`<div class="kpi-row">
+  // Coût masse salariale du jour
+  let dayCost=0;
+  _emps.forEach(emp=>{
+    const evts=events.filter(e=>e.empId===emp.id);
+    const hrs=calcEmpHours(evts,isToday);
+    dayCost+=getEmpDayCost(emp,hrs);
+  });
+  const dayCA=getDayCA(d);
+  const ratio=dayCA>0?(dayCost/dayCA*100):0;
+  const ratioCls=ratio>0?(ratio<=25?'green':ratio<=35?'orange':'red'):'';
+  const ratioLabel=ratio>0?(ratio<=25?'✅ Excellent':ratio<=35?'⚠️ Correct':'🔴 Élevé'):'—';
+
+  let h=`<div class="kpi-row" style="grid-template-columns:repeat(4,1fr)">
     <div class="kpi"><div class="kpi-label">Présents</div><div class="kpi-val green">${present}</div><div class="kpi-sub">sur ${total} employés</div></div>
     <div class="kpi"><div class="kpi-label">Absents</div><div class="kpi-val ${absent>0?'orange':''}">${absent}</div><div class="kpi-sub">non pointés</div></div>
     <div class="kpi"><div class="kpi-label">Retards</div><div class="kpi-val ${lateCount>0?'red':''}">${lateCount}</div><div class="kpi-sub">anomalies détectées</div></div>
     <div class="kpi"><div class="kpi-label">Heures cumulées</div><div class="kpi-val blue">${fmtDur(totalHours)}</div><div class="kpi-sub">${isToday?'en cours':'total jour'}</div></div>
-    <div class="kpi"><div class="kpi-label">Pointages</div><div class="kpi-val">${events.length}</div><div class="kpi-sub">événements</div></div>
+  </div>
+  <div class="kpi-row" style="grid-template-columns:repeat(4,1fr);margin-top:10px">
+    <div class="kpi" style="border-left:3px solid var(--orange)"><div class="kpi-label">💰 Coût salarial du jour</div><div class="kpi-val" style="color:var(--orange)">${fmtE(dayCost)}</div><div class="kpi-sub">${pointedToday} salarié(s) chargé(s)</div></div>
+    <div class="kpi" style="border-left:3px solid var(--rh-main)"><div class="kpi-label">📈 CA du jour (HT)</div><div class="kpi-val blue">${dayCA>0?fmtE(dayCA):'—'}</div><div class="kpi-sub">${dayCA>0?'Depuis le Pilotage':'Non saisi'}</div></div>
+    <div class="kpi" style="border-left:3px solid ${ratio>35?'var(--red)':ratio>25?'var(--orange)':'var(--rh-main)'}"><div class="kpi-label">📊 Ratio Masse sal. / CA</div><div class="kpi-val ${ratioCls}">${dayCA>0?ratio.toFixed(1)+'%':'—'}</div><div class="kpi-sub">${ratioLabel}</div></div>
+    <div class="kpi"><div class="kpi-label">📊 Pointages</div><div class="kpi-val">${events.length}</div><div class="kpi-sub">événements</div></div>
   </div>`;
 
   // Table
@@ -546,7 +607,8 @@ function renderJour(c){
   h+=`</div>`;
 
   // Timeline par employé
-  h+=`<div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">👥 Résumé par employé — Planifié vs Réalisé</div></div><div class="table-wrap"><table><thead><tr><th>Employé</th><th>Planifié</th><th>Arrivée</th><th>Départ</th><th>Pauses</th><th>Heures réalisées</th><th>Écart</th><th>Statut</th></tr></thead><tbody>`;
+  h+=`<div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">👥 Résumé par employé — Planifié vs Réalisé vs Coût</div></div><div class="table-wrap"><table><thead><tr><th>Employé</th><th>Planifié</th><th>Arrivée</th><th>Départ</th><th>Pauses</th><th>Heures réalisées</th><th>Écart</th><th>💰 Coût chargé</th><th>Statut</th></tr></thead><tbody>`;
+  let totalCostTable=0;
   _emps.forEach((emp,i)=>{
     const evts=events.filter(e=>e.empId===emp.id).sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
     const arrives=evts.filter(e=>e.type==='arrivee');
@@ -556,6 +618,8 @@ function renderJour(c){
     const departValid=depart&&arrive&&depart.timestamp>arrive.timestamp;
     const pauseCount=evts.filter(e=>e.type==='pause_deb').length;
     const hrs=calcEmpHours(evts,isToday);
+    const empCost=getEmpDayCost(emp,hrs);
+    totalCostTable+=empCost;
     const plannedMin=getPlannedMinutes(d,emp.id);
     const plannedStr=getPlannedShiftStr(d,emp.id);
     const ecart=hrs-plannedMin;
@@ -563,11 +627,11 @@ function renderJour(c){
     if(departValid) statut='<span style="color:var(--text)">Terminé</span>';
     else if(evts.some(e=>e.type==='pause_deb')&&!evts.some(e=>e.type==='pause_fin'&&e.timestamp>(evts.filter(x=>x.type==='pause_deb').pop()?.timestamp||0))) statut='<span style="color:var(--orange)">⏸ En pause</span>';
     else if(arrive) statut='<span style="color:var(--rh-main)">🟢 Présent</span>';
-    // Flag: not planned but pointed
     if(!plannedMin&&hrs>0) statut+=' <span class="tag" style="background:#fef3c7;color:#92400e;font-size:9px">Hors planning</span>';
     const ci=COLORS[i%COLORS.length];
     const ecartCls=ecart>=0?'var(--rh-main)':'var(--red)';
     const ecartIcon=ecart>0?'▲':ecart<0?'▼':'=';
+    const costPerH=getEmpCostPerHour(emp);
     h+=`<tr>
       <td><div class="emp-chip"><div class="emp-av" style="background:${ci}">${empInit(emp)}</div>${empName(emp)}</div></td>
       <td style="font-size:11px">${plannedStr?`<div class="time-mono" style="font-weight:700">${fmtDur(plannedMin)}</div><div style="font-size:10px;color:var(--muted)">${plannedStr}</div>`:'<span style="color:var(--muted)">—</span>'}</td>
@@ -576,10 +640,58 @@ function renderJour(c){
       <td>${pauseCount>0?pauseCount+' pause(s)':'—'}</td>
       <td class="time-mono" style="font-weight:800;color:var(--rh-main)">${hrs>0?fmtDur(hrs):'—'}</td>
       <td style="font-weight:700;color:${ecartCls}">${plannedMin>0&&hrs>0?ecartIcon+' '+fmtDur(Math.abs(ecart)):'—'}</td>
+      <td style="font-weight:700;color:var(--orange)">${hrs>0?fmtE2(empCost):'—'}${costPerH>0?`<div style="font-size:9px;color:var(--muted);font-weight:500">${fmtE2(costPerH)}/h chargé</div>`:''}</td>
       <td>${statut}</td>
     </tr>`;
   });
+  // Total row
+  h+=`<tr style="background:var(--rh-ghost);border-top:2px solid var(--rh-border)">
+    <td style="font-weight:800" colspan="5">TOTAL JOUR</td>
+    <td class="time-mono" style="font-weight:800;color:var(--rh-main)">${fmtDur(totalHours)}</td>
+    <td></td>
+    <td style="font-weight:800;color:var(--orange);font-size:14px">${fmtE(totalCostTable)}</td>
+    <td></td>
+  </tr>`;
   h+=`</tbody></table></div></div>`;
+
+  // Rentability card
+  if(dayCA>0||dayCost>0){
+    const marge=dayCA-dayCost;
+    const margePos=marge>=0;
+    h+=`<div class="card" style="margin-top:16px;border-left:4px solid ${margePos?'var(--rh-main)':'var(--red)'}">
+      <div class="card-head"><div class="card-title">💡 Rentabilité du jour — Masse salariale vs CA</div></div>
+      <div style="padding:18px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:16px;text-align:center">
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">CA du jour HT</div>
+          <div style="font-size:22px;font-weight:800;color:var(--rh-main)">${dayCA>0?fmtE(dayCA):'—'}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">Coût salarial chargé</div>
+          <div style="font-size:22px;font-weight:800;color:var(--orange)">${fmtE(dayCost)}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">Ratio masse sal./CA</div>
+          <div style="font-size:22px;font-weight:800;color:${ratio<=25?'var(--rh-main)':ratio<=35?'var(--orange)':'var(--red)'}">${dayCA>0?ratio.toFixed(1)+'%':'—'}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:2px">${ratioLabel}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px">Marge après salaires</div>
+          <div style="font-size:22px;font-weight:800;color:${margePos?'var(--rh-main)':'var(--red)'}">${dayCA>0?(margePos?'+':'')+fmtE(marge):'—'}</div>
+        </div>
+      </div>
+      <div style="padding:0 18px 14px">
+        <div style="height:24px;background:#f1f5f9;border-radius:99px;overflow:hidden;display:flex">
+          ${dayCA>0?`<div style="width:${Math.min(ratio,100)}%;background:${ratio<=25?'var(--rh-main)':ratio<=35?'var(--orange)':'var(--red)'};border-radius:99px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:white;min-width:40px">${ratio.toFixed(0)}% sal.</div>
+          <div style="flex:1;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;color:var(--muted)">${(100-ratio).toFixed(0)}% marge</div>`:'<div style="flex:1;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--muted)">CA non saisi</div>'}
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:9px;color:var(--muted)">
+          <span>Objectif commerce : &lt;20% | Restauration : &lt;35%</span>
+          ${!dayCA?'<a href="pilotage.html" style="color:var(--rh-main);text-decoration:none;font-weight:700">→ Saisir le CA</a>':''}
+        </div>
+      </div>
+    </div>`;
+  }
+
   c.innerHTML=h;
 }
 
