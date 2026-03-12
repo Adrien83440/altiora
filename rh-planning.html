@@ -955,6 +955,7 @@
       <button class="btn btn-outline btn-sm" onclick="openPolyPanel()">🎯 Polyvalence</button>
       <button class="btn btn-outline btn-sm" onclick="openParamsEntreprise()" title="Paramètres horaires de l'entreprise" style="border-color:#6366f1;color:#6366f1">⚙️ Paramètres</button>
       <button class="btn btn-outline btn-sm" onclick="exportPDF()">🖨️ Imprimer vue</button>
+      <button class="btn btn-sm" style="background:linear-gradient(135deg,#3b82f6,#60a5fa);color:white;box-shadow:0 2px 10px rgba(59,130,246,.3)" onclick="publishPlanning()">📢 Communiquer</button>
       <button class="btn btn-outline btn-sm" onclick="exportPlanningMensuelSalarie()" title="Planning mensuel individuel — une page par salarié (portrait A4)">👤 Planning individuel</button>
       <button class="btn btn-ai btn-sm" onclick="openAI()">✨ IA Planning</button>
       <button class="btn btn-sm" style="background:linear-gradient(135deg,#1d4ed8,#60a5fa);color:white" onclick="openCongeRapide()">🏖️ Congés</button>
@@ -4186,6 +4187,121 @@ function removePlageOuverture(idx){
   renderPlagesOuverture();
 }
 window.removePlageOuverture=removePlageOuverture;
+
+// ══════════════════════════════════════════
+//   COMMUNIQUER LE PLANNING (accusés de réception)
+// ══════════════════════════════════════════
+async function sha256(str){
+  const buf=new TextEncoder().encode(str);
+  const hash=await crypto.subtle.digest('SHA-256',buf);
+  return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+async function publishPlanning(){
+  if(!window._uid||!_emps.length){showToast('Aucun employé chargé','warn');return;}
+
+  // Déterminer la période
+  const days=weekDays(_cur);
+  const monDate=fmt(days[0]);
+  const sunDate=fmt(days[6]);
+  const weekNum=getISOWeek(days[0]);
+  const label='Semaine '+weekNum+' ('+days[0].toLocaleDateString('fr-FR',{day:'numeric',month:'short'})+' → '+days[6].toLocaleDateString('fr-FR',{day:'numeric',month:'short',year:'numeric'})+')';
+
+  // Scan shifts par employé sur la semaine
+  const empShifts={};
+  _emps.forEach(e=>{
+    const shifts=[];
+    days.forEach(d=>{
+      const k=fmt(d)+'_'+e.id;
+      const items=(_cr[k]?.items||[]).filter(it=>['travail','partiel','formation','astreinte'].includes(it.type));
+      if(items.length){
+        shifts.push({
+          date:fmt(d),
+          jour:d.toLocaleDateString('fr-FR',{weekday:'short'}),
+          items:items.map(it=>({type:it.type,deb:it.deb||'',fin:it.fin||'',plages:it.plages||[],note:it.note||''}))
+        });
+      }
+    });
+    if(shifts.length) empShifts[e.id]={emp:e,shifts};
+  });
+
+  const empCount=Object.keys(empShifts).length;
+  if(empCount===0){showToast('Aucun créneau trouvé sur cette semaine','warn');return;}
+
+  if(!confirm(`📢 Communiquer le planning ?\n\n${label}\n${empCount} salarié(s) concerné(s)\n\nChaque salarié recevra une notification dans son espace pour accuser réception.\n\n(Obligation légale : communication 7 jours avant — art. L.3171-1)`)) return;
+
+  const btn=document.querySelector('[onclick="publishPlanning()"]');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Publication...';}
+
+  let created=0, skipped=0;
+  try{
+    for(const [empId,data] of Object.entries(empShifts)){
+      const emp=data.emp;
+      const shifts=data.shifts;
+
+      // Vérifier si un accusé existe déjà pour cet employé+semaine
+      const ackId='ack_'+monDate.replace(/-/g,'')+'_'+empId;
+      try{
+        const existRef=window._doc(window._db,'rh_emargements',window._uid,'planning_acks',ackId);
+        const existSnap=await window._getDoc(existRef);
+        if(existSnap.exists()){
+          const existData=existSnap.data();
+          // Si déjà accusé → ne pas écraser
+          if(existData.status==='acknowledged'){skipped++;continue;}
+        }
+      }catch(e){}
+
+      const snapshot=shifts.map(s=>({
+        date:s.date,
+        jour:s.jour,
+        items:s.items.map(it=>{
+          const plages=it.plages&&it.plages.length?it.plages:[{deb:it.deb,fin:it.fin}];
+          const totalH=plages.reduce((sum,p)=>sum+diffH(p.deb,p.fin),0);
+          return {type:it.type,plages,totalH:Math.round(totalH*10)/10,note:it.note};
+        })
+      }));
+
+      const totalWeekH=snapshot.reduce((s,d)=>s+d.items.reduce((s2,it)=>s2+it.totalH,0),0);
+      const contentHash=await sha256(JSON.stringify(snapshot)+empId+monDate);
+
+      const ack={
+        employeId:empId,
+        employeNom:`${emp.prenom||''} ${emp.nom||''}`.trim(),
+        planningRef:'plan_'+monDate.replace(/-/g,''),
+        planningDebut:monDate,
+        planningFin:sunDate,
+        periodeLabel:label,
+        communicatedAt:Date.now(),
+        planningSnapshot:snapshot,
+        totalHeures:Math.round(totalWeekH*10)/10,
+        nbJours:shifts.length,
+        contentHash,
+        signatureEmploye:null,
+        status:'pending',
+        createdAt:Date.now()
+      };
+
+      await window._setDoc(window._doc(window._db,'rh_emargements',window._uid,'planning_acks',ackId),ack);
+      created++;
+    }
+
+    let msg=`✅ Planning communiqué : ${created} salarié(s)`;
+    if(skipped>0) msg+=` (${skipped} déjà accusé(s))`;
+    showToast(msg,'ok');
+  }catch(e){
+    console.error('publishPlanning',e);
+    showToast('❌ Erreur : '+e.message,'warn');
+  }
+  if(btn){btn.disabled=false;btn.textContent='📢 Communiquer';}
+}
+window.publishPlanning=publishPlanning;
+
+function getISOWeek(d){
+  const dt=new Date(d);dt.setHours(0,0,0,0);
+  dt.setDate(dt.getDate()+3-(dt.getDay()+6)%7);
+  const wk1=new Date(dt.getFullYear(),0,4);
+  return 1+Math.round(((dt-wk1)/86400000-3+(wk1.getDay()+6)%7)/7);
+}
 
 // ── UTILS ──
 function showToast(m,t=''){const el=document.getElementById('toast');el.textContent=m;el.className='toast show '+(t||'');setTimeout(()=>el.className='toast',3200);}
