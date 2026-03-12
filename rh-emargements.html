@@ -525,15 +525,20 @@ function renderFiches(c){
 
     filtered.forEach(f=>{
       const emp=_emps.find(e=>e.id===f.employeId);
-      const sig=_signatures.find(s=>s.ficheId===f._id && s.type==='heures');
+      // Signature lookup: _signatures first, then daily data
+      const sig=_signatures.find(s=>s.ficheId===f._id && (s.type==='heures'||s.type==='daily'));
+      const empDailys=_daily.filter(d=>d.employeId===f.employeId && d.date>=f.periodeDebut && d.date<=f.periodeFin && d.status==='signed');
+      const bestSig=sig||empDailys[0]||null;
+      const signedDate=bestSig?(bestSig.signedAt||bestSig.signedAt):null;
+      const sigHash=bestSig?(bestSig.proofHash||bestSig.contentHash||''):null;
       const color=COLORS[_emps.indexOf(emp)%COLORS.length]||'#059669';
       h+=`<tr>
         <td><div class="emp-chip"><div class="emp-av" style="background:${color}">${emp?empInit(emp):'?'}</div>${f.employeNom||'?'}</div></td>
         <td><span class="time-mono">${f.periodeLabel||f.periode||'—'}</span></td>
         <td><span class="time-mono" style="color:var(--rh-main)">${f.totalHeures?f.totalHeures.toFixed(1)+'h':'—'}</span>${f.daysTotal?` <span style="font-size:9px;color:var(--muted)">(${f.daysSigned||0}/${f.daysTotal}j signés)</span>`:''}</td>
         <td><span class="tag ${STATUS_CLS[f.status]||'tag-pending'}">${STATUS_LABELS[f.status]||f.status}</span></td>
-        <td style="font-size:11px">${sig?fmtTS(sig.signedAt):'—'}</td>
-        <td>${sig?'<code style="font-size:9px;color:#64748b;background:#f1f5f9;padding:2px 5px;border-radius:4px" title="'+sig.proofHash+'">'+sig.proofHash.slice(0,12)+'…</code>':'—'}</td>
+        <td style="font-size:11px">${signedDate?fmtTS(signedDate):'—'}</td>
+        <td>${sigHash?'<code style="font-size:9px;color:#64748b;background:#f1f5f9;padding:2px 5px;border-radius:4px" title="'+sigHash+'">'+sigHash.slice(0,12)+'…</code>':'—'}</td>
         <td style="display:flex;gap:4px;flex-wrap:wrap">
           <button class="btn btn-outline btn-xs" onclick="viewFiche('${f._id}')">👁 Voir</button>
           ${f.status==='pending'?`<button class="btn btn-outline btn-xs" style="border-color:var(--blue);color:var(--blue)" onclick="refreshFiche('${f._id}')">🔄</button>`:''}
@@ -1096,21 +1101,18 @@ window.validateFiche=validateFiche;
 // ══════════════════════════════════════════
 //   EXPORT PDF
 // ══════════════════════════════════════════
-function exportFichePDF(ficheId){
+function exportFichePDF(ficheId, existingPdf, noSave){
   const f=_fiches.find(x=>x._id===ficheId);
-  if(!f){showToast('Fiche introuvable');return;}
+  if(!f){if(!existingPdf)showToast('Fiche introuvable');return existingPdf||null;}
 
-  // Chercher signature : d'abord dans _signatures (fiche mensuelle), puis dans _daily (quotidiens)
   const sig=_signatures.find(s=>s.ficheId===ficheId && (s.type==='heures'||s.type==='daily'));
-  // Collecter les daily signés pour cet employé sur la période
   const empDailys=_daily.filter(d=>d.employeId===f.employeId && d.date>=f.periodeDebut && d.date<=f.periodeFin && d.status==='signed');
-  // Prendre le daily le plus récent qui a une signatureImage
   const dailyWithSig=empDailys.find(d=>d.signatureImage);
-  // Best signature info : daily > fiche sig
   const bestSig=dailyWithSig||sig||empDailys[0]||null;
 
   const {jsPDF}=window.jspdf;
-  const pdf=new jsPDF('p','mm','a4');
+  const pdf=existingPdf||(new jsPDF('p','mm','a4'));
+  if(existingPdf) pdf.addPage();
   const pw=210, ph=297, margin=15, cw=pw-2*margin, bottomLimit=ph-15;
 
   function needPage(y,need){ if(y+need>bottomLimit){pdf.addPage();return 20;} return y; }
@@ -1266,23 +1268,38 @@ function exportFichePDF(ficheId){
   pdf.setFontSize(6);pdf.setTextColor(160);
   pdf.text('Document généré par ALTEORE (alteore.com)',margin,y);
 
-  pdf.save(`emargement_${f.employeNom.replace(/\s+/g,'_')}_${f.periode}.pdf`);
-  showToast('📄 PDF exporté');
+  if(!existingPdf && !noSave){
+    pdf.save(`emargement_${f.employeNom.replace(/\s+/g,'_')}_${f.periode}.pdf`);
+    showToast('📄 PDF exporté');
+  }
+  return pdf;
 }
 window.exportFichePDF=exportFichePDF;
 
 function exportAllPDF(){
-  const {start,end}=getPeriodRange();
-  const inPeriod=_fiches.filter(f=>f.periodeDebut && f.periodeDebut>=fmt(start) && f.periodeDebut<=fmt(end));
-  if(inPeriod.length===0){
-    // Try month match
+  const {start,end,label}=getPeriodRange();
+  let fichesToExport=_fiches.filter(f=>f.periodeDebut && f.periodeDebut>=fmt(start) && f.periodeDebut<=fmt(end));
+  if(fichesToExport.length===0){
     const ym=start.getFullYear()+'-'+String(start.getMonth()+1).padStart(2,'0');
-    const monthFiches=_fiches.filter(f=>f.periode===ym);
-    if(monthFiches.length===0){showToast('Aucune fiche à exporter');return;}
-    monthFiches.forEach(f=>exportFichePDF(f._id));
+    fichesToExport=_fiches.filter(f=>f.periode===ym);
+  }
+  if(fichesToExport.length===0){showToast('Aucune fiche à exporter');return;}
+
+  if(fichesToExport.length===1){
+    exportFichePDF(fichesToExport[0]._id);
     return;
   }
-  inPeriod.forEach(f=>exportFichePDF(f._id));
+
+  // Plusieurs fiches → un seul PDF combiné
+  let pdf=exportFichePDF(fichesToExport[0]._id, null, true); // première fiche, pas de save
+  for(let i=1;i<fichesToExport.length;i++){
+    pdf=exportFichePDF(fichesToExport[i]._id, pdf); // ajoute une page à chaque fiche
+  }
+  if(pdf){
+    const periode=label.replace(/\s+/g,'_').replace(/[^\w-]/g,'');
+    pdf.save(`emargements_inspection_${periode}.pdf`);
+    showToast(`📄 ${fichesToExport.length} fiche(s) exportées en 1 PDF`);
+  }
 }
 window.exportAllPDF=exportAllPDF;
 
