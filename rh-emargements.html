@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<title>ALTEORE — Émargements & Signatures</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --rh-dark:#052e16;--rh-main:#059669;--rh-mid:#10b981;--rh-bright:#34d399;
+  --rh-ghost:#f0fdf4;--rh-border:#d1fae5;
+  --text:#1a1f36;--muted:#6b7280;--border:#e5e7eb;--bg:#f5f7f6;--sidebar-w:252px;--radius:14px;
+  --red:#ef4444;--orange:#f59e0b;--blue:#3b82f6;--purple:#8b5cf6;
+  --shadow-sm:0 2px 8px rgba(0,0,0,0.06);
+}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;font-size:13px;-webkit-font-smoothing:antialiased;}
+.main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;min-width:0;}
+
+/* TOPBAR */
+.topbar{background:rgba(255,255,255,0.85);backdrop-filter:blur(20px);border-bottom:1px solid rgba(0,0,0,0.06);padding:14px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;gap:10px;flex-wrap:wrap;}
+.topbar-left h1{font-size:17px;font-weight:800;letter-spacing:-0.3px;}
+.topbar-left p{font-size:11px;color:var(--muted);}
+.topbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.btn{padding:7px 15px;border:none;border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;}
+.btn:active{transform:scale(0.97);}
+.btn-rh{background:linear-gradient(135deg,var(--rh-main),var(--rh-bright));color:white;box-shadow:0 2px 10px rgba(5,150,105,.3);}
+.btn-rh:hover{box-shadow:0 4px 16px rgba(5,150,105,.4);transform:translateY(-1px);}
+.btn-outline{background:white;color:var(--text);border:1.5px solid var(--border);box-shadow:0 1px 2px rgba(0,0,0,.04);}
+.btn-outline:hover{border-color:var(--rh-main);color:var(--rh-main);}
+.btn-sm{padding:6px 12px;font-size:11px;border-radius:9px;}
+.btn-xs{padding:3px 9px;font-size:10px;border-radius:7px;}
+.btn-danger{background:#fef2f2;color:var(--red);border:1.5px solid #fecaca;}
+
+/* TABS */
+.view-tabs{display:flex;gap:2px;background:rgba(0,0,0,0.03);border-radius:10px;padding:3px;margin:0 24px 0;}
+.vtab{padding:7px 16px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;color:var(--muted);border:none;background:transparent;transition:all .15s;font-family:inherit;}
+.vtab.active{background:white;color:var(--rh-main);box-shadow:0 1px 6px rgba(0,0,0,.1);}
+
+/* CONTENT */
+.content{padding:20px 24px;flex:1;}
+
+/* KPI ROW */
+.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px;}
+.kpi{background:white;border:1px solid rgba(0,0,0,.05);border-radius:var(--radius);padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.03);transition:all .15s;}
+.kpi:hover{box-shadow:var(--shadow-sm);transform:translateY(-1px);}
+.kpi-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-bottom:4px;}
+.kpi-val{font-size:22px;font-weight:800;}
+.kpi-val.green{color:var(--rh-main);}
+.kpi-val.red{color:var(--red);}
+.kpi-val.orange{color:var(--orange);}
+.kpi-val.blue{color:var(--blue);}
+.kpi-sub{font-size:10px;color:var(--muted);margin-top:3px;}
+
+/* CARD */
+.card{background:white;border:1px solid rgba(0,0,0,.05);border-radius:var(--radius);overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.03);margin-bottom:16px;}
+.card-head{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid rgba(0,0,0,.05);flex-wrap:wrap;gap:8px;}
+.card-title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:7px;}
+
+/* TABLE */
+.table-wrap{overflow-x:auto;}
+table{width:100%;border-collapse:collapse;font-size:12px;}
+th{padding:10px 14px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;background:rgba(0,0,0,.015);border-bottom:1px solid rgba(0,0,0,.06);letter-spacing:.3px;}
+td{padding:10px 14px;border-bottom:1px solid rgba(0,0,0,.04);}
+tr:hover td{background:rgba(16,185,129,.02);}
+
+/* TAGS */
+.tag{display:inline-flex;align-items:center;gap:3px;padding:3px 9px;border-radius:8px;font-size:10px;font-weight:700;}
+.tag-pending{background:#fef3c7;color:#92400e;}
+.tag-signed{background:#dcfce7;color:#166534;}
+.tag-validated{background:#d1fae5;color:#065f46;}
+.tag-contested{background:#fee2e2;color:#991b1b;}
+.tag-expired{background:#f3f4f6;color:#6b7280;}
+
+/* EMP CHIP */
+.emp-chip{display:inline-flex;align-items:center;gap:6px;font-weight:600;}
+.emp-av{width:24px;height:24px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:white;flex-shrink:0;}
+.time-mono{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:12px;}
+
+/* PERIOD SELECTOR */
+.period-bar{background:white;border-bottom:1px solid rgba(0,0,0,.06);padding:12px 24px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;top:56px;z-index:40;}
+.period-select{padding:6px 12px;border:1.5px solid var(--border);border-radius:9px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;outline:none;background:white;cursor:pointer;}
+.period-select:focus{border-color:var(--rh-main);}
+
+/* FILTER PILLS */
+.filter-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;}
+.fpill{padding:5px 13px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;border:1.5px solid var(--border);background:white;color:var(--muted);transition:all .15s;font-family:inherit;}
+.fpill.active{background:var(--rh-main);color:white;border-color:var(--rh-main);}
+
+/* PROOF BLOCK */
+.proof{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;font-family:'JetBrains Mono',monospace;font-size:10px;color:#64748b;word-break:break-all;line-height:1.6;}
+
+/* MODAL */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);z-index:200;display:none;align-items:center;justify-content:center;}
+.overlay.show{display:flex;}
+.modal{background:white;border-radius:16px;width:100%;max-width:640px;max-height:90vh;overflow:auto;box-shadow:0 24px 60px rgba(0,0,0,.2);}
+.modal-head{padding:18px 22px;border-bottom:1px solid rgba(0,0,0,.06);display:flex;align-items:center;justify-content:space-between;}
+.modal-head h3{font-size:15px;font-weight:700;}
+.modal-close{background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted);}
+.modal-body{padding:20px 22px;}
+.modal-foot{padding:14px 22px;border-top:1px solid rgba(0,0,0,.06);display:flex;gap:8px;justify-content:flex-end;}
+
+/* SPINNER */
+.spin{width:20px;height:20px;border:2.5px solid rgba(5,150,105,.15);border-top-color:var(--rh-main);border-radius:50%;animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loader{display:flex;align-items:center;justify-content:center;gap:12px;padding:60px;color:var(--muted);}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.empty{padding:40px;text-align:center;color:var(--muted);font-size:12px;}
+.empty-icon{font-size:36px;margin-bottom:8px;}
+
+/* MOBILE */
+.hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:var(--rh-main);border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;box-shadow:0 4px 16px rgba(5,150,105,.4);}
+.hamburger span{display:block;width:20px;height:2.5px;background:#fff;border-radius:2px;transition:all .25s ease;}
+.hamburger.open span:nth-child(1){transform:translateY(7.5px) rotate(45deg);}
+.hamburger.open span:nth-child(2){opacity:0;}
+.hamburger.open span:nth-child(3){transform:translateY(-7.5px) rotate(-45deg);}
+.nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;}
+.nav-overlay.show{display:block;}
+@media(max-width:768px){
+  .hamburger{display:flex!important;}
+  .main{margin-left:0!important;width:100vw!important;}
+  .topbar{padding:12px 12px 12px 62px!important;}
+  .kpi-row{grid-template-columns:1fr 1fr!important;gap:8px!important;}
+  .content{padding:14px 12px;}
+  .period-bar{padding:10px 12px!important;top:auto!important;position:relative!important;}
+  table{min-width:600px!important;}
+  input[type=date],select{font-size:16px!important;}
+  .view-tabs{margin:0 12px;}
+  .overlay{align-items:flex-end!important;padding:0!important;}
+  .modal{max-width:100%!important;border-radius:18px 18px 0 0!important;max-height:92vh!important;}
+}
+@media(max-width:420px){
+  .kpi-row{grid-template-columns:1fr!important;}
+}
+</style>
+</head>
+<body>
+<button class="hamburger" id="hamburger" onclick="toggleMobileNav()"><span></span><span></span><span></span></button>
+<div class="nav-overlay" id="navOverlay" onclick="toggleMobileNav()"></div>
+
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>📝 Émargements & Signatures</h1>
+      <p>Fiches d'heures signées · Accusés de planning · Journal d'audit — Conformité inspection du travail</p>
+    </div>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="exportAllPDF()">📄 Export PDF (inspection)</button>
+      <button class="btn btn-rh btn-sm" onclick="generateFiches()">⚡ Générer les fiches</button>
+    </div>
+  </div>
+
+  <!-- PERIOD BAR -->
+  <div class="period-bar">
+    <span style="font-size:12px;font-weight:700;color:var(--muted)">Période :</span>
+    <select class="period-select" id="selType" onchange="onTypeChange()">
+      <option value="semaine">Semaine</option>
+      <option value="mois" selected>Mois</option>
+    </select>
+    <button class="btn btn-outline btn-xs" onclick="navPeriod(-1)">‹ Précédent</button>
+    <span style="font-size:13px;font-weight:800;min-width:140px;text-align:center" id="periodLabel">—</span>
+    <button class="btn btn-outline btn-xs" onclick="navPeriod(1)">Suivant ›</button>
+    <button class="btn btn-outline btn-xs" style="border-color:var(--rh-main);color:var(--rh-main)" onclick="goCurrentPeriod()">Aujourd'hui</button>
+    <div style="margin-left:auto">
+      <div class="view-tabs">
+        <button class="vtab active" id="vt-fiches" onclick="setView('fiches')">📋 Fiches d'heures</button>
+        <button class="vtab" id="vt-planning" onclick="setView('planning')">📅 Accusés planning</button>
+        <button class="vtab" id="vt-audit" onclick="setView('audit')">🔍 Audit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTENT -->
+  <div class="content" id="content">
+    <div class="loader"><div class="spin"></div><span>Chargement…</span></div>
+  </div>
+</div>
+
+<!-- DETAIL MODAL -->
+<div class="overlay" id="detailOverlay" onclick="closeDetail()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-head">
+      <h3 id="detailTitle">Détail fiche</h3>
+      <button class="modal-close" onclick="closeDetail()">✕</button>
+    </div>
+    <div class="modal-body" id="detailBody"></div>
+    <div class="modal-foot" id="detailFoot"></div>
+  </div>
+</div>
+
+<!-- FIREBASE -->
+<script type="module">
+import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import{getAuth,onAuthStateChanged,signOut}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import{getFirestore,doc,setDoc,getDoc,getDocs,deleteDoc,collection,addDoc}from"https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+const app=initializeApp({apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",authDomain:"altiora-70599.firebaseapp.com",projectId:"altiora-70599",storageBucket:"altiora-70599.firebasestorage.app",messagingSenderId:"120905555746",appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"});
+const auth=getAuth(app);const db=getFirestore(app);
+window._db=db;window._doc=doc;window._setDoc=setDoc;window._getDoc=getDoc;
+window._getDocs=getDocs;window._deleteDoc=deleteDoc;
+window._col=collection;window._addDoc=addDoc;window._signOut=signOut;
+onAuthStateChanged(auth,u=>{
+  if(!u){location.href='index.html';return;}
+  window._uid=u.uid;
+  window._auth=auth;
+  const n=u.displayName||u.email.split('@')[0];
+  document.getElementById('uname')&&(document.getElementById('uname').textContent=n);
+  document.getElementById('av')&&(document.getElementById('av').textContent=n.charAt(0).toUpperCase());
+  window._firebaseReady=true;
+  window.initEmargements();
+});
+</script>
+
+<script>
+// ══════════════════════════════════════════
+//   ÉMARGEMENTS & SIGNATURES — ALTEORE
+// ══════════════════════════════════════════
+const COLORS=['#059669','#2563eb','#7c3aed','#d97706','#dc2626','#0d9488','#ea580c','#4f46e5'];
+const JOURS_FR=['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
+const MOIS_FR=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const STATUS_LABELS={pending:'En attente',signed:'Signé',validated:'Validé',contested:'Contesté',expired:'Expiré',acknowledged:'Accusé'};
+const STATUS_CLS={pending:'tag-pending',signed:'tag-signed',validated:'tag-validated',contested:'tag-contested',expired:'tag-expired',acknowledged:'tag-signed'};
+
+let _emps=[], _fiches=[], _planningAcks=[], _auditLog=[], _signatures=[];
+let _view='fiches', _periodType='mois', _cur=new Date(), _filter='all';
+
+// ── UTILS ──
+function empName(e){return `${e.prenom||''} ${e.nom||''}`.trim()||'?';}
+function empInit(e){return ((e.prenom||'?')[0]+(e.nom||'')[0]).toUpperCase();}
+function fmt(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+function fmtFR(ds){if(!ds)return '—';try{return new Date(ds+'T12:00:00').toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});}catch(e){return ds;}}
+function toMin(t){if(!t)return 0;const[h,m]=(t||'0:0').split(':').map(Number);return h*60+(m||0);}
+function fmtDur(mins){const h=Math.floor(Math.abs(mins)/60),m=Math.abs(mins)%60;return `${h}h${String(m).padStart(2,'0')}`;}
+function fmtTS(ts){if(!ts)return '—';const d=ts.toDate?ts.toDate():new Date(ts);return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});}
+
+// ── SHA-256 ──
+async function sha256(str){
+  const buf=new TextEncoder().encode(str);
+  const hash=await crypto.subtle.digest('SHA-256',buf);
+  return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// ── PERIOD LOGIC ──
+function getPeriodRange(){
+  const y=_cur.getFullYear(), m=_cur.getMonth();
+  if(_periodType==='mois'){
+    return {start:new Date(y,m,1), end:new Date(y,m+1,0), label:MOIS_FR[m]+' '+y};
+  } else {
+    const d=new Date(_cur);d.setHours(12);
+    const day=d.getDay(), diff=day===0?-6:1-day;
+    d.setDate(d.getDate()+diff);
+    const mon=new Date(d);
+    const sun=new Date(d);sun.setDate(d.getDate()+6);
+    const wn=getISOWeek(mon);
+    return {start:mon, end:sun, label:'Semaine '+wn+' ('+fmtFR(fmt(mon))+' → '+fmtFR(fmt(sun))+')'};
+  }
+}
+
+function getISOWeek(d){
+  const dt=new Date(d);dt.setHours(0,0,0,0);
+  dt.setDate(dt.getDate()+3-(dt.getDay()+6)%7);
+  const wk1=new Date(dt.getFullYear(),0,4);
+  return 1+Math.round(((dt-wk1)/86400000-3+(wk1.getDay()+6)%7)/7);
+}
+
+function navPeriod(dir){
+  if(_periodType==='mois') _cur.setMonth(_cur.getMonth()+dir);
+  else _cur.setDate(_cur.getDate()+dir*7);
+  loadData();
+}
+function goCurrentPeriod(){_cur=new Date();loadData();}
+function onTypeChange(){_periodType=document.getElementById('selType').value;loadData();}
+
+// ── INIT ──
+async function initEmargements(){
+  if(!window._uid||!window._col){setTimeout(initEmargements,400);return;}
+  await loadEmps();
+  await loadData();
+}
+window.initEmargements=initEmargements;
+
+async function loadEmps(){
+  _emps=[];
+  try{
+    const snap=await window._getDocs(window._col(window._db,'rh',window._uid,'employes'));
+    snap.forEach(d=>{const e=d.data();e.id=d.id;if(e.statut!=='inactif')_emps.push(e);});
+  }catch(e){console.error(e);}
+  _emps.sort((a,b)=>empName(a).localeCompare(empName(b)));
+}
+
+async function loadData(){
+  const {label}=getPeriodRange();
+  document.getElementById('periodLabel').textContent=label;
+  await Promise.all([loadFiches(), loadPlanningAcks(), loadSignatures(), loadAudit()]);
+  render();
+}
+
+async function loadFiches(){
+  _fiches=[];
+  try{
+    const snap=await window._getDocs(window._col(window._db,'rh_emargements',window._uid,'fiches'));
+    snap.forEach(d=>{const f=d.data();f._id=d.id;_fiches.push(f);});
+  }catch(e){console.warn('loadFiches',e);}
+  _fiches.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+}
+
+async function loadPlanningAcks(){
+  _planningAcks=[];
+  try{
+    const snap=await window._getDocs(window._col(window._db,'rh_emargements',window._uid,'planning_acks'));
+    snap.forEach(d=>{const a=d.data();a._id=d.id;_planningAcks.push(a);});
+  }catch(e){console.warn('loadPlanningAcks',e);}
+}
+
+async function loadSignatures(){
+  _signatures=[];
+  try{
+    const snap=await window._getDocs(window._col(window._db,'rh_emargements_public',window._uid,'signatures'));
+    snap.forEach(d=>{const s=d.data();s._id=d.id;_signatures.push(s);});
+  }catch(e){console.warn('loadSignatures',e);}
+}
+
+async function loadAudit(){
+  _auditLog=[];
+  try{
+    const snap=await window._getDocs(window._col(window._db,'rh_emargements',window._uid,'audit'));
+    snap.forEach(d=>{const a=d.data();a._id=d.id;_auditLog.push(a);});
+  }catch(e){console.warn('loadAudit',e);}
+  _auditLog.sort((a,b)=>(b.timestamp||0)-(a.timestamp||0));
+}
+
+// ── VIEW SWITCHING ──
+function setView(v){
+  _view=v;
+  document.querySelectorAll('.vtab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('vt-'+v)?.classList.add('active');
+  render();
+}
+window.setView=setView;
+
+// ── RENDER DISPATCHER ──
+function render(){
+  const c=document.getElementById('content');
+  if(_view==='fiches') renderFiches(c);
+  else if(_view==='planning') renderPlanningAcks(c);
+  else if(_view==='audit') renderAudit(c);
+}
+
+// ══════════════════════════════════════════
+//   FICHES D'HEURES
+// ══════════════════════════════════════════
+function renderFiches(c){
+  const {start,end}=getPeriodRange();
+  // Filter fiches by period
+  const fichesInPeriod=_fiches.filter(f=>{
+    if(!f.periode) return false;
+    if(_periodType==='mois'){
+      const ym=start.getFullYear()+'-'+String(start.getMonth()+1).padStart(2,'0');
+      return f.periode===ym || (f.type==='heures_semaine' && f.periodeDebut && f.periodeDebut>=fmt(start) && f.periodeDebut<=fmt(end));
+    } else {
+      return f.periodeDebut && f.periodeDebut>=fmt(start) && f.periodeDebut<=fmt(end);
+    }
+  });
+
+  // Filter by status
+  const filtered=_filter==='all'?fichesInPeriod:fichesInPeriod.filter(f=>f.status===_filter);
+
+  // KPI
+  const total=fichesInPeriod.length;
+  const pending=fichesInPeriod.filter(f=>f.status==='pending').length;
+  const signed=fichesInPeriod.filter(f=>f.status==='signed'||f.status==='validated').length;
+  const contested=fichesInPeriod.filter(f=>f.status==='contested').length;
+  const pctSigned=total>0?Math.round(signed/total*100):0;
+
+  let h=`
+  <div class="kpi-row">
+    <div class="kpi"><div class="kpi-label">Total fiches</div><div class="kpi-val blue">${total}</div><div class="kpi-sub">sur la période</div></div>
+    <div class="kpi"><div class="kpi-label">En attente</div><div class="kpi-val orange">${pending}</div><div class="kpi-sub">non signées</div></div>
+    <div class="kpi"><div class="kpi-label">Signées / Validées</div><div class="kpi-val green">${signed}</div><div class="kpi-sub">${pctSigned}% complétés</div></div>
+    <div class="kpi"><div class="kpi-label">Contestées</div><div class="kpi-val red">${contested}</div><div class="kpi-sub">à traiter</div></div>
+    <div class="kpi"><div class="kpi-label">Conformité</div><div class="kpi-val ${pctSigned>=90?'green':pctSigned>=50?'orange':'red'}">${pctSigned}%</div><div class="kpi-sub">taux d'émargement</div></div>
+  </div>`;
+
+  // Filter pills
+  h+=`<div class="filter-row">
+    <button class="fpill ${_filter==='all'?'active':''}" onclick="setFilter('all')">Tous (${fichesInPeriod.length})</button>
+    <button class="fpill ${_filter==='pending'?'active':''}" onclick="setFilter('pending')">⏳ En attente (${pending})</button>
+    <button class="fpill ${_filter==='signed'?'active':''}" onclick="setFilter('signed')">✅ Signées (${fichesInPeriod.filter(f=>f.status==='signed').length})</button>
+    <button class="fpill ${_filter==='validated'?'active':''}" onclick="setFilter('validated')">✓ Validées (${fichesInPeriod.filter(f=>f.status==='validated').length})</button>
+    <button class="fpill ${_filter==='contested'?'active':''}" onclick="setFilter('contested')">⚠️ Contestées (${contested})</button>
+  </div>`;
+
+  if(filtered.length===0){
+    h+=`<div class="card"><div class="empty"><div class="empty-icon">📋</div>
+      ${total===0?'Aucune fiche pour cette période.<br><br><button class="btn btn-rh" onclick="generateFiches()">⚡ Générer les fiches depuis les pointages</button>':'Aucune fiche avec ce filtre.'}
+    </div></div>`;
+  } else {
+    h+=`<div class="card">
+      <div class="card-head">
+        <div class="card-title">📋 Fiches d'heures — ${filtered.length} résultat(s)</div>
+        <button class="btn btn-outline btn-xs" onclick="exportAllPDF()">📄 Export PDF</button>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Salarié</th><th>Période</th><th>Heures</th><th>Statut</th><th>Signé le</th><th>Hash preuve</th><th>Actions</th></tr></thead>
+        <tbody>`;
+
+    filtered.forEach(f=>{
+      const emp=_emps.find(e=>e.id===f.employeId);
+      const sig=_signatures.find(s=>s.ficheId===f._id && s.type==='heures');
+      const color=COLORS[_emps.indexOf(emp)%COLORS.length]||'#059669';
+      h+=`<tr>
+        <td><div class="emp-chip"><div class="emp-av" style="background:${color}">${emp?empInit(emp):'?'}</div>${f.employeNom||'?'}</div></td>
+        <td><span class="time-mono">${f.periodeLabel||f.periode||'—'}</span></td>
+        <td><span class="time-mono" style="color:var(--rh-main)">${f.totalHeures?f.totalHeures.toFixed(1)+'h':'—'}</span></td>
+        <td><span class="tag ${STATUS_CLS[f.status]||'tag-pending'}">${STATUS_LABELS[f.status]||f.status}</span></td>
+        <td style="font-size:11px">${sig?fmtTS(sig.signedAt):'—'}</td>
+        <td>${sig?'<code style="font-size:9px;color:#64748b;background:#f1f5f9;padding:2px 5px;border-radius:4px" title="'+sig.proofHash+'">'+sig.proofHash.slice(0,12)+'…</code>':'—'}</td>
+        <td style="display:flex;gap:4px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-xs" onclick="viewFiche('${f._id}')">👁 Voir</button>
+          ${f.status==='signed'?`<button class="btn btn-rh btn-xs" onclick="validateFiche('${f._id}')">✓ Valider</button>`:''}
+          <button class="btn btn-outline btn-xs" onclick="exportFichePDF('${f._id}')">📄</button>
+        </td>
+      </tr>`;
+    });
+
+    h+=`</tbody></table></div></div>`;
+  }
+
+  c.innerHTML=h;
+}
+
+// ══════════════════════════════════════════
+//   ACCUSÉS DE PLANNING
+// ══════════════════════════════════════════
+function renderPlanningAcks(c){
+  const {start,end}=getPeriodRange();
+  const inPeriod=_planningAcks.filter(a=>{
+    if(!a.planningDebut) return false;
+    return a.planningDebut>=fmt(start) && a.planningDebut<=fmt(end);
+  });
+  const total=inPeriod.length;
+  const acked=inPeriod.filter(a=>a.status==='acknowledged').length;
+  const pending=inPeriod.filter(a=>a.status==='pending').length;
+
+  let h=`
+  <div class="kpi-row" style="grid-template-columns:repeat(3,1fr)">
+    <div class="kpi"><div class="kpi-label">Plannings communiqués</div><div class="kpi-val blue">${total}</div><div class="kpi-sub">sur la période</div></div>
+    <div class="kpi"><div class="kpi-label">Accusés reçus</div><div class="kpi-val green">${acked}</div><div class="kpi-sub">${total>0?Math.round(acked/total*100):0}% accusés</div></div>
+    <div class="kpi"><div class="kpi-label">En attente</div><div class="kpi-val orange">${pending}</div><div class="kpi-sub">non accusés</div></div>
+  </div>`;
+
+  if(inPeriod.length===0){
+    h+=`<div class="card"><div class="empty"><div class="empty-icon">📅</div>Aucun accusé de planning sur cette période.<br><br>
+      <span style="font-size:11px;color:var(--muted)">Les accusés sont générés automatiquement lors de la publication d'un planning.</span>
+    </div></div>`;
+  } else {
+    h+=`<div class="card"><div class="card-head"><div class="card-title">📅 Accusés de réception de planning</div></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Salarié</th><th>Planning</th><th>Communiqué le</th><th>Statut</th><th>Accusé le</th><th>Hash</th></tr></thead>
+        <tbody>`;
+    inPeriod.forEach(a=>{
+      const emp=_emps.find(e=>e.id===a.employeId);
+      const color=COLORS[_emps.indexOf(emp)%COLORS.length]||'#059669';
+      const sig=_signatures.find(s=>s.ficheId===a._id && s.type==='planning');
+      h+=`<tr>
+        <td><div class="emp-chip"><div class="emp-av" style="background:${color}">${emp?empInit(emp):'?'}</div>${a.employeNom||'?'}</div></td>
+        <td><span class="time-mono">${fmtFR(a.planningDebut)} → ${fmtFR(a.planningFin)}</span></td>
+        <td style="font-size:11px">${a.communicatedAt?fmtTS(a.communicatedAt):'—'}</td>
+        <td><span class="tag ${STATUS_CLS[a.status]||'tag-pending'}">${STATUS_LABELS[a.status]||a.status}</span></td>
+        <td style="font-size:11px">${sig?fmtTS(sig.signedAt):'—'}</td>
+        <td>${a.contentHash?'<code style="font-size:9px;color:#64748b;background:#f1f5f9;padding:2px 5px;border-radius:4px">'+a.contentHash.slice(0,12)+'…</code>':'—'}</td>
+      </tr>`;
+    });
+    h+=`</tbody></table></div></div>`;
+  }
+  c.innerHTML=h;
+}
+
+// ══════════════════════════════════════════
+//   JOURNAL D'AUDIT
+// ══════════════════════════════════════════
+function renderAudit(c){
+  const ACTION_LABELS={
+    fiche_created:'Fiche créée',fiche_signed:'Fiche signée',fiche_validated:'Fiche validée',
+    fiche_contested:'Fiche contestée',planning_published:'Planning publié',planning_acknowledged:'Planning accusé',
+    pointage_modified:'Pointage modifié'
+  };
+  const ACTION_ICONS={
+    fiche_created:'📋',fiche_signed:'✍️',fiche_validated:'✅',fiche_contested:'⚠️',
+    planning_published:'📅',planning_acknowledged:'👁',pointage_modified:'✏️'
+  };
+
+  let h=`<div class="card">
+    <div class="card-head">
+      <div class="card-title">🔍 Journal d'audit — Traçabilité complète</div>
+      <span style="font-size:10px;color:var(--muted);background:#f1f5f9;padding:4px 10px;border-radius:6px;font-weight:700">🔒 Immutable — Aucune suppression possible</span>
+    </div>`;
+
+  if(_auditLog.length===0){
+    h+=`<div class="empty"><div class="empty-icon">🔍</div>Aucune entrée d'audit pour le moment.</div>`;
+  } else {
+    h+=`<div class="table-wrap"><table>
+      <thead><tr><th>Date/Heure</th><th>Action</th><th>Objet</th><th>Acteur</th><th>IP</th><th>Hash preuve</th></tr></thead>
+      <tbody>`;
+    _auditLog.slice(0,100).forEach(a=>{
+      h+=`<tr>
+        <td><span class="time-mono" style="font-size:11px">${a.timestamp?fmtTS(a.timestamp):'—'}</span></td>
+        <td><span style="font-size:13px">${ACTION_ICONS[a.action]||'📌'}</span> ${ACTION_LABELS[a.action]||a.action}</td>
+        <td style="font-size:11px">${a.targetType||'—'} <code style="font-size:9px;color:#94a3b8">${(a.targetId||'').slice(0,10)}</code></td>
+        <td style="font-size:11px">${a.actorNom||'—'} <span style="color:var(--muted)">(${a.actorType||'?'})</span></td>
+        <td><code style="font-size:10px;color:#64748b">${a.ip||'—'}</code></td>
+        <td>${a.hash?'<code style="font-size:9px;color:#64748b;background:#f1f5f9;padding:2px 5px;border-radius:4px">'+a.hash.slice(0,16)+'…</code>':'—'}</td>
+      </tr>`;
+    });
+    h+=`</tbody></table></div>`;
+  }
+  h+=`</div>`;
+  c.innerHTML=h;
+}
+
+// ══════════════════════════════════════════
+//   GÉNÉRATION DE FICHES DEPUIS POINTAGES
+// ══════════════════════════════════════════
+async function generateFiches(){
+  if(!window._uid) return;
+  const {start,end}=getPeriodRange();
+  const btn=document.querySelector('[onclick="generateFiches()"]');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Génération...';}
+
+  try{
+    // Load pointage data for the period
+    const days=[];
+    const d=new Date(start);d.setHours(12);
+    while(d<=end){days.push(fmt(d));d.setDate(d.getDate()+1);}
+
+    const pointagesMap={}; // {dateStr: events[]}
+    for(const ds of days){
+      try{
+        const ref=window._doc(window._db,'rh_pointages_public',window._uid,'events',ds);
+        const snap=await window._getDoc(ref);
+        if(snap.exists()){pointagesMap[ds]=snap.data().events||[];}
+      }catch(e){}
+    }
+
+    // Group by employee
+    const empDays={}; // {empId: {date: {arrivee,depart,pause_deb,pause_fin}}}
+    for(const [ds,events] of Object.entries(pointagesMap)){
+      events.forEach(evt=>{
+        if(!evt.empId) return;
+        if(!empDays[evt.empId]) empDays[evt.empId]={};
+        if(!empDays[evt.empId][ds]) empDays[evt.empId][ds]={};
+        // Keep first arrivee, last depart
+        if(evt.type==='arrivee' && !empDays[evt.empId][ds].arrivee) empDays[evt.empId][ds].arrivee=evt.heure;
+        if(evt.type==='depart') empDays[evt.empId][ds].depart=evt.heure;
+        if(evt.type==='pause_deb') empDays[evt.empId][ds].pause_deb=evt.heure;
+        if(evt.type==='pause_fin') empDays[evt.empId][ds].pause_fin=evt.heure;
+      });
+    }
+
+    let created=0;
+    const periode=_periodType==='mois'?fmt(start).slice(0,7):'W'+getISOWeek(start);
+    const periodeLabel=_periodType==='mois'?MOIS_FR[start.getMonth()]+' '+start.getFullYear():'Semaine '+getISOWeek(start);
+
+    for(const emp of _emps){
+      const data=empDays[emp.id];
+      if(!data||Object.keys(data).length===0) continue;
+
+      // Check if fiche already exists for this employee+period
+      const existing=_fiches.find(f=>f.employeId===emp.id && f.periode===periode);
+      if(existing) continue;
+
+      // Build lines
+      const lignes=[];
+      let totalMin=0;
+      const sortedDays=Object.keys(data).sort();
+      for(const ds of sortedDays){
+        const day=data[ds];
+        const debut=day.arrivee||'';
+        const fin=day.depart||'';
+        const pauseDebMin=toMin(day.pause_deb);
+        const pauseFinMin=toMin(day.pause_fin);
+        const pauseMin=(day.pause_deb&&day.pause_fin)?Math.max(0,pauseFinMin-pauseDebMin):0;
+        const workMin=debut&&fin?Math.max(0,toMin(fin)-toMin(debut)-pauseMin):0;
+        totalMin+=workMin;
+        lignes.push({date:ds, debut, fin, pause:pauseMin, totalMin:workMin});
+      }
+
+      // Generate content hash
+      const hashInput=JSON.stringify(lignes)+emp.id+periode;
+      const contentHash=await sha256(hashInput);
+
+      // Find public ID for this employee
+      let publicId='';
+      try{
+        const pubSnap=await window._getDocs(window._col(window._db,'rh_employes_public'));
+        pubSnap.forEach(d=>{
+          const p=d.data();
+          if(p.uid===window._uid && p.empId===emp.id) publicId=d.id;
+        });
+      }catch(e){}
+
+      const ficheId='fiche_'+emp.id+'_'+periode+'_'+Date.now();
+      const fiche={
+        employeId:emp.id,
+        publicId,
+        employeNom:empName(emp),
+        type:_periodType==='mois'?'heures_mois':'heures_semaine',
+        periode,
+        periodeLabel,
+        periodeDebut:fmt(start),
+        periodeFin:fmt(end),
+        lignes,
+        totalMinutes:totalMin,
+        totalHeures:Math.round(totalMin/60*10)/10,
+        contentHash,
+        signatureEmploye:null,
+        signatureAdmin:null,
+        status:'pending',
+        locked:false,
+        createdAt:Date.now(),
+        updatedAt:Date.now()
+      };
+
+      await window._setDoc(window._doc(window._db,'rh_emargements',window._uid,'fiches',ficheId),fiche);
+
+      // Audit entry
+      await addAuditEntry('fiche_created','fiche',ficheId,empName(emp));
+
+      created++;
+    }
+
+    showToast(created>0?`✅ ${created} fiche(s) générée(s)`:'Aucune nouvelle fiche à générer (déjà existantes ou pas de pointages)');
+    await loadFiches();
+    await loadAudit();
+    render();
+  }catch(e){
+    console.error('generateFiches',e);
+    showToast('❌ Erreur : '+e.message);
+  }
+  if(btn){btn.disabled=false;btn.textContent='⚡ Générer les fiches';}
+}
+window.generateFiches=generateFiches;
+
+// ── AUDIT ENTRY ──
+async function addAuditEntry(action, targetType, targetId, actorNom){
+  const auditId='aud_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
+  const timestamp=Date.now();
+  const hashStr=action+targetId+timestamp+window._uid;
+  const hash=await sha256(hashStr);
+  const entry={
+    action, targetType, targetId,
+    actorType:'admin', actorId:window._uid, actorNom,
+    timestamp, ip:'—', hash
+  };
+  try{
+    await window._setDoc(window._doc(window._db,'rh_emargements',window._uid,'audit',auditId),entry);
+  }catch(e){console.warn('audit',e);}
+}
+
+// ── VIEW FICHE DETAIL ──
+function viewFiche(ficheId){
+  const f=_fiches.find(x=>x._id===ficheId);
+  if(!f) return;
+  const sig=_signatures.find(s=>s.ficheId===ficheId && s.type==='heures');
+
+  document.getElementById('detailTitle').textContent='📋 '+f.employeNom+' — '+f.periodeLabel;
+
+  let h=`<div style="margin-bottom:14px;padding:12px 14px;background:var(--rh-ghost);border-radius:10px;border:1px solid var(--rh-border)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="font-size:12px;font-weight:700">${f.employeNom}</span>
+      <span class="tag ${STATUS_CLS[f.status]||'tag-pending'}">${STATUS_LABELS[f.status]||f.status}</span>
+    </div>
+    <div style="font-size:11px;color:var(--muted)">Période : ${f.periodeLabel} · Total : <b style="color:var(--rh-main)">${f.totalHeures?.toFixed(1)||0}h</b></div>
+  </div>`;
+
+  // Lignes
+  h+=`<div style="font-size:11px;font-weight:700;margin-bottom:8px">Détail jour par jour</div>
+    <div style="overflow-x:auto"><table style="min-width:400px">
+    <thead><tr><th>Date</th><th>Arrivée</th><th>Départ</th><th>Pause</th><th>Total</th></tr></thead>
+    <tbody>`;
+  (f.lignes||[]).forEach(l=>{
+    h+=`<tr>
+      <td>${fmtFR(l.date)}</td>
+      <td class="time-mono">${l.debut||'—'}</td>
+      <td class="time-mono">${l.fin||'—'}</td>
+      <td>${l.pause?fmtDur(l.pause):'—'}</td>
+      <td class="time-mono" style="color:var(--rh-main);font-weight:800">${fmtDur(l.totalMin)}</td>
+    </tr>`;
+  });
+  h+=`<tr style="background:#f0fdf4;font-weight:800"><td colspan="4" style="text-align:right">Total période</td>
+    <td class="time-mono" style="color:var(--rh-main)">${f.totalHeures?.toFixed(1)||0}h</td></tr>`;
+  h+=`</tbody></table></div>`;
+
+  // Preuve cryptographique
+  h+=`<div style="margin-top:14px;font-size:11px;font-weight:700;margin-bottom:6px">🔐 Preuve cryptographique</div>
+    <div class="proof">Content hash : ${f.contentHash||'—'}</div>`;
+
+  if(sig){
+    h+=`<div style="margin-top:10px" class="proof">
+      Signature salarié : ${sig.proofHash||'—'}<br>
+      Signé le : ${fmtTS(sig.signedAt)}<br>
+      IP : ${sig.ip||'—'}<br>
+      User-Agent : ${(sig.userAgent||'—').slice(0,80)}
+    </div>`;
+  }
+
+  document.getElementById('detailBody').innerHTML=h;
+
+  // Footer actions
+  let foot='';
+  if(f.status==='signed'){
+    foot=`<button class="btn btn-rh" onclick="validateFiche('${ficheId}');closeDetail()">✅ Contresigner (Valider)</button>`;
+  }
+  foot+=`<button class="btn btn-outline" onclick="exportFichePDF('${ficheId}')">📄 Export PDF</button>`;
+  foot+=`<button class="btn btn-outline" onclick="closeDetail()">Fermer</button>`;
+  document.getElementById('detailFoot').innerHTML=foot;
+
+  document.getElementById('detailOverlay').classList.add('show');
+}
+window.viewFiche=viewFiche;
+
+function closeDetail(){document.getElementById('detailOverlay').classList.remove('show');}
+window.closeDetail=closeDetail;
+
+// ── VALIDATE FICHE (admin countersign) ──
+async function validateFiche(ficheId){
+  const f=_fiches.find(x=>x._id===ficheId);
+  if(!f) return;
+  if(!confirm(`Valider et contresigner la fiche de ${f.employeNom} ?\n\nCette action est irréversible et sera enregistrée dans le journal d'audit.`)) return;
+
+  f.signatureAdmin={validatedAt:Date.now(),status:'validated'};
+  f.status='validated';
+  f.updatedAt=Date.now();
+  f.locked=true;
+
+  try{
+    await window._setDoc(window._doc(window._db,'rh_emargements',window._uid,'fiches',ficheId),f);
+    const user=window._auth?.currentUser;
+    await addAuditEntry('fiche_validated','fiche',ficheId,user?.displayName||'Admin');
+    showToast('✅ Fiche validée et contresignée');
+    await loadFiches();await loadAudit();render();
+  }catch(e){showToast('❌ Erreur : '+e.message);}
+}
+window.validateFiche=validateFiche;
+
+// ══════════════════════════════════════════
+//   EXPORT PDF
+// ══════════════════════════════════════════
+function exportFichePDF(ficheId){
+  const f=_fiches.find(x=>x._id===ficheId);
+  if(!f){showToast('Fiche introuvable');return;}
+  const sig=_signatures.find(s=>s.ficheId===ficheId && s.type==='heures');
+
+  const {jsPDF}=window.jspdf;
+  const pdf=new jsPDF('p','mm','a4');
+
+  // Header
+  pdf.setFontSize(18);pdf.setFont(undefined,'bold');
+  pdf.text('FICHE D\'HEURES — ÉMARGEMENT',15,20);
+  pdf.setFontSize(10);pdf.setFont(undefined,'normal');
+  pdf.setTextColor(100);
+  pdf.text('Document conforme à l\'article L.3171-2 du Code du travail',15,27);
+  pdf.text('Généré par ALTEORE — '+new Date().toLocaleDateString('fr-FR'),15,32);
+
+  // Employee info
+  pdf.setTextColor(0);pdf.setFontSize(12);pdf.setFont(undefined,'bold');
+  pdf.text('Salarié : '+f.employeNom,15,44);
+  pdf.setFont(undefined,'normal');pdf.setFontSize(10);
+  pdf.text('Période : '+f.periodeLabel,15,50);
+  pdf.text('Total heures : '+(f.totalHeures?.toFixed(1)||0)+'h',15,56);
+  pdf.text('Statut : '+(STATUS_LABELS[f.status]||f.status),15,62);
+
+  // Table
+  const rows=(f.lignes||[]).map(l=>[
+    fmtFR(l.date),
+    l.debut||'—',
+    l.fin||'—',
+    l.pause?fmtDur(l.pause):'—',
+    fmtDur(l.totalMin)
+  ]);
+  rows.push(['','','','TOTAL',(f.totalHeures?.toFixed(1)||0)+'h']);
+
+  pdf.autoTable({
+    startY:68,
+    head:[['Date','Arrivée','Départ','Pause','Total']],
+    body:rows,
+    theme:'grid',
+    headStyles:{fillColor:[5,150,105],textColor:255,fontStyle:'bold',fontSize:9},
+    bodyStyles:{fontSize:9},
+    footStyles:{fontStyle:'bold'},
+    margin:{left:15,right:15}
+  });
+
+  let y=pdf.lastAutoTable.finalY+12;
+
+  // Signature blocks
+  pdf.setFontSize(10);pdf.setFont(undefined,'bold');
+  pdf.text('Signature salarié',15,y);
+  pdf.setFont(undefined,'normal');pdf.setFontSize(9);
+  if(sig){
+    pdf.text('Signé le : '+fmtTS(sig.signedAt),15,y+6);
+    pdf.text('IP : '+(sig.ip||'—'),15,y+11);
+    pdf.text('Hash : '+(sig.proofHash||'—'),15,y+16);
+  } else {
+    pdf.text('Non signé',15,y+6);
+  }
+
+  pdf.setFont(undefined,'bold');pdf.setFontSize(10);
+  pdf.text('Contresignature employeur',110,y);
+  pdf.setFont(undefined,'normal');pdf.setFontSize(9);
+  if(f.signatureAdmin){
+    pdf.text('Validé le : '+fmtTS(f.signatureAdmin.validatedAt),110,y+6);
+  } else {
+    pdf.text('Non validé',110,y+6);
+  }
+
+  // Hash de contenu
+  y+=28;
+  pdf.setFontSize(8);pdf.setTextColor(120);
+  pdf.text('Hash contenu (SHA-256) : '+(f.contentHash||'—'),15,y);
+  pdf.text('Ce document fait foi en cas de contrôle de l\'inspection du travail.',15,y+5);
+
+  pdf.save(`emargement_${f.employeNom.replace(/\s+/g,'_')}_${f.periode}.pdf`);
+  showToast('📄 PDF exporté');
+}
+window.exportFichePDF=exportFichePDF;
+
+function exportAllPDF(){
+  const {start,end}=getPeriodRange();
+  const inPeriod=_fiches.filter(f=>f.periodeDebut && f.periodeDebut>=fmt(start) && f.periodeDebut<=fmt(end));
+  if(inPeriod.length===0){
+    // Try month match
+    const ym=start.getFullYear()+'-'+String(start.getMonth()+1).padStart(2,'0');
+    const monthFiches=_fiches.filter(f=>f.periode===ym);
+    if(monthFiches.length===0){showToast('Aucune fiche à exporter');return;}
+    monthFiches.forEach(f=>exportFichePDF(f._id));
+    return;
+  }
+  inPeriod.forEach(f=>exportFichePDF(f._id));
+}
+window.exportAllPDF=exportAllPDF;
+
+// ── FILTER ──
+function setFilter(f){_filter=f;render();}
+window.setFilter=setFilter;
+
+// ── TOAST ──
+function showToast(msg){
+  const t=document.createElement('div');
+  t.textContent=msg;
+  t.style.cssText='position:fixed;bottom:24px;right:24px;background:linear-gradient(135deg,#059669,#10b981);color:white;padding:12px 20px;border-radius:14px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 8px 32px rgba(0,0,0,.2);animation:fadeInUp .3s ease';
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(),3500);
+}
+
+window.navPeriod=navPeriod;window.goCurrentPeriod=goCurrentPeriod;window.onTypeChange=onTypeChange;
+</script>
+
+<!-- NAV -->
+<script>
+function toggleNav(subId,el){const sub=document.getElementById(subId);sub&&sub.classList.toggle('open');el&&el.classList.toggle('open');}
+function activatePage(pageId,openSub){const el=document.getElementById(pageId);if(el)el.classList.add('on');if(openSub){const sub=document.getElementById(openSub);if(sub)sub.classList.add('open');}}
+document.addEventListener('DOMContentLoaded',()=>activatePage('nav-rh','rh-nav-sub'));
+</script>
+<script src="nav.js"></script>
+</body>
+</html>

@@ -23,7 +23,7 @@
     'rh-temps.html', 'rh-paie.html', 'rh-dirigeant.html', 'rh-recrutement.html',
     'rh-onboarding.html', 'rh-entretiens.html',
     'rh-conformite.html', 'rh-modeles.html', 'rh-documents.html', 'rh-rapport.html',
-    'rh-contrats.html', 'rh-pointages.html'
+    'rh-contrats.html', 'rh-pointages.html', 'rh-emargements.html'
   ];
 
   // ════════════════════════════════════════════════
@@ -157,6 +157,11 @@
         <span class="dot rh-dot"></span>
         <span style="flex:1">Pointages</span>
         <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.2);color:#6ee7b7;padding:1px 5px;border-radius:4px;flex-shrink:0">Nouveau</span>
+      </div>
+      <div class="si rh-si${a('rh-emargements.html')}" onclick="location.href='rh-emargements.html'">
+        <span class="dot rh-dot"></span>
+        <span style="flex:1">Émargements</span>
+        <span style="font-size:9px;font-weight:700;background:rgba(59,130,246,.2);color:#93c5fd;padding:1px 5px;border-radius:4px;flex-shrink:0">Légal</span>
       </div>
 
       <div class="rh-sub-group">Rémunération</div>

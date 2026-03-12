@@ -337,6 +337,7 @@
       <button class="tnav" onclick="showTab('conges',this)" id="tab-conges-btn">🏖️ Congés</button>
       <button class="tnav" onclick="showTab('planning',this)">📅 Planning</button>
       <button class="tnav" onclick="showTab('pointage',this)">⏱ Pointage</button>
+      <button class="tnav" onclick="showTab('emargements',this)" id="tab-emarg-btn">📝 Émargements <span class="notif" id="emarg-notif" style="display:none">0</span></button>
     </div>
   </div>
 
@@ -667,6 +668,28 @@
     <!-- Mode info -->
     <div style="font-size:10px;color:var(--muted);text-align:center;margin-top:8px;line-height:1.6" id="pt-mode-info">
       Pointage mobile activé par votre employeur
+    </div>
+  </div>
+
+  <!-- ══ ONGLET ÉMARGEMENTS ══ -->
+  <div class="tab-section" id="tab-emargements" style="margin-top:16px">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">📝 Documents à signer</div>
+        <button class="btn-ghost btn" style="font-size:11px;padding:4px 10px" onclick="loadEmargData()">↻ Actualiser</button>
+      </div>
+      <div class="card-body" id="emarg-pending" style="padding:8px 12px">
+        <div style="text-align:center;padding:16px;color:var(--muted);font-size:11px">Chargement...</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">✅ Historique des signatures</div>
+      </div>
+      <div class="card-body" id="emarg-history" style="padding:8px 12px">
+        <div style="text-align:center;padding:16px;color:var(--muted);font-size:11px">Chargement...</div>
+      </div>
     </div>
   </div>
 
@@ -1957,6 +1980,278 @@ var _swapTimer=setInterval(function(){
 
 })();
 </script>
+<!-- ══ ÉMARGEMENTS MODULE ══ -->
+<script>
+(function(){
+  var _emargFiches=[];
+  var _emargAcks=[];
+  var _emargSigs=[];
+
+  async function sha256(str){
+    var buf=new TextEncoder().encode(str);
+    var hash=await crypto.subtle.digest('SHA-256',buf);
+    return Array.from(new Uint8Array(hash)).map(function(b){return b.toString(16).padStart(2,'0');}).join('');
+  }
+
+  function fmtTS(ts){
+    if(!ts) return '\u2014';
+    var d=ts.toDate?ts.toDate():new Date(ts);
+    return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  }
+  function fmtDur(mins){var h=Math.floor(Math.abs(mins)/60),m=Math.abs(mins)%60;return h+'h'+String(m).padStart(2,'0');}
+
+  async function loadEmargData(){
+    if(!_uid) return;
+    _emargFiches=[];_emargAcks=[];_emargSigs=[];
+
+    // Load fiches for this employee
+    try{
+      var snap=await window._getDocs('rh_emargements',_uid,'fiches');
+      snap.forEach(function(d){
+        var f=d.data();f._id=d.id;
+        if(f.employeId===_empId) _emargFiches.push(f);
+      });
+    }catch(e){console.warn('emarg fiches',e);}
+
+    // Load planning acks
+    try{
+      var snap2=await window._getDocs('rh_emargements',_uid,'planning_acks');
+      snap2.forEach(function(d){
+        var a=d.data();a._id=d.id;
+        if(a.employeId===_empId) _emargAcks.push(a);
+      });
+    }catch(e){console.warn('emarg acks',e);}
+
+    // Load my signatures
+    try{
+      var snap3=await window._getDocs('rh_emargements_public',_uid,'signatures');
+      snap3.forEach(function(d){
+        var s=d.data();s._id=d.id;
+        if(s.publicId===new URLSearchParams(window.location.search).get('id'))
+          _emargSigs.push(s);
+      });
+    }catch(e){console.warn('emarg sigs',e);}
+
+    renderEmargements();
+  }
+  window.loadEmargData=loadEmargData;
+
+  function renderEmargements(){
+    // Pending items
+    var pendingFiches=_emargFiches.filter(function(f){return f.status==='pending';});
+    var pendingAcks=_emargAcks.filter(function(a){return a.status==='pending';});
+    var pendingCount=pendingFiches.length+pendingAcks.length;
+
+    // Update notification badge
+    var badge=document.getElementById('emarg-notif');
+    if(badge){
+      if(pendingCount>0){badge.textContent=pendingCount;badge.style.display='inline';}
+      else{badge.style.display='none';}
+    }
+
+    // Render pending
+    var el=document.getElementById('emarg-pending');
+    if(!el) return;
+    if(pendingCount===0){
+      el.innerHTML='<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px"><div style="font-size:28px;margin-bottom:6px">\u2705</div>Aucun document en attente de signature</div>';
+    } else {
+      var h='';
+      pendingFiches.forEach(function(f){
+        h+='<div style="padding:12px;border:2px solid #fde68a;border-radius:12px;background:#fffbeb;margin-bottom:8px">';
+        h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
+        h+='<div><div style="font-size:13px;font-weight:700">\ud83d\udccb Fiche d\'heures</div>';
+        h+='<div style="font-size:11px;color:var(--muted)">'+escHtml(f.periodeLabel||f.periode||'')+'</div></div>';
+        h+='<span style="background:#fef3c7;color:#92400e;padding:3px 8px;border-radius:8px;font-size:10px;font-weight:700">\u23f3 En attente</span>';
+        h+='</div>';
+        h+='<div style="font-size:12px;margin-bottom:8px">Total : <b style="color:#059669">'+((f.totalHeures||0).toFixed(1))+'h</b></div>';
+        h+='<div style="display:flex;gap:6px">';
+        h+='<button onclick="viewEmargFiche(\''+f._id+'\')" style="flex:1;padding:9px;border:1.5px solid var(--border);border-radius:9px;background:white;font-family:Plus Jakarta Sans,sans-serif;font-size:12px;font-weight:700;cursor:pointer">\ud83d\udc41 D\u00e9tail</button>';
+        h+='<button onclick="signFiche(\''+f._id+'\')" style="flex:1;padding:9px;border:none;border-radius:9px;background:linear-gradient(135deg,#059669,#34d399);color:white;font-family:Plus Jakarta Sans,sans-serif;font-size:12px;font-weight:700;cursor:pointer">\u270d\ufe0f Signer</button>';
+        h+='<button onclick="contestFiche(\''+f._id+'\')" style="padding:9px 12px;border:1.5px solid #fecaca;border-radius:9px;background:#fef2f2;color:#ef4444;font-family:Plus Jakarta Sans,sans-serif;font-size:12px;font-weight:700;cursor:pointer">\u26a0\ufe0f</button>';
+        h+='</div></div>';
+      });
+
+      pendingAcks.forEach(function(a){
+        h+='<div style="padding:12px;border:2px solid #bfdbfe;border-radius:12px;background:#eff6ff;margin-bottom:8px">';
+        h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">';
+        h+='<div><div style="font-size:13px;font-weight:700">\ud83d\udcc5 Planning communiqu\u00e9</div>';
+        h+='<div style="font-size:11px;color:var(--muted)">'+(a.planningDebut||'')+' \u2192 '+(a.planningFin||'')+'</div></div>';
+        h+='<span style="background:#dbeafe;color:#1e40af;padding:3px 8px;border-radius:8px;font-size:10px;font-weight:700">\ud83d\udc41 \u00c0 accuser</span>';
+        h+='</div>';
+        h+='<button onclick="ackPlanning(\''+a._id+'\')" style="width:100%;padding:9px;border:none;border-radius:9px;background:linear-gradient(135deg,#3b82f6,#60a5fa);color:white;font-family:Plus Jakarta Sans,sans-serif;font-size:12px;font-weight:700;cursor:pointer">\u2705 J\'en prends connaissance</button>';
+        h+='</div>';
+      });
+
+      el.innerHTML=h;
+    }
+
+    // Render history
+    var hel=document.getElementById('emarg-history');
+    if(!hel) return;
+    var signed=_emargFiches.filter(function(f){return f.status!=='pending';});
+    var ackedList=_emargAcks.filter(function(a){return a.status!=='pending';});
+    var all=[];
+    signed.forEach(function(f){all.push({type:'fiche',data:f,ts:f.updatedAt||f.createdAt||0});});
+    ackedList.forEach(function(a){all.push({type:'ack',data:a,ts:a.updatedAt||a.createdAt||0});});
+    all.sort(function(a,b){return (b.ts||0)-(a.ts||0);});
+
+    if(all.length===0){
+      hel.innerHTML='<div style="text-align:center;padding:16px;color:var(--muted);font-size:11px">Aucune signature pass\u00e9e</div>';
+    } else {
+      var hh='';
+      all.forEach(function(item){
+        var statusLabel={signed:'\u2705 Sign\u00e9',validated:'\u2705 Valid\u00e9',contested:'\u26a0\ufe0f Contest\u00e9',acknowledged:'\ud83d\udc41 Accus\u00e9',expired:'\u231b Expir\u00e9'};
+        var statusBg={signed:'#dcfce7',validated:'#d1fae5',contested:'#fee2e2',acknowledged:'#dbeafe',expired:'#f3f4f6'};
+        var statusColor={signed:'#166534',validated:'#065f46',contested:'#991b1b',acknowledged:'#1e40af',expired:'#6b7280'};
+        var st=item.data.status||'signed';
+        hh+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f3f4f6">';
+        hh+='<div style="font-size:18px">'+(item.type==='fiche'?'\ud83d\udccb':'\ud83d\udcc5')+'</div>';
+        hh+='<div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:700">'+(item.type==='fiche'?'Fiche d\'heures':'Accus\u00e9 planning')+'</div>';
+        hh+='<div style="font-size:10px;color:var(--muted)">'+(item.data.periodeLabel||item.data.periode||item.data.planningDebut||'')+'</div></div>';
+        hh+='<span style="background:'+(statusBg[st]||'#f3f4f6')+';color:'+(statusColor[st]||'#6b7280')+';padding:3px 8px;border-radius:8px;font-size:10px;font-weight:700">'+(statusLabel[st]||st)+'</span>';
+        hh+='</div>';
+      });
+      hel.innerHTML=hh;
+    }
+  }
+
+  // ── VIEW FICHE DETAIL (alert modal) ──
+  window.viewEmargFiche=function(ficheId){
+    var f=_emargFiches.find(function(x){return x._id===ficheId;});
+    if(!f) return;
+    var msg='Fiche : '+(f.periodeLabel||f.periode)+'\n';
+    msg+='Total : '+(f.totalHeures||0).toFixed(1)+'h\n\n';
+    msg+='D\u00e9tail :\n';
+    (f.lignes||[]).forEach(function(l){
+      msg+=l.date+' : '+(l.debut||'\u2014')+' \u2192 '+(l.fin||'\u2014')+' ('+fmtDur(l.totalMin)+')\n';
+    });
+    msg+='\nHash preuve : '+(f.contentHash||'\u2014').slice(0,32)+'...';
+    alert(msg);
+  };
+
+  // ── SIGN FICHE ──
+  window.signFiche=async function(ficheId){
+    var f=_emargFiches.find(function(x){return x._id===ficheId;});
+    if(!f) return;
+    if(!confirm('Signer cette fiche d\'heures ?\n\nP\u00e9riode : '+(f.periodeLabel||'')+'\nTotal : '+(f.totalHeures||0).toFixed(1)+'h\n\nCette action est irr\u00e9versible et fait preuve l\u00e9gale.')) return;
+
+    var pid=new URLSearchParams(window.location.search).get('id')||'';
+    var now=new Date();
+    var proofInput=(f.contentHash||'')+pid+now.toISOString();
+    var proofHash=await sha256(proofInput);
+
+    var sigData={
+      ficheId:ficheId,
+      type:'heures',
+      publicId:pid,
+      employeNom:(_emp?((_emp.prenom||'')+' '+(_emp.nom||'')):'').trim(),
+      signedAt:now.toISOString(),
+      ip:'\u2014',
+      userAgent:navigator.userAgent||'\u2014',
+      proofHash:proofHash,
+      status:'signed',
+      motifContestation:null
+    };
+
+    try{
+      // Get IP
+      try{var r=await fetch('https://api.ipify.org?format=json');var j=await r.json();sigData.ip=j.ip||'\u2014';}catch(e){}
+
+      var sigId='sig_'+ficheId+'_'+Date.now();
+      await window._setDocPublic('rh_emargements_public',_uid,'signatures',sigId,sigData);
+
+      // Update fiche status
+      f.status='signed';
+      f.signatureEmploye={signedAt:now.toISOString(),ip:sigData.ip,hash:proofHash,status:'signed'};
+      f.locked=true;
+      f.updatedAt=Date.now();
+      await window._setDocOwner('rh_emargements',_uid,'fiches',ficheId,f);
+
+      window.showToast('\u2705 Fiche sign\u00e9e avec succ\u00e8s !','ok');
+      loadEmargData();
+    }catch(e){
+      console.error('signFiche',e);
+      window.showToast('Erreur : '+e.message,'err');
+    }
+  };
+
+  // ── CONTEST FICHE ──
+  window.contestFiche=async function(ficheId){
+    var f=_emargFiches.find(function(x){return x._id===ficheId;});
+    if(!f) return;
+    var motif=prompt('Motif de contestation :\n(Expliquez pourquoi les heures ne sont pas correctes)');
+    if(!motif) return;
+
+    var pid=new URLSearchParams(window.location.search).get('id')||'';
+    var now=new Date();
+    var proofHash=await sha256((f.contentHash||'')+pid+now.toISOString()+'CONTESTED');
+
+    var sigData={
+      ficheId:ficheId, type:'heures', publicId:pid,
+      employeNom:(_emp?((_emp.prenom||'')+' '+(_emp.nom||'')):'').trim(),
+      signedAt:now.toISOString(), ip:'\u2014', userAgent:navigator.userAgent||'\u2014',
+      proofHash:proofHash, status:'contested', motifContestation:motif
+    };
+
+    try{
+      try{var r=await fetch('https://api.ipify.org?format=json');var j=await r.json();sigData.ip=j.ip||'\u2014';}catch(e){}
+      var sigId='sig_'+ficheId+'_'+Date.now();
+      await window._setDocPublic('rh_emargements_public',_uid,'signatures',sigId,sigData);
+      f.status='contested';
+      f.updatedAt=Date.now();
+      await window._setDocOwner('rh_emargements',_uid,'fiches',ficheId,f);
+      window.showToast('\u26a0\ufe0f Fiche contest\u00e9e — Votre employeur sera notifi\u00e9','ok');
+      loadEmargData();
+    }catch(e){console.error(e);window.showToast('Erreur : '+e.message,'err');}
+  };
+
+  // ── ACK PLANNING ──
+  window.ackPlanning=async function(ackId){
+    var a=_emargAcks.find(function(x){return x._id===ackId;});
+    if(!a) return;
+    if(!confirm('Confirmer la prise de connaissance de ce planning ?\n\n'+(a.planningDebut||'')+' \u2192 '+(a.planningFin||''))) return;
+
+    var pid=new URLSearchParams(window.location.search).get('id')||'';
+    var now=new Date();
+    var proofHash=await sha256((a.contentHash||'')+pid+now.toISOString());
+
+    var sigData={
+      ficheId:ackId, type:'planning', publicId:pid,
+      employeNom:(_emp?((_emp.prenom||'')+' '+(_emp.nom||'')):'').trim(),
+      signedAt:now.toISOString(), ip:'\u2014', userAgent:navigator.userAgent||'\u2014',
+      proofHash:proofHash, status:'acknowledged', motifContestation:null
+    };
+
+    try{
+      try{var r=await fetch('https://api.ipify.org?format=json');var j=await r.json();sigData.ip=j.ip||'\u2014';}catch(e){}
+      var sigId='sig_'+ackId+'_'+Date.now();
+      await window._setDocPublic('rh_emargements_public',_uid,'signatures',sigId,sigData);
+      a.status='acknowledged';
+      a.signatureEmploye={signedAt:now.toISOString(),ip:sigData.ip,hash:proofHash};
+      a.updatedAt=Date.now();
+      await window._setDocOwner('rh_emargements',_uid,'planning_acks',ackId,a);
+      window.showToast('\u2705 Planning accus\u00e9 r\u00e9ception !','ok');
+      loadEmargData();
+    }catch(e){console.error(e);window.showToast('Erreur : '+e.message,'err');}
+  };
+
+  // Helper: write to public collection (no auth needed per Firestore rules)
+  window._setDocPublic=async function(col,uid,sub,docId,data){
+    await window._setDocPath([col,uid,sub,docId],data);
+  };
+
+  // Helper: write to owner collection (auth needed)
+  window._setDocOwner=async function(col,uid,sub,docId,data){
+    await window._setDocPath([col,uid,sub,docId],data);
+  };
+
+  // Auto-load when ready
+  var _emTimer=setInterval(function(){
+    if(window._dbReady&&_uid&&_empId){clearInterval(_emTimer);setTimeout(loadEmargData,1200);}
+  },500);
+})();
+</script>
+
 <!-- PWA Install Banner -->
 <div id="pwa-banner" style="display:none;position:fixed;bottom:0;left:0;right:0;z-index:9999;padding:14px 16px;background:linear-gradient(135deg,#0f1f5c,#1a3dce);box-shadow:0 -4px 24px rgba(15,31,92,.4);font-family:'Plus Jakarta Sans',sans-serif;animation:pwaSlide .4s ease">
   <div style="display:flex;align-items:center;gap:12px;max-width:500px;margin:0 auto">
