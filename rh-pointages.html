@@ -424,10 +424,19 @@ function renderJour(c){
   const isToday=d===fmt(new Date());
 
   // KPIs
-  const empIds=new Set(events.filter(e=>e.type==='arrivee').map(e=>e.empId));
-  const present=empIds.size;
+  // Count currently present (arrived but not departed after last arrival)
+  let present=0, pointedToday=0;
+  _emps.forEach(emp=>{
+    const empEvts=events.filter(e=>e.empId===emp.id).sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
+    const arrives=empEvts.filter(e=>e.type==='arrivee');
+    const departs=empEvts.filter(e=>e.type==='depart');
+    if(arrives.length>0) pointedToday++;
+    const lastArr=arrives[arrives.length-1];
+    const lastDep=departs[departs.length-1];
+    if(lastArr && (!lastDep || lastDep.timestamp<lastArr.timestamp)) present++;
+  });
   const total=_emps.length;
-  const absent=total-present;
+  const absent=total-pointedToday;
   const lateCount=computeLate(d).length;
   const totalHours=computeTotalHours(d);
 
@@ -444,14 +453,17 @@ function renderJour(c){
   if(events.length===0){
     h+=`<div class="empty">Aucun pointage enregistré${isToday?' pour le moment':''}.</div>`;
   } else {
-    h+=`<div class="table-wrap"><table><thead><tr><th>Employé</th><th>Type</th><th>Heure</th><th>Notes</th><th>Photo</th></tr></thead><tbody>`;
+    h+=`<div class="table-wrap"><table><thead><tr><th>Employé</th><th>Type</th><th>Heure</th><th>Source</th><th>Notes</th><th>Photo</th></tr></thead><tbody>`;
     events.forEach(ev=>{
       const emp=_emps.find(e=>e.id===ev.empId);
       const ci=emp?COLORS[_emps.indexOf(emp)%COLORS.length]:'#666';
+      const src=ev.source==='mobile'?'<span class="tag" style="background:#eff6ff;color:#1e40af">📱 Mobile</span>':'<span class="tag" style="background:#f3e8ff;color:#6b21a8">📟 Kiosk</span>';
+      const gps=ev.lat?`<div style="font-size:9px;color:var(--muted)">📍 ${ev.lat.toFixed(4)}, ${ev.lng.toFixed(4)}</div>`:'';
       h+=`<tr>
         <td><div class="emp-chip"><div class="emp-av" style="background:${ci}">${emp?empInit(emp):'?'}</div>${emp?empName(emp):'Inconnu'}</div></td>
         <td><span class="tag ${TYPE_CLS[ev.type]||''}">${TYPE_LABELS[ev.type]||ev.type}</span>${ev.horsPlan?'<span class="tag" style="background:#fef3c7;color:#92400e;margin-left:4px">Hors planning</span>':''}</td>
         <td class="time-mono">${ev.heure||'—'}</td>
+        <td>${src}${gps}</td>
         <td style="font-size:11px;color:var(--muted)">${ev.motifHorsPlan||'—'}</td>
         <td>${ev.photo?`<button class="btn btn-xs btn-outline" onclick="showPhoto('${escB64(ev.photo)}')">📷</button>`:'—'}</td>
       </tr>`;
@@ -463,20 +475,23 @@ function renderJour(c){
   // Timeline par employé
   h+=`<div class="card" style="margin-top:16px"><div class="card-head"><div class="card-title">👥 Résumé par employé</div></div><div class="table-wrap"><table><thead><tr><th>Employé</th><th>Arrivée</th><th>Départ</th><th>Pauses</th><th>Heures travaillées</th><th>Statut</th></tr></thead><tbody>`;
   _emps.forEach((emp,i)=>{
-    const evts=events.filter(e=>e.empId===emp.id);
-    const arrive=evts.find(e=>e.type==='arrivee');
-    const depart=evts.find(e=>e.type==='depart');
+    const evts=events.filter(e=>e.empId===emp.id).sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
+    const arrives=evts.filter(e=>e.type==='arrivee');
+    const departs=evts.filter(e=>e.type==='depart');
+    const arrive=arrives[arrives.length-1]||null;
+    const depart=departs[departs.length-1]||null;
+    const departValid=depart&&arrive&&depart.timestamp>arrive.timestamp;
     const pauseCount=evts.filter(e=>e.type==='pause_deb').length;
     const hrs=calcEmpHours(evts,isToday);
     let statut='<span style="color:var(--muted)">Absent</span>';
-    if(depart) statut='<span style="color:var(--text)">Terminé</span>';
+    if(departValid) statut='<span style="color:var(--text)">Terminé</span>';
     else if(evts.some(e=>e.type==='pause_deb')&&!evts.some(e=>e.type==='pause_fin'&&e.timestamp>(evts.filter(x=>x.type==='pause_deb').pop()?.timestamp||0))) statut='<span style="color:var(--orange)">⏸ En pause</span>';
     else if(arrive) statut='<span style="color:var(--rh-main)">🟢 Présent</span>';
     const ci=COLORS[i%COLORS.length];
     h+=`<tr>
       <td><div class="emp-chip"><div class="emp-av" style="background:${ci}">${empInit(emp)}</div>${empName(emp)}</div></td>
       <td class="time-mono">${arrive?.heure||'—'}</td>
-      <td class="time-mono">${depart?.heure||'—'}</td>
+      <td class="time-mono">${departValid?depart.heure:'—'}</td>
       <td>${pauseCount>0?pauseCount+' pause(s)':'—'}</td>
       <td class="time-mono" style="font-weight:800;color:var(--rh-main)">${hrs>0?fmtDur(hrs):'—'}</td>
       <td>${statut}</td>
@@ -510,18 +525,21 @@ function renderSalarie(c){
   for(let d=1;d<=last;d++){
     const dt=new Date(y,m,d);
     const ds=fmt(dt);
-    const evts=(getEvents(ds)||[]).filter(e=>e.empId===_selEmp);
+    const evts=(getEvents(ds)||[]).filter(e=>e.empId===_selEmp).sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
     if(evts.length===0) continue;
-    const arrive=evts.find(e=>e.type==='arrivee');
-    const depart=evts.find(e=>e.type==='depart');
+    const arrives=evts.filter(e=>e.type==='arrivee');
+    const departs=evts.filter(e=>e.type==='depart');
+    const arrive=arrives[arrives.length-1]||null;
+    const depart=departs[departs.length-1]||null;
+    const departValid=depart&&arrive&&depart.timestamp>arrive.timestamp;
     const pauseCount=evts.filter(e=>e.type==='pause_deb').length;
-    const hrs=calcEmpHours(evts,false);
+    const hrs=calcEmpHours(evts,ds===fmt(new Date()));
     if(hrs>0){totalWorked+=hrs;totalDays++;}
     const dow=dt.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short'});
     h+=`<tr>
       <td style="font-weight:600">${dow}</td>
       <td class="time-mono">${arrive?.heure||'—'}</td>
-      <td class="time-mono">${depart?.heure||'—'}</td>
+      <td class="time-mono">${departValid?depart.heure:'—'}</td>
       <td>${pauseCount>0?pauseCount:'—'}</td>
       <td class="time-mono" style="font-weight:800;color:${hrs>=0?'var(--rh-main)':'var(--red)'}">${hrs>0?fmtDur(hrs):'—'}</td>
     </tr>`;
@@ -630,14 +648,20 @@ function renderAlertes(c){
 
 // ═══ CALC HELPERS ═══
 function calcEmpHours(evts,live){
-  const arrive=evts.find(e=>e.type==='arrivee');
-  const depart=evts.find(e=>e.type==='depart');
+  // Sort by timestamp to handle multiple cycles correctly
+  const sorted=[...evts].sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
+  // Use LAST arrivee and LAST depart (handles re-pointages from testing)
+  const arrives=sorted.filter(e=>e.type==='arrivee');
+  const departs=sorted.filter(e=>e.type==='depart');
+  const arrive=arrives[arrives.length-1];
+  const depart=departs[departs.length-1];
   if(!arrive) return 0;
   const startM=toMin(arrive.heure);
-  const endM=depart?toMin(depart.heure):(live?toMin(nowHM()):0);
-  if(endM<=startM&&!depart) return 0;
+  const endM=depart&&depart.timestamp>arrive.timestamp?toMin(depart.heure):(live?toMin(nowHM()):0);
+  if(endM<=startM) return 0;
+  // Subtract pauses that fall within this arrivee→depart window
   let pauseM=0,lastP=null;
-  evts.filter(e=>e.type==='pause_deb'||e.type==='pause_fin').sort((a,b)=>(a.timestamp||0)-(b.timestamp||0)).forEach(p=>{
+  sorted.filter(e=>(e.type==='pause_deb'||e.type==='pause_fin')&&(e.timestamp||0)>=(arrive.timestamp||0)).forEach(p=>{
     if(p.type==='pause_deb') lastP=toMin(p.heure);
     else if(p.type==='pause_fin'&&lastP!==null){pauseM+=toMin(p.heure)-lastP;lastP=null;}
   });

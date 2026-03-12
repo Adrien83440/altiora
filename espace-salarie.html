@@ -1469,13 +1469,17 @@ async function loadPtEvents(){
 }
 
 function getState(){
-  var arrived=_ptEvents.some(function(e){return e.type==='arrivee';});
-  var departed=_ptEvents.some(function(e){return e.type==='depart';});
-  var pauses=_ptEvents.filter(function(e){return e.type==='pause_deb'||e.type==='pause_fin';});
-  var onPause=pauses.length>0&&pauses[pauses.length-1].type==='pause_deb';
-  var arriveEvt=_ptEvents.find(function(e){return e.type==='arrivee';});
-  var departEvt=_ptEvents.find(function(e){return e.type==='depart';});
-  return {arrived:arrived,departed:departed,onPause:onPause,arriveTime:arriveEvt?arriveEvt.heure:'',departTime:departEvt?departEvt.heure:''};
+  var sorted=_ptEvents.slice().sort(function(a,b){return (a.timestamp||0)-(b.timestamp||0);});
+  var arrives=sorted.filter(function(e){return e.type==='arrivee';});
+  var departs=sorted.filter(function(e){return e.type==='depart';});
+  var arrive=arrives.length?arrives[arrives.length-1]:null;
+  var depart=departs.length?departs[departs.length-1]:null;
+  var arrived=!!arrive;
+  var departed=!!depart&&arrive&&depart.timestamp>arrive.timestamp;
+  var pauses=sorted.filter(function(e){return e.type==='pause_deb'||e.type==='pause_fin';});
+  var relevantPauses=arrive?pauses.filter(function(p){return (p.timestamp||0)>=(arrive.timestamp||0);}):[];
+  var onPause=relevantPauses.length>0&&relevantPauses[relevantPauses.length-1].type==='pause_deb';
+  return {arrived:arrived,departed:departed,onPause:onPause,arriveTime:arrive?arrive.heure:'',departTime:departed?depart.heure:''};
 }
 
 function updatePtStatus(){
@@ -1518,10 +1522,19 @@ function renderPtHistory(){
   var el=document.getElementById('pt-history');if(!el) return;
   if(!_ptEvents.length){el.innerHTML='<div style="text-align:center;padding:12px;color:var(--muted);font-size:11px">Aucun pointage aujourd\'hui</div>';return;}
   var labels={arrivee:'🟢 Arrivée',depart:'🔴 Départ',pause_deb:'⏸ Début pause',pause_fin:'▶️ Fin pause'};
-  el.innerHTML=_ptEvents.map(function(ev){
-    return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">'
-      +'<span style="font-size:12px;font-weight:600">'+(labels[ev.type]||ev.type)+'</span>'
-      +'<span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:var(--g3)">'+ev.heure+'</span>'
+  el.innerHTML=_ptEvents.sort(function(a,b){return (a.timestamp||0)-(b.timestamp||0);}).map(function(ev){
+    var gpsInfo='';
+    if(ev.lat&&ev.lng){
+      gpsInfo='<div style="font-size:9px;color:var(--muted);margin-top:2px">📍 GPS : '+ev.lat.toFixed(4)+', '+ev.lng.toFixed(4)+(ev.accuracy?' (±'+Math.round(ev.accuracy)+'m)':'')+'</div>';
+    }
+    var srcInfo=ev.source==='mobile'?'<span style="font-size:8px;background:#eff6ff;color:#1e40af;padding:1px 5px;border-radius:4px;margin-left:4px">📱 Mobile</span>':'';
+    if(!ev.source) srcInfo='<span style="font-size:8px;background:#f3e8ff;color:#6b21a8;padding:1px 5px;border-radius:4px;margin-left:4px">📟 Kiosk</span>';
+    return '<div style="padding:8px 0;border-bottom:1px solid var(--border)">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between">'
+        +'<span style="font-size:12px;font-weight:600">'+(labels[ev.type]||ev.type)+srcInfo+'</span>'
+        +'<span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:var(--g3)">'+ev.heure+'</span>'
+      +'</div>'
+      +gpsInfo
     +'</div>';
   }).join('');
 }

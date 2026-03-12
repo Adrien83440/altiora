@@ -579,14 +579,17 @@ function actionBtn(type,cls,icon,label,sub){
 window.doAction=doAction;
 
 function getEmpState(empId){
-  const evts=_pointages.filter(p=>p.empId===empId);
-  const arrived=evts.some(p=>p.type==='arrivee');
-  const departed=evts.some(p=>p.type==='depart');
+  const evts=_pointages.filter(p=>p.empId===empId).sort((a,b)=>(a.timestamp||0)-(b.timestamp||0));
+  const arrives=evts.filter(p=>p.type==='arrivee');
+  const departs=evts.filter(p=>p.type==='depart');
+  const arrive=arrives[arrives.length-1]||null;
+  const depart=departs[departs.length-1]||null;
+  const arrived=!!arrive;
+  const departed=!!depart&&arrive&&depart.timestamp>arrive.timestamp;
   const pauses=evts.filter(p=>p.type==='pause_deb'||p.type==='pause_fin');
-  const onPause=pauses.length>0 && pauses[pauses.length-1].type==='pause_deb';
-  const arriveEvt=evts.find(p=>p.type==='arrivee');
-  const departEvt=evts.find(p=>p.type==='depart');
-  return {arrived,departed,onPause,arriveTime:arriveEvt?.heure||'',departTime:departEvt?.heure||''};
+  const relevantPauses=pauses.filter(p=>arrive&&(p.timestamp||0)>=(arrive.timestamp||0));
+  const onPause=relevantPauses.length>0 && relevantPauses[relevantPauses.length-1].type==='pause_deb';
+  return {arrived,departed,onPause,arriveTime:arrive?.heure||'',departTime:departed?depart.heure:''};
 }
 
 // (getTodayShift is defined above with loadPlanning)
@@ -607,7 +610,7 @@ function doAction(type){
     }
   }
 
-  _pendingAction={empId:_currentEmp.id,type,heure:nowHM(),timestamp:Date.now(),photo:null};
+  _pendingAction={empId:_currentEmp.id,type,heure:nowHM(),timestamp:Date.now(),photo:null,source:'kiosk'};
   if(!planned) _pendingAction.horsPlan=true;
   if(motifHP) _pendingAction.motifHorsPlan=motifHP;
 
