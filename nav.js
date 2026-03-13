@@ -20,7 +20,7 @@
   // Pages RH (contrôle d'accès + détection page active)
   const RH_PAGES = [
     'rh-dashboard.html', 'rh-employes.html', 'rh-planning.html', 'rh-conges.html',
-    'rh-temps.html', 'rh-paie.html', 'rh-dirigeant.html', 'rh-recrutement.html',
+    'rh-temps.html', 'rh-paie.html', 'rh-dirigeant.html', 'rh-objectifs.html', 'rh-recrutement.html',
     'rh-onboarding.html', 'rh-entretiens.html',
     'rh-conformite.html', 'rh-modeles.html', 'rh-documents.html', 'rh-rapport.html',
     'rh-contrats.html', 'rh-pointages.html', 'rh-emargements.html', 'rh-urgence.html'
@@ -173,6 +173,11 @@
       <div class="si rh-si${a('rh-dirigeant.html')}" onclick="location.href='rh-dirigeant.html'">
         <span class="dot rh-dot"></span>
         <span style="flex:1">Rémunération dirigeant</span>
+        <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.2);color:#6ee7b7;padding:1px 5px;border-radius:4px;flex-shrink:0">Nouveau</span>
+      </div>
+      <div class="si rh-si${a('rh-objectifs.html')}" onclick="location.href='rh-objectifs.html'">
+        <span class="dot rh-dot"></span>
+        <span style="flex:1">Objectifs &amp; Primes</span>
         <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.2);color:#6ee7b7;padding:1px 5px;border-radius:4px;flex-shrink:0">Nouveau</span>
       </div>
 
