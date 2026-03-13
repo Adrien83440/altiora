@@ -532,6 +532,25 @@
             <option value="">— Défaut entreprise —</option>
           </select>
           <div id="f-ccn-note" style="display:none;font-size:11px;color:var(--muted);padding:8px 10px;background:#f8faff;border:1px solid var(--border);border-radius:6px;margin-top:6px;line-height:1.6"></div>
+
+          <!-- IA — Recherche intelligente CCN -->
+          <div id="ccn-ai-block" style="margin-top:10px;border:1.5px solid #c7d2fe;border-radius:10px;background:linear-gradient(135deg,#f5f3ff,#eef2ff);padding:12px 14px">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+              <span style="font-size:16px">🤖</span>
+              <span style="font-size:12px;font-weight:700;color:#4338ca">Pas trouvé ? L'IA identifie votre CCN</span>
+            </div>
+            <div style="display:flex;gap:8px;align-items:stretch">
+              <input type="text" class="minput" id="f-ccn-ai-input"
+                placeholder="Décrivez votre activité… (ex: salon de coiffure, cabinet comptable, boulangerie bio)"
+                style="flex:1;font-size:13px;border-color:#c7d2fe"/>
+              <button onclick="searchCCNAI()" id="btn-ccn-ai" class="btn btn-sm"
+                style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;border:none;white-space:nowrap;padding:8px 14px;font-size:12px;font-weight:700;border-radius:8px;cursor:pointer;flex-shrink:0">
+                🔍 Trouver
+              </button>
+            </div>
+            <div id="ccn-ai-status" style="display:none;margin-top:8px;font-size:11px;color:#6366f1;font-weight:600"></div>
+            <div id="ccn-ai-result" style="display:none;margin-top:10px"></div>
+          </div>
         </div>
       </div>
 
@@ -779,6 +798,12 @@ async function loadEmployes() {
     const snap = await window._getDocs(window._collection(window._db,'rh',window._uid,'employes'));
     _employes = {};
     snap.forEach(d => { _employes[d.id] = { id:d.id, ...d.data() }; });
+    // Réinjecter les CCN trouvées par l'IA dans CCN_RULES
+    Object.values(_employes).forEach(e => {
+      if (e.ccn && e.ccnData && !CCN_RULES[e.ccn]) {
+        CCN_RULES[e.ccn] = { ...e.ccnData, _fromAI: true };
+      }
+    });
     buildDeptFilter();
     renderList();
   } catch(e) {
@@ -2279,6 +2304,21 @@ function populateCCNSelect(selId, currentVal) {
     });
     el.appendChild(og);
   });
+  // Ajouter les CCN trouvées par l'IA (non présentes dans les groupes)
+  const groupedKeys = new Set(CCN_GROUPS.flatMap(g => g.keys));
+  const aiEntries = Object.entries(CCN_RULES).filter(([k,v]) => v._fromAI && !groupedKeys.has(k));
+  if (aiEntries.length > 0) {
+    const og = document.createElement('optgroup');
+    og.label = '🤖 Trouvées par l\'IA';
+    aiEntries.forEach(([k, v]) => {
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = v.label + (v.idcc ? ' (IDCC ' + v.idcc + ')' : '');
+      if(k === currentVal) opt.selected = true;
+      og.appendChild(opt);
+    });
+    el.appendChild(og);
+  }
 }
 
 // Afficher la note de la CCN sélectionnée
@@ -2436,6 +2476,149 @@ function clearCCNSearch() {
 }
 window.clearCCNSearch = clearCCNSearch;
 
+// ══════════════════════════════════════════════════
+// RECHERCHE IA — Convention Collective
+// ══════════════════════════════════════════════════
+window.searchCCNAI = async function() {
+  const input = document.getElementById('f-ccn-ai-input');
+  const statusEl = document.getElementById('ccn-ai-status');
+  const resultEl = document.getElementById('ccn-ai-result');
+  const btn = document.getElementById('btn-ccn-ai');
+  const desc = (input?.value||'').trim();
+
+  if (!desc || desc.length < 3) {
+    if(input) input.focus();
+    return;
+  }
+
+  // UI loading
+  if(btn) { btn.disabled = true; btn.textContent = '⏳ Recherche...'; }
+  if(statusEl) { statusEl.style.display = 'block'; statusEl.innerHTML = '🔄 Analyse de votre activité en cours…'; }
+  if(resultEl) resultEl.style.display = 'none';
+
+  try {
+    const token = await window._auth.currentUser.getIdToken();
+    const resp = await fetch('/api/find-ccn', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ description: desc })
+    });
+    const data = await resp.json();
+
+    if (!resp.ok || data.error) {
+      if(statusEl) { statusEl.innerHTML = '❌ ' + (data.error || 'Erreur serveur'); statusEl.style.color = '#ef4444'; }
+      return;
+    }
+
+    if (!data.key) {
+      if(statusEl) { statusEl.innerHTML = '⚠️ ' + (data.error || 'CCN non identifiée. Essayez une description plus précise.'); statusEl.style.color = '#f59e0b'; }
+      return;
+    }
+
+    // Succès — injecter dans CCN_RULES si absente
+    if(statusEl) statusEl.style.display = 'none';
+    _injectCCNFromAI(data);
+
+  } catch(e) {
+    console.error('searchCCNAI error:', e);
+    if(statusEl) { statusEl.innerHTML = '❌ Erreur réseau. Vérifiez votre connexion.'; statusEl.style.color = '#ef4444'; }
+  } finally {
+    if(btn) { btn.disabled = false; btn.textContent = '🔍 Trouver'; }
+  }
+};
+
+function _injectCCNFromAI(data) {
+  const resultEl = document.getElementById('ccn-ai-result');
+  const key = data.key;
+  const confColors = { haute: '#10b981', moyenne: '#f59e0b', basse: '#ef4444' };
+  const confLabels = { haute: '✅ Haute', moyenne: '⚠️ Moyenne', basse: '❌ Basse' };
+  const confColor = confColors[data.confiance] || '#6b7280';
+  const confLabel = confLabels[data.confiance] || data.confiance;
+
+  // Injecter dans CCN_RULES (même si la clé existe déjà, on met à jour)
+  CCN_RULES[key] = {
+    label:        data.label || key,
+    idcc:         data.idcc || null,
+    jourMax:      parseFloat(data.jourMax) || 10,
+    hebdoMax:     parseFloat(data.hebdoMax) || 48,
+    hebdoMoyMax:  parseFloat(data.hebdoMoyMax) || 44,
+    reposMin:     parseFloat(data.reposMin) || 11,
+    pauseApres:   parseFloat(data.pauseApres) || 6,
+    pauseMin:     parseFloat(data.pauseMin) || 20,
+    note:         data.note || '',
+    primes:       Array.isArray(data.primes) ? data.primes : [],
+    anciennete:   Array.isArray(data.anciennete) ? data.anciennete : [],
+    treizieme:    !!data.treizieme,
+    mutuelle:     data.mutuelle || 'Selon accord',
+    congesPayes:  parseInt(data.congesPayes) || 25,
+    rtts:         parseInt(data.rtts) || 0,
+    _fromAI:      true
+  };
+
+  // Mettre à jour le select
+  populateCCNSelect('f-ccn', key);
+  // Sélectionner automatiquement
+  const sel = document.getElementById('f-ccn');
+  if(sel) sel.value = key;
+  onCCNChange();
+
+  // Mettre à jour les champs de recherche texte
+  const searchInput = document.getElementById('f-ccn-search');
+  if(searchInput) searchInput.value = data.label + (data.idcc ? ' (IDCC ' + data.idcc + ')' : '');
+  const idccInput = document.getElementById('f-ccn-idcc-direct');
+  if(idccInput && data.idcc) idccInput.value = data.idcc;
+
+  // Afficher le résultat IA
+  if(resultEl) {
+    const altHtml = (data.alternatives && data.alternatives.length > 0)
+      ? '<div style="margin-top:6px;font-size:10px;color:var(--muted)">Autres possibles : ' + data.alternatives.join(' · ') + '</div>'
+      : '';
+    const primesHtml = (data.primes && data.primes.length > 0)
+      ? '<div style="margin-top:6px"><span style="font-size:10px;font-weight:700;color:#374151">Primes :</span> ' +
+        data.primes.map(p => '<span style="font-size:10px;background:#f0fdf4;color:#166534;padding:1px 6px;border-radius:4px;margin-left:2px">' + p.nom + (p.montant ? ' (' + p.montant + ')' : '') + '</span>').join(' ') + '</div>'
+      : '';
+
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `
+      <div style="background:white;border:1.5px solid #c7d2fe;border-radius:8px;padding:12px 14px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:13px;font-weight:800;color:#1e1b4b">${data.label || key}</div>
+          ${data.idcc ? '<span style="font-size:10px;background:#dbeafe;color:#1e40af;padding:2px 8px;border-radius:5px;font-weight:700">IDCC ' + data.idcc + '</span>' : ''}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span style="font-size:10px;font-weight:700;color:${confColor}">Confiance : ${confLabel}</span>
+          <span style="font-size:10px;color:var(--muted)">·</span>
+          <span style="font-size:10px;color:var(--muted)">${data.congesPayes || 25}j congés · ${data.rtts || 0} RTT · ${data.hebdoMax || 48}h/sem max</span>
+        </div>
+        ${data.explication ? '<div style="font-size:11px;color:#4b5563;line-height:1.5;margin-bottom:4px">' + data.explication + '</div>' : ''}
+        ${primesHtml}
+        ${altHtml}
+        <div style="margin-top:8px;display:flex;gap:6px">
+          <button onclick="applyCCNAI('${key}')" class="btn btn-sm" style="background:#10b981;color:white;border:none;font-size:11px;padding:5px 12px;border-radius:6px;cursor:pointer;font-weight:700">✅ Appliquer cette CCN</button>
+          <button onclick="document.getElementById('ccn-ai-result').style.display='none'" class="btn btn-sm" style="background:#f1f5f9;color:var(--muted);border:none;font-size:11px;padding:5px 12px;border-radius:6px;cursor:pointer">Fermer</button>
+        </div>
+        <div style="margin-top:6px;font-size:9px;color:var(--muted);font-style:italic">⚠️ Vérifiez sur Légifrance ou auprès de votre expert-comptable. Cette suggestion est indicative.</div>
+      </div>`;
+  }
+}
+
+window.applyCCNAI = function(key) {
+  const sel = document.getElementById('f-ccn');
+  if(sel) sel.value = key;
+  onCCNChange();
+  const resultEl = document.getElementById('ccn-ai-result');
+  if(resultEl) resultEl.style.display = 'none';
+  const statusEl = document.getElementById('ccn-ai-status');
+  if(statusEl) { statusEl.style.display = 'block'; statusEl.innerHTML = '✅ CCN appliquée : <b>' + (CCN_RULES[key]?.label || key) + '</b>'; statusEl.style.color = '#10b981'; }
+  // Déclencher auto-save si actif
+  if (typeof _scheduleAutoSave === 'function') _scheduleAutoSave();
+};
+
+// Enter key sur le champ IA
+document.getElementById('f-ccn-ai-input')?.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); searchCCNAI(); }
+});
+
 
 
 // Stockage notes personnalisées CCN (en mémoire + Firestore)
@@ -2555,6 +2738,9 @@ window.openModalNouvelEmploye = function() {
   openModal('modalEmploye');
   if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
   const _as1 = document.getElementById('autosave-status'); if(_as1) _as1.style.opacity = '0';
+  const _aiIn = document.getElementById('f-ccn-ai-input'); if(_aiIn) _aiIn.value = '';
+  const _aiSt = document.getElementById('ccn-ai-status'); if(_aiSt) _aiSt.style.display = 'none';
+  const _aiRs = document.getElementById('ccn-ai-result'); if(_aiRs) _aiRs.style.display = 'none';
 };
 
 window.openModalEdit = function(id) {
@@ -2627,6 +2813,9 @@ window.openModalEdit = function(id) {
   openModal('modalEmploye');
   if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
   const _as2 = document.getElementById('autosave-status'); if(_as2) _as2.style.opacity = '0';
+  const _aiIn2 = document.getElementById('f-ccn-ai-input'); if(_aiIn2) _aiIn2.value = '';
+  const _aiSt2 = document.getElementById('ccn-ai-status'); if(_aiSt2) _aiSt2.style.display = 'none';
+  const _aiRs2 = document.getElementById('ccn-ai-result'); if(_aiRs2) _aiRs2.style.display = 'none';
 };
 
 window.saveEmploye = async function() {
@@ -2665,6 +2854,7 @@ window.saveEmploye = async function() {
     docVitaleRecu:   document.getElementById('f-doc-vitale')?.checked||false,
     docContratRecu:  document.getElementById('f-doc-contrat')?.checked||false,
     ccn:             document.getElementById('f-ccn').value||null,
+    ccnData:         (function(){ const k = document.getElementById('f-ccn').value; return (k && CCN_RULES[k]?._fromAI) ? CCN_RULES[k] : null; })(),
     couleur:         document.getElementById('f-couleur').value,
     pin:             document.getElementById('f-pin').value.trim()||null,
     competences:     _tempCompetences.map(c=>({nom:c.nom,niveau:c.niveau})),
@@ -2771,6 +2961,7 @@ function _collectFormData() {
     docVitaleRecu:   document.getElementById('f-doc-vitale')?.checked||false,
     docContratRecu:  document.getElementById('f-doc-contrat')?.checked||false,
     ccn:             document.getElementById('f-ccn').value||null,
+    ccnData:         (function(){ const k = document.getElementById('f-ccn').value; return (k && CCN_RULES[k]?._fromAI) ? CCN_RULES[k] : null; })(),
     couleur:         document.getElementById('f-couleur').value,
     pin:             (document.getElementById('f-pin').value||'').trim()||null,
     competences:     (_tempCompetences||[]).map(c=>({nom:c.nom,niveau:c.niveau})),
@@ -2856,12 +3047,12 @@ function _scheduleAutoSave() {
 (function() {
   const modal = document.getElementById('modalEmploye');
   if (!modal) return;
-  modal.addEventListener('input', function(e) {
-    if (e.target.matches('.minput, input, select, textarea')) _scheduleAutoSave();
-  });
-  modal.addEventListener('change', function(e) {
-    if (e.target.matches('.minput, input, select, textarea')) _scheduleAutoSave();
-  });
+  const _skipAutoSave = new Set(['f-ccn-ai-input','f-ccn-search','f-ccn-idcc-direct']);
+  function _shouldAutoSave(e) {
+    return e.target.matches('.minput, input, select, textarea') && !_skipAutoSave.has(e.target.id);
+  }
+  modal.addEventListener('input', function(e) { if (_shouldAutoSave(e)) _scheduleAutoSave(); });
+  modal.addEventListener('change', function(e) { if (_shouldAutoSave(e)) _scheduleAutoSave(); });
 })();
 
 // ══════════════════════════
