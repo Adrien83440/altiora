@@ -279,6 +279,7 @@
   <div class="modal">
     <div class="modal-head">
       <h3 id="modal-emp-title">👤 Nouvel employé</h3>
+      <span id="autosave-status" style="font-size:11px;font-weight:600;color:#10b981;opacity:0;transition:opacity .3s;margin-left:8px;white-space:nowrap"></span>
       <button class="modal-close" onclick="closeModal('modalEmploye')">✕</button>
     </div>
     <div class="modal-body">
@@ -2552,6 +2553,8 @@ window.openModalNouvelEmploye = function() {
   renderCompetences();
   setTimeout(()=>onContratChange(), 50);
   openModal('modalEmploye');
+  if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
+  const _as1 = document.getElementById('autosave-status'); if(_as1) _as1.style.opacity = '0';
 };
 
 window.openModalEdit = function(id) {
@@ -2622,6 +2625,8 @@ window.openModalEdit = function(id) {
   _tempCompetences = (e.competences||[]).map(c=>({nom:c.nom||c, niveau:parseInt(c.niveau)||3}));
   renderCompetences();
   openModal('modalEmploye');
+  if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
+  const _as2 = document.getElementById('autosave-status'); if(_as2) _as2.style.opacity = '0';
 };
 
 window.saveEmploye = async function() {
@@ -2722,6 +2727,142 @@ window.saveEmploye = async function() {
     showToast('Erreur : '+e.message,'err');
   }
 };
+
+// ══════════════════════════
+// AUTO-SAVE (1.5s debounce)
+// ══════════════════════════
+let _autoSaveTimer = null;
+let _autoSaving = false;
+
+function _collectFormData() {
+  const prenom = (document.getElementById('f-prenom').value||'').trim();
+  const nom    = (document.getElementById('f-nom').value||'').trim();
+  if (!prenom || !nom) return null; // pas de save si nom/prénom vides
+
+  const pf = v => parseFloat((v||'').toString().replace(',','.'))||null;
+  return {
+    prenom, nom,
+    dateNaissance:   document.getElementById('f-naissance').value||null,
+    nationalite:     (document.getElementById('f-nationalite').value||'').trim()||null,
+    adresse:         (document.getElementById('f-adresse').value||'').trim()||null,
+    telephone:       (document.getElementById('f-tel').value||'').trim()||null,
+    email:           (document.getElementById('f-email').value||'').trim()||null,
+    nss:             (document.getElementById('f-nss').value||'').trim()||null,
+    typeContrat:     document.getElementById('f-contrat').value,
+    categoriePoste:  document.getElementById('f-categorie').value,
+    statut:          document.getElementById('f-statut').value,
+    poste:           (document.getElementById('f-poste').value||'').trim()||null,
+    departement:     (document.getElementById('f-dept').value||'').trim()||null,
+    dateEntree:      document.getElementById('f-entree').value||null,
+    dateFinContrat:  document.getElementById('f-fin').value||null,
+    salaireBrut:     pf(document.getElementById('f-brut').value),
+    salaireNet:      pf(document.getElementById('f-net').value),
+    salaireSuperBrut:pf(document.getElementById('f-superbrut').value),
+    tauxCharges:     window._currentTauxCharges || null,
+    frequence:       document.getElementById('f-freq').value,
+    heuresHebdo:     parseFloat(document.getElementById('f-heures').value)||35,
+    iban:            (document.getElementById('f-iban').value||'').trim()||null,
+    mutuelle:        (document.getElementById('f-mutuelle')?.value||'').trim()||null,
+    dpaeDate:        document.getElementById('f-dpae')?.value||null,
+    dateVisiteMedicale:    document.getElementById('f-visite-embauche')?.value||null,
+    prochaineSuiviMedical: document.getElementById('f-visite-prochaine')?.value||null,
+    docCniRecu:      document.getElementById('f-doc-cni')?.checked||false,
+    docRibRecu:      document.getElementById('f-doc-rib')?.checked||false,
+    docVitaleRecu:   document.getElementById('f-doc-vitale')?.checked||false,
+    docContratRecu:  document.getElementById('f-doc-contrat')?.checked||false,
+    ccn:             document.getElementById('f-ccn').value||null,
+    couleur:         document.getElementById('f-couleur').value,
+    pin:             (document.getElementById('f-pin').value||'').trim()||null,
+    competences:     (_tempCompetences||[]).map(c=>({nom:c.nom,niveau:c.niveau})),
+    periodeEssai: document.getElementById('pe-active')?.checked ? {
+      active:    true,
+      duree:     parseFloat(document.getElementById('pe-duree')?.value)||0,
+      unite:     document.getElementById('pe-unite')?.value||'mois',
+      renouvelable: document.getElementById('pe-renouv')?.value === 'oui',
+      finEstimee: document.getElementById('pe-fin-info')?.textContent||null,
+    } : { active: false },
+    updatedAt: Date.now()
+  };
+}
+
+function _showAutoSaveStatus(text, ok) {
+  const el = document.getElementById('autosave-status');
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = ok ? '#10b981' : '#f59e0b';
+  el.style.opacity = '1';
+  if (ok) setTimeout(()=>{ el.style.opacity = '0.5'; }, 2000);
+}
+
+async function _autoSaveEmploye() {
+  // Ne pas sauver si le modal est fermé
+  const modal = document.getElementById('modalEmploye');
+  if (!modal || !modal.classList.contains('show')) return;
+  if (_autoSaving || !window._uid || !window._setDoc) return;
+  const data = _collectFormData();
+  if (!data) return; // prénom/nom requis
+
+  _autoSaving = true;
+  _showAutoSaveStatus('💾 Sauvegarde...', false);
+
+  const id = _editId || ('emp_' + Date.now());
+  if (!_editId) data.createdAt = Date.now();
+
+  // Conserver données existantes si édition
+  if (_editId && _employes[_editId]) {
+    data.documents   = _employes[_editId].documents   || [];
+    data.evaluations = _employes[_editId].evaluations  || [];
+    data.photoURL    = _employes[_editId].photoURL     || null;
+    data.noteMoyenne = _employes[_editId].noteMoyenne  || null;
+    data.publicId    = _employes[_editId].publicId     || null;
+  }
+  if (!data.publicId) {
+    data.publicId = 'emp_' + Math.random().toString(36).slice(2,10) + Date.now().toString(36);
+  }
+
+  const publicData = {
+    uid: window._uid, empId: id,
+    prenom: data.prenom||'', nom: data.nom||'',
+    poste: data.poste||'', departement: data.departement||'',
+    typeContrat: data.typeContrat||'', couleur: data.couleur||'#059669',
+    dateEntree: data.dateEntree||'',
+    cpAjustAcquis: data.cpAjustAcquis||0, rttAjust: data.rttAjust||0, recupHeures: data.recupHeures||0,
+  };
+
+  try {
+    await window._setDoc(window._doc(window._db,'rh',window._uid,'employes',id), data);
+    await window._setDoc(window._doc(window._db,'rh_employes_public',data.publicId), publicData);
+    _employes[id] = { id, ...data };
+    // Si c'était un nouveau, passer en mode édition silencieusement
+    if (!_editId) {
+      _editId = id;
+      document.getElementById('modal-emp-title').textContent = `✏️ Modifier — ${data.prenom} ${data.nom}`;
+    }
+    _showAutoSaveStatus('✅ Sauvegardé', true);
+  } catch(e) {
+    console.warn('Auto-save error:', e);
+    _showAutoSaveStatus('⚠️ Erreur sauvegarde', false);
+  }
+  _autoSaving = false;
+}
+
+function _scheduleAutoSave() {
+  if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+  _showAutoSaveStatus('✏️ Modifié...', false);
+  _autoSaveTimer = setTimeout(_autoSaveEmploye, 1500);
+}
+
+// Écouter input/change dans le modal employé
+(function() {
+  const modal = document.getElementById('modalEmploye');
+  if (!modal) return;
+  modal.addEventListener('input', function(e) {
+    if (e.target.matches('.minput, input, select, textarea')) _scheduleAutoSave();
+  });
+  modal.addEventListener('change', function(e) {
+    if (e.target.matches('.minput, input, select, textarea')) _scheduleAutoSave();
+  });
+})();
 
 // ══════════════════════════
 // PHOTO
@@ -3166,7 +3307,10 @@ function showToast(msg, type='') {
   setTimeout(()=>t.className='toast',3200);
 }
 function openModal(id) { document.getElementById(id).classList.add('show'); }
-window.closeModal = function(id) { document.getElementById(id).classList.remove('show'); };
+window.closeModal = function(id) {
+  document.getElementById(id).classList.remove('show');
+  if (id === 'modalEmploye' && _autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
+};
 
 window.copyLienSalarie = function(empId, publicId) {
   const lien = 'https://alteore.com/espace-salarie.html?id=' + publicId;
