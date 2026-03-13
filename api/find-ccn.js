@@ -60,17 +60,55 @@ export default async function handler(req, res) {
 L'utilisateur décrit son activité professionnelle. Tu dois identifier LA convention collective la plus probable et retourner UNIQUEMENT un objet JSON valide (pas de markdown, pas de backticks, pas de texte avant/après).
 
 RÈGLES IMPÉRATIVES :
-- Identifie la CCN par son code IDCC officiel (registre Légifrance)
+- Identifie la CCN par son code IDCC officiel (registre Légifrance / legifrance.gouv.fr)
+- L'IDCC est un nombre à 1-4 chiffres. Vérifie qu'il correspond bien au nom de la CCN.
+- ATTENTION aux confusions fréquentes : "commerce de détail alimentaire" ≠ "grande distribution" ≠ "métallurgie"
 - Si tu hésites entre plusieurs CCN, choisis celle qui s'applique le plus souvent pour cette activité
 - Les valeurs horaires sont les MAXIMUMS légaux de la CCN (pas le droit commun sauf si la CCN ne précise pas)
 - congesPayes = nombre de jours ouvrés par an (25 minimum légal)
 - RTTs = estimation standard pour cette CCN (0 si non applicable)
 - Indique le niveau de confiance : "haute" (CCN évidente), "moyenne" (plusieurs possibles), "basse" (incertain)
 
+RÉFÉRENCE DES IDCC LES PLUS COURANTS (vérifie tes réponses contre cette liste) :
+- 3237 : Commerce de détail alimentaire spécialisé (primeurs, fromageries, bio, épiceries fines, torréfacteurs, surgelés, compléments alimentaires)
+- 1979 : Hôtels, cafés, restaurants (HCR)
+- 1501 : Restauration rapide
+- 1266 : Traiteurs et organisateurs de réceptions
+- 1517 : Commerce de détail non alimentaire
+- 2216 : Commerce de détail et de gros à prédominance alimentaire (supermarchés, hypermarchés, supérettes)
+- 843 : Boulangerie-pâtisserie artisanale
+- 1267 : Pâtisserie (entreprises artisanales)
+- 953 : Boucherie, boucherie-charcuterie, triperie
+- 1504 : Poissonnerie
+- 1586 : Industrie de la salaison, charcuterie en gros
+- 1483 : Commerce de détail habillement et articles textiles
+- 2511 : Sport
+- 1597 : Bâtiment ouvriers (jusqu'à 10 salariés)
+- 1090 : Automobile (services)
+- 2596 : Coiffure
+- 3032 : Esthétique cosmétique
+- 2264 : Hospitalisation privée
+- 2941 : Aide, accompagnement, soins et services à domicile
+- 1147 : Personnel des cabinets médicaux
+- 3043 : Entreprises de propreté
+- 1518 : Animation
+- 2098 : Particuliers employeurs
+- 3239 : Métallurgie (CCN unifiée 2024, remplace les anciennes IDCC métallurgie régionales)
+- 1486 : Bureaux d'études techniques (Syntec)
+- 2691 : Enseignement privé indépendant
+- 1505 : Commerce de détail de fruits et légumes, épicerie, produits laitiers
+
+ATTENTION CONFUSIONS COURANTES :
+- Épicerie, primeurs, fromagerie, bio → IDCC 3237 (commerce de détail alimentaire spécialisé) ou 1505 (fruits/légumes/épicerie)
+- Supermarché, hypermarché, supérette → IDCC 2216 (grande distribution)
+- Restaurant, bar, hôtel → IDCC 1979 (HCR)
+- Usine agroalimentaire → IDCC différent (IAA), PAS 3237
+- Métallurgie → IDCC 3239 UNIQUEMENT pour la fabrication/industrie métallique, PAS pour le commerce
+
 FORMAT JSON EXACT à retourner :
 {
   "key": "identifiant_court_sans_accents",
-  "label": "Nom complet de la CCN",
+  "label": "Nom complet officiel de la CCN",
   "idcc": 1234,
   "jourMax": 10,
   "hebdoMax": 48,
