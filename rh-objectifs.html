@@ -897,7 +897,7 @@ function renderCreatePanel(obj,isEdit){
     });
     h+='</div>';
   } else {
-    h+='<select class="rh-select" id="c-employeId">'+empOptions+'</select>';
+    h+='<select class="rh-select" id="c-employeId" onchange="updateCreateAlertes()">'+empOptions+'</select>';
   }
   h+='</div>';
 
@@ -916,8 +916,8 @@ function renderCreatePanel(obj,isEdit){
 
   // Prime
   h+='<div class="section"><div class="sec-head"><div class="sec-title">💰 Configuration de la prime</div></div><div class="sec-body">';
-  h+='<div class="form-grid-3"><div class="field-wrap"><label class="field-label">Montant brut (€ ou %)</label><input class="rh-input" id="c-prime-montant" type="text" inputmode="decimal" value="'+(obj.prime.montantBrut||'')+'" placeholder="500" oninput="updateSimulateur()"/></div>';
-  h+='<div class="field-wrap"><label class="field-label">Mode de calcul</label><select class="rh-select" id="c-prime-mode" onchange="updateSimulateur()"><option value="fixe"'+(obj.prime.mode==='fixe'?' selected':'')+'>Montant fixe (€)</option><option value="pct_salaire"'+(obj.prime.mode==='pct_salaire'?' selected':'')+'>% du salaire brut</option><option value="pct_resultat"'+(obj.prime.mode==='pct_resultat'?' selected':'')+'>% du résultat</option></select></div>';
+  h+='<div class="form-grid-3"><div class="field-wrap"><label class="field-label">Montant brut (€ ou %)</label><input class="rh-input" id="c-prime-montant" type="text" inputmode="decimal" value="'+(obj.prime.montantBrut||'')+'" placeholder="500" oninput="updateSimulateur();updateCreateAlertes()"/></div>';
+  h+='<div class="field-wrap"><label class="field-label">Mode de calcul</label><select class="rh-select" id="c-prime-mode" onchange="updateSimulateur();updateCreateAlertes()"><option value="fixe"'+(obj.prime.mode==='fixe'?' selected':'')+'>Montant fixe (€)</option><option value="pct_salaire"'+(obj.prime.mode==='pct_salaire'?' selected':'')+'>% du salaire brut</option><option value="pct_resultat"'+(obj.prime.mode==='pct_resultat'?' selected':'')+'>% du résultat</option></select></div>';
   h+='<div class="field-wrap"><label class="field-label">Taux charges patronales (%)</label><input class="rh-input" id="c-prime-taux" type="number" value="'+(obj.prime.tauxCharges||45)+'" min="0" max="100" step="1" oninput="updateSimulateur()"/></div></div>';
 
   // Mode palier
@@ -942,8 +942,14 @@ function renderCreatePanel(obj,isEdit){
   // Simulateur coût
   h+='<div class="sim-box" id="create-sim"><div class="sim-title">📊 Simulateur de coût</div><div class="sim-grid" id="sim-create-grid"></div></div>';
 
-  // Conformité preview
-  h+='<div id="create-alertes"></div>';
+  // Conformité — garde-fous en temps réel
+  h+='<div class="section" style="border-color:#c7d2fe"><div class="sec-head" style="background:#f5f3ff"><div class="sec-title">⚖️ Conformité & Garde-fous <span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:4px">— Vérifié en temps réel</span></div></div><div class="sec-body">';
+  h+='<div id="create-alertes-live" style="min-height:24px"><div style="font-size:11px;color:var(--muted)">Remplissez le formulaire pour voir les alertes...</div></div>';
+  h+='<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">';
+  h+='<button class="btn btn-sm" style="background:var(--purple-light);color:var(--purple);border:1.5px solid #c7d2fe;width:100%" onclick="checkConformiteIAFromForm()">🤖 Vérifier conformité CCN avec l\'IA (recommandé avant validation)</button>';
+  h+='<div id="create-ia-result" style="margin-top:8px"></div>';
+  h+='</div>';
+  h+='</div></div>';
 
   h+='</div>'; // /detail-body
 
@@ -951,8 +957,8 @@ function renderCreatePanel(obj,isEdit){
 
   panel.innerHTML=h;
 
-  // Init simulateur
-  setTimeout(updateSimulateur,50);
+  // Init simulateur + conformité
+  setTimeout(function(){updateSimulateur();updateCreateAlertes();},50);
 }
 
 function renderCritRow(c,i){
@@ -989,13 +995,15 @@ function setObjType(t){
       if(e.statut==='inactif')return;
       empOptions+='<option value="'+e.id+'">'+(e.prenom||'')+' '+(e.nom||'')+' — '+(e.poste||'—')+'</option>';
     });
-    sec.innerHTML='<label class="field-label">Employé assigné</label><select class="rh-select" id="c-employeId">'+empOptions+'</select>';
+    sec.innerHTML='<label class="field-label">Employé assigné</label><select class="rh-select" id="c-employeId" onchange="updateCreateAlertes()">'+empOptions+'</select>';
   }
+  setTimeout(updateCreateAlertes,50);
 }
 
 function toggleEquipeMember(cb){
   var lbl=cb.closest('label');
   if(lbl){lbl.style.background=cb.checked?'var(--rh-ghost)':'white';lbl.style.borderColor=cb.checked?'var(--rh-main)':'var(--border)';}
+  updateCreateAlertes();
 }
 
 function addCritere(){
@@ -1067,6 +1075,96 @@ function updateSimulateur(){
   grid.innerHTML='<div class="sim-item"><div class="sim-item-label">Si 100% atteint</div><div class="sim-item-val green">'+fmtE(simCost(100))+'</div><div class="sim-item-sub">coût chargé employeur</div></div>'
     +'<div class="sim-item"><div class="sim-item-label">Si 80% atteint</div><div class="sim-item-val orange">'+fmtE(simCost(80))+'</div><div class="sim-item-sub">coût chargé employeur</div></div>'
     +'<div class="sim-item"><div class="sim-item-label">Si 50% atteint</div><div class="sim-item-val red">'+fmtE(simCost(50))+'</div><div class="sim-item-sub">coût chargé employeur</div></div>';
+}
+
+// ═══════════════════════════════════════════
+//  CONFORMITÉ TEMPS RÉEL (formulaire création)
+// ═══════════════════════════════════════════
+function _collectFormObj(){
+  var type=window._createObjType||'individuel';
+  var employeId='';var employeIds=[];
+  if(type==='equipe'){
+    document.querySelectorAll('#equipe-checkboxes input[type=checkbox]:checked').forEach(function(cb){employeIds.push(cb.value);});
+  } else {
+    employeId=gv('c-employeId');
+  }
+  // Recueillir critères
+  var critRows=document.querySelectorAll('#crit-rows .crit-row');
+  var criteres=[];
+  critRows.forEach(function(r){
+    var inputs=r.querySelectorAll('input');
+    var sel=r.querySelector('select');
+    if(inputs[0] && inputs[0].value){
+      criteres.push({label:inputs[0].value,cible:inputs[1]?inputs[1].value.replace(',','.'):'',unite:sel?sel.value:'€',poids:parseFloat(inputs[2]?inputs[2].value:0)||0});
+    }
+  });
+  return {
+    type:type,titre:gv('c-titre'),description:gv('c-description'),
+    employeId:employeId,employeIds:employeIds,
+    periodicite:gv('c-periodicite'),dateDebut:gv('c-dateDebut'),dateFin:gv('c-dateFin'),
+    criteres:criteres,
+    prime:{
+      montantBrut:gv('c-prime-montant').replace(',','.'),
+      mode:gv('c-prime-mode'),
+      modePalier:window._createPalierMode||'tout_ou_rien',
+      tauxCharges:parseFloat(gv('c-prime-taux'))||45
+    },
+    statut:'brouillon'
+  };
+}
+
+function updateCreateAlertes(){
+  var container=document.getElementById('create-alertes-live');
+  if(!container)return;
+  var obj=_collectFormObj();
+  // Pas assez d'infos → message par défaut
+  if(!obj.titre && !obj.employeId && !(obj.employeIds||[]).length && !obj.prime.montantBrut){
+    container.innerHTML='<div style="font-size:11px;color:var(--muted)">Remplissez le formulaire pour voir les alertes de conformité...</div>';
+    return;
+  }
+  var alertes=checkGardeFous(obj);
+  if(alertes.length===0){
+    container.innerHTML='<div class="alerte-box ok"><span class="alerte-icon">✅</span><div><b>Aucune alerte détectée</b> — L\'objectif semble conforme aux règles générales. Nous recommandons tout de même une vérification CCN via l\'IA avant validation.</div></div>';
+    return;
+  }
+  var html='';
+  alertes.forEach(function(a){
+    html+='<div class="alerte-box '+a.type+'"><span class="alerte-icon">'+a.icon+'</span><div>'+a.msg+'</div></div>';
+  });
+  container.innerHTML=html;
+}
+
+async function checkConformiteIAFromForm(){
+  var container=document.getElementById('create-ia-result');
+  if(!container)return;
+  var obj=_collectFormObj();
+  if(!obj.titre){showToast('Renseignez au moins le titre','error');return;}
+  container.innerHTML='<div class="loader" style="padding:12px"><div class="spin"></div> Analyse IA en cours...</div>';
+
+  // Récupérer CCN du salarié
+  var ccn='';
+  var employe=null;
+  if(obj.employeId && _employes[obj.employeId]){
+    employe=_employes[obj.employeId];
+    ccn=employe.ccn||'';
+  }
+
+  try{
+    var token=await window._auth.currentUser.getIdToken();
+    var resp=await fetch('/api/check-prime-conformite',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({objectif:obj,ccn:ccn,employe:employe})
+    });
+    var data=await resp.json();
+    if(data.error){
+      container.innerHTML='<div class="alerte-box danger"><span class="alerte-icon">❌</span><div>'+esc(data.error)+'</div></div>';
+      return;
+    }
+    container.innerHTML='<div class="ia-result"><h4>🤖 Analyse IA — Conformité CCN</h4><div style="white-space:pre-line">'+esc(data.analyse||'Aucun résultat')+'</div></div>';
+  }catch(e){
+    container.innerHTML='<div class="alerte-box danger"><span class="alerte-icon">❌</span><div>Erreur réseau : '+esc(e.message)+'</div></div>';
+  }
 }
 
 // ═══════════════════════════════════════════
@@ -1282,6 +1380,8 @@ window.addPalier=addPalier;
 window.removePalier=removePalier;
 window.setPalierMode=setPalierMode;
 window.updateSimulateur=updateSimulateur;
+window.updateCreateAlertes=updateCreateAlertes;
+window.checkConformiteIAFromForm=checkConformiteIAFromForm;
 window.checkConformiteIA=checkConformiteIA;
 </script>
 
