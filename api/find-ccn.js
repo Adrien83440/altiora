@@ -34,6 +34,42 @@ async function _verifyAuth(req,res){
 }
 const _rlBuckets=new Map();function _rateLimit(uid,res,max=10){const now=Date.now();let b=_rlBuckets.get(uid);if(!b||now>b.r){b={c:0,r:now+60000};_rlBuckets.set(uid,b)}b.c++;if(b.c>max){res.status(429).json({error:'Trop de requêtes. Réessayez dans 1 minute.'});return true}return false}
 
+// ── Référentiel officiel CCN (source: DILA/Légifrance via kali-data) ──
+// Cache en mémoire (persiste entre les invocations warm de Vercel)
+let _officialCCNCache = null;
+let _officialCCNCacheTime = 0;
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
+
+async function _getOfficialCCNList() {
+  if (_officialCCNCache && (Date.now() - _officialCCNCacheTime < CACHE_TTL)) {
+    return _officialCCNCache;
+  }
+  try {
+    const resp = await fetch('https://cdn.jsdelivr.net/npm/@socialgouv/kali-data@latest/data/index.json', {
+      headers: { 'Accept': 'application/json' }
+    });
+    if (!resp.ok) {
+      console.warn('kali-data fetch failed:', resp.status);
+      return null;
+    }
+    const agreements = await resp.json();
+    // Construire un map IDCC → {title, shortTitle, id}
+    const map = {};
+    for (const a of agreements) {
+      if (a.num) {
+        map[String(a.num)] = { title: a.title || '', shortTitle: a.shortTitle || '', id: a.id || '' };
+      }
+    }
+    _officialCCNCache = map;
+    _officialCCNCacheTime = Date.now();
+    console.log(`kali-data loaded: ${Object.keys(map).length} CCN`);
+    return map;
+  } catch (e) {
+    console.warn('kali-data fetch error:', e.message);
+    return null; // Fallback gracieux — on continue sans validation
+  }
+}
+
 export default async function handler(req, res) {
   if (_cors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -91,9 +127,10 @@ RÉFÉRENCE DES IDCC LES PLUS COURANTS (vérifie tes réponses contre cette list
 - 2941 : Aide, accompagnement, soins et services à domicile
 - 1147 : Personnel des cabinets médicaux
 - 3043 : Entreprises de propreté
+- 3109 : Industries alimentaires diverses — 5 branches (IAA, agroalimentaire)
 - 1518 : Animation
 - 2098 : Particuliers employeurs
-- 3239 : Métallurgie (CCN unifiée 2024, remplace les anciennes IDCC métallurgie régionales)
+- 3248 : Métallurgie (CCN unifiée 2024, remplace les anciennes CCN métallurgie régionales + cadres + sidérurgie)
 - 1486 : Bureaux d'études techniques (Syntec)
 - 2691 : Enseignement privé indépendant
 - 1505 : Commerce de détail de fruits et légumes, épicerie, produits laitiers
@@ -102,8 +139,8 @@ ATTENTION CONFUSIONS COURANTES :
 - Épicerie, primeurs, fromagerie, bio → IDCC 3237 (commerce de détail alimentaire spécialisé) ou 1505 (fruits/légumes/épicerie)
 - Supermarché, hypermarché, supérette → IDCC 2216 (grande distribution)
 - Restaurant, bar, hôtel → IDCC 1979 (HCR)
-- Usine agroalimentaire → IDCC différent (IAA), PAS 3237
-- Métallurgie → IDCC 3239 UNIQUEMENT pour la fabrication/industrie métallique, PAS pour le commerce
+- Usine agroalimentaire → IDCC 3109 (industries alimentaires diverses 5 branches), PAS 3237
+- Métallurgie → IDCC 3248 UNIQUEMENT pour la fabrication/industrie métallique, PAS pour le commerce
 
 FORMAT JSON EXACT à retourner :
 {
@@ -174,6 +211,23 @@ Si tu ne trouves vraiment AUCUNE CCN applicable, retourne :
     // Vérification minimale
     if (!result.key && !result.error) {
       return res.status(502).json({ error: 'Réponse IA incomplète. Réessayez.' });
+    }
+
+    // ── VALIDATION CROISÉE contre le référentiel officiel DILA/Légifrance ──
+    if (result.idcc) {
+      const officialList = await _getOfficialCCNList();
+      const idccStr = String(result.idcc);
+      const officialEntry = officialList ? officialList[idccStr] : null;
+      if (officialList && !officialEntry) {
+        // L'IA a inventé un IDCC qui n'existe pas
+        result.confiance = 'basse';
+        result._warning = `IDCC ${result.idcc} non trouvé dans le référentiel officiel DILA. Vérifiez sur Légifrance.`;
+        console.warn(`find-ccn: IA returned unknown IDCC ${result.idcc} for "${description}"`);
+      } else if (officialEntry) {
+        // IDCC validé — injecter le nom officiel
+        result._officialTitle = officialEntry.shortTitle || officialEntry.title || null;
+        result._validated = true;
+      }
     }
 
     return res.status(200).json(result);
