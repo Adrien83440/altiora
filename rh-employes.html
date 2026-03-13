@@ -1128,6 +1128,7 @@ function renderFiche(e) {
       <button class="tab" onclick="showTab('docs',this)">📎 Documents</button>
       <button class="tab" onclick="showTab('evals',this)">⭐ Évaluations</button>
       <button class="tab" onclick="showTab('entretiens',this);loadEntretiensTab('${e.id}')">🎯 Entretiens</button>
+      <button class="tab" onclick="showTab('objectifs',this);loadObjectifsTab('${e.id}')">🏆 Objectifs</button>
     </div>
 
     <!-- TAB INFOS -->
@@ -1266,11 +1267,27 @@ function renderFiche(e) {
       </div>
     </div>
 
+    <!-- TAB OBJECTIFS & PRIMES -->
+    <div class="fiche-section" id="tab-objectifs" style="display:none">
+      <div class="sec-head">
+        <div class="sec-title">🏆 Objectifs & Primes</div>
+        <div style="display:flex;gap:6px">
+          <a href="rh-objectifs.html" class="btn btn-outline btn-xs" style="text-decoration:none">📂 Module objectifs</a>
+          <a href="rh-objectifs.html?empId=${e.id}&create=1" class="btn btn-rh btn-xs" style="text-decoration:none">+ Nouvel objectif</a>
+        </div>
+      </div>
+      <div class="sec-body" id="objectifs-body-${e.id}">
+        <div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">
+          <div style="font-size:24px;margin-bottom:6px">⏳</div>Chargement...
+        </div>
+      </div>
+    </div>
+
   </div>`;
 }
 
 function showTab(tab, btn) {
-  ['infos','contrat','docs','evals','entretiens'].forEach(t => {
+  ['infos','contrat','docs','evals','entretiens','objectifs'].forEach(t => {
     const el = document.getElementById('tab-'+t);
     if (el) el.style.display = t===tab ? '' : 'none';
   });
@@ -2347,6 +2364,141 @@ window.createEntretienFromFiche = function(empId) {
   // Redirige vers le module entretiens avec l'employé pré-sélectionné via URL param
   window.location.href = 'rh-entretiens.html?empId=' + empId;
 };
+
+// ═══════════════════════════════════════
+// ONGLET OBJECTIFS & PRIMES (fiche employé)
+// ═══════════════════════════════════════
+var _ficheObjectifs = {};
+
+window.loadObjectifsTab = async function(empId) {
+  const body = document.getElementById('objectifs-body-' + empId);
+  if (!body) return;
+
+  // Cache
+  if (_ficheObjectifs[empId]) {
+    body.innerHTML = renderObjectifsTab(empId, _ficheObjectifs[empId]);
+    return;
+  }
+
+  body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px"><div style="font-size:24px;margin-bottom:6px">⏳</div>Chargement...</div>';
+  try {
+    const snap = await window._getDocs(
+      window._collection(window._db, 'rh', window._uid, 'objectifs')
+    );
+    const allObj = [];
+    snap.forEach(d => allObj.push(Object.assign({ id: d.id }, d.data())));
+    // Filtrer pour cet employé (individuel ou membre d'une équipe)
+    const list = allObj.filter(o =>
+      o.employeId === empId || (o.employeIds && o.employeIds.includes(empId))
+    );
+    list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    _ficheObjectifs[empId] = list;
+    body.innerHTML = renderObjectifsTab(empId, list);
+  } catch(err) {
+    console.error(err);
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">Impossible de charger les objectifs.<br><small>' + (err.message||'') + '</small></div>';
+  }
+};
+
+function renderObjectifsTab(empId, list) {
+  if (!list || list.length === 0) {
+    return '<div style="text-align:center;padding:24px;color:var(--muted);font-size:12px">' +
+      '<div style="font-size:32px;margin-bottom:8px">🏆</div>' +
+      'Aucun objectif pour ce collaborateur.<br>' +
+      '<a href="rh-objectifs.html?empId=' + empId + '&create=1" class="btn btn-rh btn-sm" style="margin-top:12px;text-decoration:none;display:inline-block">+ Créer un objectif</a>' +
+    '</div>';
+  }
+
+  var typeLabels = {individuel:'👤',equipe:'👥',exceptionnel:'⭐'};
+  var statutLabels = {brouillon:'📝 Brouillon',en_cours:'🟢 En cours',atteint:'✅ Atteint',partiel:'🟡 Partiel',non_atteint:'❌ Non atteint',annule:'🚫 Annulé'};
+  var statutColors = {brouillon:'#f1f5f9',en_cours:'#d1fae5',atteint:'#10b981',partiel:'#fef3c7',non_atteint:'#fee2e2',annule:'#f1f5f9'};
+  var statutTextColors = {brouillon:'#64748b',en_cours:'#065f46',atteint:'white',partiel:'#92400e',non_atteint:'#991b1b',annule:'#94a3b8'};
+
+  // KPIs
+  var enCours = list.filter(o => _objStatutAuto(o) === 'en_cours').length;
+  var atteints = list.filter(o => _objStatutAuto(o) === 'atteint').length;
+  var totalPrimes = 0;
+  list.forEach(o => { if (_objStatutAuto(o) !== 'annule') totalPrimes += _objPrimeAcquise(o); });
+
+  var html = '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">';
+  html += '<div style="padding:10px 12px;border-radius:9px;background:var(--rh-ghost);border:1px solid var(--rh-border);text-align:center"><div style="font-size:18px;font-weight:800;color:var(--rh-main)">' + list.length + '</div><div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-top:2px">Total</div></div>';
+  html += '<div style="padding:10px 12px;border-radius:9px;background:var(--rh-ghost);border:1px solid var(--rh-border);text-align:center"><div style="font-size:18px;font-weight:800;color:var(--rh-main)">' + enCours + '</div><div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-top:2px">En cours</div></div>';
+  html += '<div style="padding:10px 12px;border-radius:9px;background:#d1fae5;border:1px solid #6ee7b7;text-align:center"><div style="font-size:18px;font-weight:800;color:#065f46">' + atteints + '</div><div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-top:2px">Atteints</div></div>';
+  html += '<div style="padding:10px 12px;border-radius:9px;background:#fef3c7;border:1px solid #fcd34d;text-align:center"><div style="font-size:18px;font-weight:800;color:#92400e">' + fmtE(totalPrimes) + '</div><div style="font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;margin-top:2px">Primes acquises</div></div>';
+  html += '</div>';
+
+  // Liste
+  list.forEach(function(o) {
+    var statut = _objStatutAuto(o);
+    var av = _objAvancement(o);
+    var barColor = av >= 100 ? '#10b981' : av >= 60 ? '#f59e0b' : '#ef4444';
+    var primeAcq = _objPrimeAcquise(o);
+    var primeMax = parseFloat((o.prime||{}).montantBrut) || 0;
+    html += '<div style="border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer;transition:all .15s" onclick="location.href=\'rh-objectifs.html?objId=' + o.id + '\'" onmouseover="this.style.borderColor=\'var(--rh-border)\';this.style.background=\'var(--rh-ghost)\'" onmouseout="this.style.borderColor=\'var(--border)\';this.style.background=\'\'">';
+    html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">';
+    html += '<span style="font-size:14px">' + (typeLabels[o.type] || '🎯') + '</span>';
+    html += '<span style="font-size:13px;font-weight:700;flex:1">' + (o.titre || 'Sans titre') + '</span>';
+    html += '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:' + (statutColors[statut]||'#f1f5f9') + ';color:' + (statutTextColors[statut]||'#64748b') + '">' + (statutLabels[statut]||statut) + '</span>';
+    html += '</div>';
+    // Progress bar
+    html += '<div style="height:6px;background:#f1f5f9;border-radius:99px;overflow:hidden;margin-bottom:6px"><div style="height:100%;border-radius:99px;width:' + Math.min(av,100) + '%;background:' + barColor + ';transition:width .4s"></div></div>';
+    html += '<div style="display:flex;justify-content:space-between;font-size:11px">';
+    html += '<span style="font-weight:700;color:' + barColor + '">' + av.toFixed(0) + '% atteint</span>';
+    if (primeMax > 0) html += '<span style="color:var(--muted)">Prime : <b style="color:var(--rh-main)">' + fmtE(primeAcq) + '</b> / ' + fmtE(primeMax) + '</span>';
+    if (o.dateFin) html += '<span style="color:var(--muted)">Échéance : ' + fmtDate(o.dateFin) + '</span>';
+    html += '</div>';
+    html += '</div>';
+  });
+
+  html += '<div style="text-align:center;margin-top:8px"><a href="rh-objectifs.html" style="font-size:12px;color:var(--rh-main);font-weight:600;text-decoration:none">Voir tous les objectifs dans le module dédié →</a></div>';
+  return html;
+}
+
+// Helpers objectifs (pour le rendu dans la fiche, pas de dépendance externe)
+function _objAvancement(obj) {
+  var criteres = obj.criteres || [];
+  if (criteres.length === 0) return 0;
+  var totalPoids = 0, totalAvance = 0;
+  criteres.forEach(function(c) {
+    var poids = parseFloat(c.poids) || 0;
+    var cible = parseFloat(c.cible) || 0;
+    var avancement = parseFloat(c.avancement) || 0;
+    if (cible <= 0) { totalPoids += poids; return; }
+    totalAvance += Math.min(avancement / cible * 100, 150) * poids;
+    totalPoids += poids;
+  });
+  return totalPoids > 0 ? totalAvance / totalPoids : 0;
+}
+
+function _objStatutAuto(obj) {
+  if (obj.statut === 'annule' || obj.statut === 'brouillon') return obj.statut;
+  var now = new Date();
+  var fin = obj.dateFin ? new Date(obj.dateFin) : null;
+  var av = _objAvancement(obj);
+  if (fin && now > fin) {
+    if (av >= 100) return 'atteint';
+    if (av >= 50) return 'partiel';
+    return 'non_atteint';
+  }
+  if (av >= 100) return 'atteint';
+  return 'en_cours';
+}
+
+function _objPrimeAcquise(obj) {
+  var prime = obj.prime || {};
+  var montant = parseFloat(prime.montantBrut) || 0;
+  var mode = prime.modePalier || 'tout_ou_rien';
+  var av = _objAvancement(obj);
+  if (mode === 'tout_ou_rien') return av >= 100 ? montant : 0;
+  if (mode === 'proportionnel') return montant * Math.min(av, 100) / 100;
+  if (mode === 'paliers') {
+    var paliers = (prime.paliers || []).slice().sort(function(a,b) { return (parseFloat(b.seuil)||0) - (parseFloat(a.seuil)||0); });
+    for (var i = 0; i < paliers.length; i++) {
+      if (av >= (parseFloat(paliers[i].seuil) || 0)) return montant * (parseFloat(paliers[i].primePct) || 0) / 100;
+    }
+  }
+  return 0;
+}
 
 // ══════════════════════════
 // ARCHIVAGE

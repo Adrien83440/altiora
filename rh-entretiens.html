@@ -688,9 +688,11 @@ function renderEntretienForm(empId, ent){
       <div class="section">
         <div class="sec-head">
           <div class="sec-title">🎯 Bilan des objectifs fixés</div>
+          <button class="btn btn-outline btn-xs" onclick="importObjectifsFromModule('${empId}',${ent.annee||new Date().getFullYear()})" title="Importer les objectifs depuis le module Objectifs & Primes">📥 Importer du module</button>
         </div>
         <div class="sec-body">
           <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Evaluez le niveau d'atteinte de chaque objectif fixé l'année précédente</div>
+          <div id="import-obj-banner-${empId}" style="display:none;margin-bottom:10px"></div>
           <div class="obj-grid" id="bilan-obj-grid">
             ${renderBilanObjRows(ent.bilan_objectifs||[])}
           </div>
@@ -1133,6 +1135,79 @@ function getBilanObjRows(){
   });
   return rows;
 }
+
+// Import objectifs depuis le module Objectifs & Primes
+window.importObjectifsFromModule=async function(empId,anneeEval){
+  var banner=document.getElementById('import-obj-banner-'+empId);
+  if(banner) banner.innerHTML='<div style="text-align:center;padding:8px;font-size:11px;color:var(--muted)"><span style="display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--rh-main);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px"></span>Chargement des objectifs...</div>';
+  if(banner) banner.style.display='block';
+  try{
+    var snap=await window._getDocs(window._collection(window._db,'rh',window._uid,'objectifs'));
+    var objs=[];
+    snap.forEach(function(d){objs.push(Object.assign({id:d.id},d.data()));});
+    // Filtrer : objectifs de cet employé pour l'année évaluée (ou N-1)
+    var filtered=objs.filter(function(o){
+      var matchEmp=(o.employeId===empId)||(o.employeIds&&o.employeIds.indexOf(empId)>=0);
+      if(!matchEmp)return false;
+      if(o.statut==='annule')return false;
+      // Vérifier la période : dateFin dans l'année évaluée ou année précédente
+      if(o.dateFin){
+        var y=new Date(o.dateFin).getFullYear();
+        if(y===anneeEval||y===anneeEval-1)return true;
+      }
+      if(o.dateDebut){
+        var y2=new Date(o.dateDebut).getFullYear();
+        if(y2===anneeEval||y2===anneeEval-1)return true;
+      }
+      return true; // en cas de doute, inclure
+    });
+
+    if(filtered.length===0){
+      if(banner) banner.innerHTML='<div style="padding:8px 12px;background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;font-size:11px;color:#92400e">⚠️ Aucun objectif trouvé dans le module pour ce salarié. <a href="rh-objectifs.html?empId='+empId+'&create=1" style="color:#1d4ed8;font-weight:700">Créer un objectif →</a></div>';
+      return;
+    }
+
+    // Convertir en bilan_objectifs rows
+    var existingRows=getBilanObjRows().filter(function(r){return r.obj;});
+    var existingTitles=existingRows.map(function(r){return r.obj.toLowerCase().trim();});
+
+    var imported=0;
+    filtered.forEach(function(o){
+      // Éviter les doublons
+      if(existingTitles.indexOf((o.titre||'').toLowerCase().trim())>=0)return;
+      // Calculer avancement
+      var av=0,critCount=0;
+      (o.criteres||[]).forEach(function(c){
+        var cible=parseFloat(c.cible)||0;
+        var avance=parseFloat(c.avancement)||0;
+        if(cible>0){av+=Math.min(avance/cible*100,150);critCount++;}
+      });
+      var pctGlobal=critCount>0?Math.round(av/critCount):0;
+      // Déterminer le statut
+      var atteinte='';
+      if(pctGlobal>=100)atteinte='atteint';
+      else if(pctGlobal>=50)atteinte='partiel';
+      else if(pctGlobal>0)atteinte='non_atteint';
+
+      existingRows.push({obj:o.titre||'Objectif importé',atteinte:atteinte,pct:pctGlobal>0?String(pctGlobal):''});
+      imported++;
+    });
+
+    if(imported===0){
+      if(banner) banner.innerHTML='<div style="padding:8px 12px;background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;font-size:11px;color:#065f46">✅ Tous les objectifs du module sont déjà présents dans le bilan.</div>';
+      return;
+    }
+
+    // Re-render
+    var grid=document.getElementById('bilan-obj-grid');
+    if(grid) grid.innerHTML=renderBilanObjRows(existingRows);
+    autoSave();
+    if(banner) banner.innerHTML='<div style="padding:8px 12px;background:#d1fae5;border:1px solid #6ee7b7;border-radius:8px;font-size:11px;color:#065f46">✅ '+imported+' objectif(s) importé(s) depuis le module Objectifs & Primes avec leur taux d\'atteinte.</div>';
+  }catch(e){
+    console.error('importObjectifsFromModule',e);
+    if(banner) banner.innerHTML='<div style="padding:8px 12px;background:#fee2e2;border:1px solid #fca5a5;border-radius:8px;font-size:11px;color:#991b1b">❌ Erreur : '+(e.message||'')+'</div>';
+  }
+};
 window.addNewObjRow=function(){
   var grid=document.getElementById('new-obj-grid');
   if(!grid)return;
