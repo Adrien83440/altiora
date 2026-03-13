@@ -892,6 +892,14 @@ async function loadMonth() {
         empSnap.forEach(function(d){ var e=d.data(); e.id=d.id; if(e.statut!=='inactif') window._rhEmployes.push(e); });
       }
     } catch(e) { /* pas de module RH ou pas accès */ }
+    // Charger objectifs & primes RH
+    window._rhObjectifs = [];
+    try {
+      if (window._uid && window._getDocs && window._collection) {
+        var objSnap = await window._getDocs(window._collection(window._db,'rh',window._uid,'objectifs'));
+        objSnap.forEach(function(d){ var o=d.data(); o.id=d.id; window._rhObjectifs.push(o); });
+      }
+    } catch(e) { /* pas de module objectifs ou pas accès */ }
     // Si mode auto ET des employés trouvés, pré-remplir
     if (window._rhEmployes.length > 0 && (!data.masseSalariale.mode || data.masseSalariale.mode === 'manuel')) {
       // Ne forcer auto QUE si aucune ligne manuelle n'a été saisie
@@ -1460,7 +1468,7 @@ function getMSTaux(emp) {
 }
 
 function calcMasseSalariale(ms) {
-  var totalSal = 0, totalDir = 0;
+  var totalSal = 0, totalDir = 0, totalPrimes = 0;
   if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
     window._rhEmployes.forEach(function(e) {
       var brut = parseFloat(e.salaireBrut) || 0;
@@ -1474,6 +1482,33 @@ function calcMasseSalariale(ms) {
       totalSal += brut * (1 + taux / 100);
     });
   }
+  // Primes depuis module Objectifs
+  if (window._rhObjectifs && window._rhObjectifs.length > 0) {
+    window._rhObjectifs.forEach(function(obj) {
+      if (obj.statut === 'annule' || obj.statut === 'brouillon') return;
+      var prime = obj.prime || {};
+      var montant = parseFloat(prime.montantBrut) || 0;
+      if (montant <= 0) return;
+      var taux = parseFloat(prime.tauxCharges) || 45;
+      // Calculer avancement
+      var av = _calcObjAvancement(obj);
+      var mode = prime.modePalier || 'tout_ou_rien';
+      var brut = 0;
+      if (mode === 'tout_ou_rien') brut = av >= 100 ? montant : 0;
+      else if (mode === 'proportionnel') brut = montant * Math.min(av, 100) / 100;
+      else if (mode === 'paliers') {
+        var paliers = (prime.paliers || []).slice().sort(function(a,b){ return (parseFloat(b.seuil)||0) - (parseFloat(a.seuil)||0); });
+        for (var i = 0; i < paliers.length; i++) {
+          if (av >= (parseFloat(paliers[i].seuil) || 0)) { brut = montant * (parseFloat(paliers[i].primePct) || 0) / 100; break; }
+        }
+      }
+      if (brut > 0) {
+        // Pour objectifs équipe, multiplier par nb membres
+        var vol = (obj.type === 'equipe' && obj.employeIds) ? obj.employeIds.length : 1;
+        totalPrimes += brut * (1 + taux / 100) * vol;
+      }
+    });
+  }
   // Dirigeant (toujours manuel)
   var dir = ms.dirigeant || {};
   var remDir = pf(dir.remuneration);
@@ -1482,7 +1517,22 @@ function calcMasseSalariale(ms) {
   var divid = pf(dir.dividendes);
   var tauxDiv = parseFloat(dir.tauxDividendes) || 30;
   totalDir += divid * (1 + tauxDiv / 100);
-  return { salaries: totalSal, dirigeant: totalDir, total: totalSal + totalDir };
+  return { salaries: totalSal, dirigeant: totalDir, primes: totalPrimes, total: totalSal + totalDir + totalPrimes };
+}
+
+function _calcObjAvancement(obj) {
+  var criteres = obj.criteres || [];
+  if (criteres.length === 0) return 0;
+  var totalPoids = 0, totalAvance = 0;
+  criteres.forEach(function(c) {
+    var poids = parseFloat(c.poids) || 0;
+    var cible = parseFloat(c.cible) || 0;
+    var avancement = parseFloat(c.avancement) || 0;
+    if (cible <= 0) { totalPoids += poids; return; }
+    totalAvance += Math.min(avancement / cible * 100, 150) * poids;
+    totalPoids += poids;
+  });
+  return totalPoids > 0 ? totalAvance / totalPoids : 0;
 }
 
 function renderMasseSalariale(data, t) {
@@ -1573,6 +1623,52 @@ function renderMasseSalariale(data, t) {
     '<td style="text-align:right;font-weight:700;color:#f59e0b"><span id="ms-dir-divCout">' + fmtN(coutDiv) + '</span> €</td></tr>' +
     '<tr style="border-top:2px solid var(--border);font-weight:800"><td>TOTAL DIRIGEANT</td><td></td><td></td><td style="text-align:right;color:#f59e0b"><span id="tot-msDir">' + fmtN(msCalc.dirigeant) + '</span> €</td></tr>' +
     '</tbody></table></div>';
+
+  // Section Primes & Objectifs
+  if (window._rhObjectifs && window._rhObjectifs.length > 0 && msCalc.primes > 0) {
+    var primesObjs = window._rhObjectifs.filter(function(obj) {
+      return obj.statut !== 'annule' && obj.statut !== 'brouillon' && (obj.prime||{}).montantBrut;
+    });
+    html += '<div style="border-top:2px solid var(--border);padding:14px 0 0">' +
+      '<div style="font-size:12px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px">🏆 Primes & Objectifs' +
+      '<span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.15);color:#059669;padding:2px 7px;border-radius:20px">Module Objectifs</span>' +
+      '<a href="rh-objectifs.html" style="margin-left:auto;font-size:11px;color:#059669;text-decoration:none;font-weight:600">Gérer →</a></div>';
+    html += '<table class="data-table"><thead><tr><th>Objectif</th><th>Salarié(s)</th><th>Atteinte</th><th>Prime brute (€)</th><th>Coût chargé (€)</th></tr></thead><tbody>';
+    primesObjs.forEach(function(obj) {
+      var prime = obj.prime || {};
+      var montant = parseFloat(prime.montantBrut) || 0;
+      var taux = parseFloat(prime.tauxCharges) || 45;
+      var av = _calcObjAvancement(obj);
+      var mode = prime.modePalier || 'tout_ou_rien';
+      var brut = 0;
+      if (mode === 'tout_ou_rien') brut = av >= 100 ? montant : 0;
+      else if (mode === 'proportionnel') brut = montant * Math.min(av, 100) / 100;
+      else if (mode === 'paliers') {
+        var p2 = (prime.paliers || []).slice().sort(function(a,b){ return (parseFloat(b.seuil)||0) - (parseFloat(a.seuil)||0); });
+        for (var i = 0; i < p2.length; i++) { if (av >= (parseFloat(p2[i].seuil) || 0)) { brut = montant * (parseFloat(p2[i].primePct) || 0) / 100; break; } }
+      }
+      var vol = (obj.type === 'equipe' && obj.employeIds) ? obj.employeIds.length : 1;
+      var cout = brut * (1 + taux / 100) * vol;
+      // Noms des employés
+      var empNom = '—';
+      if (obj.type === 'equipe' && obj.employeIds) {
+        empNom = obj.employeIds.length + ' membres';
+      } else if (obj.employeId && window._rhEmployes) {
+        var emp = window._rhEmployes.find(function(e){ return e.id === obj.employeId; });
+        if (emp) empNom = (emp.prenom || '') + ' ' + (emp.nom || '');
+      }
+      var avColor = av >= 100 ? '#059669' : av >= 60 ? '#d97706' : '#dc2626';
+      html += '<tr>' +
+        '<td style="font-weight:600">' + (obj.titre || '—') + '</td>' +
+        '<td>' + empNom + '</td>' +
+        '<td style="text-align:center;font-weight:700;color:' + avColor + '">' + av.toFixed(0) + '%</td>' +
+        '<td style="text-align:right">' + fmtN(brut * vol) + '</td>' +
+        '<td style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(cout) + '</td>' +
+        '</tr>';
+    });
+    html += '<tr style="border-top:2px solid var(--border);font-weight:800"><td colspan="3">TOTAL PRIMES</td><td></td><td style="text-align:right;color:#f59e0b"><span id="tot-msPrimes">' + fmtN(msCalc.primes) + '</span> €</td></tr>';
+    html += '</tbody></table></div>';
+  }
 
   // Total global
   html += '<div style="border-top:2px solid var(--border);padding:12px 0 4px;display:flex;justify-content:space-between;align-items:center">' +

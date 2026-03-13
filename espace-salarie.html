@@ -338,6 +338,7 @@
       <button class="tnav" onclick="showTab('planning',this)">📅 Planning</button>
       <button class="tnav" onclick="showTab('pointage',this)">⏱ Pointage</button>
       <button class="tnav" onclick="showTab('emargements',this)" id="tab-emarg-btn">📝 Émargements <span class="notif" id="emarg-notif" style="display:none">0</span></button>
+      <button class="tnav" onclick="showTab('objectifs',this)">🏆 Objectifs</button>
     </div>
   </div>
 
@@ -737,6 +738,22 @@
       Signature électronique simple au sens de l'article 1366 du Code civil et du règlement eIDAS (niveau 1).<br>
       Chaque signature génère une preuve cryptographique SHA-256 horodatée, conservée 5 ans conformément à l'art. D.3171-16 du Code du travail.<br>
       En cas de désaccord, utilisez le bouton « Contester » — votre employeur sera notifié (art. L.3171-4).
+    </div>
+  </div>
+
+  <!-- ══ ONGLET OBJECTIFS ══ -->
+  <div class="tab-section" id="tab-objectifs" style="margin-top:16px">
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">🏆 Mes objectifs</div>
+        <button class="btn-ghost btn" style="font-size:11px;padding:4px 10px" onclick="loadObjectifsSalarie()">↻ Actualiser</button>
+      </div>
+      <div class="card-body" id="obj-salarie-body" style="padding:12px">
+        <div style="text-align:center;padding:24px;color:var(--muted);font-size:12px">
+          <div style="font-size:28px;margin-bottom:6px">🏆</div>
+          Les objectifs s'afficheront ici une fois chargés.
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2540,6 +2557,179 @@ document.getElementById('pwa-close').addEventListener('click', function() {
       }, {once: true});
     }, 3000);
   }
+})();
+</script>
+
+<!-- ══ MODULE OBJECTIFS SALARIE ══ -->
+<script>
+(function(){
+'use strict';
+
+var _objLoaded = false;
+
+// Intercept tab switch to load objectifs on first view
+var _prevShowTab = window.showTab;
+window.showTab = function(tab, el) {
+  if (_prevShowTab) _prevShowTab(tab, el);
+  if (tab === 'objectifs' && !_objLoaded) {
+    _objLoaded = true;
+    loadObjectifsSalarie();
+  }
+};
+
+window.loadObjectifsSalarie = async function() {
+  var body = document.getElementById('obj-salarie-body');
+  if (!body) return;
+  if (!window._dbReady || !_uid || !_empId) {
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">Session non initialisée. Rechargez la page.</div>';
+    return;
+  }
+  body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px"><div style="font-size:20px;margin-bottom:6px">⏳</div>Chargement...</div>';
+
+  try {
+    // Lire depuis rh/{uid}/objectifs (collection privée, besoin plan master + auth)
+    // L'espace salarié est public (pas d'auth Firebase), donc on utilise une collection publique
+    // On lit depuis rh_objectifs_public/{uid}/items
+    var snap = await window._getDocs('rh_objectifs_public', _uid, 'items');
+    var objs = [];
+    snap.forEach(function(d) { objs.push(Object.assign({id: d.id}, d.data())); });
+
+    // Filtrer pour cet employé
+    var myObjs = objs.filter(function(o) {
+      return o.employeId === _empId || (o.employeIds && o.employeIds.indexOf(_empId) >= 0);
+    });
+
+    if (myObjs.length === 0) {
+      body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--muted);font-size:12px"><div style="font-size:28px;margin-bottom:8px">🏆</div>Aucun objectif défini pour le moment.<br><span style="font-size:11px">Votre responsable peut vous attribuer des objectifs depuis le module RH.</span></div>';
+      return;
+    }
+
+    // Tri : en cours d'abord
+    myObjs.sort(function(a, b) {
+      var sa = _objStat(a) === 'en_cours' ? 0 : 1;
+      var sb = _objStat(b) === 'en_cours' ? 0 : 1;
+      return sa !== sb ? sa - sb : (b.dateFin || '').localeCompare(a.dateFin || '');
+    });
+
+    var html = '';
+    myObjs.forEach(function(o) {
+      var statut = _objStat(o);
+      var av = _objAv(o);
+      var barColor = av >= 100 ? '#10b981' : av >= 60 ? '#f59e0b' : '#ef4444';
+      var prime = o.prime || {};
+      var montant = parseFloat(prime.montantBrut) || 0;
+      var primeAcq = _objPrime(o);
+      var statutLabels = {brouillon:'📝 Brouillon',en_cours:'🟢 En cours',atteint:'✅ Atteint',partiel:'🟡 Partiel',non_atteint:'❌ Non atteint',annule:'🚫 Annulé'};
+      var statutBg = {brouillon:'#f1f5f9',en_cours:'#d1fae5',atteint:'#059669',partiel:'#fef3c7',non_atteint:'#fee2e2',annule:'#f1f5f9'};
+      var statutFg = {brouillon:'#64748b',en_cours:'#065f46',atteint:'white',partiel:'#92400e',non_atteint:'#991b1b',annule:'#94a3b8'};
+
+      html += '<div style="border:1.5px solid var(--border);border-radius:12px;padding:14px;margin-bottom:10px">';
+      // Header
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">';
+      html += '<span style="font-size:15px;font-weight:800;flex:1;line-height:1.3">' + (o.titre || 'Objectif') + '</span>';
+      html += '<span style="font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;background:' + (statutBg[statut]||'#f1f5f9') + ';color:' + (statutFg[statut]||'#64748b') + '">' + (statutLabels[statut]||statut) + '</span>';
+      html += '</div>';
+
+      // Description
+      if (o.description) {
+        html += '<div style="font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:8px">' + (o.description||'').replace(/</g,'&lt;') + '</div>';
+      }
+
+      // Période
+      html += '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">';
+      if (o.dateDebut) html += 'Du <b>' + _fmtD(o.dateDebut) + '</b> ';
+      if (o.dateFin) html += 'au <b>' + _fmtD(o.dateFin) + '</b> ';
+      html += '· ' + (o.periodicite || 'libre');
+      html += '</div>';
+
+      // Progress bar
+      html += '<div style="margin-bottom:6px">';
+      html += '<div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-size:11px;font-weight:700;color:' + barColor + '">' + av.toFixed(0) + '% atteint</span></div>';
+      html += '<div style="height:10px;background:#f1f5f9;border-radius:99px;overflow:hidden"><div style="height:100%;border-radius:99px;width:' + Math.min(av,100) + '%;background:' + barColor + ';transition:width .6s"></div></div>';
+      html += '</div>';
+
+      // Critères détail
+      var criteres = o.criteres || [];
+      if (criteres.length > 0) {
+        html += '<div style="margin-top:10px">';
+        criteres.forEach(function(c) {
+          var cible = parseFloat(c.cible) || 0;
+          var avC = parseFloat(c.avancement) || 0;
+          var pctC = cible > 0 ? Math.min(avC / cible * 100, 150) : 0;
+          var colC = pctC >= 100 ? '#10b981' : pctC >= 60 ? '#f59e0b' : '#ef4444';
+          html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">';
+          html += '<span style="font-size:11px;flex:1">' + (c.label || 'Critère') + '</span>';
+          html += '<div style="width:80px;height:5px;background:#f1f5f9;border-radius:99px;overflow:hidden"><div style="height:100%;width:' + Math.min(pctC,100) + '%;background:' + colC + ';border-radius:99px"></div></div>';
+          html += '<span style="font-size:10px;font-weight:700;color:' + colC + ';min-width:60px;text-align:right">' + avC + ' / ' + cible + ' ' + (c.unite||'') + '</span>';
+          html += '</div>';
+        });
+        html += '</div>';
+      }
+
+      // Prime
+      if (montant > 0) {
+        html += '<div style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #d1fae5;border-radius:8px;display:flex;justify-content:space-between;align-items:center">';
+        html += '<span style="font-size:11px;color:var(--muted)">Prime associée</span>';
+        html += '<div style="text-align:right"><div style="font-size:14px;font-weight:800;color:#059669">' + _fmtE(primeAcq) + '</div>';
+        html += '<div style="font-size:10px;color:var(--muted)">sur ' + _fmtE(montant) + ' max</div></div>';
+        html += '</div>';
+      }
+
+      html += '</div>';
+    });
+
+    body.innerHTML = html;
+  } catch(e) {
+    console.warn('loadObjectifsSalarie error:', e);
+    body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px"><div style="font-size:20px;margin-bottom:6px">⚠️</div>Impossible de charger les objectifs.<br><span style="font-size:10px">' + (e.message||'') + '</span></div>';
+  }
+};
+
+function _objAv(obj) {
+  var c = obj.criteres || [];
+  if (c.length === 0) return 0;
+  var tp = 0, ta = 0;
+  c.forEach(function(x) {
+    var p = parseFloat(x.poids) || 0;
+    var ci = parseFloat(x.cible) || 0;
+    var av = parseFloat(x.avancement) || 0;
+    if (ci <= 0) { tp += p; return; }
+    ta += Math.min(av / ci * 100, 150) * p;
+    tp += p;
+  });
+  return tp > 0 ? ta / tp : 0;
+}
+
+function _objStat(o) {
+  if (o.statut === 'annule' || o.statut === 'brouillon') return o.statut;
+  var av = _objAv(o);
+  var fin = o.dateFin ? new Date(o.dateFin) : null;
+  if (fin && new Date() > fin) { return av >= 100 ? 'atteint' : av >= 50 ? 'partiel' : 'non_atteint'; }
+  return av >= 100 ? 'atteint' : 'en_cours';
+}
+
+function _objPrime(o) {
+  var p = o.prime || {};
+  var m = parseFloat(p.montantBrut) || 0;
+  var av = _objAv(o);
+  var mode = p.modePalier || 'tout_ou_rien';
+  if (mode === 'tout_ou_rien') return av >= 100 ? m : 0;
+  if (mode === 'proportionnel') return m * Math.min(av, 100) / 100;
+  if (mode === 'paliers') {
+    var pl = (p.paliers || []).slice().sort(function(a,b) { return (parseFloat(b.seuil)||0) - (parseFloat(a.seuil)||0); });
+    for (var i = 0; i < pl.length; i++) { if (av >= (parseFloat(pl[i].seuil)||0)) return m * (parseFloat(pl[i].primePct)||0) / 100; }
+  }
+  return 0;
+}
+
+function _fmtD(d) { try { return new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'}); } catch(e) { return d; } }
+function _fmtE(n) { return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' €'; }
+
+// Auto-load when tab is shown or after delay
+setTimeout(function() {
+  if (_uid && window._dbReady) loadObjectifsSalarie();
+}, 4000);
+
 })();
 </script>
 

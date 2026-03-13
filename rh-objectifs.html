@@ -1143,10 +1143,12 @@ async function submitObjectif(existingId){
     if(existingId){
       await window._setDoc(window._doc(window._db,'rh',window._uid,'objectifs',existingId),obj);
       _objectifs[existingId]=Object.assign({id:existingId},obj);
+      syncObjPublic(existingId, obj);
     } else {
       var ref=await window._addDoc(window._collection(window._db,'rh',window._uid,'objectifs'),obj);
       obj.id=ref.id;
       _objectifs[ref.id]=obj;
+      syncObjPublic(ref.id, obj);
     }
     closeDetail();
     renderObjGrid();
@@ -1169,17 +1171,45 @@ async function saveObjectifToFirestore(id){
   delete obj.id;
   obj.updatedAt=new Date().toISOString();
   await window._setDoc(window._doc(window._db,'rh',window._uid,'objectifs',id),obj);
+  // Sync vers collection publique (portail salarié)
+  syncObjPublic(id, obj);
 }
 
 async function deleteObjectif(id){
   if(!confirm('Supprimer cet objectif ?'))return;
   try{
     await window._deleteDoc(window._doc(window._db,'rh',window._uid,'objectifs',id));
+    // Supprimer aussi de la collection publique
+    try{await window._deleteDoc(window._doc(window._db,'rh_objectifs_public',window._uid,'items',id));}catch(e){}
     delete _objectifs[id];
     closeDetail();
     renderObjGrid();
     showToast('Objectif supprimé','success');
   }catch(e){showToast('Erreur','error');}
+}
+
+// Sync vers rh_objectifs_public/{uid}/items/{id} (lecture publique pour espace salarié)
+async function syncObjPublic(id, obj){
+  if(!window._uid)return;
+  try{
+    // Ne publier que les objectifs non-brouillon
+    if(obj.statut==='brouillon'){
+      try{await window._deleteDoc(window._doc(window._db,'rh_objectifs_public',window._uid,'items',id));}catch(e){}
+      return;
+    }
+    // Version publique allégée (sans données sensibles de conformité IA)
+    var pub={
+      titre:obj.titre||'', description:obj.description||'',
+      type:obj.type||'individuel', periodicite:obj.periodicite||'',
+      employeId:obj.employeId||'', employeIds:obj.employeIds||[],
+      dateDebut:obj.dateDebut||'', dateFin:obj.dateFin||'',
+      criteres:(obj.criteres||[]).map(function(c){return{label:c.label,cible:c.cible,unite:c.unite,poids:c.poids,avancement:c.avancement};}),
+      prime:{montantBrut:(obj.prime||{}).montantBrut||'',mode:(obj.prime||{}).mode||'fixe',modePalier:(obj.prime||{}).modePalier||'tout_ou_rien',paliers:(obj.prime||{}).paliers||[]},
+      statut:obj.statut||'en_cours',
+      updatedAt:obj.updatedAt||new Date().toISOString()
+    };
+    await window._setDoc(window._doc(window._db,'rh_objectifs_public',window._uid,'items',id),pub);
+  }catch(e){console.warn('syncObjPublic',e);}
 }
 
 // ═══════════════════════════════════════════
