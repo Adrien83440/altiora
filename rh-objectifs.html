@@ -764,19 +764,31 @@ function renderDetailPanel(obj){
   h+='</div></div>';
 
   // Alertes conformité
+  h+='<div class="section" style="border-color:#c7d2fe"><div class="sec-head" style="background:#f5f3ff"><div class="sec-title">⚖️ Conformité & Analyse juridique</div></div><div class="sec-body">';
+
+  // Garde-fous automatiques (s'il y en a)
   if(alertes.length>0){
-    h+='<div class="section"><div class="sec-head"><div class="sec-title">⚠️ Conformité & Garde-fous</div></div><div class="sec-body">';
+    h+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin-bottom:8px">Garde-fous automatiques</div>';
     alertes.forEach(function(a){
       h+='<div class="alerte-box '+a.type+'"><span class="alerte-icon">'+a.icon+'</span><div>'+a.msg+'</div></div>';
     });
-    h+='<button class="btn btn-sm" style="background:var(--purple-light);color:var(--purple);border:1.5px solid #c7d2fe;margin-top:8px;width:100%" onclick="checkConformiteIA(\''+obj.id+'\')">🤖 Vérifier conformité CCN avec l\'IA</button>';
-    h+='<div id="ia-result-'+obj.id+'"></div>';
-    h+='</div></div>';
-  } else {
-    h+='<div class="alerte-box ok"><span class="alerte-icon">✅</span><div><b>Aucune alerte</b> — Cet objectif semble conforme aux règles générales du droit du travail.</div></div>';
-    h+='<button class="btn btn-sm" style="background:var(--purple-light);color:var(--purple);border:1.5px solid #c7d2fe;width:100%" onclick="checkConformiteIA(\''+obj.id+'\')">🤖 Vérifier conformité CCN avec l\'IA</button>';
-    h+='<div id="ia-result-'+obj.id+'"></div>';
   }
+
+  // Résultat IA précédent (si déjà analysé)
+  var prevIA=obj.conformite&&obj.conformite.ccnCheck&&obj.conformite.ccnCheck.resultat;
+  if(prevIA){
+    h+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;margin:12px 0 8px">Dernière analyse IA <span style="font-weight:400;text-transform:none">('+fmtDateShort(obj.conformite.ccnCheck.date)+')</span></div>';
+    h+='<div class="ia-result">'+sanitizeIA(prevIA)+'</div>';
+  }
+
+  // Bouton IA — toujours visible et proéminent
+  h+='<div style="margin-top:12px;padding:14px;background:linear-gradient(135deg,#f5f3ff,#eff6ff);border:1.5px solid #c7d2fe;border-radius:10px;text-align:center">';
+  h+='<div style="font-size:12px;font-weight:700;color:var(--purple);margin-bottom:6px">🤖 Vérification IA recommandée</div>';
+  h+='<div style="font-size:11px;color:var(--muted);margin-bottom:10px">L\'IA analyse la conformité avec le Code du travail et la CCN du salarié</div>';
+  h+='<button class="btn" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);color:white;box-shadow:0 3px 10px rgba(99,102,241,.3);width:100%;padding:10px 16px" onclick="checkConformiteIA(\''+obj.id+'\')">'+(prevIA?'🔄 Relancer l\'analyse IA':'🤖 Lancer l\'analyse de conformité CCN')+'</button>';
+  h+='</div>';
+  h+='<div id="ia-result-'+obj.id+'"></div>';
+  h+='</div></div>';
 
   // Actions rapides
   h+='<div style="display:flex;gap:8px;flex-wrap:wrap">';
@@ -1148,7 +1160,7 @@ async function checkConformiteIAFromForm(){
   if(!container)return;
   var obj=_collectFormObj();
   if(!obj.titre){showToast('Renseignez au moins le titre','error');return;}
-  container.innerHTML='<div class="loader" style="padding:12px"><div class="spin"></div> Analyse IA en cours...</div>';
+  container.innerHTML='<div style="padding:16px;text-align:center;background:linear-gradient(135deg,#f5f3ff,#eff6ff);border:1.5px solid #c7d2fe;border-radius:10px;margin-top:10px"><div class="spin" style="margin:0 auto 10px"></div><div style="font-size:12px;font-weight:700;color:var(--purple)">Analyse en cours...</div><div style="font-size:11px;color:var(--muted);margin-top:4px">Verification Code du travail et CCN applicable</div></div>';
 
   // Récupérer CCN du salarié
   var ccn='';
@@ -1170,7 +1182,7 @@ async function checkConformiteIAFromForm(){
       container.innerHTML='<div class="alerte-box danger"><span class="alerte-icon">❌</span><div>'+esc(data.error)+'</div></div>';
       return;
     }
-    container.innerHTML='<div class="ia-result"><h4>🤖 Analyse IA — Conformité CCN</h4>'+sanitizeIA(data.analyse||'Aucun résultat')+'</div>';
+    container.innerHTML='<div class="ia-result"><div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #e2e8f0"><span style="font-size:18px">🤖</span><div><div style="font-size:13px;font-weight:700;color:var(--purple)">Analyse de conformité</div><div style="font-size:10px;color:var(--muted)">Généré le '+new Date().toLocaleDateString('fr-FR')+' · Claude IA</div></div></div>'+sanitizeIA(data.analyse||'Aucun résultat')+'</div>';
   }catch(e){
     container.innerHTML='<div class="alerte-box danger"><span class="alerte-icon">❌</span><div>Erreur réseau : '+esc(e.message)+'</div></div>';
   }
@@ -1327,7 +1339,7 @@ async function checkConformiteIA(id){
   if(!obj)return;
   var container=document.getElementById('ia-result-'+id);
   if(!container)return;
-  container.innerHTML='<div class="loader"><div class="spin"></div> Analyse IA en cours...</div>';
+  container.innerHTML='<div style="padding:16px;text-align:center;background:linear-gradient(135deg,#f5f3ff,#eff6ff);border:1.5px solid #c7d2fe;border-radius:10px;margin-top:10px"><div class="spin" style="margin:0 auto 10px"></div><div style="font-size:12px;font-weight:700;color:var(--purple)">Analyse en cours...</div><div style="font-size:11px;color:var(--muted);margin-top:4px">Vérification Code du travail et CCN applicable</div></div>';
 
   // Récupérer CCN du salarié
   var ccn='';
@@ -1347,7 +1359,7 @@ async function checkConformiteIA(id){
       container.innerHTML='<div class="alerte-box danger"><span class="alerte-icon">❌</span><div>'+esc(data.error)+'</div></div>';
       return;
     }
-    container.innerHTML='<div class="ia-result" style="margin-top:12px"><h4>🤖 Analyse IA — Conformité CCN</h4>'+sanitizeIA(data.analyse||'Aucun résultat')+'</div>';
+    container.innerHTML='<div class="ia-result" style="margin-top:12px"><div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #e2e8f0"><span style="font-size:18px">🤖</span><div><div style="font-size:13px;font-weight:700;color:var(--purple)">Analyse de conformité</div><div style="font-size:10px;color:var(--muted)">Généré le '+new Date().toLocaleDateString('fr-FR')+' · Claude IA</div></div></div>'+sanitizeIA(data.analyse||'Aucun résultat')+'</div>';
     // Sauvegarder dans l'objectif
     _objectifs[id].conformite={verifie:true,alertes:checkGardeFous(obj).map(function(a){return a.msg;}),ccnCheck:{resultat:data.analyse||'',date:new Date().toISOString()}};
     saveObjectifToFirestore(id);
@@ -1364,13 +1376,155 @@ function fmtDateShort(d){if(!d)return'—';try{var dt=new Date(d);return dt.toLo
 function pf(v){return parseFloat(String(v||'0').replace(',','.'))||0;}
 function gv(id){var el=document.getElementById(id);return el?el.value:'';}
 function esc(s){if(!s)return'';var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
-function sanitizeIA(html){
-  if(!html)return'<p style="color:var(--muted)">Aucun résultat</p>';
+function sanitizeIA(raw){
+  if(!raw)return'<p style="color:var(--muted)">Aucun résultat</p>';
+  var html=raw;
+  // Détecter si c'est du markdown (##, **, ---, |---|)
+  var isMarkdown=/^#{1,4}\s|^\*\*|\n#{1,4}\s|\n---\n|\|---/.test(raw);
+  if(isMarkdown){
+    html=mdToHtml(raw);
+  }
   // Supprimer balises dangereuses
-  var clean=html.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<iframe[\s\S]*?<\/iframe>/gi,'').replace(/<style[\s\S]*?<\/style>/gi,'').replace(/on\w+="[^"]*"/gi,'').replace(/on\w+='[^']*'/gi,'');
-  // Nettoyer les éventuels backticks markdown résiduels
-  clean=clean.replace(/^```html\s*/i,'').replace(/```\s*$/,'');
-  return clean;
+  html=html.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<iframe[\s\S]*?<\/iframe>/gi,'').replace(/<style[\s\S]*?<\/style>/gi,'').replace(/on\w+="[^"]*"/gi,'').replace(/on\w+='[^']*'/gi,'');
+  html=html.replace(/^```html\s*/i,'').replace(/```\s*$/,'').replace(/```/g,'');
+  return html;
+}
+
+function mdToHtml(md){
+  var lines=md.split('\n');
+  var html='';
+  var inList=false;
+  var inTable=false;
+  var tableRows=[];
+
+  for(var i=0;i<lines.length;i++){
+    var line=lines[i];
+    var trimmed=line.trim();
+
+    // Séparateur
+    if(/^---+$/.test(trimmed)){
+      if(inList){html+='</ul>';inList=false;}
+      if(inTable){html+=renderMdTable(tableRows);inTable=false;tableRows=[];}
+      html+='<hr style="border:none;border-top:1px solid #e2e8f0;margin:12px 0"/>';
+      continue;
+    }
+
+    // Table
+    if(trimmed.indexOf('|')>=0 && trimmed.indexOf('|')!==trimmed.lastIndexOf('|')){
+      if(inList){html+='</ul>';inList=false;}
+      if(/^\|[\s-:|]+\|$/.test(trimmed)) continue; // separator row
+      tableRows.push(trimmed);
+      inTable=true;
+      // Check if next line is NOT a table row
+      if(i+1>=lines.length || (lines[i+1].trim().indexOf('|')<0 || lines[i+1].trim().indexOf('|')===lines[i+1].trim().lastIndexOf('|'))){
+        html+=renderMdTable(tableRows);
+        inTable=false;tableRows=[];
+      }
+      continue;
+    }
+    if(inTable){html+=renderMdTable(tableRows);inTable=false;tableRows=[];}
+
+    // Titres
+    if(/^####\s/.test(trimmed)){
+      if(inList){html+='</ul>';inList=false;}
+      html+='<div style="font-size:11px;font-weight:700;color:var(--muted);margin:10px 0 4px">'+inline(trimmed.replace(/^####\s+/,''))+'</div>';
+      continue;
+    }
+    if(/^###\s/.test(trimmed)){
+      if(inList){html+='</ul>';inList=false;}
+      var title=trimmed.replace(/^###\s+/,'');
+      // Détecter les émojis de type d'alerte
+      var alertStyle=detectAlertStyle(title);
+      if(alertStyle){
+        html+='<div style="'+alertStyle.bg+';border:1px solid '+alertStyle.border+';border-radius:8px;padding:10px 12px;margin:8px 0;font-size:12px;color:'+alertStyle.color+'"><strong>'+inline(title)+'</strong></div>';
+      } else {
+        html+='<div style="font-size:12px;font-weight:700;color:#1a1f36;margin:14px 0 6px;padding:8px 12px;background:#f8faff;border-left:3px solid #6366f1;border-radius:0 6px 6px 0">'+inline(title)+'</div>';
+      }
+      continue;
+    }
+    if(/^##\s/.test(trimmed)){
+      if(inList){html+='</ul>';inList=false;}
+      html+='<div style="font-size:13px;font-weight:800;color:#1a1f36;margin:16px 0 8px;padding:10px 14px;background:linear-gradient(135deg,#f5f3ff,#eff6ff);border-radius:8px;border-left:3px solid #6366f1">'+inline(trimmed.replace(/^##\s+/,''))+'</div>';
+      continue;
+    }
+    if(/^#\s/.test(trimmed)){
+      if(inList){html+='</ul>';inList=false;}
+      html+='<div style="font-size:14px;font-weight:800;color:var(--purple);margin:16px 0 8px">'+inline(trimmed.replace(/^#\s+/,''))+'</div>';
+      continue;
+    }
+
+    // Liste
+    if(/^[-*]\s/.test(trimmed)){
+      if(!inList){html+='<ul style="margin:4px 0 10px 4px;padding-left:14px;list-style:none">';inList=true;}
+      var content=trimmed.replace(/^[-*]\s+/,'');
+      // Détecter alertes dans les items
+      var itemAlert=detectAlertStyle(content);
+      if(itemAlert){
+        html+='<li style="margin-bottom:6px;padding:8px 10px;background:'+itemAlert.bg+';border:1px solid '+itemAlert.border+';border-radius:6px;color:'+itemAlert.color+';font-size:11px;list-style:none">'+inline(content)+'</li>';
+      } else {
+        html+='<li style="margin-bottom:4px;font-size:12px;line-height:1.5;position:relative;padding-left:12px"><span style="position:absolute;left:0;color:#6366f1">•</span>'+inline(content)+'</li>';
+      }
+      continue;
+    }
+    if(inList && !trimmed){html+='</ul>';inList=false;continue;}
+    if(inList && !/^[-*]\s/.test(trimmed)){html+='</ul>';inList=false;}
+
+    // Ligne vide
+    if(!trimmed){continue;}
+
+    // Paragraphe
+    // Détecter si c'est une alerte
+    var paraAlert=detectAlertStyle(trimmed);
+    if(paraAlert){
+      html+='<div style="background:'+paraAlert.bg+';border:1px solid '+paraAlert.border+';border-radius:8px;padding:10px 12px;margin:6px 0;font-size:12px;color:'+paraAlert.color+';line-height:1.6">'+inline(trimmed)+'</div>';
+    } else {
+      html+='<p style="margin:0 0 8px;font-size:12px;line-height:1.6;color:#1a1f36">'+inline(trimmed)+'</p>';
+    }
+  }
+  if(inList) html+='</ul>';
+  if(inTable) html+=renderMdTable(tableRows);
+  return html;
+}
+
+function inline(s){
+  // Bold
+  s=s.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  // Italic
+  s=s.replace(/\*([^*]+)\*/g,'<em style="color:var(--muted)">$1</em>');
+  // Code
+  s=s.replace(/`([^`]+)`/g,'<code style="background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:11px">$1</code>');
+  // Emojis → colored
+  return s;
+}
+
+function detectAlertStyle(text){
+  var t=text.toLowerCase();
+  if(/🔴|❌|risque\s*(majeur|critique|élevé)|danger|problème\s*majeur/.test(t))
+    return{bg:'#fee2e2',border:'#fca5a5',color:'#991b1b'};
+  if(/⚠️|🟡|risque\s*(modéré|moyen)|attention|à\s*vérifier|points?\s*à\s*vérifier/.test(t))
+    return{bg:'#fef3c7',border:'#fcd34d',color:'#92400e'};
+  if(/✅|🟢|conforme|point[s]?\s*conforme/.test(t))
+    return{bg:'#d1fae5',border:'#6ee7b7',color:'#065f46'};
+  if(/💡|recommand|action\s*requise|suggestion/.test(t))
+    return{bg:'#eff6ff',border:'#bfdbfe',color:'#1e40af'};
+  return null;
+}
+
+function renderMdTable(rows){
+  if(rows.length===0)return'';
+  var html='<table style="width:100%;border-collapse:collapse;margin:8px 0;font-size:11px;border-radius:8px;overflow:hidden">';
+  rows.forEach(function(row,idx){
+    var cells=row.replace(/^\||\|$/g,'').split('|').map(function(c){return c.trim();});
+    var tag=idx===0?'th':'td';
+    var bgStyle=idx===0?'background:#f0f4ff;font-weight:700;font-size:10px;color:var(--purple);text-transform:uppercase;letter-spacing:.3px':'';
+    html+='<tr>';
+    cells.forEach(function(c){
+      html+='<'+tag+' style="padding:7px 10px;border-bottom:1px solid #e2e8f0;text-align:left;'+bgStyle+'">'+inline(c)+'</'+tag+'>';
+    });
+    html+='</tr>';
+  });
+  html+='</table>';
+  return html;
 }
 function todayISO(){var d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
 function hashCode(s){var h=0;for(var i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0;}return h;}
