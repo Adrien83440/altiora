@@ -403,6 +403,8 @@
         }
         // Bannière trial
         if(d.plan==='trial' && d.trialEnd) showTrialBanner(d.trialEnd, d.pendingPlan||'pro');
+        // Saisonnalité
+        if(d.saisonnalite && d.saisonnalite.active) _saisonConfig=d.saisonnalite;
       }
     }catch(e){}
     window.loadData();
@@ -476,6 +478,17 @@ const MONTHS_SHORT=['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct
 let _charts=[];
 var _viewMode='civil';
 var _fiscalStart=0;
+var _saisonConfig=null;
+
+function saisonGetStats(cfg){
+  if(!cfg||!cfg.active)return{active:false,ouverts:12,inter:0,fermes:0,moisEquivCA:12,moisEquivCV:12};
+  var ouverts=0,inter=0,fermes=0;
+  for(var i=1;i<=12;i++){var s=(cfg.mois||{})[i]||'ouvert';if(s==='ouvert')ouverts++;else if(s==='intersaison')inter++;else fermes++;}
+  var cCA=parseFloat(cfg.coeffCA)||0.4;
+  var cCV=parseFloat(cfg.coeffChargesVar)||0.5;
+  return{active:true,ouverts:ouverts,inter:inter,fermes:fermes,coeffCA:cCA,coeffCV:cCV,moisEquivCA:ouverts+(inter*cCA),moisEquivCV:ouverts+(inter*cCV)};
+}
+function saisonMonthStatus(m){if(!_saisonConfig||!_saisonConfig.active)return'ouvert';return(_saisonConfig.mois||{})[m+1]||'ouvert';}
 
 document.getElementById('pageDate').textContent=new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
 
@@ -802,8 +815,10 @@ async function loadData(_tries){
   // Projection fin d'année
   const moisPassesAvecCA=monthsData.filter((d,i)=>!d.isFuture&&d.caHT>0);
   const nbMoisReel=moisPassesAvecCA.length;
-  const projCA=nbMoisReel>0?(annualCA/nbMoisReel*12):0;
-  const projResultat=nbMoisReel>0?(annualResultat/nbMoisReel*12):0;
+  const _ss=saisonGetStats(_saisonConfig);
+  const _projTarget=_ss.active?_ss.moisEquivCA:12;
+  const projCA=nbMoisReel>0?(annualCA/nbMoisReel*_projTarget):0;
+  const projResultat=nbMoisReel>0?(annualResultat/nbMoisReel*_projTarget):0;
 
   // Ventes journalières du mois courant
   const caJour=current.caJournalier||[];
@@ -986,7 +1001,7 @@ async function loadData(_tries){
             <td style="color:#f59e0b;font-weight:700">${fmtE(projCA)}</td>
             <td class="td-muted">—</td>
             <td style="color:${projResultat>=0?'#10b981':'#ef4444'};font-weight:700">${fmtE(projResultat)}</td>
-            <td class="td-muted">Basé sur ${nbMoisReel} mois</td>
+            <td class="td-muted">Basé sur ${nbMoisReel} mois${_ss.active?' (×'+_ss.moisEquivCA.toFixed(1)+' éq.)':''}</td>
           </tr>`:''}
         </tfoot>
       </table>
@@ -1021,7 +1036,7 @@ async function loadData(_tries){
         <span class="context-pill"><span class="dot"></span>Données en direct · ${MONTHS[currentM]} ${year}</span>
         ${!hasCurrentData?'<span class="last-update" style="color:#f59e0b;margin-left:8px;">⚠️ Aucune donnée ce mois — <a href="pilotage.html" style="color:var(--blue-main);font-weight:600;">Saisir dans le Pilotage</a></span>':''}
       </div>
-      <span class="last-update">${_viewMode==='exercice'?'Exercice '+getFiscalLabel(year):'Année '+year} · ${monthsData.filter(d=>d.caHT>0||d.chargesHT>0).length} mois renseignés</span>
+      <span class="last-update">${_viewMode==='exercice'?'Exercice '+getFiscalLabel(year):'Année '+year} · ${monthsData.filter(d=>d.caHT>0||d.chargesHT>0).length} mois renseignés${_ss.active?' · <span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:12px;font-weight:700;font-size:10px">🏖️ Saisonnier '+_ss.ouverts+'m ouverts'+((_ss.inter>0)?(' + '+_ss.inter+'m inter'):'')+((_ss.fermes>0)?(' + '+_ss.fermes+'m fermés'):'')+'</span>':''}</span>
     </div>
 
     <!-- COPILOTE IA -->
@@ -1159,7 +1174,7 @@ async function loadData(_tries){
             <div class="kpi-value" style="font-size:18px">${annualTVA>0?fmtE(annualTVA):'—'}</div>
             <div class="kpi-sub"><span class="neutral">Cumul ${year}</span></div>
           </div>
-          ${nbMoisReel>0?`<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:4px">Projection basée sur ${nbMoisReel} mois de données réelles</div>`:''}
+          ${nbMoisReel>0?`<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:4px">Projection basée sur ${nbMoisReel} mois de données réelles${_ss.active?' · activité saisonnière ('+_ss.moisEquivCA.toFixed(1)+' mois éq. CA)':''}</div>`:''}
         </div>
       </div>
       <!-- Fidélisation -->
@@ -1243,6 +1258,7 @@ async function loadData(_tries){
     varCA: varCA, varCharges: varCharges,
     stock: _stockData.loaded ? {valeur:_stockData.value, variation:_stockData.variation, refs:_stockData.refs, alertes:_stockData.alerts, ruptures:_stockData.ruptures, rotation:_stockData.rotation, joursStock:_stockData.joursStock} : null,
     dettesMens: monthsData.reduce(function(s,d){return s+d.creditsPrincipal+d.creditsInteret},0)/Math.max(nbMoisReel,1),
+    saisonnalite: _ss.active ? {ouverts:_ss.ouverts, inter:_ss.inter, fermes:_ss.fermes, moisEquivCA:_ss.moisEquivCA} : null,
   };
   loadCopilote(_copiloteMetrics);
   window._vocalMetrics = _copiloteMetrics;

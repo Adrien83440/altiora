@@ -131,10 +131,11 @@ const auth=getAuth(app);
 const db=initializeFirestore(app,{experimentalAutoDetectLongPolling:true});
 window._auth=auth;window._db=db;window._doc=doc;window._getDoc=getDoc;
 window._collection=collection;window._getDocs=getDocs;window._signOut=signOut;
-onAuthStateChanged(auth,user=>{
+onAuthStateChanged(auth,async user=>{
   if(!user){location.href='index.html';return;}
   window._uid=user.uid;
   window._firebaseReady=true;
+  try{const usnap=await getDoc(doc(db,'users',user.uid));if(usnap.exists()&&usnap.data().saisonnalite&&usnap.data().saisonnalite.active){window._saisonConfig=usnap.data().saisonnalite;}}catch(e){}
   window.initScenarios();
 });
 </script>
@@ -150,6 +151,19 @@ var MONTHS=['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov',
 // ── STATE ──
 var _baseData = []; // 12 months of real data {caHT, charges, fixe, variable, credit, leasing}
 var _chart = null;
+var _saisonConfig = null;
+
+function _saisonMonthStatus(m){
+  var cfg=window._saisonConfig||_saisonConfig;
+  if(!cfg||!cfg.active)return'ouvert';
+  return(cfg.mois||{})[m+1]||'ouvert';
+}
+function _saisonBadge(m){
+  var s=_saisonMonthStatus(m);
+  if(s==='ferme')return' <span style="background:#fef2f2;color:#ef4444;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px">Fermé</span>';
+  if(s==='intersaison')return' <span style="background:#fffbeb;color:#f59e0b;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px">Inter.</span>';
+  return'';
+}
 
 // Default lever values
 var _levers = {
@@ -234,9 +248,15 @@ async function loadBaseData(){
 
 // ── SIMULATION ──
 function simulate(){
+  var cfg=window._saisonConfig;
+  var hasSaison=cfg&&cfg.active;
+  var coeffCA=hasSaison?(parseFloat(cfg.coeffCA)||0.4):1;
   return _baseData.map(function(d){
-    var ca = d.caHT * (1 + (_levers.prixVente + _levers.volume)/100) + _levers.nouveauCA;
-    var fixe = d.fixe * (1 + _levers.chargesFixes/100) + _levers.embauche;
+    var status=_saisonMonthStatus(d.month);
+    var saisonCAMult=!hasSaison?1:(status==='ferme'?0:status==='intersaison'?coeffCA:1);
+    var saisonStaffMult=!hasSaison?1:(status==='ferme'?0:1);
+    var ca = d.caHT * (1 + (_levers.prixVente + _levers.volume)/100) + _levers.nouveauCA * saisonCAMult;
+    var fixe = d.fixe * (1 + _levers.chargesFixes/100) + _levers.embauche * saisonStaffMult;
     var variable = d.variable * (1 + (_levers.chargesVar + _levers.perteFourn)/100);
     var charges = fixe + variable + d.leasing + d.credit + (d.masseSal||0);
     var resultat = ca - charges;
@@ -291,6 +311,7 @@ function renderAll(){
       </div>
 
       <!-- Chart -->
+      ${(window._saisonConfig&&window._saisonConfig.active)?'<div style="padding:10px 16px;background:#fffbeb;border:1px solid #fde68a;border-radius:10px;font-size:11px;color:#92400e;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-size:14px">🏖️</span><b>Saisonnalité active</b> — Les mois fermés n\'ont ni nouveau CA ni nouvelle embauche simulée. L\'intersaison applique les coefficients configurés. <a href="profil.html" style="color:#1a3dce;font-weight:700">Configurer →</a></div>':''}
       <div class="chart-card">
         <div class="chart-title">📈 Projection mensuelle — Situation actuelle vs Scénario simulé</div>
         <div class="chart-sub">Les barres représentent le CA, les lignes le résultat net</div>
@@ -314,7 +335,7 @@ function renderAll(){
             <tbody>
               ${simData.map(function(d){
                 var dca=d.caSim-d.caBase, dr=d.resultatSim-d.resultatBase;
-                return '<tr><td>'+MONTHS[d.month]+'</td><td>'+fmtE(d.caBase)+'</td><td style="font-weight:700">'+fmtE(d.caSim)+'</td><td class="'+(dca>=0?'td-up':'td-down')+'">'+(dca>=0?'+':'')+fmtE(dca)+'</td><td>'+fmtE(d.chargesBase)+'</td><td>'+fmtE(d.chargesSim)+'</td><td class="'+(d.resultatBase>=0?'td-up':'td-down')+'">'+fmtE(d.resultatBase)+'</td><td style="font-weight:700" class="'+(d.resultatSim>=0?'td-up':'td-down')+'">'+fmtE(d.resultatSim)+'</td><td class="'+(dr>=0?'td-up':'td-down')+'" style="font-weight:700">'+(dr>=0?'+':'')+fmtE(dr)+'</td></tr>';
+                return '<tr><td>'+MONTHS[d.month]+_saisonBadge(d.month)+'</td><td>'+fmtE(d.caBase)+'</td><td style="font-weight:700">'+fmtE(d.caSim)+'</td><td class="'+(dca>=0?'td-up':'td-down')+'">'+(dca>=0?'+':'')+fmtE(dca)+'</td><td>'+fmtE(d.chargesBase)+'</td><td>'+fmtE(d.chargesSim)+'</td><td class="'+(d.resultatBase>=0?'td-up':'td-down')+'">'+fmtE(d.resultatBase)+'</td><td style="font-weight:700" class="'+(d.resultatSim>=0?'td-up':'td-down')+'">'+fmtE(d.resultatSim)+'</td><td class="'+(dr>=0?'td-up':'td-down')+'" style="font-weight:700">'+(dr>=0?'+':'')+fmtE(dr)+'</td></tr>';
               }).join('')}
               <tr class="row-total"><td>TOTAL</td><td>${fmtE(t.base.ca)}</td><td>${fmtE(t.sim.ca)}</td><td class="${t.deltaCA>=0?'td-up':'td-down'}">${t.deltaCA>=0?'+':''}${fmtE(t.deltaCA)}</td><td>${fmtE(t.base.charges)}</td><td>${fmtE(t.sim.charges)}</td><td class="${t.base.resultat>=0?'td-up':'td-down'}">${fmtE(t.base.resultat)}</td><td class="${t.sim.resultat>=0?'td-up':'td-down'}">${fmtE(t.sim.resultat)}</td><td class="${t.deltaResultat>=0?'td-up':'td-down'}" style="font-size:14px">${t.deltaResultat>=0?'+':''}${fmtE(t.deltaResultat)}</td></tr>
             </tbody>

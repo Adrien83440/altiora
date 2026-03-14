@@ -619,6 +619,15 @@ html, body { overflow-x: hidden; max-width: 100vw; }
           </div>
 
           <!-- KPI ROW -->
+          <template x-if="_saisonStats()">
+            <div style="margin-bottom:10px;padding:8px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:11px;color:#92400e;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-size:14px">🏖️</span>
+              <span><b>Mode saisonnier actif</b></span>
+              <span>·</span>
+              <span x-text="'CF majorées ×' + _saisonStats().mult.toFixed(2) + ' (12 mois de charges ÷ ' + _saisonStats().moisEquivCA.toFixed(1) + ' mois éq. activité)'"></span>
+              <a href="profil.html" style="color:#1a3dce;font-weight:700;margin-left:auto">⚙️ Configurer</a>
+            </div>
+          </template>
           <div class="kpi-row">
             <div class="kpi-box blue">
               <div class="kpi-label">Prix vente <span style="font-size:9px;background:#e0f2fe;color:#0369a1;padding:1px 5px;border-radius:4px;font-weight:700">HT</span></div>
@@ -1022,13 +1031,15 @@ html, body { overflow-x: hidden; max-width: 100vw; }
   window._auth=auth;window._db=db;window._doc=doc;window._setDoc=setDoc;
   window._getDoc=getDoc;window._collection=collection;window._getDocs=getDocs;
   window._deleteDoc=deleteDoc;window._signOut=signOut;
-  onAuthStateChanged(auth,user=>{
+  onAuthStateChanged(auth,async user=>{
     if(!user){window.location.href='index.html';return;}
     window._uid=user.uid;
     const name=user.displayName||user.email.split('@')[0];
     document.getElementById('uname').textContent=name;
     document.getElementById('av').textContent=name.charAt(0).toUpperCase();
     window._firebaseReady = true;
+    // Charger saisonnalité
+    try{const usnap=await getDoc(doc(db,'users',user.uid));if(usnap.exists()&&usnap.data().saisonnalite&&usnap.data().saisonnalite.active){_saisonConfig=usnap.data().saisonnalite;}}catch(e){}
     window.loadProducts();
   });
 </script>
@@ -1052,6 +1063,24 @@ function _ingrCost(r){
   return qte*pu;
 }
 
+// ═══ SAISONNALITÉ ═══
+var _saisonConfig = null;
+function _saisonCFMultiplier(){
+  if(!_saisonConfig||!_saisonConfig.active) return 1;
+  var ouverts=0,inter=0;
+  for(var i=1;i<=12;i++){var s=(_saisonConfig.mois||{})[i]||'ouvert';if(s==='ouvert')ouverts++;else if(s==='intersaison')inter++;}
+  var cCA=parseFloat(_saisonConfig.coeffCA)||0.4;
+  var moisEquiv=ouverts+(inter*cCA);
+  return moisEquiv>0?12/moisEquiv:1;
+}
+function _saisonStats(){
+  if(!_saisonConfig||!_saisonConfig.active) return null;
+  var o=0,it=0,f=0;
+  for(var i=1;i<=12;i++){var s=(_saisonConfig.mois||{})[i]||'ouvert';if(s==='ouvert')o++;else if(s==='intersaison')it++;else f++;}
+  var cCA=parseFloat(_saisonConfig.coeffCA)||0.4;
+  return{ouverts:o,inter:it,fermes:f,moisEquivCA:o+(it*cCA),mult:(o+(it*cCA))>0?12/(o+(it*cCA)):1};
+}
+
 function _calcMB(p) {
   if(!p) return {cv:0, mb:0, txMB:0};
   var cv = (parseFloat(p.mp)||0) + (parseFloat(p.mo)||0) + (parseFloat(p.emb)||0) + (parseFloat(p.liv)||0);
@@ -1067,8 +1096,9 @@ function _calcCleRep(p) {
   var total = parseFloat(cle.total)||1;
   var ratio = total > 0 ? Math.min(prod/total, 1) : 0;
   var cf = p.cfTotal > 0 ? p.cfTotal : 0;
-  var cfImpute = p.cfTotal > 0 && prod > 0 ? cf * ratio / Math.max(parseFloat(p.qte)||1, 1) : cf;
-  return {ratio:ratio, cfImpute:cfImpute};
+  var mult = _saisonCFMultiplier(); // 12/moisEquivCA pour saisonniers, 1 sinon
+  var cfImpute = p.cfTotal > 0 && prod > 0 ? cf * mult * ratio / Math.max(parseFloat(p.qte)||1, 1) : cf * mult;
+  return {ratio:ratio, cfImpute:cfImpute, saisonMult:mult};
 }
 
 function _calcMN(p) {
@@ -1094,7 +1124,8 @@ function _calcSim(p, sim) {
   var mbSim = pvSim - cvSim;
   var txMBSim = pvSim > 0 ? mbSim/pvSim*100 : 0;
   var rep = _calcCleRep(p);
-  var cfImputeSim = cfSim * rep.ratio / Math.max(volSim, 1);
+  var mult = _saisonCFMultiplier();
+  var cfImputeSim = cfSim * mult * rep.ratio / Math.max(volSim, 1);
   var mnSim = mbSim - cfImputeSim;
   var txMNSim = pvSim > 0 ? mnSim/pvSim*100 : 0;
   return {pvSim:pvSim, cvSim:cvSim, mbSim:mbSim, txMBSim:txMBSim,

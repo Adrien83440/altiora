@@ -174,6 +174,19 @@ main{margin-left:250px;flex:1;display:flex;flex-direction:column}
 
 input[type=file]{display:none}
 
+/* ── SAISONNALITÉ ── */
+.saison-month{display:flex;flex-direction:column;align-items:center;gap:5px;padding:10px 6px;border:2px solid var(--border);border-radius:10px;cursor:pointer;transition:.2s;user-select:none;-webkit-tap-highlight-color:transparent}
+.saison-month:hover{border-color:var(--blue2)}
+.saison-month.ouvert{background:#f0fdf4;border-color:#6ee7b7}
+.saison-month.intersaison{background:#fffbeb;border-color:#fcd34d}
+.saison-month.ferme{background:#fef2f2;border-color:#fca5a5}
+.saison-month .sm-emoji{font-size:18px;line-height:1}
+.saison-month .sm-label{font-size:11px;font-weight:700;color:var(--text)}
+.saison-month .sm-status{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.3px}
+.saison-month.ouvert .sm-status{color:#10b981}
+.saison-month.intersaison .sm-status{color:#f59e0b}
+.saison-month.ferme .sm-status{color:#ef4444}
+
 
 /* ── MOBILE UNIQUEMENT ── */
 
@@ -408,6 +421,11 @@ html, body { overflow-x: hidden; max-width: 100vw; }
   .hero-right { text-align: center !important; }
   .hero-tags { justify-content: center !important; }
   .hero-name { font-size: 17px !important; }
+
+  /* ── SAISONNALITÉ ── */
+  #saison-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 6px !important; }
+  #saison-coeffs > div:last-child { grid-template-columns: 1fr !important; }
+  #saison-summary-content { grid-template-columns: 1fr !important; }
 
   /* ── MODAL → bottom sheet ── */
   .overlay, .modal-overlay { align-items: flex-end !important; padding: 0 !important; }
@@ -683,6 +701,75 @@ html, body { overflow-x: hidden; max-width: 100vw; }
           </div>
           <div id="exercice-preview" style="margin-top:14px;padding:10px 14px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--muted);display:none">
             📆 Votre exercice en cours : <span id="exercice-preview-txt" style="font-weight:700;color:var(--text)"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── SAISONNALITÉ ── -->
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">🏖️ Saisonnalité</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:11px;color:var(--muted)">Activer le mode saisonnier</span>
+            <label class="rh-toggle" style="margin-left:0">
+              <input type="checkbox" id="saison-active" onchange="saisonToggle(this.checked)"/>
+              <span class="rh-slider"></span>
+            </label>
+          </div>
+        </div>
+        <div id="saison-panel" style="display:none">
+          <div style="padding:20px">
+            <p style="font-size:12px;color:var(--muted);margin-bottom:14px">
+              Indiquez l'état de chaque mois pour adapter automatiquement les calculs (projections, marges, répartition des charges fixes) à votre activité réelle.
+            </p>
+
+            <!-- Calendrier 12 mois -->
+            <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:18px" id="saison-grid"></div>
+
+            <div style="display:flex;gap:14px;margin-bottom:18px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)"><span style="width:12px;height:12px;border-radius:4px;background:#10b981;flex-shrink:0"></span> Ouvert (pleine saison)</div>
+              <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)"><span style="width:12px;height:12px;border-radius:4px;background:#f59e0b;flex-shrink:0"></span> Intersaison</div>
+              <div style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)"><span style="width:12px;height:12px;border-radius:4px;background:#ef4444;flex-shrink:0"></span> Fermé</div>
+            </div>
+
+            <!-- Coefficients intersaison -->
+            <div id="saison-coeffs" style="display:none">
+              <div style="font-size:12px;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:6px">
+                🎚️ Coefficients intersaison
+                <span style="font-size:10px;font-weight:400;color:var(--muted)">— Quel % de votre pleine saison représente l'intersaison ?</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                  <label style="font-size:11px;font-weight:600;color:var(--muted);display:flex;justify-content:space-between">
+                    CA intersaison
+                    <span id="saison-ca-val" style="font-weight:800;color:var(--blue)">40%</span>
+                  </label>
+                  <input type="range" id="saison-coeff-ca" min="5" max="95" step="5" value="40"
+                    style="width:100%;accent-color:var(--blue);margin-top:6px"
+                    oninput="saisonUpdateCoeff()"/>
+                  <div style="display:flex;justify-content:space-between;font-size:9px;color:#d1d5db;margin-top:2px"><span>5%</span><span>95%</span></div>
+                  <p style="font-size:10px;color:var(--muted);margin-top:4px">Ex : 40% = votre CA d'intersaison représente 40% de votre CA en pleine saison</p>
+                </div>
+                <div>
+                  <label style="font-size:11px;font-weight:600;color:var(--muted);display:flex;justify-content:space-between">
+                    Charges variables intersaison
+                    <span id="saison-cv-val" style="font-weight:800;color:var(--purple)">50%</span>
+                  </label>
+                  <input type="range" id="saison-coeff-cv" min="5" max="95" step="5" value="50"
+                    style="width:100%;accent-color:var(--purple);margin-top:6px"
+                    oninput="saisonUpdateCoeff()"/>
+                  <div style="display:flex;justify-content:space-between;font-size:9px;color:#d1d5db;margin-top:2px"><span>5%</span><span>95%</span></div>
+                  <p style="font-size:10px;color:var(--muted);margin-top:4px">Ex : 50% = vos achats, sous-traitance d'intersaison représentent 50% de la pleine saison</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Résumé -->
+            <div id="saison-summary" style="margin-top:16px;padding:14px 18px;background:var(--bg);border-radius:10px;border:1px solid var(--border);display:none">
+              <div style="font-size:12px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:6px">📊 Résumé de votre saisonnalité</div>
+              <div id="saison-summary-content" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px"></div>
+              <div id="saison-summary-detail" style="margin-top:10px;font-size:11px;color:var(--muted);line-height:1.6"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -1350,6 +1437,112 @@ function updateHero() {
 }
 
 // ── SAVE / LOAD ──
+// ═══════════════════════════════════════════
+// SAISONNALITÉ
+// ═══════════════════════════════════════════
+var MOIS_FR=['Janv.','Févr.','Mars','Avril','Mai','Juin','Juil.','Août','Sept.','Oct.','Nov.','Déc.'];
+var MOIS_EMOJI=['❄️','❄️','🌸','🌷','☀️','☀️','🔥','🔥','🍂','🍂','🌧️','❄️'];
+var _saisonConfig = {
+  active: false,
+  mois: {1:'ouvert',2:'ouvert',3:'ouvert',4:'ouvert',5:'ouvert',6:'ouvert',7:'ouvert',8:'ouvert',9:'ouvert',10:'ouvert',11:'ouvert',12:'ouvert'},
+  coeffCA: 0.4,
+  coeffChargesVar: 0.5
+};
+
+var SAISON_CYCLE=['ouvert','intersaison','ferme'];
+var SAISON_LABELS={ouvert:'Ouvert',intersaison:'Intersaison',ferme:'Fermé'};
+
+function saisonRenderGrid(){
+  var grid=document.getElementById('saison-grid');
+  if(!grid)return;
+  var html='';
+  for(var i=1;i<=12;i++){
+    var s=_saisonConfig.mois[i]||'ouvert';
+    html+='<div class="saison-month '+s+'" onclick="saisonCycleMonth('+i+')" title="Cliquez pour changer">';
+    html+='<span class="sm-emoji">'+MOIS_EMOJI[i-1]+'</span>';
+    html+='<span class="sm-label">'+MOIS_FR[i-1]+'</span>';
+    html+='<span class="sm-status">'+SAISON_LABELS[s]+'</span>';
+    html+='</div>';
+  }
+  grid.innerHTML=html;
+  saisonUpdateSummary();
+}
+
+function saisonCycleMonth(m){
+  var cur=_saisonConfig.mois[m]||'ouvert';
+  var idx=SAISON_CYCLE.indexOf(cur);
+  _saisonConfig.mois[m]=SAISON_CYCLE[(idx+1)%3];
+  saisonRenderGrid();
+  saisonShowCoeffs();
+  scheduleAutosave();
+}
+
+function saisonToggle(on){
+  _saisonConfig.active=on;
+  var panel=document.getElementById('saison-panel');
+  if(panel)panel.style.display=on?'block':'none';
+  if(on)saisonRenderGrid();
+  saisonShowCoeffs();
+  saisonUpdateSummary();
+  scheduleAutosave();
+}
+
+function saisonShowCoeffs(){
+  var hasInter=Object.values(_saisonConfig.mois).some(function(s){return s==='intersaison';});
+  var el=document.getElementById('saison-coeffs');
+  if(el)el.style.display=hasInter?'block':'none';
+}
+
+function saisonUpdateCoeff(){
+  var ca=document.getElementById('saison-coeff-ca');
+  var cv=document.getElementById('saison-coeff-cv');
+  if(ca){_saisonConfig.coeffCA=parseInt(ca.value)/100;document.getElementById('saison-ca-val').textContent=ca.value+'%';}
+  if(cv){_saisonConfig.coeffChargesVar=parseInt(cv.value)/100;document.getElementById('saison-cv-val').textContent=cv.value+'%';}
+  saisonUpdateSummary();
+  scheduleAutosave();
+}
+
+function saisonGetStats(cfg){
+  if(!cfg||!cfg.active)return{active:false,ouverts:12,inter:0,fermes:0,moisEquivCA:12,moisEquivCV:12,moisCF:12};
+  var ouverts=0,inter=0,fermes=0;
+  for(var i=1;i<=12;i++){
+    var s=cfg.mois[i]||'ouvert';
+    if(s==='ouvert')ouverts++;else if(s==='intersaison')inter++;else fermes++;
+  }
+  var cCA=parseFloat(cfg.coeffCA)||0.4;
+  var cCV=parseFloat(cfg.coeffChargesVar)||0.5;
+  return{
+    active:true,ouverts:ouverts,inter:inter,fermes:fermes,
+    coeffCA:cCA,coeffCV:cCV,
+    moisEquivCA:ouverts+(inter*cCA),
+    moisEquivCV:ouverts+(inter*cCV),
+    moisCF:12 // CF payées 12 mois
+  };
+}
+
+function saisonUpdateSummary(){
+  var wrap=document.getElementById('saison-summary');
+  var content=document.getElementById('saison-summary-content');
+  var detail=document.getElementById('saison-summary-detail');
+  if(!wrap||!content)return;
+  if(!_saisonConfig.active){wrap.style.display='none';return;}
+  var st=saisonGetStats(_saisonConfig);
+  wrap.style.display='block';
+  content.innerHTML=
+    '<div style="text-align:center;padding:10px;background:#f0fdf4;border-radius:8px;border:1px solid #bbf7d0"><div style="font-size:18px;font-weight:800;color:#10b981">'+st.ouverts+'</div><div style="font-size:10px;font-weight:600;color:var(--muted)">mois ouverts</div></div>'+
+    '<div style="text-align:center;padding:10px;background:#fffbeb;border-radius:8px;border:1px solid #fde68a"><div style="font-size:18px;font-weight:800;color:#f59e0b">'+st.inter+'</div><div style="font-size:10px;font-weight:600;color:var(--muted)">mois intersaison</div></div>'+
+    '<div style="text-align:center;padding:10px;background:#fef2f2;border-radius:8px;border:1px solid #fecaca"><div style="font-size:18px;font-weight:800;color:#ef4444">'+st.fermes+'</div><div style="font-size:10px;font-weight:600;color:var(--muted)">mois fermés</div></div>';
+  detail.innerHTML=
+    '📈 <b>Mois équivalents CA :</b> '+st.moisEquivCA.toFixed(1)+' mois (= '+st.ouverts+' ouverts'+(st.inter>0?' + '+st.inter+' × '+Math.round(st.coeffCA*100)+'%':'')+')<br>'+
+    '📦 <b>Mois équivalents charges var. :</b> '+st.moisEquivCV.toFixed(1)+' mois<br>'+
+    '🏗️ <b>Charges fixes :</b> payées 12 mois (y compris mois fermés)<br>'+
+    (st.fermes>0?'⚠️ <b>Matelas trésorerie :</b> prévoir au moins <b>'+st.fermes+' mois</b> de charges fixes pour couvrir la fermeture':'');
+}
+
+window.saisonToggle=saisonToggle;
+window.saisonCycleMonth=saisonCycleMonth;
+window.saisonUpdateCoeff=saisonUpdateCoeff;
+
 function saveProfile() {
   const fields = ['nom','commercial','secteur','forme','siret','tva','desc','adresse','cp','ville','tel','email','web','banque','titulaire','iban','bic'];
   const data = {};
@@ -1362,7 +1555,7 @@ function saveProfile() {
     // Préférences de gestion → users/{uid} (partagées avec dashboard/suivi-ca/cashflow)
     const fiscalStart = parseInt(document.getElementById('p-fiscalStart')?.value || '0');
     const viewMode = _profMode || 'civil';
-    window._setDoc(window._doc(window._db,'users',window._uid), {fiscalStart, viewMode}, {merge:true}).catch(() => {});
+    window._setDoc(window._doc(window._db,'users',window._uid), {fiscalStart, viewMode, saisonnalite: _saisonConfig}, {merge:true}).catch(() => {});
   }
 }
 
@@ -1603,6 +1796,23 @@ async function tryFirebase() {
         setProfMode(ud.viewMode);
       } else {
         setProfMode('civil');
+      }
+      // Saisonnalité
+      if (ud.saisonnalite) {
+        _saisonConfig = Object.assign({active:false,mois:{},coeffCA:0.4,coeffChargesVar:0.5}, ud.saisonnalite);
+        var toggle = document.getElementById('saison-active');
+        if (toggle) toggle.checked = !!_saisonConfig.active;
+        if (_saisonConfig.active) {
+          var panel = document.getElementById('saison-panel');
+          if (panel) panel.style.display = 'block';
+          saisonRenderGrid();
+          saisonShowCoeffs();
+          var caSlider = document.getElementById('saison-coeff-ca');
+          var cvSlider = document.getElementById('saison-coeff-cv');
+          if (caSlider) { caSlider.value = Math.round((_saisonConfig.coeffCA||0.4)*100); document.getElementById('saison-ca-val').textContent = caSlider.value+'%'; }
+          if (cvSlider) { cvSlider.value = Math.round((_saisonConfig.coeffChargesVar||0.5)*100); document.getElementById('saison-cv-val').textContent = cvSlider.value+'%'; }
+          saisonUpdateSummary();
+        }
       }
     } else {
       setProfMode('civil');
