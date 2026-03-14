@@ -262,13 +262,19 @@ Retards/absences ? → Dashboard Pointages > Alertes (semaine) ou Dashboard RH >
 Échange de shifts ? → Espace salarié > Planning > Échange de shifts. Validation dans Dashboard RH > Congés à valider.
 Envoyer lien par SMS ? → Fiche employé > Infos > 📱 Envoyer par SMS (1 crédit SMS).
 
+═══ SUPPORT ═══
+Email support : support@alteore.com
+Centre d'aide : aide.html (accessible via le menu → Centre d'aide)
+Le chatbot peut ouvrir un ticket directement : quand l'utilisateur tape "problème", "ticket", "bug", un formulaire apparaît dans le chat.
+Ne JAMAIS mentionner d'URL comme "alteore.com/support" → cette page n'existe pas.
+
 ═══ RÈGLES ═══
 1. Toujours répondre en français, de façon concise (2-4 paragraphes max)
 2. Exemples chiffrés concrets pour les concepts financiers
 3. Guider vers la bonne page quand pertinent
-4. Si problème technique → proposer d'ouvrir un ticket
-5. Si tu ne sais pas → le dire, proposer le support
-6. Ne JAMAIS inventer de fonctionnalités inexistantes
+4. Si problème technique → proposer de taper "ouvrir un ticket" directement dans ce chat, ou d'écrire à support@alteore.com
+5. Si tu ne sais pas → le dire, proposer de taper "ouvrir un ticket" ou de contacter support@alteore.com
+6. Ne JAMAIS inventer de fonctionnalités, de pages ou d'URL qui n'existent pas
 7. Émojis avec parcimonie (1-2 max par message)
 8. Pas de conseils fiscaux/comptables précis → recommander un expert-comptable
 9. Si module nécessite un plan supérieur → l'indiquer, expliquer comment upgrader`;
@@ -365,12 +371,13 @@ async function submitTicket(){
     await fetch('/api/send-ticket',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
       ticketId:ticketId,nom:nom,prenom:prenom,telephone:'',email:userEmail||'chatbot@alteore.com',
       sujet:'[Chatbot] '+({bug:'Bug technique',question:'Question',suggestion:'Suggestion',billing:'Facturation',other:'Autre'}[tp]||tp),
-      description:ds,page:location.pathname,uid:window._uid||''
+      description:ds,page:location.pathname,uid:window._uid||'',
+      plan:window._userPlan||'unknown'
     })});
   }catch(e){console.warn('Email ticket:',e);}
 
   var f=document.getElementById('cb-tkf');if(f)f.remove();
-  botMsg('✅ **Ticket #'+ticketId+' envoyé !** Vous recevrez une réponse à '+(userEmail||'votre adresse')+'.\n\nAutre chose ?');
+  botMsg('✅ **Ticket #'+ticketId+' envoyé !** Vous recevrez une confirmation par email à '+(userEmail||'votre adresse')+'.\n\nNotre équipe vous répondra rapidement. Vous pouvez aussi nous écrire à **support@alteore.com**.\n\nAutre chose ?');
 }
 
 async function callAPI(userMessage){
