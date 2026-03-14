@@ -60,90 +60,97 @@ module.exports = async (req, res) => {
     return res.status(405).json({ error: 'Méthode non autorisée' });
   }
 
-  // ── 1. Authentification Firebase ──
-  const db = getDb(); // Initialise Firebase Admin AVANT de vérifier le token
-  const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Non authentifié. Connectez-vous d\'abord.' });
-  }
-
-  const idToken = authHeader.split('Bearer ')[1];
-  let uid;
   try {
-    const decoded = await getAuth().verifyIdToken(idToken);
-    uid = decoded.uid;
-  } catch (e) {
-    return res.status(401).json({ error: 'Token invalide ou expiré.' });
-  }
-
-  // ── 2. Valider le code promo ──
-  const { promoCode } = req.body || {};
-  if (!promoCode || typeof promoCode !== 'string') {
-    return res.status(400).json({ error: 'Code promo manquant.' });
-  }
-
-  const code = promoCode.trim().toUpperCase();
-  const promoDef = PROMO_CODES[code];
-  if (!promoDef || !promoDef.active) {
-    return res.status(400).json({ error: 'Code promo invalide ou expiré.' });
-  }
-
-  // ── 3. Vérifier l'utilisateur ──
-  const userRef = db.collection('users').doc(uid);
-  const userSnap = await userRef.get();
-
-  if (!userSnap.exists) {
-    return res.status(404).json({ error: 'Compte utilisateur introuvable.' });
-  }
-
-  const userData = userSnap.data();
-
-  // Vérifier qu'il n'a pas déjà un abonnement Stripe actif
-  if (userData.stripeSubscriptionId && ['active', 'trialing'].includes(userData.subscriptionStatus)) {
-    return res.status(400).json({ error: 'Vous avez déjà un abonnement actif. Le code promo n\'est pas nécessaire.' });
-  }
-
-  // Vérifier qu'il n'a pas déjà utilisé ce code
-  if (userData.promoCode === code && userData.promoEnd) {
-    return res.status(400).json({ error: 'Vous avez déjà utilisé ce code promo.' });
-  }
-
-  // Vérifier qu'il n'a pas déjà une promo active (autre code)
-  if (userData.promoEnd) {
-    const promoEnd = new Date(userData.promoEnd);
-    if (!isNaN(promoEnd.getTime()) && promoEnd > new Date()) {
-      return res.status(400).json({ error: 'Vous bénéficiez déjà d\'une offre en cours.' });
+    // ── 1. Authentification Firebase ──
+    const db = getDb(); // Initialise Firebase Admin AVANT de vérifier le token
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Non authentifié. Connectez-vous d\'abord.' });
     }
+
+    const idToken = authHeader.split('Bearer ')[1];
+    let uid;
+    try {
+      const decoded = await getAuth().verifyIdToken(idToken);
+      uid = decoded.uid;
+    } catch (e) {
+      console.error('[activate-promo] ❌ Token verification failed:', e.message);
+      return res.status(401).json({ error: 'Token invalide ou expiré.' });
+    }
+
+    // ── 2. Valider le code promo ──
+    const { promoCode } = req.body || {};
+    if (!promoCode || typeof promoCode !== 'string') {
+      return res.status(400).json({ error: 'Code promo manquant.' });
+    }
+
+    const code = promoCode.trim().toUpperCase();
+    const promoDef = PROMO_CODES[code];
+    if (!promoDef || !promoDef.active) {
+      return res.status(400).json({ error: 'Code promo invalide ou expiré.' });
+    }
+
+    // ── 3. Vérifier l'utilisateur ──
+    const userRef = db.collection('users').doc(uid);
+    const userSnap = await userRef.get();
+
+    if (!userSnap.exists) {
+      return res.status(404).json({ error: 'Compte utilisateur introuvable.' });
+    }
+
+    const userData = userSnap.data();
+
+    // Vérifier qu'il n'a pas déjà un abonnement Stripe actif
+    if (userData.stripeSubscriptionId && ['active', 'trialing'].includes(userData.subscriptionStatus)) {
+      return res.status(400).json({ error: 'Vous avez déjà un abonnement actif. Le code promo n\'est pas nécessaire.' });
+    }
+
+    // Vérifier qu'il n'a pas déjà utilisé ce code
+    if (userData.promoCode === code && userData.promoEnd) {
+      return res.status(400).json({ error: 'Vous avez déjà utilisé ce code promo.' });
+    }
+
+    // Vérifier qu'il n'a pas déjà une promo active (autre code)
+    if (userData.promoEnd) {
+      const promoEnd = new Date(userData.promoEnd);
+      if (!isNaN(promoEnd.getTime()) && promoEnd > new Date()) {
+        return res.status(400).json({ error: 'Vous bénéficiez déjà d\'une offre en cours.' });
+      }
+    }
+
+    // ── 4. Activer la promo ──
+    const now = new Date();
+    const end = new Date(now);
+    end.setDate(end.getDate() + promoDef.durationDays);
+
+    const updateData = {
+      plan: promoDef.plan,
+      promoCode: code,
+      promoLabel: promoDef.label,
+      promoActivatedAt: now.toISOString(),
+      promoEnd: end.toISOString(),
+    };
+
+    // Si l'utilisateur était en trial, on conserve l'info
+    if (userData.plan === 'trial' && userData.trialEnd) {
+      updateData.previousPlan = 'trial';
+      updateData.previousTrialEnd = userData.trialEnd;
+    }
+
+    await userRef.update(updateData);
+
+    console.log(`[activate-promo] ✅ ${uid} → ${promoDef.plan} via code ${code} (expire ${end.toISOString()})`);
+
+    return res.status(200).json({
+      ok: true,
+      plan: promoDef.plan,
+      promoEnd: end.toISOString(),
+      label: promoDef.label,
+      durationDays: promoDef.durationDays,
+    });
+
+  } catch (e) {
+    console.error('[activate-promo] ❌ Erreur serveur:', e);
+    return res.status(500).json({ error: 'Erreur serveur : ' + e.message });
   }
-
-  // ── 4. Activer la promo ──
-  const now = new Date();
-  const end = new Date(now);
-  end.setDate(end.getDate() + promoDef.durationDays);
-
-  const updateData = {
-    plan: promoDef.plan,
-    promoCode: code,
-    promoLabel: promoDef.label,
-    promoActivatedAt: now.toISOString(),
-    promoEnd: end.toISOString(),
-  };
-
-  // Si l'utilisateur était en trial, on conserve l'info
-  if (userData.plan === 'trial' && userData.trialEnd) {
-    updateData.previousPlan = 'trial';
-    updateData.previousTrialEnd = userData.trialEnd;
-  }
-
-  await userRef.update(updateData);
-
-  console.log(`[activate-promo] ✅ ${uid} → ${promoDef.plan} via code ${code} (expire ${end.toISOString()})`);
-
-  return res.status(200).json({
-    ok: true,
-    plan: promoDef.plan,
-    promoEnd: end.toISOString(),
-    label: promoDef.label,
-    durationDays: promoDef.durationDays,
-  });
 };
