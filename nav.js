@@ -6,7 +6,8 @@
   // ════════════════════════════════════════════════
   const PLAN_NAMES = {
     free: 'Plan Gratuit', trial: 'Essai gratuit', trial_expired: 'Essai expiré', deleted: 'Compte supprimé', pro: 'Alteore Pro',
-    max: 'Alteore Max', master: 'Alteore Master', past_due: 'Paiement en attente', dev: 'Dev / Admin'
+    max: 'Alteore Max', master: 'Alteore Master', past_due: 'Paiement en attente', dev: 'Dev / Admin',
+    promo_expired: 'Offre expirée'
   };
   const CAN_FIDELISATION = ['trial', 'max', 'master', 'dev'];
   const CAN_IMPORT       = ['trial', 'pro', 'max', 'master', 'dev'];
@@ -469,7 +470,8 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
       scenarios:    { icon: '🎯', title: 'Scénarios & IA avancée — Plan Max requis', desc: 'Les scénarios \"Et si...\", l\'assistant vocal IA et l\'analyse IA du stock sont disponibles dès le plan <strong>Max (99€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
       core:         { icon: '📊', title: 'Fonctionnalité Premium',                 desc: 'Cette fonctionnalité est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Voir les plans' },
       trial_expired:{ icon: '⏰', title: 'Votre essai gratuit a expiré',           desc: 'Votre période d\'essai de 15 jours est terminée.<br><br>Souscrivez à un abonnement pour <strong>continuer à utiliser Alteore</strong> et conserver toutes vos données.<br><br>⚠️ <strong>Sans abonnement, vos données seront définitivement supprimées 15 jours après l\'expiration.</strong>', cta: '⭐ Choisir mon plan →' },
-      deleted:      { icon: '🗑', title: 'Vos données ont été supprimées',          desc: 'Votre essai a expiré il y a plus de 15 jours. <strong>Toutes vos données ont été définitivement supprimées</strong> conformément à nos conditions.<br><br>Pour utiliser Alteore, vous pouvez créer un nouveau compte et souscrire à un abonnement.', cta: 'Créer un nouveau compte →' }
+      deleted:      { icon: '🗑', title: 'Vos données ont été supprimées',          desc: 'Votre essai a expiré il y a plus de 15 jours. <strong>Toutes vos données ont été définitivement supprimées</strong> conformément à nos conditions.<br><br>Pour utiliser Alteore, vous pouvez créer un nouveau compte et souscrire à un abonnement.', cta: 'Créer un nouveau compte →' },
+      promo_expired:{ icon: '🎁', title: 'Votre offre découverte a expiré',        desc: 'Votre offre gratuite de 2 mois est terminée.<br><br><strong>Bonne nouvelle : toutes vos données sont intactes !</strong> Choisissez un plan pour reprendre là où vous en étiez.<br><br>Vous ne perdrez rien.', cta: '⭐ Choisir mon plan →' }
     };
     const cfg = configs[upgrade] || configs.core;
     document.getElementById('nav-modal-icon').textContent  = cfg.icon;
@@ -477,7 +479,7 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     document.getElementById('nav-modal-desc').innerHTML    = cfg.desc;
     document.getElementById('nav-modal-cta').textContent   = cfg.cta;
     document.getElementById('nav-modal-cta').onclick = function () {
-      if (upgrade === 'trial_expired') location.href = 'pricing.html';
+      if (upgrade === 'trial_expired' || upgrade === 'promo_expired') location.href = 'pricing.html';
       else if (upgrade === 'deleted') location.href = 'index.html';
       else location.href = 'profil.html?tab=abonnement&upgrade=' + upgrade;
     };
@@ -534,10 +536,10 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
 
   function checkPageAccess(plan) {
     // ── Plan free / past_due / trial_expired → redirection (pas de plan gratuit) ──
-    const BLOCKED_PLANS = ['free', 'past_due', 'trial_expired', 'deleted'];
+    const BLOCKED_PLANS = ['free', 'past_due', 'trial_expired', 'deleted', 'promo_expired'];
     const ALLOWED_PAGES_FREE = ['profil.html', 'aide.html', 'tutoriels.html'];
     if (BLOCKED_PLANS.includes(plan) && !ALLOWED_PAGES_FREE.includes(PAGE)) {
-      var upgradeType = (plan === 'trial_expired' || plan === 'deleted') ? plan : 'core';
+      var upgradeType = (plan === 'trial_expired' || plan === 'deleted') ? plan : (plan === 'promo_expired' ? 'promo_expired' : 'core');
       location.href = 'profil.html?tab=abonnement&upgrade=' + upgradeType;
       return false;
     }
@@ -599,6 +601,26 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
           }
         }
       }
+
+      // ── Vérifier expiration de la promo ──
+      if (plan === 'master' && snap.exists()) {
+        var dp = snap.data();
+        var promoEnd = dp.promoEnd;
+        var hasStripePlan = dp.stripeSubscriptionId && ['active', 'trialing'].includes(dp.subscriptionStatus);
+        if (promoEnd && !hasStripePlan) {
+          var promoEndDate = new Date(promoEnd);
+          if (!isNaN(promoEndDate.getTime())) {
+            if (promoEndDate < new Date()) {
+              plan = 'promo_expired';
+            } else {
+              // Promo active → injecter un bandeau avec les jours restants
+              var now = new Date(); now.setHours(12,0,0,0); promoEndDate.setHours(12,0,0,0);
+              var promoDaysLeft = Math.max(0, Math.round((promoEndDate - now) / (1000*60*60*24)));
+              injectPromoBanner(promoDaysLeft);
+            }
+          }
+        }
+      }
       const user = window._auth && window._auth.currentUser;
       if (user) {
         const n  = user.displayName || user.email?.split('@')[0] || '';
@@ -629,8 +651,32 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
       if (abonPanel) abonPanel.classList.add('on');
       // ── Afficher la modale trial expiré / deleted automatiquement ──
       var upgrade = params.get('upgrade');
-      if (upgrade === 'trial_expired' || upgrade === 'deleted') showUpgradeModal(upgrade);
+      if (upgrade === 'trial_expired' || upgrade === 'deleted' || upgrade === 'promo_expired') showUpgradeModal(upgrade);
     }, 400);
+  }
+
+  // ════════════════════════════════════════════════
+  // BANDEAU PROMO (jours restants)
+  // ════════════════════════════════════════════════
+  function injectPromoBanner(daysLeft) {
+    if (document.getElementById('promo-banner')) return;
+    var color = daysLeft <= 3 ? '#ef4444' : daysLeft <= 7 ? '#f59e0b' : '#10b981';
+    var bg    = daysLeft <= 3 ? '#fef2f2' : daysLeft <= 7 ? '#fffbeb' : '#f0fdf4';
+    var border= daysLeft <= 3 ? '#fecaca' : daysLeft <= 7 ? '#fde68a' : '#bbf7d0';
+    var text  = daysLeft <= 1
+      ? '🎁 Votre offre gratuite expire <strong>demain</strong> !'
+      : '🎁 Offre découverte — <strong>' + daysLeft + ' jour' + (daysLeft > 1 ? 's' : '') + '</strong> restant' + (daysLeft > 1 ? 's' : '');
+    var banner = document.createElement('div');
+    banner.id = 'promo-banner';
+    banner.style.cssText = 'background:' + bg + ';border-bottom:2px solid ' + border + ';padding:10px 20px;display:flex;align-items:center;justify-content:center;gap:12px;font-size:13px;color:' + color + ';font-weight:600;z-index:49;position:sticky;top:0;flex-wrap:wrap';
+    banner.innerHTML = '<span>' + text + '</span><a href="pricing.html" style="padding:5px 14px;background:linear-gradient(135deg,#1a3dce,#4f7ef8);color:white;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none;white-space:nowrap">Choisir mon plan →</a>';
+    var topbar = document.querySelector('.topbar');
+    if (topbar && topbar.parentNode) {
+      topbar.parentNode.insertBefore(banner, topbar);
+    } else {
+      var main = document.querySelector('.main, main');
+      if (main) main.insertBefore(banner, main.firstChild);
+    }
   }
 
   // ════════════════════════════════════════════════

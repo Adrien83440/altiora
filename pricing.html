@@ -197,6 +197,26 @@ input:checked + .toggle-slider:before{transform:translateX(24px)}
   🔒 Paiement sécurisé par Stripe · Annulation à tout moment · <a href="cgv.html">Conditions générales</a>
 </div>
 
+<!-- ═══ SECTION CODE PROMO ═══ -->
+<div style="max-width:520px;margin:20px auto 40px;padding:0 20px">
+  <div style="background:#fff;border:2px solid #e2e8f0;border-radius:16px;padding:28px 24px;text-align:center">
+    <div style="font-size:28px;margin-bottom:8px">🎁</div>
+    <div style="font-size:17px;font-weight:800;color:#0f1f5c;margin-bottom:6px">Vous avez un code promo ?</div>
+    <p style="font-size:13px;color:#64748b;margin-bottom:20px;line-height:1.5">Si vous avez reçu un code promotionnel, entrez-le ci-dessous pour activer votre offre.</p>
+    <div style="display:flex;gap:10px;max-width:380px;margin:0 auto">
+      <input type="text" id="promoCodeInput" placeholder="Ex: OFFRE2MOIS" maxlength="20"
+        style="flex:1;padding:12px 16px;border:2px solid #e2e8f0;border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:1px;outline:none;text-align:center;color:#0f1f5c"
+        oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')"
+        onfocus="this.style.borderColor='#1a3dce'" onblur="this.style.borderColor='#e2e8f0'"/>
+      <button id="promoActivateBtn" onclick="activatePromoCode()"
+        style="padding:12px 24px;background:linear-gradient(135deg,#10b981,#059669);color:white;border:none;border-radius:10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;transition:.2s">
+        Activer →
+      </button>
+    </div>
+    <div id="promoStatus" style="font-size:13px;margin-top:12px;min-height:20px;line-height:1.5"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -326,6 +346,71 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ── Code promo ──
+async function activatePromoCode() {
+  const input = document.getElementById('promoCodeInput');
+  const statusEl = document.getElementById('promoStatus');
+  const btn = document.getElementById('promoActivateBtn');
+  const code = input.value.trim().toUpperCase();
+
+  if (!code || code.length < 3) {
+    statusEl.innerHTML = '⚠️ Saisissez un code promo valide';
+    statusEl.style.color = '#f59e0b';
+    return;
+  }
+
+  // Vérifier que l'utilisateur est connecté
+  let idToken = null;
+  try {
+    const { getAuth } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+    const user = getAuth().currentUser;
+    if (user) {
+      idToken = await user.getIdToken();
+    }
+  } catch(e) {}
+
+  if (!idToken) {
+    statusEl.innerHTML = '⚠️ Vous devez d\'abord <a href="index.html" style="color:#1a3dce;font-weight:700">créer un compte</a> ou vous connecter.';
+    statusEl.style.color = '#f59e0b';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  statusEl.textContent = '';
+
+  try {
+    const res = await fetch('/api/activate-promo', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + idToken,
+      },
+      body: JSON.stringify({ promoCode: code })
+    });
+    const data = await res.json();
+
+    if (res.ok && data.ok) {
+      input.style.borderColor = '#10b981';
+      statusEl.innerHTML = '✅ <strong>Offre activée !</strong> Vous avez accès au plan <strong>' + data.plan.charAt(0).toUpperCase() + data.plan.slice(1) + '</strong> pendant ' + data.durationDays + ' jours. Redirection...';
+      statusEl.style.color = '#10b981';
+      // Redirection vers le dashboard après 2s
+      setTimeout(function() { window.location.href = 'dashboard.html'; }, 2000);
+    } else {
+      input.style.borderColor = '#ef4444';
+      statusEl.textContent = '❌ ' + (data.error || 'Code invalide');
+      statusEl.style.color = '#ef4444';
+      btn.disabled = false;
+      btn.textContent = 'Activer →';
+    }
+  } catch(e) {
+    statusEl.textContent = '❌ Erreur de connexion. Réessayez.';
+    statusEl.style.color = '#ef4444';
+    btn.disabled = false;
+    btn.textContent = 'Activer →';
+  }
 }
 </script>
 
