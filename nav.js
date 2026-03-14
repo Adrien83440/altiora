@@ -588,6 +588,12 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
       const snap = await window._getDoc(window._doc(window._db, 'users', window._uid));
       let plan = snap.exists() ? (snap.data().plan || 'free') : 'free';
 
+      // ── Redirection onboarding si pas complété ──
+      if (snap.exists() && snap.data().isOnboarded === false && PAGE !== 'profil.html' && PAGE !== 'aide.html' && PAGE !== 'tutoriels.html') {
+        window.location.href = 'bienvenue.html';
+        return;
+      }
+
       // ── Vérifier expiration du trial (15 jours) ──
       if (plan === 'trial' && snap.exists()) {
         var d = snap.data();

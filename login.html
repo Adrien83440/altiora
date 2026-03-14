@@ -477,7 +477,10 @@
   window._doc             = doc;
   window._serverTimestamp = serverTimestamp;
 
-  onAuthStateChanged(auth, user => user ? showDashboard(user) : showAuth());
+  onAuthStateChanged(auth, user => {
+    if (window._registering) return; // Inscription en cours → bienvenue.html gère
+    user ? showDashboard(user) : showAuth();
+  });
 </script>
 
 <script>
@@ -550,6 +553,7 @@
     const email    = document.getElementById('registerEmail').value.trim();
     const password = document.getElementById('registerPassword').value;
     try {
+      window._registering = true;
       const cred = await window._createUser(window._auth, email, password);
       await window._updateProfile(cred.user, { displayName: name });
       await window._setDoc(window._doc(window._db, 'users', cred.user.uid), {
@@ -557,9 +561,13 @@
         email,
         createdAt: window._serverTimestamp(),
         plan: 'trial',
-        trialEnd: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString()
+        trialEnd: new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString(),
+        isOnboarded: false
       });
+      // Redirection vers la page d'accueil
+      window.location.href = 'bienvenue.html';
     } catch (err) {
+      window._registering = false;
       showAlert('registerAlert', firebaseError(err.code));
       setLoading('registerBtn', false, 'Créer mon compte gratuitement →');
     }
