@@ -37,11 +37,15 @@ try { (function () {
       { target:'.topbar-right .btn-primary',      title:'Commencez ici !',          text:'Cliquez ce bouton pour saisir vos premières données dans le pilotage.', pos:'bottom' },
     ]},
 
-    'pilotage.html':      { id:'tour_pilotage',     delay:4000, title:'🧭 Pilotage financier', steps:[
-      { target:'#kpi-summary',   title:'Résumé mensuel',           text:'Vos 5 KPIs : CA, charges, résultat, TVA collectée et TVA due. Mis à jour en temps réel.', pos:'bottom' },
-      { target:'#ca-tbody',      title:'CA journalier',            text:'Entrez votre CA jour par jour, réparti par taux de TVA. Toggle HT/TTC en haut.', pos:'bottom' },
-      { target:'#cf-tbody',      title:'Charges fixes',            text:'Loyer, assurances, salaires… Cliquez "+ Ligne" pour ajouter.', pos:'top' },
-      { target:'#cv-tbody',      title:'Charges variables',        text:'Achats, matières premières. Le résultat se recalcule automatiquement.', pos:'top' },
+    'pilotage.html':      { id:'tour_pilotage',     delay:4500, title:'🧭 Pilotage financier', steps:[
+      { target:'#kpi-summary',   title:'Vos 5 indicateurs clés',   text:'CA, charges, résultat, TVA collectée et TVA due. Ces 5 chiffres se mettent à jour en temps réel à chaque saisie. C\'est la synthèse de votre mois.', pos:'bottom' },
+      { target:'#htTtcToggle',   title:'Mode HT ou TTC',           text:'Basculez entre Hors Taxes et Toutes Taxes Comprises selon votre habitude. Toute la page s\'adapte. La plupart des commerçants saisissent en TTC.', pos:'bottom' },
+      { target:'#s-ca',          title:'Chiffre d\'affaires',       text:'Votre CA du mois se calcule automatiquement depuis vos saisies journalières dans le tableau ci-dessous. Il inclut le CA journalier et les factures pro.', pos:'bottom' },
+      { target:'#ca-tbody tr:first-child,#tot-caHT', title:'Saisie jour par jour', text:'Chaque ligne correspond à un jour du mois. Saisissez votre CA par taux de TVA (5.5%, 10%, 20%). Les totaux se calculent automatiquement. Utilisez Tab pour aller vite.', pos:'bottom' },
+      { target:'#s-ch',          title:'Vos charges',               text:'Le total de toutes vos dépenses : fixes (loyer, assurance…) + variables (achats, matières…) + crédits et leasing. Descendez pour les saisir.', pos:'bottom' },
+      { target:'#tot-fixHT,#cf-tbody tr:first-child', title:'Charges fixes', text:'Loyer, assurances, salaires, abonnements… Les charges récurrentes chaque mois. Cliquez "+ Ligne" pour en ajouter. Elles se pré-remplissent le mois suivant.', pos:'top' },
+      { target:'#tot-varHT,#cv-tbody tr:first-child', title:'Charges variables', text:'Achats de matières premières, frais ponctuels, sous-traitance… Tout ce qui varie. Ajoutez-les au fil de l\'eau.', pos:'top' },
+      { target:'#s-res',         title:'Votre résultat',            text:'CA moins charges = résultat. Vert = bénéficiaire. Rouge = les charges dépassent les recettes. C\'est LE chiffre à surveiller chaque mois.', pos:'bottom' },
     ]},
 
     'suivi-ca.html':      { id:'tour_suivi',        delay:5500, title:'📈 Suivi CA & Résultats', steps:[
