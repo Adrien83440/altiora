@@ -545,6 +545,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
         const d = snap.data();
         if(d.viewMode) _viewMode = d.viewMode;
         if(d.fiscalStart !== undefined) _fiscalStart = parseInt(d.fiscalStart);
+        if(d.saisonnalite && d.saisonnalite.active) window._saisonConfig = d.saisonnalite;
       }
     } catch(e) {}
     window._firebaseReady = true;
@@ -560,6 +561,15 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 const MONTHS_SHORT=['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
 let _charts=[];
+
+function _saisonBadge(monthIdx){
+  var cfg=window._saisonConfig;
+  if(!cfg||!cfg.active)return'';
+  var s=(cfg.mois||{})[monthIdx+1]||'ouvert';
+  if(s==='ferme')return' <span style="background:#fef2f2;color:#ef4444;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;vertical-align:middle">Fermé</span>';
+  if(s==='intersaison')return' <span style="background:#fffbeb;color:#f59e0b;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;vertical-align:middle">Inter.</span>';
+  return'';
+}
 
 function toggleMenu(id,el){document.getElementById(id).classList.toggle('open');el.classList.toggle('open');}
 async function handleLogout(){await window._signOut(window._auth);window.location.href='index.html';}
@@ -596,7 +606,7 @@ async function loadYear(_tries){
     }catch(e){months.push(null);}
   }
   // Labels des mois pour affichage
-  const monthLabels = fiscalMonths2.map(function(ym){return MONTHS[ym.month] + (_viewMode==='exercice' && ym.year!==year ? ' '+ym.year:'');});
+  const monthLabels = fiscalMonths2.map(function(ym){return MONTHS[ym.month] + (_viewMode==='exercice' && ym.year!==year ? ' '+ym.year:'') + _saisonBadge(ym.month);});
   const monthLabelsShort = fiscalMonths2.map(function(ym){return MONTHS_SHORT[ym.month];});
 
   // Clé du mois courant pour distinguer passé/futur
@@ -1260,7 +1270,7 @@ async function fetchCompMonthData(key) {
     var computed = getMonthDataComputed(raw);
     var parts = key.split('-');
     var y = parseInt(parts[0]), m = parseInt(parts[1])-1;
-    var label = MONTHS[m] + ' ' + y;
+    var label = MONTHS[m] + ' ' + y + _saisonBadge(m);
     _compAllData[key] = {computed, label, ym:{year:y, month:m}, hasData: raw !== null};
     return _compAllData[key];
   } catch(e) { return null; }

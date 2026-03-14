@@ -1555,7 +1555,7 @@ function saveProfile() {
     // Préférences de gestion → users/{uid} (partagées avec dashboard/suivi-ca/cashflow)
     const fiscalStart = parseInt(document.getElementById('p-fiscalStart')?.value || '0');
     const viewMode = _profMode || 'civil';
-    window._setDoc(window._doc(window._db,'users',window._uid), {fiscalStart, viewMode, saisonnalite: _saisonConfig}, {merge:true}).catch(() => {});
+    window._setDoc(window._doc(window._db,'users',window._uid), {fiscalStart, viewMode, saisonnalite: _saisonConfig}, {merge:true}).catch(function(e){ console.error('Erreur save prefs:', e); });
   }
 }
 
@@ -1873,7 +1873,7 @@ onAuthStateChanged(auth, async function(user) {
     if (heroMember) heroMember.textContent = 'Membre depuis ' + created;
   }
 
-  // ── CHARGER LE PLAN ──
+  // ── CHARGER LE PLAN + PRÉFÉRENCES ──
   try {
     const planSnap = await getDoc(doc(db, 'users', user.uid));
     const plan = planSnap.exists() ? (planSnap.data().plan || 'free') : 'free';
@@ -1888,7 +1888,37 @@ onAuthStateChanged(auth, async function(user) {
     }
     if (uplan) uplan.textContent = PLAN_NAMES[plan] || plan;
     if (typeof window.loadPlanUI === 'function') window.loadPlanUI(plan);
-  } catch(e) { console.error('Erreur plan:', e); }
+
+    // ── Préférences de gestion (fiscalStart, viewMode) ──
+    if (planSnap.exists()) {
+      const ud = planSnap.data();
+      if (ud.fiscalStart !== undefined) {
+        const sel = document.getElementById('p-fiscalStart');
+        if (sel) sel.value = String(ud.fiscalStart);
+      }
+      if (ud.viewMode && typeof setProfMode === 'function') {
+        setProfMode(ud.viewMode);
+      }
+
+      // ── Saisonnalité ──
+      if (ud.saisonnalite) {
+        _saisonConfig = Object.assign({active:false,mois:{},coeffCA:0.4,coeffChargesVar:0.5}, ud.saisonnalite);
+        var toggle = document.getElementById('saison-active');
+        if (toggle) toggle.checked = !!_saisonConfig.active;
+        if (_saisonConfig.active) {
+          var panel = document.getElementById('saison-panel');
+          if (panel) panel.style.display = 'block';
+          if (typeof saisonRenderGrid === 'function') saisonRenderGrid();
+          if (typeof saisonShowCoeffs === 'function') saisonShowCoeffs();
+          var caSlider = document.getElementById('saison-coeff-ca');
+          var cvSlider = document.getElementById('saison-coeff-cv');
+          if (caSlider) { caSlider.value = Math.round((_saisonConfig.coeffCA||0.4)*100); document.getElementById('saison-ca-val').textContent = caSlider.value+'%'; }
+          if (cvSlider) { cvSlider.value = Math.round((_saisonConfig.coeffChargesVar||0.5)*100); document.getElementById('saison-cv-val').textContent = cvSlider.value+'%'; }
+          if (typeof saisonUpdateSummary === 'function') saisonUpdateSummary();
+        }
+      }
+    }
+  } catch(e) { console.error('Erreur plan/prefs:', e); }
 
   // ── CHARGER LE PROFIL ──
   try {
