@@ -378,6 +378,8 @@
         </select>
       </div>
 
+      <!-- BLOC SALARIÉ (masqué si Freelance) -->
+      <div id="bloc-salarie">
       <!-- Salaire -->
       <div class="msep">💶 Rémunération <span style="font-size:10px;font-weight:400;color:var(--muted)">— Saisissez l'un des montants, les autres se calculent automatiquement</span></div>
 
@@ -536,6 +538,39 @@
             <option value="">— Aucune CCN sélectionnée —</option>
           </select>
           <div id="f-ccn-note" style="display:none;font-size:11px;color:var(--muted);padding:8px 10px;background:#f8faff;border:1px solid var(--border);border-radius:6px;margin-top:6px;line-height:1.6"></div>
+        </div>
+      </div>
+      </div><!-- /bloc-salarie -->
+
+      <!-- BLOC FREELANCE (masqué par défaut, affiché si Freelance) -->
+      <div id="bloc-freelance" style="display:none">
+        <div class="msep">🤝 Prestation freelance <span style="font-size:10px;font-weight:400;color:var(--muted)">— Rémunération du prestataire (cumulable)</span></div>
+        <div class="mrow">
+          <div class="mfield"><label>Société / Nom commercial</label><input class="minput" id="f-fl-societe" placeholder="Ex : Studio Dupont"/></div>
+          <div class="mfield"><label>SIRET du prestataire</label><input class="minput" id="f-fl-siret" placeholder="123 456 789 00012" maxlength="17"/></div>
+        </div>
+        <div class="mrow">
+          <div class="mfield"><label>Mission / Description</label><input class="minput" id="f-fl-mission" placeholder="Ex : Community management, livraisons, conseil..."/></div>
+          <div class="mfield"><label>Fréquence de facturation</label>
+            <select class="minput" id="f-fl-freq">
+              <option value="mensuel">Mensuel</option>
+              <option value="bimensuel">Bimensuel</option>
+              <option value="trimestriel">Trimestriel</option>
+              <option value="ponctuel">Ponctuel / à la mission</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:12px;font-size:12px;font-weight:700;color:var(--text);margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
+          <span>💶 Lignes de rémunération</span>
+          <button type="button" class="btn btn-rh btn-sm" onclick="addFlLine()" style="font-size:11px;padding:4px 10px">+ Ajouter</button>
+        </div>
+        <div id="fl-lines-container"></div>
+        <div style="margin-top:10px;padding:10px 14px;background:#1e293b;border-radius:10px;display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:11px;color:rgba(255,255,255,.5);font-weight:600">COÛT TOTAL ESTIMÉ / MOIS</span>
+          <span id="fl-total" style="font-size:16px;font-weight:800;color:#34d399">0,00 €</span>
+        </div>
+        <div style="margin-top:8px;padding:8px 12px;background:#fce7f3;border:1px solid #fbcfe8;border-radius:8px;font-size:11px;color:#9d174d;line-height:1.5">
+          💡 Un freelance n'est pas un salarié — pas de charges patronales, pas de fiche de paie. Assurez-vous d'avoir un <strong>contrat de prestation</strong> signé et de vérifier son numéro SIRET.
         </div>
       </div>
 
@@ -1098,6 +1133,27 @@ function renderFiche(e) {
 
       <!-- KPIs RAPIDES -->
       <div class="fiche-kpis">
+        ${e.typeContrat==='Freelance' && e.freelance ? `
+        <div class="fkpi">
+          <div class="fkpi-label">Rémunération</div>
+          <div class="fkpi-val" style="font-size:13px">${(e.freelance.lignes||[]).map(function(l){
+            var ft = {fixe:'Fixe',commission:'Com.',pct_ca:'%CA',forfait:'Forfait',prime:'Prime',autre:'Autre'}[l.type]||l.type;
+            var unit = (l.type==='commission'||l.type==='pct_ca') ? '%' : '€';
+            return ft+' '+(l.montant||0)+unit;
+          }).join(' + ')||'—'}</div>
+          <div class="fkpi-sub">${(e.freelance.lignes||[]).length} ligne(s)</div>
+        </div>
+        <div class="fkpi">
+          <div class="fkpi-label">Société</div>
+          <div class="fkpi-val" style="font-size:13px">${e.freelance.societe||'—'}</div>
+          <div class="fkpi-sub">${e.freelance.siret||'SIRET non renseigné'}</div>
+        </div>
+        <div class="fkpi">
+          <div class="fkpi-label">Facturation</div>
+          <div class="fkpi-val" style="font-size:14px">${{mensuel:'Mensuel',bimensuel:'Bimensuel',trimestriel:'Trimestriel',ponctuel:'Ponctuel'}[e.freelance.frequence]||'—'}</div>
+          <div class="fkpi-sub">${e.freelance.mission||'—'}</div>
+        </div>
+        ` : `
         <div class="fkpi">
           <div class="fkpi-label">Salaire net</div>
           <div class="fkpi-val">${e.salaireNet?fmtE(e.salaireNet):'—'}</div>
@@ -1113,10 +1169,11 @@ function renderFiche(e) {
           <div class="fkpi-val">${e.dateFinContrat||'CDI'}</div>
           <div class="fkpi-sub">${e.typeContrat||'—'} · ${e.categoriePoste==='cadre'?'Cadre':e.categoriePoste==='agent_maitrise'?'Agent maîtrise':'Employé'}</div>
         </div>
+        `}
         <div class="fkpi ${e.periodeEssai?.active?'orange':''}">
-          <div class="fkpi-label">Période d'essai</div>
-          <div class="fkpi-val">${e.periodeEssai?.active?`${e.periodeEssai.duree} ${e.periodeEssai.unite}`:'—'}</div>
-          <div class="fkpi-sub">${e.periodeEssai?.active?`Fin : ${e.periodeEssai.finEstimee||'—'}`:'Non configurée'}</div>
+          <div class="fkpi-label">${e.typeContrat==='Freelance'?'Début mission':'Période d\'essai'}</div>
+          <div class="fkpi-val">${e.typeContrat==='Freelance'?(e.dateEntree||'—'):(e.periodeEssai?.active?`${e.periodeEssai.duree} ${e.periodeEssai.unite}`:'—')}</div>
+          <div class="fkpi-sub">${e.typeContrat==='Freelance'?'Prestataire externe':(e.periodeEssai?.active?`Fin : ${e.periodeEssai.finEstimee||'—'}`:'Non configurée')}</div>
         </div>
       </div>
     </div>
@@ -1769,6 +1826,11 @@ window.openModalNouvelEmploye = function() {
   if (peDetails) peDetails.style.display = 'none';
   if (peDuree) peDuree.value = '';
   clearSalRecap();
+  // Reset freelance
+  _flLines = [];
+  ['f-fl-societe','f-fl-siret','f-fl-mission'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  const flFreq = document.getElementById('f-fl-freq'); if(flFreq) flFreq.value='mensuel';
+  const flC = document.getElementById('fl-lines-container'); if(flC) flC.innerHTML = '';
   _tempCompetences = [];
   renderCompetences();
   setTimeout(()=>onContratChange(), 50);
@@ -1829,7 +1891,27 @@ window.openModalEdit = function(id) {
   }
   // Afficher recap salaire si brut renseigné
   if (e.salaireBrut) setTimeout(()=>calcSalaire('brut'), 50);
-  // Déclencher recalcul PE
+  // Pré-remplir freelance
+  _flLines = [];
+  if (e.freelance) {
+    const fl = e.freelance;
+    const sfl = (id, val) => { const el=document.getElementById(id); if(el) el.value=val||''; };
+    sfl('f-fl-freq', fl.frequence||'mensuel');
+    sfl('f-fl-societe', fl.societe);
+    sfl('f-fl-siret', fl.siret);
+    sfl('f-fl-mission', fl.mission);
+    // Migration ancien format (mode unique) → lignes
+    if (fl.lignes && fl.lignes.length > 0) {
+      _flLines = fl.lignes.map(l=>({type:l.type||'fixe', montant:l.montant?String(l.montant):'', note:l.note||''}));
+    } else if (fl.mode) {
+      // Ancien format : convertir en lignes
+      if (fl.fixe) _flLines.push({type:'fixe', montant:String(fl.fixe), note:''});
+      if (fl.taux) _flLines.push({type:fl.mode==='pct_ca'?'pct_ca':'commission', montant:String(fl.taux), note:''});
+      if (_flLines.length === 0) _flLines.push({type:fl.mode||'fixe', montant:'', note:''});
+    }
+    setTimeout(()=>renderFlLines(), 60);
+  }
+  // Déclencher recalcul PE + toggle blocs
   setTimeout(()=>onContratChange(), 50);
   // Charger compétences
   _tempCompetences = (e.competences||[]).map(c=>({nom:c.nom||c, niveau:parseInt(c.niveau)||3}));
@@ -1890,6 +1972,14 @@ window.saveEmploye = async function() {
       renouvelable: document.getElementById('pe-renouv')?.value === 'oui',
       finEstimee: document.getElementById('pe-fin-info')?.textContent||null,
     } : { active: false },
+    // Freelance
+    freelance: document.getElementById('f-contrat').value === 'Freelance' ? {
+      lignes:    _flLines.map(function(l){ return {type:l.type, montant:parseFloat((l.montant||'').toString().replace(',','.'))||null, note:(l.note||'').trim()}; }),
+      frequence: document.getElementById('f-fl-freq')?.value || 'mensuel',
+      societe:   (document.getElementById('f-fl-societe')?.value||'').trim()||null,
+      siret:     (document.getElementById('f-fl-siret')?.value||'').trim()||null,
+      mission:   (document.getElementById('f-fl-mission')?.value||'').trim()||null,
+    } : null,
     updatedAt:       Date.now()
   };
 
@@ -1996,6 +2086,14 @@ function _collectFormData() {
       renouvelable: document.getElementById('pe-renouv')?.value === 'oui',
       finEstimee: document.getElementById('pe-fin-info')?.textContent||null,
     } : { active: false },
+    // Freelance
+    freelance: document.getElementById('f-contrat').value === 'Freelance' ? {
+      lignes:    _flLines.map(function(l){ return {type:l.type, montant:pf(l.montant), note:(l.note||'').trim()}; }),
+      frequence: document.getElementById('f-fl-freq')?.value || 'mensuel',
+      societe:   (document.getElementById('f-fl-societe')?.value||'').trim()||null,
+      siret:     (document.getElementById('f-fl-siret')?.value||'').trim()||null,
+      mission:   (document.getElementById('f-fl-mission')?.value||'').trim()||null,
+    } : null,
     updatedAt: Date.now()
   };
 }
@@ -2821,12 +2919,24 @@ window.onContratChange = function() {
   const fin      = document.getElementById('f-fin')?.value;
   const active   = document.getElementById('pe-active')?.checked;
 
-  const legal = getPELegal(contrat, categorie, entree, fin);
+  const isFreelance = contrat === 'Freelance';
 
-  // Cacher PE pour Freelance
+  // Toggle blocs salarié / freelance
+  const blocSal = document.getElementById('bloc-salarie');
+  const blocFL  = document.getElementById('bloc-freelance');
+  if (blocSal) blocSal.style.display = isFreelance ? 'none' : '';
+  if (blocFL)  blocFL.style.display  = isFreelance ? '' : 'none';
+
+  // Catégorie inutile pour freelance
+  const catField = document.getElementById('f-categorie')?.closest('.mfield');
+  if (catField) catField.style.display = isFreelance ? 'none' : '';
+
+  // PE
   const peBloc = document.getElementById('pe-bloc');
-  if (contrat === 'Freelance') { peBloc.classList.add('disabled'); return; }
-  peBloc.classList.remove('disabled');
+  if (isFreelance) { peBloc.style.display = 'none'; return; }
+  peBloc.style.display = '';
+
+  const legal = getPELegal(contrat, categorie, entree, fin);
 
   // Mettre à jour l'info légale
   const infoEl = document.getElementById('pe-legal-info');
@@ -3165,6 +3275,73 @@ window.verifyURSSAF = function() {
   _fetchURSSAF(brut, cat === 'cadre');
 };
 window.onContratChange = window.onContratChange;
+
+window.onFreelanceModeChange = function() {}; // legacy compat
+
+// ── FREELANCE MULTI-LIGNES ──
+var _flLines = [];
+var _FL_TYPES = {
+  fixe:       {label:'💶 Fixe mensuel',      unit:'€ HT/mois', placeholder:'2 000'},
+  commission: {label:'📊 Commission',         unit:'%',         placeholder:'10'},
+  pct_ca:     {label:'📈 % sur CA',           unit:'%',         placeholder:'5'},
+  forfait:    {label:'📋 Forfait ponctuel',   unit:'€ HT',      placeholder:'1 500'},
+  prime:      {label:'🎁 Prime / Bonus',      unit:'€ HT',      placeholder:'500'},
+  autre:      {label:'📝 Autre',              unit:'€ HT',      placeholder:'0'}
+};
+
+window.addFlLine = function() {
+  _flLines.push({type:'fixe', montant:'', note:''});
+  renderFlLines();
+};
+window.delFlLine = function(i) {
+  _flLines.splice(i, 1);
+  renderFlLines();
+};
+window.updateFlLine = function(i, field, val) {
+  if (_flLines[i]) _flLines[i][field] = val;
+  calcFlTotal();
+  _scheduleAutoSave();
+};
+
+function renderFlLines() {
+  var c = document.getElementById('fl-lines-container');
+  if (!c) return;
+  if (_flLines.length === 0) {
+    c.innerHTML = '<div style="padding:12px;text-align:center;color:var(--muted);font-size:12px;border:1.5px dashed var(--border);border-radius:8px;cursor:pointer" onclick="addFlLine()">Cliquez sur <b>+ Ajouter</b> pour définir la rémunération</div>';
+    calcFlTotal();
+    return;
+  }
+  c.innerHTML = _flLines.map(function(l, i) {
+    var ft = _FL_TYPES[l.type] || _FL_TYPES.autre;
+    return '<div style="display:flex;gap:8px;align-items:end;margin-bottom:8px;padding:10px 12px;background:#fafbff;border:1.5px solid var(--border);border-radius:10px">' +
+      '<div style="flex:0 0 160px"><label style="font-size:10px;font-weight:600;color:var(--muted);display:block;margin-bottom:3px">Type</label>' +
+        '<select class="minput" style="font-size:12px" onchange="updateFlLine('+i+',\'type\',this.value);renderFlLines()">' +
+          Object.keys(_FL_TYPES).map(function(k){ return '<option value="'+k+'"'+(l.type===k?' selected':'')+'>'+_FL_TYPES[k].label+'</option>'; }).join('') +
+        '</select></div>' +
+      '<div style="flex:1"><label style="font-size:10px;font-weight:600;color:var(--muted);display:block;margin-bottom:3px">Montant <span style="color:#94a3b8">('+ft.unit+')</span></label>' +
+        '<input class="minput" type="text" inputmode="decimal" placeholder="'+ft.placeholder+'" value="'+(l.montant||'')+'" oninput="updateFlLine('+i+',\'montant\',this.value)" style="font-weight:700"/></div>' +
+      '<div style="flex:1"><label style="font-size:10px;font-weight:600;color:var(--muted);display:block;margin-bottom:3px">Note</label>' +
+        '<input class="minput" placeholder="Détail, condition…" value="'+(l.note||'').replace(/"/g,'&quot;')+'" oninput="updateFlLine('+i+',\'note\',this.value)"/></div>' +
+      '<button type="button" class="btn btn-danger btn-sm" onclick="delFlLine('+i+')" style="margin-bottom:1px;height:36px;flex-shrink:0">✕</button>' +
+    '</div>';
+  }).join('');
+  calcFlTotal();
+}
+
+function calcFlTotal() {
+  var total = 0;
+  _flLines.forEach(function(l) {
+    var v = parseFloat((l.montant||'').toString().replace(',','.')) || 0;
+    if (l.type === 'fixe' || l.type === 'forfait' || l.type === 'prime' || l.type === 'autre') total += v;
+    // Pour commission et pct_ca, on ne peut pas additionner un % à des €, on les affiche séparément
+  });
+  var el = document.getElementById('fl-total');
+  var pctLines = _flLines.filter(function(l){ return (l.type==='commission'||l.type==='pct_ca') && parseFloat(l.montant)>0; });
+  var pctStr = pctLines.map(function(l){ return (_FL_TYPES[l.type]||{}).label + ' ' + l.montant + '%'; }).join(' + ');
+  if (el) {
+    el.innerHTML = fmtE(total) + (pctStr ? ' <span style="font-size:11px;color:rgba(255,255,255,.5)">+ ' + pctStr + '</span>' : '');
+  }
+}
 window.onPEChange = window.onPEChange;
 window.calcPEFin = window.calcPEFin;
 </script>
