@@ -1137,8 +1137,8 @@ function renderFiche(e) {
         <div class="fkpi">
           <div class="fkpi-label">Rémunération</div>
           <div class="fkpi-val" style="font-size:13px">${(e.freelance.lignes||[]).map(function(l){
-            var ft = {fixe:'Fixe',commission:'Com.',pct_ca:'%CA',forfait:'Forfait',prime:'Prime',autre:'Autre'}[l.type]||l.type;
-            var unit = (l.type==='commission'||l.type==='pct_ca') ? '%' : '€';
+            var ft = {fixe:'Fixe',taux_horaire:'Taux h.',commission:'Com.',pct_ca:'%CA',forfait:'Forfait',prime:'Prime',autre:'Autre'}[l.type]||l.type;
+            var unit = (l.type==='commission'||l.type==='pct_ca') ? '%' : (l.type==='taux_horaire' ? '€/h' : '€');
             return ft+' '+(l.montant||0)+unit;
           }).join(' + ')||'—'}</div>
           <div class="fkpi-sub">${(e.freelance.lignes||[]).length} ligne(s)</div>
@@ -3281,12 +3281,13 @@ window.onFreelanceModeChange = function() {}; // legacy compat
 // ── FREELANCE MULTI-LIGNES ──
 var _flLines = [];
 var _FL_TYPES = {
-  fixe:       {label:'💶 Fixe mensuel',      unit:'€ HT/mois', placeholder:'2 000'},
-  commission: {label:'📊 Commission',         unit:'%',         placeholder:'10'},
-  pct_ca:     {label:'📈 % sur CA',           unit:'%',         placeholder:'5'},
-  forfait:    {label:'📋 Forfait ponctuel',   unit:'€ HT',      placeholder:'1 500'},
-  prime:      {label:'🎁 Prime / Bonus',      unit:'€ HT',      placeholder:'500'},
-  autre:      {label:'📝 Autre',              unit:'€ HT',      placeholder:'0'}
+  fixe:         {label:'💶 Fixe mensuel',      unit:'€ HT/mois', placeholder:'2 000'},
+  taux_horaire: {label:'⏱ Taux horaire',       unit:'€ HT/h',    placeholder:'45'},
+  commission:   {label:'📊 Commission',         unit:'%',         placeholder:'10'},
+  pct_ca:       {label:'📈 % sur CA',           unit:'%',         placeholder:'5'},
+  forfait:      {label:'📋 Forfait ponctuel',   unit:'€ HT',      placeholder:'1 500'},
+  prime:        {label:'🎁 Prime / Bonus',      unit:'€ HT',      placeholder:'500'},
+  autre:        {label:'📝 Autre',              unit:'€ HT',      placeholder:'0'}
 };
 
 window.addFlLine = function() {
@@ -3333,13 +3334,18 @@ function calcFlTotal() {
   _flLines.forEach(function(l) {
     var v = parseFloat((l.montant||'').toString().replace(',','.')) || 0;
     if (l.type === 'fixe' || l.type === 'forfait' || l.type === 'prime' || l.type === 'autre') total += v;
-    // Pour commission et pct_ca, on ne peut pas additionner un % à des €, on les affiche séparément
   });
   var el = document.getElementById('fl-total');
-  var pctLines = _flLines.filter(function(l){ return (l.type==='commission'||l.type==='pct_ca') && parseFloat(l.montant)>0; });
-  var pctStr = pctLines.map(function(l){ return (_FL_TYPES[l.type]||{}).label + ' ' + l.montant + '%'; }).join(' + ');
+  var extraParts = [];
+  _flLines.forEach(function(l) {
+    var v = parseFloat(l.montant) || 0;
+    if (v <= 0) return;
+    var ft = _FL_TYPES[l.type] || {};
+    if (l.type === 'commission' || l.type === 'pct_ca') extraParts.push(ft.label + ' ' + l.montant + '%');
+    if (l.type === 'taux_horaire') extraParts.push(l.montant + ' €/h');
+  });
   if (el) {
-    el.innerHTML = fmtE(total) + (pctStr ? ' <span style="font-size:11px;color:rgba(255,255,255,.5)">+ ' + pctStr + '</span>' : '');
+    el.innerHTML = fmtE(total) + (extraParts.length ? ' <span style="font-size:11px;color:rgba(255,255,255,.5)">+ ' + extraParts.join(' + ') + '</span>' : '');
   }
 }
 window.onPEChange = window.onPEChange;
