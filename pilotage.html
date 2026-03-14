@@ -929,6 +929,8 @@ async function loadMonth() {
         }
         if (s.rentreesSupp)  data.rentreesSupp = s.rentreesSupp;
         if (s.previsionCA)   data.previsionCA  = s.previsionCA;
+        if (s.prevBaseN1 !== undefined) data.prevBaseN1 = s.prevBaseN1;
+        if (s.prevAjustN1 !== undefined) data.prevAjustN1 = s.prevAjustN1;
         if (s.chargesFixe)   data.chargesFixe  = s.chargesFixe;
         if (s.chargesVar)    data.chargesVar    = s.chargesVar;
         if (s.credits)       data.credits       = s.credits;
@@ -940,6 +942,34 @@ async function loadMonth() {
   }
 
   _data = data;
+
+  // ── Charger CA du même mois N-1 pour la prévision ──
+  window._lastYearCA = 0;
+  if (window._uid && window._getDoc && window._db && window._doc) {
+    try {
+      var keyN1 = (window._year - 1) + '-' + String(m + 1).padStart(2, '0');
+      var snapN1 = await window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', keyN1));
+      if (snapN1.exists()) {
+        var sN1 = snapN1.data();
+        var caN1 = (sN1.ca || []).reduce(function(s, r) {
+          return s + (parseFloat(r.ht055)||0) + (parseFloat(r.ht10)||0) + (parseFloat(r.ht20)||0);
+        }, 0);
+        var fpN1 = (sN1.facturesPro || []).reduce(function(s, r) {
+          return s + (parseFloat(r.ht055)||0) + (parseFloat(r.ht10)||0) + (parseFloat(r.ht20)||0);
+        }, 0);
+        window._lastYearCA = caN1 + fpN1;
+      }
+    } catch(e) { console.warn('Load N-1 CA error:', e); }
+  }
+
+  // Si la base N-1 était activée, recalculer (le CA N-1 a pu changer)
+  if (_data.prevBaseN1 && window._lastYearCA > 0) {
+    var ajN1 = parseFloat(_data.prevAjustN1) || 0;
+    var prevN1Calc = window._lastYearCA * (1 + ajN1 / 100);
+    if (_data.previsionCA && _data.previsionCA.length > 0) {
+      _data.previsionCA[0].montant = prevN1Calc.toFixed(2);
+    }
+  }
 
   // Charger employés RH une seule fois (mode auto)
   if (!window._rhEmployesLoaded) {
@@ -1334,6 +1364,7 @@ function renderPage(data, month) {
         '</div>' +
         '<div class="section-card">' +
           '<div class="section-head"><div class="section-title">🎯 Prévision CA du mois</div><button class="btn btn-outline btn-sm" onclick="addPrevLine()">+ Ligne</button></div>' +
+          renderPrevN1Banner(data) +
           '<table class="data-table"><thead><tr><th>Type / Source</th><th>Montant prévu</th><th>CA réel</th><th>Écart</th></tr></thead>' +
           '<tbody id="prev-tbody">' + renderPrevCA(data.previsionCA, t.caHT) + '</tbody>' +
           '<tfoot><tr><td>Total</td><td><span id="tot-prev">' + fmtN(t.prevCA) + '</span> €</td><td style="font-weight:700;color:var(--blue-main)" id="tot-prev-reel">' + fmtN(t.caHT) + ' €</td><td id="tot-prev-ecart" style="font-weight:700"></td></tr></tfoot></table>' +
@@ -1488,6 +1519,75 @@ function renderRentrees(rows) {
   }).join('');
 }
 
+/* ─── PRÉVISION N-1 ─── */
+function renderPrevN1Banner(data) {
+  var caN1 = window._lastYearCA || 0;
+  if (caN1 <= 0) return '';
+  var isOn = !!data.prevBaseN1;
+  var ajust = parseFloat(data.prevAjustN1) || 0;
+  var prevCalc = caN1 * (1 + ajust / 100);
+  return '<div style="padding:10px 14px;background:' + (isOn ? '#f0fdf4' : '#f8faff') + ';border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px">' +
+    '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;color:' + (isOn ? 'var(--green)' : 'var(--muted)') + '">' +
+      '<input type="checkbox" id="prev-n1-toggle" ' + (isOn ? 'checked' : '') + ' onchange="togglePrevN1(this.checked)" style="width:16px;height:16px;accent-color:#10b981;cursor:pointer"/>' +
+      '📅 Baser sur ' + MONTHS[parseInt(document.getElementById('monthSelect').value)] + ' ' + (window._year - 1) +
+    '</label>' +
+    '<span style="color:var(--muted)">CA N-1 : <strong style="color:var(--blue-main)">' + fmtN(caN1) + ' € HT</strong></span>' +
+    (isOn ? '<div style="display:flex;align-items:center;gap:6px">' +
+      '<span style="color:var(--muted)">Ajustement</span>' +
+      '<input type="number" id="prev-n1-ajust" value="' + ajust + '" style="width:60px;padding:4px 8px;border:1.5px solid var(--border);border-radius:6px;font-size:13px;font-weight:700;font-family:inherit;text-align:center" oninput="updatePrevAjust(this.value)"/>' +
+      '<span style="color:var(--muted)">%</span>' +
+      '<span id="prev-n1-result" style="font-weight:700;color:var(--green)">→ ' + fmtN(prevCalc) + ' €</span>' +
+    '</div>' : '') +
+  '</div>';
+}
+
+function togglePrevN1(isOn) {
+  _data.prevBaseN1 = isOn;
+  if (!_data.prevAjustN1 && _data.prevAjustN1 !== 0) _data.prevAjustN1 = 0;
+  if (isOn) applyPrevN1();
+  scheduleSave();
+  // Re-render section
+  var ms = document.getElementById('monthSelect');
+  var m = ms ? parseInt(ms.value) : new Date().getMonth();
+  renderPage(_data, m);
+}
+
+function updatePrevAjust(val) {
+  _data.prevAjustN1 = parseFloat(val) || 0;
+  applyPrevN1();
+  // Mettre à jour le résultat dans le bandeau sans re-render
+  var caN1 = window._lastYearCA || 0;
+  var prevCalc = caN1 * (1 + _data.prevAjustN1 / 100);
+  var resEl = document.getElementById('prev-n1-result');
+  if (resEl) resEl.textContent = '→ ' + fmtN(prevCalc) + ' €';
+  scheduleSave();
+}
+
+function applyPrevN1() {
+  var caN1 = window._lastYearCA || 0;
+  if (caN1 <= 0 || !_data.prevBaseN1) return;
+  var ajust = parseFloat(_data.prevAjustN1) || 0;
+  var prevCalc = caN1 * (1 + ajust / 100);
+  // Mettre dans la 1ère ligne de previsionCA
+  if (!_data.previsionCA || _data.previsionCA.length === 0) {
+    _data.previsionCA = [{type: 'CA N-1 ajusté', montant: ''}];
+  }
+  _data.previsionCA[0].montant = prevCalc.toFixed(2);
+  if (!_data.previsionCA[0].type || _data.previsionCA[0].type === '') {
+    _data.previsionCA[0].type = 'CA N-1 ajusté';
+  }
+  // Mettre à jour l'input sans re-render complet (préserver le focus ajustement)
+  var tbody = document.getElementById('prev-tbody');
+  var resultSpan = document.querySelector('#prev-n1-ajust');
+  if (tbody) {
+    var t = calcTotals(_data);
+    tbody.innerHTML = renderPrevCA(_data.previsionCA, t.caHT);
+    refreshTotals();
+  }
+}
+window.togglePrevN1 = togglePrevN1;
+window.updatePrevAjust = updatePrevAjust;
+
 function renderPrevCA(rows, caReelTotal) {
   // caReelTotal = CA réel du mois (toutes lignes confondues)
   // On le répartit au prorata sur la première ligne, les autres affichent —
@@ -1507,9 +1607,13 @@ function renderPrevCA(rows, caReelTotal) {
     var ecartDisp = caReelTotal > 0
       ? '<span style="font-weight:700;color:' + ecartColor + '">' + (ecart>=0?'+':'') + fmtN(ecart) + ' €</span>'
       : '<span style="color:var(--muted)">—</span>';
-    return '<tr>' +
+    var n1Locked = i === 0 && _data.prevBaseN1 && window._lastYearCA > 0;
+    return '<tr' + (n1Locked ? ' style="background:#f0fdf4"' : '') + '>' +
       '<td><input class="cell-input" style="width:130px" value="' + esc(r.type) + '" oninput="_data.previsionCA[' + i + '].type=this.value"/></td>' +
-      '<td><input class="cell-input" style="width:90px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="_data.previsionCA[' + i + '].montant=this.value;refreshTotals()"/></td>' +
+      '<td>' + (n1Locked
+        ? '<span class="cell-readonly" style="color:var(--green);font-weight:700">' + fmtN(parseFloat(r.montant)||0) + ' €</span>'
+        : '<input class="cell-input" style="width:90px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="_data.previsionCA[' + i + '].montant=this.value;refreshTotals()"/>'
+      ) + '</td>' +
       '<td style="text-align:right;padding:4px 8px" id="prev-reel-' + i + '">' + reelDisp + '</td>' +
       '<td style="text-align:right;padding:4px 8px" id="prev-ecart-' + i + '">' + ecartDisp + '</td>' +
     '</tr>';
