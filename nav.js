@@ -5,7 +5,7 @@
   // CONFIG PLANS
   // ════════════════════════════════════════════════
   const PLAN_NAMES = {
-    free: 'Plan Gratuit', trial: 'Essai gratuit', trial_expired: 'Essai expiré', pro: 'Alteore Pro',
+    free: 'Plan Gratuit', trial: 'Essai gratuit', trial_expired: 'Essai expiré', deleted: 'Compte supprimé', pro: 'Alteore Pro',
     max: 'Alteore Max', master: 'Alteore Master', past_due: 'Paiement en attente', dev: 'Dev / Admin'
   };
   const CAN_FIDELISATION = ['trial', 'max', 'master', 'dev'];
@@ -468,7 +468,8 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
       rh:           { icon: '👥', title: 'Module RH — Plan Master requis',         desc: 'La gestion complète des ressources humaines (employés, planning, congés, paie, rémunération dirigeant…) est disponible avec le plan <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Master' },
       scenarios:    { icon: '🎯', title: 'Scénarios & IA avancée — Plan Max requis', desc: 'Les scénarios \"Et si...\", l\'assistant vocal IA et l\'analyse IA du stock sont disponibles dès le plan <strong>Max (99€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
       core:         { icon: '📊', title: 'Fonctionnalité Premium',                 desc: 'Cette fonctionnalité est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Voir les plans' },
-      trial_expired:{ icon: '⏰', title: 'Votre essai gratuit a expiré',           desc: 'Votre période d\'essai de 15 jours est terminée.<br><br>Souscrivez à un abonnement pour <strong>continuer à utiliser Alteore</strong> et conserver toutes vos données.<br><br>⚠️ <strong>Sans abonnement, vos données seront définitivement supprimées 15 jours après l\'expiration.</strong>', cta: '⭐ Choisir mon plan →' }
+      trial_expired:{ icon: '⏰', title: 'Votre essai gratuit a expiré',           desc: 'Votre période d\'essai de 15 jours est terminée.<br><br>Souscrivez à un abonnement pour <strong>continuer à utiliser Alteore</strong> et conserver toutes vos données.<br><br>⚠️ <strong>Sans abonnement, vos données seront définitivement supprimées 15 jours après l\'expiration.</strong>', cta: '⭐ Choisir mon plan →' },
+      deleted:      { icon: '🗑', title: 'Vos données ont été supprimées',          desc: 'Votre essai a expiré il y a plus de 15 jours. <strong>Toutes vos données ont été définitivement supprimées</strong> conformément à nos conditions.<br><br>Pour utiliser Alteore, vous pouvez créer un nouveau compte et souscrire à un abonnement.', cta: 'Créer un nouveau compte →' }
     };
     const cfg = configs[upgrade] || configs.core;
     document.getElementById('nav-modal-icon').textContent  = cfg.icon;
@@ -477,6 +478,7 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     document.getElementById('nav-modal-cta').textContent   = cfg.cta;
     document.getElementById('nav-modal-cta').onclick = function () {
       if (upgrade === 'trial_expired') location.href = 'pricing.html';
+      else if (upgrade === 'deleted') location.href = 'index.html';
       else location.href = 'profil.html?tab=abonnement&upgrade=' + upgrade;
     };
     document.getElementById('nav-upgrade-modal').style.display = 'flex';
@@ -532,10 +534,10 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
 
   function checkPageAccess(plan) {
     // ── Plan free / past_due / trial_expired → redirection (pas de plan gratuit) ──
-    const BLOCKED_PLANS = ['free', 'past_due', 'trial_expired'];
+    const BLOCKED_PLANS = ['free', 'past_due', 'trial_expired', 'deleted'];
     const ALLOWED_PAGES_FREE = ['profil.html', 'aide.html', 'tutoriels.html'];
     if (BLOCKED_PLANS.includes(plan) && !ALLOWED_PAGES_FREE.includes(PAGE)) {
-      var upgradeType = plan === 'trial_expired' ? 'trial_expired' : 'core';
+      var upgradeType = (plan === 'trial_expired' || plan === 'deleted') ? plan : 'core';
       location.href = 'profil.html?tab=abonnement&upgrade=' + upgradeType;
       return false;
     }
@@ -625,9 +627,9 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
       if (abonTab) abonTab.classList.add('on');
       const abonPanel = document.getElementById('panel-abonnement');
       if (abonPanel) abonPanel.classList.add('on');
-      // ── Afficher la modale trial expiré automatiquement ──
+      // ── Afficher la modale trial expiré / deleted automatiquement ──
       var upgrade = params.get('upgrade');
-      if (upgrade === 'trial_expired') showUpgradeModal('trial_expired');
+      if (upgrade === 'trial_expired' || upgrade === 'deleted') showUpgradeModal(upgrade);
     }, 400);
   }
 

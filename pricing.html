@@ -229,12 +229,12 @@ async function startCheckout(plan, skipTrial=false) {
   btn.textContent = '⏳ Chargement...';
 
   // Récupérer uid Firebase si connecté
-  let uid = null, email = null;
+  let uid = null, email = null, idToken = null;
   try {
     const { getAuth } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
     const auth = getAuth();
     const user = auth.currentUser;
-    if (user) { uid = user.uid; email = user.email; }
+    if (user) { uid = user.uid; email = user.email; idToken = await user.getIdToken(); }
   } catch(e) {}
 
   try {
@@ -243,9 +243,12 @@ async function startCheckout(plan, skipTrial=false) {
     if (email)              body.email = email;
     if (_validatedReferral) body.referralCode = _validatedReferral;
 
+    const headers = { 'Content-Type': 'application/json' };
+    if (idToken) headers['Authorization'] = 'Bearer ' + idToken;
+
     const res = await fetch('/api/create-subscription-checkout', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body)
     });
     const data = await res.json();
@@ -279,19 +282,22 @@ async function validateReferralCode() {
   btn.textContent = '⏳';
   statusEl.textContent = '';
 
-  // Récupérer uid si connecté
-  let uid = null, email = null;
+  // Récupérer uid et token si connecté
+  let uid = null, email = null, idToken = null;
   try {
     const { getAuth } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
     const user = getAuth().currentUser;
-    if (user) { uid = user.uid; email = user.email; }
+    if (user) { uid = user.uid; email = user.email; idToken = await user.getIdToken(); }
   } catch(e) {}
 
   try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (idToken) headers['Authorization'] = 'Bearer ' + idToken;
+
     const res = await fetch('/api/apply-referral', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ referralCode: code, filleulUid: uid || 'anonymous', filleulEmail: email || '' })
+      headers,
+      body: JSON.stringify({ referralCode: code, filleulEmail: email || '' })
     });
     const data = await res.json();
 
