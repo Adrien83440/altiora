@@ -44,7 +44,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { requisition_id } = req.body || {};
+    const { requisition_id, date_from } = req.body || {};
     if (!requisition_id) return res.status(400).json({ error: 'requisition_id manquant' });
 
     if (!process.env.GC_BANK_SECRET_ID || !process.env.GC_BANK_SECRET_KEY) {
@@ -98,7 +98,11 @@ export default async function handler(req, res) {
         // Transactions
         let rawTxs = [];
         try {
-          const txRes  = await fetch(`${GC_BASE}/accounts/${accountId}/transactions/`, { headers: gcH });
+          let txUrl = `${GC_BASE}/accounts/${accountId}/transactions/`;
+          if (date_from && /^\d{4}-\d{2}-\d{2}$/.test(date_from)) {
+            txUrl += `?date_from=${date_from}`;
+          }
+          const txRes  = await fetch(txUrl, { headers: gcH });
           const txData = await txRes.json();
           rawTxs = [...(txData.transactions?.booked || []), ...(txData.transactions?.pending || [])];
           console.log(`[${accountId}] ${rawTxs.length} transactions`);
