@@ -35,7 +35,7 @@ async function sendEmail(to, subject, html) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) { console.warn('[cron-trial] RESEND_API_KEY manquante — email non envoyé'); return false; }
 
-  const from = process.env.RESEND_FROM || 'ALTEORE <onboarding@resend.dev>';
+  const from = process.env.RESEND_FROM || 'ALTEORE <noreply@alteore.com>';
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',

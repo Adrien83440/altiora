@@ -1,5 +1,5 @@
 // api/send-ticket.js — Envoi de ticket support ALTEORE
-// Sauvegarde le ticket dans Firestore + envoie un email à contact@adrienemily.com
+// Sauvegarde le ticket dans Firestore + envoie un email à support@alteore.com
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
@@ -54,8 +54,8 @@ export default async function handler(req, res) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${RESEND_API_KEY}` },
           body: JSON.stringify({
-            from: 'ALTEORE Support <onboarding@resend.dev>',
-            to: ['contact@adrienemily.com'],
+            from: 'ALTEORE Support <noreply@alteore.com>',
+            to: ['support@alteore.com'],
             subject: `Ticket ALTEORE - ${id}`,
             html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f8faff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0">
               <div style="background:linear-gradient(135deg,#0f1f5c,#1a3dce);padding:24px 28px;color:white"><h1 style="margin:0;font-size:20px">Nouveau Ticket Support</h1><p style="margin:6px 0 0;opacity:0.7;font-size:13px">ID: ${id} - ${date}</p></div>
