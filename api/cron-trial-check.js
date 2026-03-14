@@ -275,6 +275,61 @@ function emailDeleted(name) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// TEMPLATES EMAIL — PROMOS
+// ══════════════════════════════════════════════════════════════════
+
+function emailPromoReminder(name, daysLeft) {
+  const urgentColor = daysLeft <= 1 ? '#ef4444' : '#f59e0b';
+  const urgentBg = daysLeft <= 1 ? 'linear-gradient(135deg,#ef4444,#f87171)' : 'linear-gradient(135deg,#f59e0b,#fbbf24)';
+  const dayText = daysLeft <= 1 ? 'demain' : `dans ${daysLeft} jours`;
+  return emailWrapper(`
+    <div style="background:${urgentBg};padding:28px 32px;color:white">
+      <div style="font-size:28px;margin-bottom:8px">⏳</div>
+      <h1 style="margin:0;font-size:20px;font-weight:800">Votre offre expire ${dayText}</h1>
+      <p style="margin:8px 0 0;font-size:14px;opacity:0.85">Votre accès Master gratuit arrive bientôt à son terme.</p>
+    </div>
+    <div style="padding:28px 32px">
+      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
+        Bonjour${name ? ' ' + name : ''},
+      </p>
+      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
+        Votre offre découverte Alteore expire <strong>${dayText}</strong>. Après cette date, vous ne pourrez plus accéder au logiciel.
+      </p>
+      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
+        Pour continuer à utiliser Alteore et <strong>conserver toutes vos données</strong>, souscrivez dès maintenant à un abonnement.
+      </p>
+      <div style="text-align:center">
+        <a href="https://alteore.com/pricing.html" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#1a3dce,#4f7ef8);color:white;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(26,61,206,0.3)">Choisir mon plan →</a>
+      </div>
+      <p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">À partir de 55€/mois · Annulation à tout moment</p>
+    </div>`);
+}
+
+function emailPromoExpired(name) {
+  return emailWrapper(`
+    <div style="background:linear-gradient(135deg,#1a1f36,#2d3561);padding:28px 32px;color:white">
+      <div style="font-size:28px;margin-bottom:8px">🚫</div>
+      <h1 style="margin:0;font-size:20px;font-weight:800">Votre offre découverte a expiré</h1>
+      <p style="margin:8px 0 0;font-size:14px;opacity:0.7">Votre accès gratuit à Alteore est terminé.</p>
+    </div>
+    <div style="padding:28px 32px">
+      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
+        Bonjour${name ? ' ' + name : ''},
+      </p>
+      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
+        Votre offre découverte de 2 mois est terminée. L'accès à Alteore est maintenant bloqué.
+      </p>
+      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
+        <strong>Bonne nouvelle :</strong> toutes vos données sont intactes et vous attendent ! Il vous suffit de choisir un plan pour reprendre là où vous en étiez.
+      </p>
+      <div style="text-align:center">
+        <a href="https://alteore.com/pricing.html" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#1a3dce,#4f7ef8);color:white;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(26,61,206,0.3)">Choisir mon plan →</a>
+      </div>
+      <p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">À partir de 55€/mois · Annulation à tout moment · Vos données sont conservées</p>
+    </div>`);
+}
+
+// ══════════════════════════════════════════════════════════════════
 // HANDLER PRINCIPAL
 // ══════════════════════════════════════════════════════════════════
 
@@ -293,7 +348,7 @@ module.exports = async (req, res) => {
   }
 
   const db = getDb();
-  const stats = { checked: 0, reminderJ3: 0, reminderJ1: 0, expired: 0, deleted: 0, errors: 0 };
+  const stats = { checked: 0, reminderJ3: 0, reminderJ1: 0, expired: 0, deleted: 0, errors: 0, promoChecked: 0, promoReminder7: 0, promoReminder1: 0, promoExpired: 0 };
 
   try {
     // ── 1. Récupérer tous les users en trial ou trial_expired ──
@@ -385,7 +440,92 @@ module.exports = async (req, res) => {
       }
     }
 
-    console.log(`[cron-trial] ✅ Terminé:`, stats);
+    console.log(`[cron-trial] ✅ Trials traités:`, stats);
+
+    // ══════════════════════════════════════════════════════════════
+    // 2. GESTION DES PROMOS EXPIRÉES
+    // ══════════════════════════════════════════════════════════════
+    // On cherche les utilisateurs avec un promoEnd défini et un plan
+    // qui correspond à une promo (master sans Stripe actif)
+    try {
+      // Firestore ne permet pas de filtrer sur "promoEnd existe", donc on query par plan
+      // et on vérifie promoEnd côté code
+      const promoSnap = await db.collection('users')
+        .where('plan', '==', 'master')
+        .get();
+
+      for (const userDoc of promoSnap.docs) {
+        const data = userDoc.data();
+        const promoEnd = data.promoEnd;
+
+        // Skip si pas de promoEnd (= vrai abonné master via Stripe)
+        if (!promoEnd) continue;
+
+        // Skip si abonnement Stripe actif (= a souscrit pendant la promo)
+        if (data.stripeSubscriptionId && ['active', 'trialing'].includes(data.subscriptionStatus)) {
+          continue;
+        }
+
+        stats.promoChecked++;
+        const uid = userDoc.id;
+        const email = data.email;
+        const name = data.name || data.displayName || '';
+        const daysLeft = daysDiff(promoEnd);
+
+        if (daysLeft === null) continue;
+
+        console.log(`[cron-promo] 👤 ${uid} (${email || '?'}) — J${daysLeft >= 0 ? '-' + daysLeft : '+' + Math.abs(daysLeft)} — promo ${data.promoCode || '?'}`);
+
+        try {
+          // ── J-7 : rappel 7 jours avant fin promo ──
+          if (daysLeft === 7 && !data.promoEmailJ7) {
+            if (email) await sendEmail(email,
+              '⏳ Votre offre Alteore expire dans 7 jours',
+              emailPromoReminder(name, 7)
+            );
+            await userDoc.ref.update({ promoEmailJ7: true });
+            stats.promoReminder7++;
+          }
+
+          // ── J-1 : rappel dernier jour ──
+          else if (daysLeft === 1 && !data.promoEmailJ1) {
+            if (email) await sendEmail(email,
+              '🔔 Dernier jour de votre offre Alteore !',
+              emailPromoReminder(name, 1)
+            );
+            await userDoc.ref.update({ promoEmailJ1: true });
+            stats.promoReminder1++;
+          }
+
+          // ── J+0 ou déjà expiré : bloquer ──
+          else if (daysLeft <= 0) {
+            if (email && !data.promoEmailExpired) {
+              await sendEmail(email,
+                '🚫 Votre offre Alteore a expiré — Choisissez un plan',
+                emailPromoExpired(name)
+              );
+            }
+            await userDoc.ref.update({
+              plan: 'promo_expired',
+              promoEmailExpired: true,
+              promoExpiredAt: new Date().toISOString(),
+            });
+            stats.promoExpired++;
+            console.log(`[cron-promo] 🔒 ${uid} → promo_expired`);
+          }
+
+        } catch (promoErr) {
+          stats.errors++;
+          console.error(`[cron-promo] ❌ Erreur pour ${uid}:`, promoErr.message);
+        }
+      }
+
+      console.log(`[cron-promo] ✅ Promos traitées:`, { promoChecked: stats.promoChecked, promoReminder7: stats.promoReminder7, promoReminder1: stats.promoReminder1, promoExpired: stats.promoExpired });
+
+    } catch (promoGlobalErr) {
+      console.error('[cron-promo] ❌ Erreur globale promos:', promoGlobalErr.message);
+    }
+
     return res.status(200).json({ ok: true, stats });
 
   } catch (e) {
