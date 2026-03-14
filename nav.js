@@ -695,4 +695,14 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     document.body.appendChild(s);
   })();
 
+  // ════════════════════════════════════════════════
+  // CHARGEMENT ONBOARDING (checklist + tours guidés)
+  // ════════════════════════════════════════════════
+  (function loadOnboarding() {
+    var s = document.createElement('script');
+    s.src = 'onboarding.js';
+    s.defer = true;
+    document.body.appendChild(s);
+  })();
+
 })();
