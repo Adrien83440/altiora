@@ -1,4 +1,4 @@
-// ── onboarding.js — Alteore ── v1
+// ── onboarding.js — Alteore ── v1.1
 // Checklist dashboard + tours guidés par module
 // 100% overlay — ne modifie AUCUN fichier existant
 // Chargé via nav.js · Si crash → meurt silencieusement
@@ -6,6 +6,13 @@ try { (function () {
 
   var PAGE = location.pathname.split('/').pop() || 'dashboard.html';
   var CHECKLIST_DAYS = 7;
+
+  // ════════════════════════════════════════════════
+  // FIREBASE COMPAT — certaines pages utilisent _fbGetDoc au lieu de _getDoc
+  // ════════════════════════════════════════════════
+  function fbGetDoc() { return window._getDoc || window._fbGetDoc; }
+  function fbSetDoc() { return window._setDoc || window._fbSetDoc; }
+  function fbDoc()    { return window._doc    || window._fbDoc; }
 
   // ════════════════════════════════════════════════
   // CHECKLIST — ÉTAPES
@@ -62,13 +69,16 @@ try { (function () {
   // ════════════════════════════════════════════════
   function waitReady(cb, n) {
     n = n || 0;
-    if (window._uid && window._db && window._getDoc && window._setDoc) { try { cb(); } catch(e) {} }
+    // Accepte _getDoc OU _fbGetDoc (fidelisation utilise le 2e)
+    if (window._uid && window._db && (window._getDoc || window._fbGetDoc) && (window._setDoc || window._fbSetDoc)) {
+      try { cb(); } catch(e) {}
+    }
     else if (n < 40) setTimeout(function () { waitReady(cb, n + 1); }, 150);
   }
 
   function loadProgress(cb) {
     try {
-      window._getDoc(window._doc(window._db, 'tuto_progress', window._uid))
+      fbGetDoc()(fbDoc()(window._db, 'tuto_progress', window._uid))
         .then(function (snap) { cb(snap.exists() ? snap.data() : {}); })
         .catch(function () { cb({}); });
     } catch(e) { cb({}); }
@@ -77,7 +87,7 @@ try { (function () {
   function saveField(field, val) {
     try {
       var data = {}; data[field] = val;
-      window._setDoc(window._doc(window._db, 'tuto_progress', window._uid), data, { merge: true }).catch(function () {});
+      fbSetDoc()(fbDoc()(window._db, 'tuto_progress', window._uid), data, { merge: true }).catch(function () {});
     } catch(e) {}
   }
 
@@ -97,11 +107,11 @@ try { (function () {
   waitReady(function () {
     try {
       if (PAGE === 'profil.html') {
-        window._getDoc(window._doc(window._db, 'profil', window._uid, 'data', 'profil'))
+        fbGetDoc()(fbDoc()(window._db, 'profil', window._uid, 'data', 'profil'))
           .then(function (s) { if (s.exists() && s.data().nom) saveField('step_profil', true); })
           .catch(function () {});
       }
-      if (PAGE === 'pilotage.html')    setTimeout(function () { saveField('step_ca', true); saveField('step_charges', true); }, 8000);
+      if (PAGE === 'pilotage.html')     setTimeout(function () { saveField('step_ca', true); saveField('step_charges', true); }, 8000);
       if (PAGE === 'cout-revient.html') setTimeout(function () { saveField('step_produit', true); }, 5000);
       if (PAGE === 'dashboard.html')    setTimeout(function () { saveField('step_dashboard', true); }, 8000);
     } catch(e) {}
@@ -109,11 +119,13 @@ try { (function () {
 
   // ════════════════════════════════════════════════
   // CHECKLIST (dashboard.html uniquement)
+  // Injecté AVANT #mainContent (pas dedans — car le dashboard
+  // fait mainContent.innerHTML= qui écraserait tout)
   // ════════════════════════════════════════════════
   function injectChecklist(progress) {
     if (progress.checklistDismissed) return;
 
-    window._getDoc(window._doc(window._db, 'users', window._uid))
+    fbGetDoc()(fbDoc()(window._db, 'users', window._uid))
       .then(function (snap) {
         if (!snap.exists()) return;
         var d = snap.data();
@@ -136,11 +148,10 @@ try { (function () {
 
     var el = document.createElement('div');
     el.id = 'onboarding-checklist';
-    el.style.cssText = 'margin-bottom:20px;animation:obFadeIn .4s ease';
+    el.style.cssText = 'padding:0 32px;animation:obFadeIn .4s ease';
 
     el.innerHTML =
-      '<div style="background:white;border:2px solid ' + (allDone ? '#86efac' : '#c7d2fe') + ';border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(15,31,92,.06)">' +
-        // Header
+      '<div style="margin:20px 0;background:white;border:2px solid ' + (allDone ? '#86efac' : '#c7d2fe') + ';border-radius:16px;overflow:hidden;box-shadow:0 4px 20px rgba(15,31,92,.06)">' +
         '<div style="padding:20px 24px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;background:' + (allDone ? 'linear-gradient(135deg,#f0fdf4,#ecfdf5)' : 'linear-gradient(135deg,#f0f4ff,#f5f7ff)') + '">' +
           '<div>' +
             '<div style="font-size:16px;font-weight:800;color:#0f1f5c;display:flex;align-items:center;gap:8px">' + (allDone ? '🎉 Bravo, tout est configuré !' : '🚀 Premiers pas avec Alteore') + '</div>' +
@@ -152,7 +163,6 @@ try { (function () {
             '<button onclick="document.getElementById(\'onboarding-checklist\').remove();window._obDismiss()" style="background:none;border:none;font-size:16px;color:#94a3b8;cursor:pointer;padding:4px" title="Masquer">✕</button>' +
           '</div>' +
         '</div>' +
-        // Steps
         '<div style="padding:12px 16px;display:flex;flex-direction:column;gap:2px">' +
           STEPS.map(function (s, i) {
             var done = !!progress['step_' + s.id];
@@ -169,15 +179,17 @@ try { (function () {
         '</div>' +
       '</div>';
 
-    // Injecter AVANT le contenu existant sans le toucher
-    var content = document.querySelector('#mainContent, .content');
-    if (content && content.firstChild) content.insertBefore(el, content.firstChild);
+    // Injecter ENTRE la topbar et le contenu (sibling, pas enfant de mainContent)
+    // Comme ça, mainContent.innerHTML= ne l'écrase pas
+    var mainContent = document.getElementById('mainContent') || document.querySelector('.content');
+    if (mainContent && mainContent.parentNode) {
+      mainContent.parentNode.insertBefore(el, mainContent);
+    }
 
-    // CSS animation (une seule fois)
     if (!document.getElementById('ob-css')) {
       var style = document.createElement('style');
       style.id = 'ob-css';
-      style.textContent = '@keyframes obFadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}';
+      style.textContent = '@keyframes obFadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}} @media(max-width:768px){#onboarding-checklist{padding:0 10px !important}}';
       document.head.appendChild(style);
     }
   }
@@ -225,14 +237,12 @@ try { (function () {
     _tourIdx = 0;
     injectTourCSS();
 
-    // Overlay (injecté dans body, au-dessus de tout)
     _tourOv = document.createElement('div');
     _tourOv.id = 'tour-overlay';
     _tourOv.innerHTML = '<div id="tour-spotlight"></div>';
     _tourOv.addEventListener('click', function (e) { if (e.target === _tourOv) closeTour(); });
     document.body.appendChild(_tourOv);
 
-    // Tooltip
     _tourTt = document.createElement('div');
     _tourTt.id = 'tour-tooltip';
     document.body.appendChild(_tourTt);
@@ -254,7 +264,6 @@ try { (function () {
       return;
     }
 
-    // Spotlight autour de l'élément existant (ne le modifie pas)
     var rect = target.getBoundingClientRect();
     var pad = 8;
     var spot = document.getElementById('tour-spotlight');
@@ -265,7 +274,6 @@ try { (function () {
       spot.style.height = (rect.height + pad * 2) + 'px';
     }
 
-    // Dots
     var dots = '';
     for (var i = 0; i < steps.length; i++) dots += '<div class="tt-dot ' + (i === idx ? 'on' : '') + '"></div>';
     var isLast = idx === steps.length - 1;
@@ -282,7 +290,6 @@ try { (function () {
         '</div>' +
       '</div>';
 
-    // Position tooltip (au-dessus ou en-dessous de l'élément, sans le déplacer)
     var ttW = 340, gap = 16;
     var left = Math.max(10, Math.min(rect.left + window.scrollX, window.innerWidth - ttW - 20));
     if (step.pos === 'top') {
@@ -292,7 +299,6 @@ try { (function () {
     }
     _tourTt.style.left = left + 'px';
 
-    // Scroll doux vers l'élément
     try { target.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
   }
 
@@ -316,4 +322,4 @@ try { (function () {
   };
   window._tourClose = function () { try { closeTour(); } catch(e) { cleanupTour(); } };
 
-})(); } catch(e) { /* onboarding crash — silencieux, rien ne casse */ }
+})(); } catch(e) { /* onboarding crash — silencieux */ }
