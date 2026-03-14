@@ -394,9 +394,35 @@ async function activatePromoCode() {
 
     if (res.ok && data.ok) {
       input.style.borderColor = '#10b981';
+      statusEl.innerHTML = '⏳ Activation en cours...';
+      statusEl.style.color = '#10b981';
+
+      // Écrire dans Firestore côté client
+      try {
+        const { getAuth } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+        const { getFirestore, doc, setDoc } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+        const user = getAuth().currentUser;
+        if (user) {
+          const db = getFirestore();
+          await setDoc(doc(db, 'users', user.uid), {
+            plan: data.plan,
+            promoCode: data.code,
+            promoLabel: data.label,
+            promoActivatedAt: data.promoActivatedAt,
+            promoEnd: data.promoEnd,
+          }, {merge: true});
+        }
+      } catch(writeErr) {
+        console.error('[promo] Firestore write failed:', writeErr);
+        statusEl.textContent = '❌ Erreur de sauvegarde. Réessayez.';
+        statusEl.style.color = '#ef4444';
+        btn.disabled = false;
+        btn.textContent = 'Activer →';
+        return;
+      }
+
       statusEl.innerHTML = '✅ <strong>Offre activée !</strong> Vous avez accès au plan <strong>' + data.plan.charAt(0).toUpperCase() + data.plan.slice(1) + '</strong> pendant ' + data.durationDays + ' jours. Redirection...';
       statusEl.style.color = '#10b981';
-      // Redirection vers le dashboard après 2s
       setTimeout(function() { window.location.href = 'dashboard.html'; }, 2000);
     } else {
       input.style.borderColor = '#ef4444';

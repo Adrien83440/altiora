@@ -455,8 +455,28 @@ async function activatePromo() {
 
     if (res.ok && data.ok) {
       input.style.borderColor = '#10b981';
-      statusEl.textContent = '';
+      statusEl.textContent = '⏳ Activation en cours...';
+      statusEl.style.color = '#10b981';
 
+      // Écrire dans Firestore côté client (authentifié)
+      try {
+        await window._setDoc(window._doc(window._db, 'users', window._uid), {
+          plan: data.plan,
+          promoCode: data.code,
+          promoLabel: data.label,
+          promoActivatedAt: data.promoActivatedAt,
+          promoEnd: data.promoEnd,
+        }, {merge: true});
+      } catch(writeErr) {
+        console.error('[promo] Firestore write failed:', writeErr);
+        statusEl.textContent = '❌ Erreur de sauvegarde. Réessayez.';
+        statusEl.style.color = '#ef4444';
+        btn.disabled = false;
+        btn.textContent = 'Activer';
+        return;
+      }
+
+      statusEl.textContent = '';
       // Appliquer l'affichage promo partout
       window._applyPromoUI(data.plan, data.durationDays, data.label, true);
     } else {
