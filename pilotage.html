@@ -3578,11 +3578,12 @@ function renderFichesList() {
   }
   el.innerHTML = _fiches.slice().sort(function(a,b){return (a.nom||'').localeCompare(b.nom||'','fr');}).map(function(f) {
     var recBadge = f.recurrence ? '<span class="fiche-badge ' + (f.recurrence==='Récurrent'?'recurrent':'ponctuel') + '">' + esc(f.recurrence) + '</span>' : '';
+    var prestaBadge = f.ficheType==='prestataire' ? '<span style="background:#fce7f3;color:#9d174d;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700;margin-left:4px">🤝 Prestataire</span>' : '';
     var meta = [f.categorie, f.ville].filter(Boolean).join(' · ');
     var safeId = (f.id||'').replace(/'/g,"\\'");
     return '<div class="fiche-item" onclick="openFicheDetail(\'' + safeId + '\')">' +
       '<div class="fiche-item-left">' +
-        '<div class="fiche-item-name">' + esc(f.nom||'') + ' ' + recBadge + '</div>' +
+        '<div class="fiche-item-name">' + esc(f.nom||'') + ' ' + recBadge + prestaBadge + '</div>' +
         (meta ? '<div class="fiche-item-meta">' + esc(meta) + '</div>' : '') +
       '</div>' +
       '<div class="fiche-item-actions">' +
@@ -3597,20 +3598,34 @@ function renderFichesList() {
 function openFicheForm(id) {
   var fiche = id ? _fiches.find(function(f){ return f.id===id; }) : null;
   var isNew = !fiche;
-  if (isNew) fiche = {id:'',nom:'',adresse:'',ville:'',telephone:'',email:'',categorie:'',recurrence:'Récurrent',notes:''};
+  if (isNew) fiche = {id:'',nom:'',adresse:'',ville:'',telephone:'',email:'',categorie:'',recurrence:'Récurrent',notes:'',ficheType:'fournisseur'};
   var safeId = (fiche.id||'').replace(/'/g,"\\'");
   document.getElementById('fiche-content').innerHTML =
-    '<h3 style="margin-bottom:16px">' + (isNew ? '➕ Nouvelle fiche fournisseur' : '✏️ Modifier — ' + esc(fiche.nom)) + '</h3>' +
+    '<h3 style="margin-bottom:16px">' + (isNew ? '➕ Nouvelle fiche' : '✏️ Modifier — ' + esc(fiche.nom)) + '</h3>' +
     '<div class="fiche-form">' +
-      '<div><label class="fiche-form-label">Nom du fournisseur *</label><input class="fiche-form-input" id="ff-nom" value="' + esc(fiche.nom) + '" placeholder="Metro, Grand Frais…"/></div>' +
+      '<div><label class="fiche-form-label">Nom *</label><input class="fiche-form-input" id="ff-nom" value="' + esc(fiche.nom) + '" placeholder="Metro, Studio Dupont…"/></div>' +
+      '<div><label class="fiche-form-label">Type</label><select class="fiche-form-input" id="ff-type" onchange="onFicheTypeChange()"><option value="fournisseur"' + ((fiche.ficheType||'fournisseur')==='fournisseur'?' selected':'') + '>🏢 Fournisseur</option><option value="prestataire"' + (fiche.ficheType==='prestataire'?' selected':'') + '>🤝 Prestataire / Freelance</option></select></div>' +
       '<div><label class="fiche-form-label">Catégorie</label><input class="fiche-form-input" id="ff-cat" value="' + esc(fiche.categorie) + '" placeholder="Alimentaire, Services…"/></div>' +
+      '<div><label class="fiche-form-label">Récurrence</label><select class="fiche-form-input" id="ff-rec"><option value="Récurrent"' + (fiche.recurrence==='Récurrent'?' selected':'') + '>Récurrent (mensuel)</option><option value="Ponctuel"' + (fiche.recurrence==='Ponctuel'?' selected':'') + '>Ponctuel</option><option value="Mixte"' + (fiche.recurrence==='Mixte'?' selected':'') + '>Mixte</option></select></div>' +
       '<div><label class="fiche-form-label">Téléphone</label><input class="fiche-form-input" id="ff-tel" value="' + esc(fiche.telephone) + '" placeholder="0X XX XX XX XX"/></div>' +
       '<div><label class="fiche-form-label">Email</label><input class="fiche-form-input" id="ff-email" value="' + esc(fiche.email) + '" placeholder="contact@fournisseur.fr"/></div>' +
       '<div><label class="fiche-form-label">Adresse</label><input class="fiche-form-input" id="ff-adresse" value="' + esc(fiche.adresse) + '" placeholder="Rue, numéro…"/></div>' +
       '<div><label class="fiche-form-label">Ville</label><input class="fiche-form-input" id="ff-ville" value="' + esc(fiche.ville) + '" placeholder="Paris…"/></div>' +
-      '<div><label class="fiche-form-label">Récurrence</label><select class="fiche-form-input" id="ff-rec"><option value="Récurrent"' + (fiche.recurrence==='Récurrent'?' selected':'') + '>Récurrent (mensuel)</option><option value="Ponctuel"' + (fiche.recurrence==='Ponctuel'?' selected':'') + '>Ponctuel</option><option value="Mixte"' + (fiche.recurrence==='Mixte'?' selected':'') + '>Mixte</option></select></div>' +
-      '<div class="full"><label class="fiche-form-label">Notes (conditions, délais, contact dédié…)</label><textarea class="fiche-form-input" id="ff-notes" rows="3" style="resize:vertical">' + esc(fiche.notes) + '</textarea></div>' +
     '</div>' +
+    // Bloc prestataire (conditionnel)
+    '<div id="ff-presta-bloc" style="display:' + (fiche.ficheType==='prestataire'?'block':'none') + ';margin-bottom:16px;padding:14px 16px;background:#fce7f3;border:1.5px solid #fbcfe8;border-radius:10px">' +
+      '<div style="font-size:12px;font-weight:700;color:#9d174d;margin-bottom:10px">🤝 Infos prestataire</div>' +
+      '<div class="fiche-form">' +
+        '<div><label class="fiche-form-label">SIRET</label><input class="fiche-form-input" id="ff-siret" value="' + esc(fiche.siret||'') + '" placeholder="123 456 789 00012" maxlength="17"/></div>' +
+        '<div><label class="fiche-form-label">Société / Nom commercial</label><input class="fiche-form-input" id="ff-societe" value="' + esc(fiche.societe||'') + '" placeholder="Ex : Studio Dupont"/></div>' +
+        '<div><label class="fiche-form-label">Taux horaire (€ HT/h)</label><input class="fiche-form-input" id="ff-tauxh" type="text" inputmode="decimal" value="' + esc(fiche.tauxHoraire||'') + '" placeholder="Ex : 45"/></div>' +
+        '<div><label class="fiche-form-label">Commission / % sur CA</label><input class="fiche-form-input" id="ff-commission" type="text" inputmode="decimal" value="' + esc(fiche.commission||'') + '" placeholder="Ex : 10%"/></div>' +
+        '<div><label class="fiche-form-label">Fréquence facturation</label><select class="fiche-form-input" id="ff-freqfact"><option value="mensuel"' + ((fiche.freqFacturation||'mensuel')==='mensuel'?' selected':'') + '>Mensuel</option><option value="trimestriel"' + (fiche.freqFacturation==='trimestriel'?' selected':'') + '>Trimestriel</option><option value="ponctuel"' + (fiche.freqFacturation==='ponctuel'?' selected':'') + '>Ponctuel / à la mission</option></select></div>' +
+        '<div class="full"><label class="fiche-form-label">Mission / Description</label><input class="fiche-form-input" id="ff-mission" value="' + esc(fiche.mission||'') + '" placeholder="Ex : Community management, livraisons…"/></div>' +
+      '</div>' +
+      '<div style="margin-top:8px;font-size:10px;color:#9d174d;line-height:1.4">💡 Un prestataire est un fournisseur de service externe — pas de fiche de paie. Pensez au contrat de prestation signé.</div>' +
+    '</div>' +
+    '<div><label class="fiche-form-label">Notes (conditions, délais, contact dédié…)</label><textarea class="fiche-form-input" id="ff-notes" rows="3" style="resize:vertical;width:100%;margin-bottom:16px">' + esc(fiche.notes) + '</textarea></div>' +
     '<div class="modal-actions">' +
       '<button class="btn btn-outline" onclick="closeFicheModal()">Annuler</button>' +
       (!isNew ? '<button class="btn btn-outline" onclick="openFicheDetail(\'' + safeId + '\')">← Stats</button>' : '') +
@@ -3626,6 +3641,7 @@ async function saveFicheForm(id) {
   var fiche = {
     id: id || ('f_' + Date.now()),
     nom: nom,
+    ficheType:  document.getElementById('ff-type').value || 'fournisseur',
     categorie:  (document.getElementById('ff-cat').value||'').trim(),
     telephone:  (document.getElementById('ff-tel').value||'').trim(),
     email:      (document.getElementById('ff-email').value||'').trim(),
@@ -3634,6 +3650,15 @@ async function saveFicheForm(id) {
     recurrence: document.getElementById('ff-rec').value,
     notes:      (document.getElementById('ff-notes').value||'').trim()
   };
+  // Champs prestataire
+  if (fiche.ficheType === 'prestataire') {
+    fiche.siret          = (document.getElementById('ff-siret').value||'').trim();
+    fiche.societe        = (document.getElementById('ff-societe').value||'').trim();
+    fiche.tauxHoraire    = (document.getElementById('ff-tauxh').value||'').trim();
+    fiche.commission     = (document.getElementById('ff-commission').value||'').trim();
+    fiche.freqFacturation= document.getElementById('ff-freqfact').value;
+    fiche.mission        = (document.getElementById('ff-mission').value||'').trim();
+  }
   if (id) {
     var idx = _fiches.findIndex(function(f){ return f.id===id; });
     if (idx >= 0) _fiches[idx] = fiche; else _fiches.push(fiche);
@@ -3676,15 +3701,25 @@ async function openFicheDetail(id) {
   if (!fiche) return;
   var safeId = id.replace(/'/g,"\\'");
   var infoItems = [];
+  if (fiche.ficheType==='prestataire') infoItems.push({l:'Type', v:'<span style="background:#fce7f3;color:#9d174d;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700">🤝 Prestataire</span>'});
   if (fiche.categorie)            infoItems.push({l:'Catégorie', v:esc(fiche.categorie)});
   if (fiche.recurrence)           infoItems.push({l:'Récurrence', v:'<span class="fiche-badge ' + (fiche.recurrence==='Récurrent'?'recurrent':'ponctuel') + '">' + esc(fiche.recurrence) + '</span>'});
   if (fiche.telephone)            infoItems.push({l:'Téléphone', v:'<a href="tel:' + esc(fiche.telephone) + '" style="color:var(--blue-main)">' + esc(fiche.telephone) + '</a>'});
   if (fiche.email)                infoItems.push({l:'Email', v:'<a href="mailto:' + esc(fiche.email) + '" style="color:var(--blue-main)">' + esc(fiche.email) + '</a>'});
   if (fiche.adresse||fiche.ville) infoItems.push({l:'Adresse', v:esc([fiche.adresse,fiche.ville].filter(Boolean).join(', '))});
+  // Prestataire
+  if (fiche.ficheType==='prestataire') {
+    if (fiche.societe)        infoItems.push({l:'Société', v:esc(fiche.societe)});
+    if (fiche.siret)          infoItems.push({l:'SIRET', v:'<span style="font-family:monospace;letter-spacing:1px">' + esc(fiche.siret) + '</span>'});
+    if (fiche.tauxHoraire)    infoItems.push({l:'Taux horaire', v:'<b>' + esc(fiche.tauxHoraire) + ' €/h</b>'});
+    if (fiche.commission)     infoItems.push({l:'Commission / % CA', v:'<b>' + esc(fiche.commission) + '</b>'});
+    if (fiche.freqFacturation) infoItems.push({l:'Fact.', v:esc({mensuel:'Mensuel',trimestriel:'Trimestriel',ponctuel:'Ponctuel'}[fiche.freqFacturation]||fiche.freqFacturation)});
+    if (fiche.mission)        infoItems.push({l:'Mission', v:esc(fiche.mission)});
+  }
 
   document.getElementById('fiche-content').innerHTML =
     '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">' +
-      '<h3 style="margin:0">🏢 ' + esc(fiche.nom) + '</h3>' +
+      '<h3 style="margin:0">' + (fiche.ficheType==='prestataire'?'🤝':'🏢') + ' ' + esc(fiche.nom) + '</h3>' +
       '<button class="btn btn-outline btn-sm" onclick="openFicheForm(\'' + safeId + '\')">✏️ Modifier</button>' +
     '</div>' +
     (infoItems.length ? '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px;background:var(--bg);border-radius:10px;padding:12px">' +
@@ -3772,6 +3807,13 @@ function renderFicheStats(stats, fiche) {
 function closeFicheModal() {
   document.getElementById('ficheModal').style.display = 'none';
 }
+
+function onFicheTypeChange() {
+  var type = document.getElementById('ff-type')?.value || 'fournisseur';
+  var bloc = document.getElementById('ff-presta-bloc');
+  if (bloc) bloc.style.display = type === 'prestataire' ? 'block' : 'none';
+}
+window.onFicheTypeChange = onFicheTypeChange;
 
 document.addEventListener('DOMContentLoaded', function() {
   var _checkFb2 = setInterval(function() {
