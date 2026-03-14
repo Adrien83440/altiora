@@ -688,7 +688,7 @@ function aggregateKeys(keys){
   var _now=new Date();
   var nowKey=_now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0');
 
-  var T={caHT:0,caJ:0,caFP:0,caHT055:0,caHT10:0,caHT20:0,rentrees:0,fixe:0,variable:0,credit:0,leasing:0,masseSal:0,charges:0,resultat:0,tvaCollectee:0,tvaDed:0,tvaDue:0,moisData:0,prevCharges:0,prevCA:0};
+  var T={caHT:0,caJ:0,caFP:0,caHT055:0,caHT10:0,caHT20:0,rentrees:0,fixe:0,variable:0,credit:0,leasing:0,masseSal:0,charges:0,resultat:0,tvaCollectee:0,tvaDed:0,tvaDue:0,moisData:0,moisCA:0,prevCharges:0,prevCA:0};
   var monthly=[];
   var chargesMap={};
   keys.forEach(function(k){
@@ -698,6 +698,7 @@ function aggregateKeys(keys){
     monthly.push({key:k,lbl:MONTHS_SHORT[parseInt(k.slice(5,7))-1],yr:k.slice(0,4),m:parseInt(k.slice(5,7))-1,...r});
     if(d){
       T.moisData++;
+      if(!isFuture && r.caHT > 0) T.moisCA++;
       // Top charges : seulement les mois réels (passé + mois courant)
       if(!isFuture){
         (d.chargesFixe||[]).concat(d.chargesVar||[]).concat(d.leasing||[]).forEach(function(c){
@@ -754,8 +755,7 @@ function renderRapport(){
   var resMens=T.moisData>0?T.resultat/T.moisData:0;
   var txFixe=T.caHT>0?T.fixe/T.caHT*100:0;
   var txVar=T.caHT>0?T.variable/T.caHT*100:0;
-  var fixeMens=T.moisData>0?T.fixe/T.moisData:0; // charges fixes moyennes par mois
-  var seuil=T.moisData>0&&txVar<100?fixeMens/(1-txVar/100)||0:0; // seuil de rentabilité mensuel
+  var fixeMens=T.moisData>0?T.fixe/T.moisData:0;
 
   var dettesActives=_dettesData.filter(function(d){return d.statut!=='soldee'&&d.statut!=='soldé';});
   var totDettes=dettesActives.reduce(function(s,d){return s+(parseFloat(d.montantRestant||d.montant)||0);},0);
@@ -770,15 +770,20 @@ function renderRapport(){
   var chargesFin = T.credit + T.leasing;
   var txChargesFin = T.caHT>0 ? chargesFin/T.caHT*100 : 0;
   var resCourant = ebe - chargesFin;
-  var caf = T.resultat; // simplifié (hors dotations aux amortissements)
-  var pointMortJours = mcv>0 ? ((T.fixe+(T.masseSal||0))/mcv)*(T.moisData*30) : 0;
+  var caf = T.resultat;
+  // Seuils — formules identiques au Dashboard et Suivi CA
   var seuilAnnuel = txMCV>0 ? (T.fixe+(T.masseSal||0))/(txMCV/100) : 0;
   var seuilFinAnnuel = txMCV>0 ? (T.fixe+(T.masseSal||0)+chargesFin)/(txMCV/100) : 0;
-  var seuilFinMens = seuilFinAnnuel>0&&T.moisData>0 ? seuilFinAnnuel/12 : 0;
+  var seuil = seuilAnnuel>0 ? seuilAnnuel/12 : 0; // seuil éco mensuel = annuel/12
+  var seuilFinMens = seuilFinAnnuel>0 ? seuilFinAnnuel/12 : 0;
+  // Point mort — basé sur mois avec CA réel (même logique que Dashboard)
+  var _caJourMoy = T.moisCA>0 ? T.caHT/(T.moisCA*30) : 0;
+  var pointMortJours = _caJourMoy>0 ? seuilAnnuel/_caJourMoy : 0;
+  var pmFinJ = _caJourMoy>0 ? seuilFinAnnuel/_caJourMoy : 0;
+  // Marge de sécurité
   var margeSecuEco = T.caHT - seuilAnnuel;
   var margeSecuPct = T.caHT>0 ? margeSecuEco/T.caHT*100 : 0;
   var margeSecuFin = T.caHT - seuilFinAnnuel;
-  var pmFinJ = mcv>0 ? ((T.fixe+(T.masseSal||0)+chargesFin)/mcv)*(T.moisData*30) : 0;
   var capaciteRemb = ebe>0&&totDettes>0 ? totDettes/ebe : 0;
   // N-1 SIG
   var mcvN1 = TN1.caHT - TN1.variable;
@@ -857,7 +862,7 @@ function renderRapport(){
   html+=kpi('orange','📦','Dont charges var.',fmt(T.variable),fmtPct(txVar,true)+' du CA');
   if(moisRestants>0)html+=kpi('purple','🔮','Projection fin '+year,fmt(projResultat),projCA>0?'CA proj. '+fmt(projCA):moisRestants+' mois restants',projResultat>=0?'positive':'negative');
   else html+=kpi('teal','🏆','Mois bénéficiaires',moisBene+'/'+T.moisData,moisBene===T.moisData?'✅ Tous les mois':moisBene<T.moisData/2?'⚠️ Moins de la moitié':'✅ Majorité positive');
-  html+=kpi('teal','💡','Seuil éco. /mois',T.moisData>0&&txVar<100?fmt(seuil)+'/mois':'—','Annuel : '+(seuilAnnuel>0?fmt(seuilAnnuel):'—'));
+  html+=kpi('teal','💡','Seuil éco. /mois',seuil>0?fmt(seuil)+'/mois':'—','Annuel : '+(seuilAnnuel>0?fmt(seuilAnnuel):'—'));
   html+='</div>';
 
   // SECTION SEUIL DE RENTABILITÉ — Comparaison Éco/Fin
@@ -912,7 +917,7 @@ function renderRapport(){
   html+=kpi('blue','📊','EBE',fmt(ebe),fmtPct(txEBE,true)+' du CA',ebe>=0?'positive':'negative');
   html+=kpi(txMCV>60?'green':txMCV>40?'orange':'red','📦','Marge coûts var.',fmt(mcv),fmtPct(txMCV,true)+' du CA');
   html+=kpi(caf>=0?'green':'red','💰','CAF simplifiée',fmt(caf),'Hors amortissements',caf>=0?'positive':'negative');
-  html+=kpi('purple','⏱','Point mort',pointMortJours>0?Math.round(pointMortJours)+' jours':'—',pointMortJours>0&&pointMortJours<T.moisData*30*0.8?'✅ Atteint avec marge':'⚠️ Seuil tardif');
+  html+=kpi('purple','⏱','Point mort',pointMortJours>0?Math.round(pointMortJours)+' jours':'—',pointMortJours>0&&pointMortJours<T.moisCA*30*0.8?'✅ Atteint avec marge':'⚠️ Seuil tardif');
   if(chargesFin>0) html+=kpi('orange','🏗','Charges financières',fmt(chargesFin),fmtPct(txChargesFin,true)+' du CA');
   if(totDettes>0&&ebe>0) html+=kpi(capaciteRemb>4?'red':capaciteRemb>3?'orange':'green','🔄','Capacité remboursement',capaciteRemb.toFixed(1)+' ans','Dettes / EBE (idéal < 3)',capaciteRemb>4?'negative':capaciteRemb<=3?'positive':'');
   html+='</div>';
@@ -1033,7 +1038,7 @@ function renderRapport(){
     rcell('Marge sur coûts var.',fmtPct(txMCV,true),txMCV>60?'good':txMCV>40?'warn':'bad','MCV / CA',Math.max(txMCV,0),100)+
     rcell('Taux de charges',fmtPct(txCharges,true),txCharges>90?'bad':txCharges>75?'warn':'good','Charges / CA',txCharges,100)+
     rcell('Marge nette',fmtPct(margeN<0?0:margeN,true),margeN<0?'bad':margeN<5?'warn':'good','Résultat / CA',Math.max(margeN,0),30)+
-    rcell('Point mort',pointMortJours>0?Math.round(pointMortJours)+' jours':'—',pointMortJours>0?(pointMortJours<T.moisData*30*0.8?'good':'warn'):'','Nb jours pour couvrir les fixes',Math.min(pointMortJours,365),365)+
+    rcell('Point mort',pointMortJours>0?Math.round(pointMortJours)+' jours':'—',pointMortJours>0?(pointMortJours<T.moisCA*30*0.8?'good':'warn'):'','Nb jours pour couvrir les fixes',Math.min(pointMortJours,365),365)+
     rcell('Seuil de rentabilité',seuilAnnuel>0?fmt(seuilAnnuel)+' /an':'—',seuilAnnuel>0&&T.caHT>seuilAnnuel?'good':'warn','Seuil économique annuel',0,0)+
     rcell('Seuil financier',seuilFinAnnuel>0?fmt(seuilFinAnnuel)+' /an':'—',seuilFinAnnuel>0&&T.caHT>seuilFinAnnuel?'good':'warn','Inclut crédits & leasings',0,0)+
     rcell('Marge de sécurité',margeSecuEco!==0?(margeSecuEco>=0?'+':'')+margeSecuPct.toFixed(1)+'%':'—',margeSecuPct>20?'good':margeSecuPct>10?'warn':'bad','Écart CA vs seuil éco.',0,0)+
@@ -1042,9 +1047,9 @@ function renderRapport(){
     (totDettes>0&&ebe>0?rcell('Capacité remboursement',capaciteRemb.toFixed(1)+' ans',capaciteRemb>4?'bad':capaciteRemb>3?'warn':'good','Dettes / EBE (idéal < 3)',Math.min(capaciteRemb,6),6):'')+
     rcell('Endettement / CA',T.caHT>0?fmtPct(ratioEndett,true):'—',ratioEndett>150?'bad':ratioEndett>80?'warn':'good','Encours / CA annuel',Math.min(ratioEndett,200),200)+
     rcell('Mois bénéficiaires',moisBene+'/'+T.moisData,moisBene<T.moisData/2?'warn':'good','Sur les mois saisis',moisBene,T.moisData)+
-    rcell('Seuil rentab. / mois',T.moisData>0&&txVar<100?fmt(seuil)+'/mois':'—',seuil>0&&caMens>seuil?'good':'warn','Point mort éco. mensuel',0,0)+
+    rcell('Seuil rentab. / mois',seuil>0?fmt(seuil)+'/mois':'—',seuil>0&&caMens>seuil?'good':'warn','Point mort éco. mensuel',0,0)+
     rcell('Seuil fin. / mois',seuilFinMens>0?fmt(seuilFinMens)+'/mois':'—',seuilFinMens>0&&caMens>seuilFinMens?'good':'warn','Point mort fin. mensuel',0,0)+
-    rcell('Point mort financier',pmFinJ>0?Math.round(pmFinJ)+' jours':'—',pmFinJ>0&&pmFinJ<T.moisData*30*0.8?'good':'warn','Inclut charges financières',0,0)+
+    rcell('Point mort financier',pmFinJ>0?Math.round(pmFinJ)+' jours':'—',pmFinJ>0&&pmFinJ<T.moisCA*30*0.8?'good':'warn','Inclut charges financières',0,0)+
     '</div></div>';
   tabResume+='</div>'; // fin bilan-grid
 
@@ -1184,7 +1189,7 @@ function renderRapport(){
       caAccelere?'S1 moy. : '+fmt(caAccelere.first)+'/mois':'Moins de 4 mois enregistrés');
 
     tabResume+=factCard('📊','Seuil économique',
-      T.moisData>0&&txVar<100?fmt(seuil)+'/mois':'—',
+      seuil>0?fmt(seuil)+'/mois':'—',
       caMens>0&&seuil>0?(caMens>seuil?'✅ CA moy. au-dessus du seuil éco.':'⚠️ CA moy. sous le seuil éco.'):'',
       caMens>0&&seuil>0?(caMens>seuil?'green':'red'):'gray',
       'Annuel : '+(seuilAnnuel>0?fmt(seuilAnnuel):'—'));
@@ -1251,7 +1256,7 @@ function renderRapport(){
       else if(capaciteRemb<=3){analyse.push({type:'good',titre:'Bonne capacité de remboursement',texte:'Ratio dettes/EBE de <strong>'+capaciteRemb.toFixed(1)+' an'+(capaciteRemb>=2?'s':'')+'</strong>. L\'EBE permet de rembourser les dettes dans un délai raisonnable.'});}
     }
     if(pointMortJours>0){
-      if(pointMortJours<T.moisData*30*0.8){analyse.push({type:'good',titre:'Point mort atteint en '+Math.round(pointMortJours)+' jours',texte:'Le seuil de rentabilité est atteint rapidement, laissant une marge confortable pour générer du bénéfice sur le reste de la période.'});}
+      if(pointMortJours<T.moisCA*30*0.8){analyse.push({type:'good',titre:'Point mort atteint en '+Math.round(pointMortJours)+' jours',texte:'Le seuil de rentabilité est atteint rapidement, laissant une marge confortable pour générer du bénéfice sur le reste de la période.'});}
       else{analyse.push({type:'warn',titre:'Point mort tardif ('+Math.round(pointMortJours)+' jours)',texte:'Le seuil de rentabilité est atteint tardivement dans la période. Réduire les charges fixes permettrait d\'atteindre l\'équilibre plus tôt.'});}
     }
 
@@ -1865,8 +1870,12 @@ function exportPDF(){
     var txChFin = T.caHT>0 ? chFin/T.caHT*100 : 0;
     var resCourant = ebe - chFin;
     var caf = T.resultat;
-    var pointMortJ = mcv>0 ? ((T.fixe+(T.masseSal||0))/mcv)*(T.moisData*30) : 0;
+    // Seuils et point mort — mêmes formules que Dashboard/Suivi CA
     var seuilAn = txMCV>0 ? (T.fixe+(T.masseSal||0))/(txMCV/100) : 0;
+    var seuilFinAn = txMCV>0 ? (T.fixe+(T.masseSal||0)+chFin)/(txMCV/100) : 0;
+    var _pdfCaJourMoy = T.moisCA>0 ? T.caHT/(T.moisCA*30) : 0;
+    var pointMortJ = _pdfCaJourMoy>0 ? seuilAn/_pdfCaJourMoy : 0;
+    var pmFinJpdf = _pdfCaJourMoy>0 ? seuilFinAn/_pdfCaJourMoy : 0;
     var capRemb = ebe>0&&totD>0 ? totD/ebe : 0;
     var mcvN1 = TN1.caHT - TN1.variable;
     var ebeN1 = TN1.caHT + TN1.rentrees - TN1.fixe - TN1.variable - (TN1.masseSal||0);
@@ -2057,7 +2066,7 @@ function exportPDF(){
       [fmtP(ebe),'EBE',fmtPctP(txEBE,true)+' du CA', ebe>=0?cGR:cRD],
       [fmtPctP(txMCV,true),'Marge couts var.','MCV / CA', txMCV>60?cGR:cOR],
       [fmtP(caf),'CAF simplifiee','Hors amortissements', caf>=0?cGR:cRD],
-      [pointMortJ>0?Math.round(pointMortJ)+' j':'-','Point mort','Jours pour couvrir fixes', pointMortJ>0&&pointMortJ<T.moisData*30*0.8?cGR:cOR],
+      [pointMortJ>0?Math.round(pointMortJ)+' j':'-','Point mort','Jours pour couvrir fixes', pointMortJ>0&&pointMortJ<T.moisCA*30*0.8?cGR:cOR],
       [chFin>0?fmtP(chFin):'-','Charges fin.',fmtPctP(txChFin,true)+' du CA', cOR],
       [totD>0&&ebe>0?capRemb.toFixed(1)+' ans':'-','Capac. remb.','Dettes / EBE', capRemb>4?cRD:capRemb>3?cOR:cGR],
     ];
@@ -2183,7 +2192,7 @@ function exportPDF(){
     var iw = (CW-9)/4;
     var indicators = [
       {lbl:'Taux EBE',        val:fmtPctP(txEBE,true),  sub:'EBE / CA',                  cl:txEBE>15?cGR:txEBE>5?cOR:cRD, bg:txEBE>15?cLGR:txEBE>5?cLOR:cLRD},
-      {lbl:'Point mort',       val:pointMortJ>0?Math.round(pointMortJ)+' jours':'-', sub:'Nb jours pour couvrir fixes',   cl:pointMortJ>0&&pointMortJ<T.moisData*30*0.8?cGR:cOR, bg:cGY},
+      {lbl:'Point mort',       val:pointMortJ>0?Math.round(pointMortJ)+' jours':'-', sub:'Nb jours pour couvrir fixes',   cl:pointMortJ>0&&pointMortJ<T.moisCA*30*0.8?cGR:cOR, bg:cGY},
       {lbl:'CAF simplifiee',   val:fmtP(caf),            sub:'Hors amortissements',        cl:caf>=0?cGR:cRD,               bg:caf>=0?cLGR:cLRD},
       {lbl:totD>0&&ebe>0?'Capacite remboursement':'Seuil rentabilite /an', val:totD>0&&ebe>0?capRemb.toFixed(1)+' ans':seuilAn>0?fmtP(seuilAn):'-', sub:totD>0&&ebe>0?'Dettes / EBE (ideal < 3 ans)':'CA min. annuel',  cl:totD>0&&ebe>0?(capRemb>4?cRD:capRemb>3?cOR:cGR):cBL, bg:cGY},
     ];
@@ -2375,7 +2384,7 @@ function exportPDF(){
       else if(capRemb>3)analyses.push({cl:cOR,t:'Capacite de remboursement a surveiller : '+capRemb.toFixed(1)+' ans (dettes/EBE).'});
       else analyses.push({cl:cGR,t:'Bonne capacite de remboursement : '+capRemb.toFixed(1)+' ans. L\'EBE couvre largement les dettes.'});
     }
-    if(pointMortJ>0)analyses.push({cl:pointMortJ<T.moisData*30*0.8?cGR:cOR,t:'Point mort atteint en '+Math.round(pointMortJ)+' jours. '+(pointMortJ<T.moisData*30*0.8?'Le seuil de rentabilite est atteint avec de la marge.':'Le seuil de rentabilite est atteint tardivement. Reduire les charges fixes.')});
+    if(pointMortJ>0)analyses.push({cl:pointMortJ<T.moisCA*30*0.8?cGR:cOR,t:'Point mort atteint en '+Math.round(pointMortJ)+' jours. '+(pointMortJ<T.moisCA*30*0.8?'Le seuil de rentabilite est atteint avec de la marge.':'Le seuil de rentabilite est atteint tardivement. Reduire les charges fixes.')});
 
     var analHeight = 24 + analyses.length * 9;
     sectionTitle('ANALYSE DE LA SITUATION', analHeight);
