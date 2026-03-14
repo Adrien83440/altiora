@@ -773,6 +773,12 @@ function renderRapport(){
   var caf = T.resultat; // simplifié (hors dotations aux amortissements)
   var pointMortJours = mcv>0 ? ((T.fixe+(T.masseSal||0))/mcv)*(T.moisData*30) : 0;
   var seuilAnnuel = txMCV>0 ? (T.fixe+(T.masseSal||0))/(txMCV/100) : 0;
+  var seuilFinAnnuel = txMCV>0 ? (T.fixe+(T.masseSal||0)+chargesFin)/(txMCV/100) : 0;
+  var seuilFinMens = seuilFinAnnuel>0&&T.moisData>0 ? seuilFinAnnuel/12 : 0;
+  var margeSecuEco = T.caHT - seuilAnnuel;
+  var margeSecuPct = T.caHT>0 ? margeSecuEco/T.caHT*100 : 0;
+  var margeSecuFin = T.caHT - seuilFinAnnuel;
+  var pmFinJ = mcv>0 ? ((T.fixe+(T.masseSal||0)+chargesFin)/mcv)*(T.moisData*30) : 0;
   var capaciteRemb = ebe>0&&totDettes>0 ? totDettes/ebe : 0;
   // N-1 SIG
   var mcvN1 = TN1.caHT - TN1.variable;
@@ -851,8 +857,55 @@ function renderRapport(){
   html+=kpi('orange','📦','Dont charges var.',fmt(T.variable),fmtPct(txVar,true)+' du CA');
   if(moisRestants>0)html+=kpi('purple','🔮','Projection fin '+year,fmt(projResultat),projCA>0?'CA proj. '+fmt(projCA):moisRestants+' mois restants',projResultat>=0?'positive':'negative');
   else html+=kpi('teal','🏆','Mois bénéficiaires',moisBene+'/'+T.moisData,moisBene===T.moisData?'✅ Tous les mois':moisBene<T.moisData/2?'⚠️ Moins de la moitié':'✅ Majorité positive');
-  html+=kpi('teal','💡','Seuil de rentabilité',T.moisData>0&&txVar<100?fmt(seuil)+'/mois':'—','Point mort estimé mensuel');
+  html+=kpi('teal','💡','Seuil éco. /mois',T.moisData>0&&txVar<100?fmt(seuil)+'/mois':'—','Annuel : '+(seuilAnnuel>0?fmt(seuilAnnuel):'—'));
   html+='</div>';
+
+  // SECTION SEUIL DE RENTABILITÉ — Comparaison Éco/Fin
+  if(seuilAnnuel>0){
+    var _sgMax=Math.max(T.caHT,seuilFinAnnuel)*1.15;
+    var _sgCA=_sgMax>0?Math.min(T.caHT/_sgMax*100,100):0;
+    var _sgEco=_sgMax>0?Math.min(seuilAnnuel/_sgMax*100,100):0;
+    var _sgFin=_sgMax>0?Math.min(seuilFinAnnuel/_sgMax*100,100):0;
+    var _sgColor=T.caHT>=seuilFinAnnuel?'#059669':T.caHT>=seuilAnnuel?'#f59e0b':'#dc2626';
+    html+='<div style="background:white;border:1px solid #e2e8f0;border-radius:14px;padding:20px 24px;margin-bottom:20px">';
+    html+='<div style="font-size:13px;font-weight:700;margin-bottom:16px;display:flex;align-items:center;gap:8px">💡 Seuil de rentabilité — Économique vs Financier</div>';
+    // KPIs row
+    html+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px">';
+    html+='<div style="padding:14px;border-radius:10px;background:'+(margeSecuEco>=0?'#f0fdf4':'#fef2f2')+';border:1px solid '+(margeSecuEco>=0?'#bbf7d0':'#fecaca')+'"><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:3px">Seuil éco. /mois</div><div style="font-size:18px;font-weight:800;color:'+(margeSecuEco>=0?'#059669':'#dc2626')+'">'+fmt(seuil)+'</div><div style="font-size:10px;color:#6b7280;margin-top:2px">Annuel : '+fmt(seuilAnnuel)+'</div></div>';
+    html+='<div style="padding:14px;border-radius:10px;background:#f5f3ff;border:1px solid #ddd6fe"><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:3px">Seuil fin. /mois</div><div style="font-size:18px;font-weight:800;color:#7c3aed">'+fmt(seuilFinMens)+'</div><div style="font-size:10px;color:#6b7280;margin-top:2px">Annuel : '+fmt(seuilFinAnnuel)+'</div></div>';
+    html+='<div style="padding:14px;border-radius:10px;background:'+(margeSecuEco>=0?'#f0fdf4':'#fef2f2')+';border:1px solid '+(margeSecuEco>=0?'#bbf7d0':'#fecaca')+'"><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:3px">Marge sécurité</div><div style="font-size:18px;font-weight:800;color:'+(margeSecuEco>=0?'#059669':'#dc2626')+'">'+(margeSecuEco>=0?'+':'')+margeSecuPct.toFixed(1)+'%</div><div style="font-size:10px;color:#6b7280;margin-top:2px">'+(margeSecuEco>=0?'+':'')+fmt(margeSecuEco)+'</div></div>';
+    html+='<div style="padding:14px;border-radius:10px;background:#eff6ff;border:1px solid #bfdbfe"><div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;margin-bottom:3px">Point mort</div><div style="font-size:18px;font-weight:800;color:#1d4ed8">'+(pointMortJours>0?Math.round(pointMortJours)+' j':'—')+'</div><div style="font-size:10px;color:#6b7280;margin-top:2px">Financier : '+(pmFinJ>0?Math.round(pmFinJ)+' j':'—')+'</div></div>';
+    html+='</div>';
+    // Jauge
+    html+='<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;font-size:10px;color:#6b7280;margin-bottom:4px"><span>0 €</span><span>CA : <b style="color:#1a1f36">'+fmt(T.caHT)+'</b></span></div>';
+    html+='<div style="height:32px;background:#f1f5f9;border-radius:10px;overflow:hidden;position:relative">';
+    html+='<div style="height:100%;width:'+_sgCA+'%;background:linear-gradient(90deg,'+_sgColor+'cc,'+_sgColor+');border-radius:10px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;font-size:10px;font-weight:700;color:white">CA</div>';
+    html+='<div style="position:absolute;top:-3px;bottom:-3px;left:'+_sgEco+'%;width:3px;background:#059669;border-radius:2px"><div style="position:absolute;top:-16px;font-size:9px;font-weight:700;color:#059669;white-space:nowrap;transform:translateX(-50%)">Éco.</div></div>';
+    html+='<div style="position:absolute;top:-3px;bottom:-3px;left:'+_sgFin+'%;width:3px;background:#7c3aed;border-radius:2px"><div style="position:absolute;bottom:-16px;font-size:9px;font-weight:700;color:#7c3aed;white-space:nowrap;transform:translateX(-50%)">Fin.</div></div>';
+    html+='</div>';
+    html+='<div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10px"><div style="display:flex;gap:12px"><span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:3px;background:#059669;border-radius:2px;display:inline-block"></span>Éco. '+fmt(seuilAnnuel)+'</span><span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:3px;background:#7c3aed;border-radius:2px;display:inline-block"></span>Fin. '+fmt(seuilFinAnnuel)+'</span></div><span style="font-weight:700;color:'+_sgColor+'">'+(T.caHT>=seuilFinAnnuel?'✅ Seuils dépassés':T.caHT>=seuilAnnuel?'⚠️ Éco. OK, financier non':'❌ Non atteints')+'</span></div></div>';
+    // Comparaison éco vs fin
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px">';
+    html+='<div style="padding:14px;border-radius:10px;background:#f0fdf4;border:1px solid #bbf7d0"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><div style="width:32px;height:32px;background:#dcfce7;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px">📊</div><div style="font-size:12px;font-weight:700;color:#059669">Seuil Économique</div></div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #f5f5f5"><span>Charges fixes</span><span style="font-weight:700">'+fmt(T.fixe)+'</span></div>';
+    if((T.masseSal||0)>0)html+='<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #f5f5f5"><span>Masse salariale</span><span style="font-weight:700">'+fmt(T.masseSal)+'</span></div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #f5f5f5"><span>Taux MCV</span><span style="font-weight:700">'+txMCV.toFixed(1)+'%</span></div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-top:2px solid #bbf7d0;font-weight:700"><span>Seuil annuel</span><span style="color:#059669;font-size:14px">'+fmt(seuilAnnuel)+'</span></div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0"><span>Point mort</span><span style="font-weight:700">'+(pointMortJours>0?Math.round(pointMortJours)+' jours':'—')+'</span></div></div>';
+    html+='<div style="padding:14px;border-radius:10px;background:#f5f3ff;border:1px solid #ddd6fe"><div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><div style="width:32px;height:32px;background:#ede9fe;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px">🏦</div><div style="font-size:12px;font-weight:700;color:#7c3aed">Seuil Financier</div></div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #f5f5f5"><span>Charges fixes</span><span style="font-weight:700">'+fmt(T.fixe)+'</span></div>';
+    if((T.masseSal||0)>0)html+='<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #f5f5f5"><span>Masse salariale</span><span style="font-weight:700">'+fmt(T.masseSal)+'</span></div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #f5f5f5"><span>Crédits + Leasings</span><span style="font-weight:700">'+fmt(chargesFin)+'</span></div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #f5f5f5"><span>Taux MCV</span><span style="font-weight:700">'+txMCV.toFixed(1)+'%</span></div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:12px;padding:6px 0;border-top:2px solid #ddd6fe;font-weight:700"><span>Seuil annuel</span><span style="color:#7c3aed;font-size:14px">'+fmt(seuilFinAnnuel)+'</span></div>';
+    html+='<div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0"><span>Point mort</span><span style="font-weight:700">'+(pmFinJ>0?Math.round(pmFinJ)+' jours':'—')+'</span></div></div>';
+    html+='</div>';
+    // Alerte
+    html+='<div style="margin-top:12px;padding:10px 14px;background:'+(margeSecuEco>=0?'#f0fdf4':'#fef2f2')+';border:1px solid '+(margeSecuEco>=0?'#bbf7d0':'#fecaca')+';border-radius:8px;font-size:11px;color:'+(margeSecuEco>=0?'#166534':'#991b1b')+'">';
+    html+=(margeSecuEco>=0?'💡':'⚠️')+' <b>Marge de sécurité : '+(margeSecuEco>=0?'+':'')+margeSecuPct.toFixed(1)+'%</b> — '+(margeSecuEco>=0?'CA supérieur au seuil éco. de <b>'+fmt(margeSecuEco)+'</b>. '+(margeSecuPct>20?'Situation confortable.':margeSecuPct>10?'Marge correcte.':'Marge faible.'):'CA inférieur au seuil éco. de <b>'+fmt(Math.abs(margeSecuEco))+'</b>.');
+    if(margeSecuFin<0&&margeSecuEco>=0)html+=' Le seuil financier n\'est pas atteint (écart : '+fmt(Math.abs(margeSecuFin))+').';
+    html+='</div></div>';
+  }
 
   // KPIs LIGNE 3 — SIG
   html+='<div class="kpi-row-6">';
@@ -981,13 +1034,17 @@ function renderRapport(){
     rcell('Taux de charges',fmtPct(txCharges,true),txCharges>90?'bad':txCharges>75?'warn':'good','Charges / CA',txCharges,100)+
     rcell('Marge nette',fmtPct(margeN<0?0:margeN,true),margeN<0?'bad':margeN<5?'warn':'good','Résultat / CA',Math.max(margeN,0),30)+
     rcell('Point mort',pointMortJours>0?Math.round(pointMortJours)+' jours':'—',pointMortJours>0?(pointMortJours<T.moisData*30*0.8?'good':'warn'):'','Nb jours pour couvrir les fixes',Math.min(pointMortJours,365),365)+
-    rcell('Seuil de rentabilité',seuilAnnuel>0?fmt(seuilAnnuel)+' /an':'—',seuilAnnuel>0&&T.caHT>seuilAnnuel?'good':'warn','CA min. pour couvrir les fixes',0,0)+
+    rcell('Seuil de rentabilité',seuilAnnuel>0?fmt(seuilAnnuel)+' /an':'—',seuilAnnuel>0&&T.caHT>seuilAnnuel?'good':'warn','Seuil économique annuel',0,0)+
+    rcell('Seuil financier',seuilFinAnnuel>0?fmt(seuilFinAnnuel)+' /an':'—',seuilFinAnnuel>0&&T.caHT>seuilFinAnnuel?'good':'warn','Inclut crédits & leasings',0,0)+
+    rcell('Marge de sécurité',margeSecuEco!==0?(margeSecuEco>=0?'+':'')+margeSecuPct.toFixed(1)+'%':'—',margeSecuPct>20?'good':margeSecuPct>10?'warn':'bad','Écart CA vs seuil éco.',0,0)+
     rcell('CA mensuel moy.',fmt(caMens),'','Sur '+T.moisData+' mois',0,0)+
     (chargesFin>0?rcell('Charges fin. / CA',fmtPct(txChargesFin,true),txChargesFin>10?'bad':txChargesFin>5?'warn':'good','Poids financier',txChargesFin,15):'')+
     (totDettes>0&&ebe>0?rcell('Capacité remboursement',capaciteRemb.toFixed(1)+' ans',capaciteRemb>4?'bad':capaciteRemb>3?'warn':'good','Dettes / EBE (idéal < 3)',Math.min(capaciteRemb,6),6):'')+
     rcell('Endettement / CA',T.caHT>0?fmtPct(ratioEndett,true):'—',ratioEndett>150?'bad':ratioEndett>80?'warn':'good','Encours / CA annuel',Math.min(ratioEndett,200),200)+
     rcell('Mois bénéficiaires',moisBene+'/'+T.moisData,moisBene<T.moisData/2?'warn':'good','Sur les mois saisis',moisBene,T.moisData)+
-    rcell('Seuil rentab. / mois',T.moisData>0&&txVar<100?fmt(seuil)+'/mois':'—',seuil>0&&caMens>seuil?'good':'warn','Point mort mensuel',0,0)+
+    rcell('Seuil rentab. / mois',T.moisData>0&&txVar<100?fmt(seuil)+'/mois':'—',seuil>0&&caMens>seuil?'good':'warn','Point mort éco. mensuel',0,0)+
+    rcell('Seuil fin. / mois',seuilFinMens>0?fmt(seuilFinMens)+'/mois':'—',seuilFinMens>0&&caMens>seuilFinMens?'good':'warn','Point mort fin. mensuel',0,0)+
+    rcell('Point mort financier',pmFinJ>0?Math.round(pmFinJ)+' jours':'—',pmFinJ>0&&pmFinJ<T.moisData*30*0.8?'good':'warn','Inclut charges financières',0,0)+
     '</div></div>';
   tabResume+='</div>'; // fin bilan-grid
 
@@ -1126,11 +1183,17 @@ function renderRapport(){
       caAccelere?( caAccelere.pct>5?'green': caAccelere.pct<-5?'red':'orange'):'gray',
       caAccelere?'S1 moy. : '+fmt(caAccelere.first)+'/mois':'Moins de 4 mois enregistrés');
 
-    tabResume+=factCard('⚡','Seuil de rentabilité',
-      T.moisData>0&&txVar<100?fmt(T.fixe/(1-txVar/100)/T.moisData)+'/mois':'—',
-      caMens>0&&T.fixe/(1-txVar/100)/T.moisData>0?(caMens>T.fixe/(1-txVar/100)/T.moisData?'✅ CA moy. au-dessus du seuil':'⚠️ CA moy. sous le seuil'):'',
-      caMens>0&&T.moisData>0&&T.fixe/(1-txVar/100)/T.moisData>0?(caMens>T.fixe/(1-txVar/100)/T.moisData?'green':'red'):'gray',
-      'Point mort mensuel estimé');
+    tabResume+=factCard('📊','Seuil économique',
+      T.moisData>0&&txVar<100?fmt(seuil)+'/mois':'—',
+      caMens>0&&seuil>0?(caMens>seuil?'✅ CA moy. au-dessus du seuil éco.':'⚠️ CA moy. sous le seuil éco.'):'',
+      caMens>0&&seuil>0?(caMens>seuil?'green':'red'):'gray',
+      'Annuel : '+(seuilAnnuel>0?fmt(seuilAnnuel):'—'));
+
+    tabResume+=factCard('🏦','Seuil financier',
+      seuilFinMens>0?fmt(seuilFinMens)+'/mois':'—',
+      caMens>0&&seuilFinMens>0?(caMens>seuilFinMens?'✅ CA moy. au-dessus du seuil fin.':'⚠️ CA moy. sous le seuil fin.'):'',
+      caMens>0&&seuilFinMens>0?(caMens>seuilFinMens?'green':'red'):'gray',
+      'Annuel : '+(seuilFinAnnuel>0?fmt(seuilFinAnnuel):'—')+' · Inclut crédits');
 
     tabResume+='</div></div>';
   }
@@ -1488,7 +1551,8 @@ function renderRapport(){
   tabProj+=kpi('orange','💸','Charges projetées',fmt(projCharges),moisRestantsProj+' mois extrapolés');
   tabProj+=kpi(projResultat>=0?'green':'red','📊','Résultat projeté',fmt(projResultat),projCA>0?'Marge : '+fmtPct(projResultat/projCA*100,true):'',projResultat>=0?'positive':'negative');
   tabProj+=kpi('purple','📈','vs N-1 (CA)',TN1.caHT>0?fmt(projCA-TN1.caHT):'—',TN1.caHT>0?fmtPct((projCA-TN1.caHT)/TN1.caHT*100)+'':'');
-  tabProj+=kpi('teal','⚡','Seuil rentabilité annuel',T.moisData>0&&txVar<100?fmt(seuil*12)+'':' — ','CA annuel min. estimé');
+  tabProj+=kpi('teal','📊','Seuil éco. annuel',seuilAnnuel>0?fmt(seuilAnnuel):'—','CA min. (charges fixes'+(T.masseSal>0?' + sal.':'')+')');
+  tabProj+=kpi('purple','🏦','Seuil fin. annuel',seuilFinAnnuel>0?fmt(seuilFinAnnuel):'—','CA min. (+ crédits & leasings)');
   tabProj+='</div>';
 
   // Tableau projection mois par mois

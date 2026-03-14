@@ -74,6 +74,27 @@
     .kpi-grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;}
     .kpi-grid-5{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:24px;}
     .kpi-grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;}
+    /* Seuil de rentabilité */
+    .seuil-section{background:white;border:1px solid var(--border);border-radius:14px;padding:20px 24px;margin-bottom:20px;}
+    .seuil-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+    .seuil-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
+    .seuil-kpi{padding:14px;border-radius:10px;border:1px solid var(--border);}
+    .seuil-kpi .sk-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;}
+    .seuil-kpi .sk-val{font-size:18px;font-weight:800;}
+    .seuil-kpi .sk-sub{font-size:10px;color:var(--muted);margin-top:2px;}
+    .seuil-gauge{margin-bottom:16px;}
+    .seuil-gauge-bar{height:32px;background:#f1f5f9;border-radius:10px;overflow:hidden;position:relative;}
+    .seuil-gauge-fill{height:100%;border-radius:10px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;font-size:10px;font-weight:700;color:white;transition:width .8s ease;}
+    .seuil-gauge-marker{position:absolute;top:-3px;bottom:-3px;width:3px;border-radius:2px;z-index:2;}
+    .seuil-gauge-label{position:absolute;top:-18px;font-size:9px;font-weight:700;white-space:nowrap;transform:translateX(-50%);}
+    .seuil-compare{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+    .seuil-card{padding:14px;border-radius:10px;border:1px solid var(--border);}
+    .seuil-card-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+    .seuil-card-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;}
+    .seuil-card-title{font-size:12px;font-weight:700;}
+    .seuil-row{display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #f5f5f5;}
+    .seuil-row:last-child{border-bottom:none;font-weight:700;}
+    .seuil-row .sr-val{font-weight:700;}
     .kpi-card{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:20px;position:relative;overflow:hidden;transition:box-shadow 0.2s,transform 0.2s;}
     .kpi-card:hover{box-shadow:0 6px 24px rgba(26,61,206,0.08);transform:translateY(-1px);}
     .kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
@@ -322,6 +343,9 @@
       .topbar-right .btn{flex:1 1 auto!important;font-size:11px!important;padding:7px 8px!important;}
       .content{padding:12px 10px!important;}
       .kpi-grid-4,.kpi-grid-5,.kpi-grid-3{grid-template-columns:1fr 1fr!important;gap:8px!important;margin-bottom:12px!important;}
+      .seuil-kpis{grid-template-columns:1fr 1fr!important;gap:8px!important;}
+      .seuil-compare{grid-template-columns:1fr!important;}
+      .seuil-kpi .sk-val{font-size:14px!important;}
       .charts-grid,.charts-grid-3,.widget-row,.prev-grid{grid-template-columns:1fr!important;gap:12px!important;}
       #widgets-row{grid-template-columns:1fr!important;}
       .vocal-fab{left:20px!important;bottom:20px!important;}
@@ -814,6 +838,36 @@ async function loadData(_tries){
   const txMarge=current.caHT>0?((current.caHT-current.chargesHT)/current.caHT*100):null;
   const txMargeAnnuel=annualCA>0?((annualCA-annualCharges)/annualCA*100):null;
 
+  // ── SEUIL DE RENTABILITÉ ──
+  const _annFixes=monthsData.reduce((s,d)=>s+d.fixesHT,0);
+  const _annVar=monthsData.reduce((s,d)=>s+d.varHT,0);
+  const _annCredLeas=monthsData.reduce((s,d)=>s+d.creditsHT+d.leasingHT,0);
+  const _annMS=monthsData.reduce((s,d)=>s+(d.masseSalHT||0),0);
+  const _txCV=annualCA>0?_annVar/annualCA:0;
+  const _txMCV=1-_txCV;
+  const _cfStruct=_annFixes+_annMS;
+  const _seuilEcoAn=_txMCV>0.01?_cfStruct/_txMCV:0;
+  const _seuilFinAn=_txMCV>0.01?(_cfStruct+_annCredLeas)/_txMCV:0;
+  const _seuilEcoMens=nbMoisReel>0?_seuilEcoAn/12:0;
+  const _seuilFinMens=nbMoisReel>0?_seuilFinAn/12:0;
+  const _margeSecu=annualCA-_seuilEcoAn;
+  const _margeSecuPct=annualCA>0?_margeSecu/annualCA*100:0;
+  const _margeSecuFin=annualCA-_seuilFinAn;
+  const _caJourMoy=nbMoisReel>0?annualCA/(nbMoisReel*30):0;
+  const _pmEcoJ=_caJourMoy>0?_seuilEcoAn/_caJourMoy:0;
+  const _pmFinJ=_caJourMoy>0?_seuilFinAn/_caJourMoy:0;
+  const _seuilOK=annualCA>0&&_seuilEcoAn>0;
+
+  const _seuilAlertIcon=_margeSecu>=0?'💡':'⚠️';
+  const _seuilAlertBg=_margeSecu>=0?'#f0fdf4':'#fef2f2';
+  const _seuilAlertBorder=_margeSecu>=0?'#bbf7d0':'#fecaca';
+  const _seuilAlertColor=_margeSecu>=0?'#166534':'#991b1b';
+  const _seuilConfort=_margeSecuPct>20?'Situation confortable.':_margeSecuPct>10?'Marge correcte mais à surveiller.':'Marge faible, vigilance requise.';
+  const _seuilAlertText=_margeSecu>=0
+    ?_seuilAlertIcon+' <b>Marge de sécurité économique : +'+_margeSecuPct.toFixed(1)+'%</b> — Votre CA est <b>supérieur</b> de <b>'+fmtE(_margeSecu)+'</b> au seuil économique. '+_seuilConfort
+    :'⚠️ <b>Marge de sécurité : '+_margeSecuPct.toFixed(1)+'%</b> — CA <b>inférieur</b> de <b>'+fmtE(Math.abs(_margeSecu))+'</b> au seuil. Vous ne couvrez pas encore vos charges fixes.';
+  const _seuilAlertFin=_margeSecuFin<0&&_margeSecu>=0?' <b>Attention</b> : le seuil financier (crédits inclus) n\'est pas encore atteint (écart : '+fmtE(Math.abs(_margeSecuFin))+').':'';
+
   // Projection fin d'année
   const moisPassesAvecCA=monthsData.filter((d,i)=>!d.isFuture&&d.caHT>0);
   const nbMoisReel=moisPassesAvecCA.length;
@@ -1140,6 +1194,96 @@ async function loadData(_tries){
         <div class="kpi-sub"><span class="neutral">Résultat / CA HT</span></div>
       </div>
     </div>
+
+    
+    <!-- SEUIL DE RENTABILITÉ -->
+    ${_seuilOK?`
+    <div class="section-label">💡 Seuil de rentabilité — ${_viewMode==='exercice'?getFiscalLabel(year):year}</div>
+    <div class="seuil-section">
+      <div class="seuil-kpis">
+        <div class="seuil-kpi" style="background:${_margeSecu>=0?'#f0fdf4':'#fef2f2'};border-color:${_margeSecu>=0?'#bbf7d0':'#fecaca'}">
+          <div class="sk-label">Seuil économique / mois</div>
+          <div class="sk-val" style="color:${_margeSecu>=0?'#059669':'#dc2626'}">${fmtE(_seuilEcoMens)}</div>
+          <div class="sk-sub">Annuel : ${fmtE(_seuilEcoAn)}</div>
+        </div>
+        <div class="seuil-kpi" style="background:#f5f3ff;border-color:#ddd6fe">
+          <div class="sk-label">Seuil financier / mois</div>
+          <div class="sk-val" style="color:#7c3aed">${fmtE(_seuilFinMens)}</div>
+          <div class="sk-sub">Annuel : ${fmtE(_seuilFinAn)}</div>
+        </div>
+        <div class="seuil-kpi" style="background:${_margeSecu>=0?'#f0fdf4':'#fef2f2'};border-color:${_margeSecu>=0?'#bbf7d0':'#fecaca'}">
+          <div class="sk-label">Marge de sécurité</div>
+          <div class="sk-val" style="color:${_margeSecu>=0?'#059669':'#dc2626'}">${_margeSecu>=0?'+':''}${_margeSecuPct.toFixed(1)}%</div>
+          <div class="sk-sub">${_margeSecu>=0?'+':''}${fmtE(_margeSecu)}</div>
+        </div>
+        <div class="seuil-kpi" style="background:#eff6ff;border-color:#bfdbfe">
+          <div class="sk-label">Point mort éco.</div>
+          <div class="sk-val" style="color:#1d4ed8">${_pmEcoJ>0?Math.round(_pmEcoJ)+' j':'—'}</div>
+          <div class="sk-sub">${_pmEcoJ>0&&_pmEcoJ<nbMoisReel*30?'✅ Atteint':'⏳ '+Math.round(_pmFinJ)+' j (financier)'}</div>
+        </div>
+      </div>
+      <!-- JAUGE VISUELLE -->
+      <div class="seuil-gauge">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:4px">
+          <span>0 €</span><span>CA annuel : <b style="color:var(--text)">${fmtE(annualCA)}</b></span>
+        </div>
+        <div class="seuil-gauge-bar">
+          ${(()=>{
+            const maxVal=Math.max(annualCA,_seuilFinAn)*1.15;
+            const caPct=maxVal>0?Math.min(annualCA/maxVal*100,100):0;
+            const ecoPct=maxVal>0?Math.min(_seuilEcoAn/maxVal*100,100):0;
+            const finPct=maxVal>0?Math.min(_seuilFinAn/maxVal*100,100):0;
+            const caColor=annualCA>=_seuilFinAn?'#059669':annualCA>=_seuilEcoAn?'#f59e0b':'#dc2626';
+            return '<div class="seuil-gauge-fill" style="width:'+caPct+'%;background:linear-gradient(90deg,'+caColor+'cc,'+caColor+')">CA</div>'+
+              '<div class="seuil-gauge-marker" style="left:'+ecoPct+'%;background:#059669"><div class="seuil-gauge-label" style="color:#059669">Seuil éco.</div></div>'+
+              '<div class="seuil-gauge-marker" style="left:'+finPct+'%;background:#7c3aed"><div class="seuil-gauge-label" style="color:#7c3aed;top:auto;bottom:-18px">Seuil fin.</div></div>';
+          })()}
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:8px">
+          <div style="display:flex;gap:14px;font-size:10px">
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:3px;background:#059669;border-radius:2px;display:inline-block"></span>Éco. ${fmtE(_seuilEcoAn)}</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:3px;background:#7c3aed;border-radius:2px;display:inline-block"></span>Fin. ${fmtE(_seuilFinAn)}</span>
+          </div>
+          <div style="font-size:10px;font-weight:700;color:${annualCA>=_seuilFinAn?'#059669':annualCA>=_seuilEcoAn?'#f59e0b':'#dc2626'}">
+            ${annualCA>=_seuilFinAn?'✅ Les deux seuils dépassés':annualCA>=_seuilEcoAn?'⚠️ Seuil éco. OK, financier non atteint':'❌ Seuils non atteints'}
+          </div>
+        </div>
+      </div>
+      <!-- COMPARAISON ÉCO / FIN -->
+      <div class="seuil-compare">
+        <div class="seuil-card" style="background:#f0fdf4;border-color:#bbf7d0">
+          <div class="seuil-card-head">
+            <div class="seuil-card-icon" style="background:#dcfce7;color:#059669">📊</div>
+            <div class="seuil-card-title" style="color:#059669">Seuil Économique</div>
+          </div>
+          <div class="seuil-row"><span>Charges fixes</span><span class="sr-val">${fmtE(_annFixes)}</span></div>
+          ${_annMS>0?'<div class="seuil-row"><span>Masse salariale</span><span class="sr-val">'+fmtE(_annMS)+'</span></div>':''}
+          <div class="seuil-row"><span>Taux charges var.</span><span class="sr-val">${(_txCV*100).toFixed(1)}%</span></div>
+          <div class="seuil-row"><span>Taux MCV</span><span class="sr-val">${(_txMCV*100).toFixed(1)}%</span></div>
+          <div class="seuil-row" style="padding-top:6px;border-top:2px solid #bbf7d0"><span style="font-weight:700">Seuil annuel</span><span class="sr-val" style="color:#059669;font-size:14px">${fmtE(_seuilEcoAn)}</span></div>
+          <div class="seuil-row"><span>Seuil mensuel</span><span class="sr-val" style="color:#059669">${fmtE(_seuilEcoMens)}</span></div>
+          <div class="seuil-row"><span>Point mort</span><span class="sr-val">${_pmEcoJ>0?Math.round(_pmEcoJ)+' jours':'—'}</span></div>
+        </div>
+        <div class="seuil-card" style="background:#f5f3ff;border-color:#ddd6fe">
+          <div class="seuil-card-head">
+            <div class="seuil-card-icon" style="background:#ede9fe;color:#7c3aed">🏦</div>
+            <div class="seuil-card-title" style="color:#7c3aed">Seuil Financier</div>
+          </div>
+          <div class="seuil-row"><span>Charges fixes</span><span class="sr-val">${fmtE(_annFixes)}</span></div>
+          ${_annMS>0?'<div class="seuil-row"><span>Masse salariale</span><span class="sr-val">'+fmtE(_annMS)+'</span></div>':''}
+          <div class="seuil-row"><span>Crédits + Leasings</span><span class="sr-val">${fmtE(_annCredLeas)}</span></div>
+          <div class="seuil-row"><span>Taux charges var.</span><span class="sr-val">${(_txCV*100).toFixed(1)}%</span></div>
+          <div class="seuil-row"><span>Taux MCV</span><span class="sr-val">${(_txMCV*100).toFixed(1)}%</span></div>
+          <div class="seuil-row" style="padding-top:6px;border-top:2px solid #ddd6fe"><span style="font-weight:700">Seuil annuel</span><span class="sr-val" style="color:#7c3aed;font-size:14px">${fmtE(_seuilFinAn)}</span></div>
+          <div class="seuil-row"><span>Seuil mensuel</span><span class="sr-val" style="color:#7c3aed">${fmtE(_seuilFinMens)}</span></div>
+          <div class="seuil-row"><span>Point mort</span><span class="sr-val">${_pmFinJ>0?Math.round(_pmFinJ)+' jours':'—'}</span></div>
+        </div>
+      </div>
+      <div style="margin-top:12px;padding:10px 14px;background:${_seuilAlertBg};border:1px solid ${_seuilAlertBorder};border-radius:8px;font-size:11px;color:${_seuilAlertColor}">
+        ${_seuilAlertText}${_seuilAlertFin}
+      </div>
+    </div>
+    `:''}
 
     
     <!-- KPIs STOCK -->

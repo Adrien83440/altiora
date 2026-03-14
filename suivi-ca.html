@@ -60,6 +60,25 @@
 
     /* KPI ANNUELS */
     .kpi-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:22px;}
+    /* Seuil de rentabilité */
+    .seuil-section{background:white;border:1px solid var(--border);border-radius:14px;padding:20px 24px;margin-bottom:20px;}
+    .seuil-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
+    .seuil-kpi{padding:14px;border-radius:10px;border:1px solid var(--border);}
+    .seuil-kpi .sk-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;}
+    .seuil-kpi .sk-val{font-size:18px;font-weight:800;}
+    .seuil-kpi .sk-sub{font-size:10px;color:var(--muted);margin-top:2px;}
+    .seuil-gauge-bar{height:32px;background:#f1f5f9;border-radius:10px;overflow:hidden;position:relative;}
+    .seuil-gauge-fill{height:100%;border-radius:10px;display:flex;align-items:center;justify-content:flex-end;padding-right:8px;font-size:10px;font-weight:700;color:white;transition:width .8s ease;}
+    .seuil-gauge-marker{position:absolute;top:-3px;bottom:-3px;width:3px;border-radius:2px;z-index:2;}
+    .seuil-gauge-label{position:absolute;top:-18px;font-size:9px;font-weight:700;white-space:nowrap;transform:translateX(-50%);}
+    .seuil-compare{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+    .seuil-card{padding:14px;border-radius:10px;border:1px solid var(--border);}
+    .seuil-card-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+    .seuil-card-icon{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;}
+    .seuil-card-title{font-size:12px;font-weight:700;}
+    .seuil-row{display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px solid #f5f5f5;}
+    .seuil-row:last-child{border-bottom:none;font-weight:700;}
+    .seuil-row .sr-val{font-weight:700;}
     .kpi-card{background:white;border:1px solid var(--border);border-radius:var(--radius);padding:18px;position:relative;overflow:hidden;}
     .kpi-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
     .kpi-card.blue::before{background:linear-gradient(90deg,var(--blue-main),var(--blue-light));}
@@ -337,6 +356,9 @@ html, body { overflow-x: hidden; max-width: 100vw; }
   .charts-grid, .charts-grid-3 { grid-template-columns: 1fr !important; gap: 12px !important; }
   /* Suivi CA */
   .kpi-grid { grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
+  .seuil-kpis{grid-template-columns:1fr 1fr!important;gap:8px!important;}
+  .seuil-compare{grid-template-columns:1fr!important;}
+  .seuil-kpi .sk-val{font-size:14px!important;}
   .charts-grid-2 { grid-template-columns: 1fr !important; gap: 12px !important; }
   /* Coût de revient */
   .fiche-kpis { grid-template-columns: 1fr 1fr !important; gap: 8px !important; }
@@ -747,6 +769,22 @@ function _calcMS(d) {
   const totCredits=data.reduce((s,d)=>s+d.creditsHT,0);
   const totLeasing=data.reduce((s,d)=>s+d.leasingHT,0);
   const totMasseSal=data.reduce((s,d)=>s+(d.masseSalHT||0),0);
+  // ── SEUIL DE RENTABILITÉ ──
+  const _nbMois=data.filter(d=>!d.isFuture&&d.caHT>0).length;
+  const _txCV=totCA>0?totVar/totCA:0;
+  const _txMCV=1-_txCV;
+  const _cfStruct=totFixes+totMasseSal;
+  const _seuilEcoAn=_txMCV>0.01?_cfStruct/_txMCV:0;
+  const _seuilFinAn=_txMCV>0.01?(_cfStruct+totCredits+totLeasing)/_txMCV:0;
+  const _seuilEcoMens=_nbMois>0?_seuilEcoAn/12:0;
+  const _seuilFinMens=_nbMois>0?_seuilFinAn/12:0;
+  const _margeSecu=totCA-_seuilEcoAn;
+  const _margeSecuPct=totCA>0?_margeSecu/totCA*100:0;
+  const _margeSecuFin=totCA-_seuilFinAn;
+  const _caJourMoy=_nbMois>0?totCA/(_nbMois*30):0;
+  const _pmEcoJ=_caJourMoy>0?_seuilEcoAn/_caJourMoy:0;
+  const _pmFinJ=_caJourMoy>0?_seuilFinAn/_caJourMoy:0;
+  const _seuilOK=totCA>0&&_seuilEcoAn>0;
   await loadStockData();
   // Load RH employees for masse salariale
   if (!window._rhEmployes) {
@@ -787,6 +825,88 @@ function _calcMS(d) {
         <div class="kpi-sub">Résultat / CA HT</div>
       </div>
     </div>
+
+    <!-- SEUIL DE RENTABILITÉ -->
+    ${_seuilOK?`
+    <div class="seuil-section">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px;display:flex;align-items:center;gap:8px">💡 Seuil de rentabilité <span style="font-size:10px;font-weight:600;color:var(--muted)">— Économique & Financier</span></div>
+      <div class="seuil-kpis">
+        <div class="seuil-kpi" style="background:${_margeSecu>=0?'#f0fdf4':'#fef2f2'};border-color:${_margeSecu>=0?'#bbf7d0':'#fecaca'}">
+          <div class="sk-label">Seuil éco. / mois</div>
+          <div class="sk-val" style="color:${_margeSecu>=0?'#059669':'#dc2626'}">${fmtE(_seuilEcoMens)}</div>
+          <div class="sk-sub">Annuel : ${fmtE(_seuilEcoAn)}</div>
+        </div>
+        <div class="seuil-kpi" style="background:#f5f3ff;border-color:#ddd6fe">
+          <div class="sk-label">Seuil fin. / mois</div>
+          <div class="sk-val" style="color:#7c3aed">${fmtE(_seuilFinMens)}</div>
+          <div class="sk-sub">Annuel : ${fmtE(_seuilFinAn)}</div>
+        </div>
+        <div class="seuil-kpi" style="background:${_margeSecu>=0?'#f0fdf4':'#fef2f2'};border-color:${_margeSecu>=0?'#bbf7d0':'#fecaca'}">
+          <div class="sk-label">Marge de sécurité</div>
+          <div class="sk-val" style="color:${_margeSecu>=0?'#059669':'#dc2626'}">${_margeSecu>=0?'+':''}${_margeSecuPct.toFixed(1)}%</div>
+          <div class="sk-sub">${_margeSecu>=0?'+':''}${fmtE(_margeSecu)}</div>
+        </div>
+        <div class="seuil-kpi" style="background:#eff6ff;border-color:#bfdbfe">
+          <div class="sk-label">Point mort éco.</div>
+          <div class="sk-val" style="color:#1d4ed8">${_pmEcoJ>0?Math.round(_pmEcoJ)+' j':'—'}</div>
+          <div class="sk-sub">Financier : ${_pmFinJ>0?Math.round(_pmFinJ)+' j':'—'}</div>
+        </div>
+      </div>
+      <!-- JAUGE -->
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:4px"><span>0 €</span><span>CA : <b style="color:var(--text)">${fmtE(totCA)}</b></span></div>
+        <div class="seuil-gauge-bar">
+          ${(()=>{
+            const mx=Math.max(totCA,_seuilFinAn)*1.15;
+            const caPct=mx>0?Math.min(totCA/mx*100,100):0;
+            const ecoPct=mx>0?Math.min(_seuilEcoAn/mx*100,100):0;
+            const finPct=mx>0?Math.min(_seuilFinAn/mx*100,100):0;
+            const cl=totCA>=_seuilFinAn?'#059669':totCA>=_seuilEcoAn?'#f59e0b':'#dc2626';
+            return '<div class="seuil-gauge-fill" style="width:'+caPct+'%;background:linear-gradient(90deg,'+cl+'cc,'+cl+')">CA</div>'+
+              '<div class="seuil-gauge-marker" style="left:'+ecoPct+'%;background:#059669"><div class="seuil-gauge-label" style="color:#059669">Éco.</div></div>'+
+              '<div class="seuil-gauge-marker" style="left:'+finPct+'%;background:#7c3aed"><div class="seuil-gauge-label" style="color:#7c3aed;top:auto;bottom:-18px">Fin.</div></div>';
+          })()}
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10px">
+          <div style="display:flex;gap:12px">
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:3px;background:#059669;border-radius:2px;display:inline-block"></span>Éco. ${fmtE(_seuilEcoAn)}</span>
+            <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:3px;background:#7c3aed;border-radius:2px;display:inline-block"></span>Fin. ${fmtE(_seuilFinAn)}</span>
+          </div>
+          <span style="font-weight:700;color:${totCA>=_seuilFinAn?'#059669':totCA>=_seuilEcoAn?'#f59e0b':'#dc2626'}">
+            ${totCA>=_seuilFinAn?'✅ Seuils dépassés':totCA>=_seuilEcoAn?'⚠️ Éco. OK, financier non':'❌ Non atteints'}
+          </span>
+        </div>
+      </div>
+      <!-- COMPARAISON -->
+      <div class="seuil-compare">
+        <div class="seuil-card" style="background:#f0fdf4;border-color:#bbf7d0">
+          <div class="seuil-card-head"><div class="seuil-card-icon" style="background:#dcfce7;color:#059669">📊</div><div class="seuil-card-title" style="color:#059669">Seuil Économique</div></div>
+          <div class="seuil-row"><span>Charges fixes</span><span class="sr-val">${fmtE(totFixes)}</span></div>
+          ${totMasseSal>0?'<div class="seuil-row"><span>Masse salariale</span><span class="sr-val">'+fmtE(totMasseSal)+'</span></div>':''}
+          <div class="seuil-row"><span>Taux charges var.</span><span class="sr-val">${(_txCV*100).toFixed(1)}%</span></div>
+          <div class="seuil-row"><span>Taux MCV</span><span class="sr-val">${(_txMCV*100).toFixed(1)}%</span></div>
+          <div class="seuil-row" style="padding-top:6px;border-top:2px solid #bbf7d0"><span style="font-weight:700">Seuil annuel</span><span class="sr-val" style="color:#059669;font-size:14px">${fmtE(_seuilEcoAn)}</span></div>
+          <div class="seuil-row"><span>Seuil mensuel</span><span class="sr-val" style="color:#059669">${fmtE(_seuilEcoMens)}</span></div>
+          <div class="seuil-row"><span>Point mort</span><span class="sr-val">${_pmEcoJ>0?Math.round(_pmEcoJ)+' jours':'—'}</span></div>
+        </div>
+        <div class="seuil-card" style="background:#f5f3ff;border-color:#ddd6fe">
+          <div class="seuil-card-head"><div class="seuil-card-icon" style="background:#ede9fe;color:#7c3aed">🏦</div><div class="seuil-card-title" style="color:#7c3aed">Seuil Financier</div></div>
+          <div class="seuil-row"><span>Charges fixes</span><span class="sr-val">${fmtE(totFixes)}</span></div>
+          ${totMasseSal>0?'<div class="seuil-row"><span>Masse salariale</span><span class="sr-val">'+fmtE(totMasseSal)+'</span></div>':''}
+          <div class="seuil-row"><span>Crédits + Leasings</span><span class="sr-val">${fmtE(totCredits+totLeasing)}</span></div>
+          <div class="seuil-row"><span>Taux charges var.</span><span class="sr-val">${(_txCV*100).toFixed(1)}%</span></div>
+          <div class="seuil-row"><span>Taux MCV</span><span class="sr-val">${(_txMCV*100).toFixed(1)}%</span></div>
+          <div class="seuil-row" style="padding-top:6px;border-top:2px solid #ddd6fe"><span style="font-weight:700">Seuil annuel</span><span class="sr-val" style="color:#7c3aed;font-size:14px">${fmtE(_seuilFinAn)}</span></div>
+          <div class="seuil-row"><span>Seuil mensuel</span><span class="sr-val" style="color:#7c3aed">${fmtE(_seuilFinMens)}</span></div>
+          <div class="seuil-row"><span>Point mort</span><span class="sr-val">${_pmFinJ>0?Math.round(_pmFinJ)+' jours':'—'}</span></div>
+        </div>
+      </div>
+      <div style="margin-top:12px;padding:10px 14px;background:${_margeSecu>=0?'#f0fdf4':'#fef2f2'};border:1px solid ${_margeSecu>=0?'#bbf7d0':'#fecaca'};border-radius:8px;font-size:11px;color:${_margeSecu>=0?'#166534':'#991b1b'}">
+        ${_margeSecu>=0?'💡':'⚠️'} <b>Marge de sécurité : ${_margeSecu>=0?'+':''}${_margeSecuPct.toFixed(1)}%</b> — CA ${_margeSecu>=0?'supérieur de <b>'+fmtE(_margeSecu)+'</b> au seuil éco. '+(_margeSecuPct>20?'Confortable.':_margeSecuPct>10?'Correcte.':'Faible.'):'inférieur de <b>'+fmtE(Math.abs(_margeSecu))+'</b> au seuil éco.'}
+        ${_margeSecuFin<0&&_margeSecu>=0?' Le seuil financier n\'est pas encore atteint (écart : '+fmtE(Math.abs(_margeSecuFin))+').':''}
+      </div>
+    </div>
+    `:''}
 
 
     ${_stockData.refs>0?'<div style="padding:12px 16px;background:linear-gradient(135deg,#f0f4ff,#f0fdf4);border:1px solid #c7d2fe;border-radius:10px;margin-bottom:16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px"><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><span style="font-size:20px">📦</span><div><div style="font-size:12px;font-weight:700;color:#1a1f36">Stock : '+fmtE(_stockData.value)+'</div><div style="font-size:11px;color:#6b7280">'+_stockData.refs+' réf. · Variation : <b style="color:'+(_stockData.variation>=0?'#059669':'#ef4444')+'">'+(_stockData.variation>=0?'+':'')+fmtE(_stockData.variation)+'</b> '+(_stockData.variation>0?'(↑ résultat)':_stockData.variation<0?'(↓ résultat)':'')+'</div></div></div><a href="gestion-stock.html" class="btn btn-outline" style="font-size:11px;padding:6px 14px;border-radius:8px">📦 Gérer le stock →</a></div>'
