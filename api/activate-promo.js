@@ -61,6 +61,7 @@ module.exports = async (req, res) => {
   }
 
   // ── 1. Authentification Firebase ──
+  const db = getDb(); // Initialise Firebase Admin AVANT de vérifier le token
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Non authentifié. Connectez-vous d\'abord.' });
@@ -88,7 +89,6 @@ module.exports = async (req, res) => {
   }
 
   // ── 3. Vérifier l'utilisateur ──
-  const db = getDb();
   const userRef = db.collection('users').doc(uid);
   const userSnap = await userRef.get();
 
