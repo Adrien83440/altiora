@@ -208,7 +208,11 @@
             <div class="sync-text">Dernière synchronisation : <strong id="last-sync-text">—</strong></div>
             <div style="font-size:11px;color:var(--muted)">💡 Cliquez sur <strong>Synchroniser</strong> pour récupérer vos dépenses, puis sur <strong>Valider les transactions</strong> pour les ajouter dans Pilotage.</div>
           </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <div style="display:flex;align-items:center;gap:6px;background:#f0f4ff;padding:6px 10px;border-radius:8px;border:1px solid #e2e8f0">
+              <label for="sync-date-from" style="font-size:11px;font-weight:600;color:var(--muted);white-space:nowrap">À partir du</label>
+              <input type="date" id="sync-date-from" class="cell-input" style="font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid #d1d5db;font-family:inherit;min-width:130px"/>
+            </div>
             <button class="btn btn-primary btn-sm" onclick="window.location.href='bank-validation.html'">✅ Valider les transactions</button>
             <button class="btn btn-success btn-sm" id="btn-sync-main" onclick="syncNow()">🔄 Synchroniser maintenant</button>
             <button class="btn btn-danger btn-sm" onclick="purgeBankLines()" title="Supprimer toutes les lignes importées automatiquement par la banque (source:bank_sync)">🧹 Purger les imports banque</button>
@@ -379,6 +383,14 @@ function showConnectedZone(conn) {
   if (conn.lastSync) {
     const d = new Date(conn.lastSync);
     document.getElementById('last-sync-text').textContent = d.toLocaleDateString('fr-FR') + ' à ' + d.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'});
+    // Pré-remplir le date picker avec la date de dernière sync
+    const df = document.getElementById('sync-date-from');
+    if (df) df.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  } else {
+    // Pas de sync précédente → 1er du mois en cours
+    const now = new Date();
+    const df = document.getElementById('sync-date-from');
+    if (df) df.value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-01';
   }
 
   // Comptes
@@ -533,7 +545,7 @@ async function finalizeBankConnection(reqId) {
   if (ovS) ovS.textContent = 'Récupération de vos transactions';
 
   try {
-    const count = await fetchAndStagePending(realReqId);
+    const count = await fetchAndStagePending(realReqId, (document.getElementById('sync-date-from')||{}).value || '');
     showToast(`✅ ${count} transactions récupérées — ouverture de la validation…`, 'success');
     setTimeout(() => window.location.href = 'bank-validation.html', 900);
   } catch(e) {
@@ -544,13 +556,15 @@ async function finalizeBankConnection(reqId) {
 }
 
 // ── SYNC — récupère les transactions et les stocke dans bank_pending (pas dans Pilotage) ──
-async function fetchAndStagePending(requisitionId) {
+async function fetchAndStagePending(requisitionId, dateFrom) {
   // ── 1. Appel API GoCardless (sans Firebase Admin) ──────────────────────
-  console.log('[SYNC] Appel /api/bank-sync, requisition_id:', requisitionId);
+  console.log('[SYNC] Appel /api/bank-sync, requisition_id:', requisitionId, 'date_from:', dateFrom);
+  const body = { requisition_id: requisitionId };
+  if (dateFrom) body.date_from = dateFrom;
   const res = await fetch('/api/bank-sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ requisition_id: requisitionId })
+    body: JSON.stringify(body)
   });
 
   let data;
@@ -646,7 +660,7 @@ async function syncNow() {
     if (overlayText) overlayText.textContent = 'Analyse des transactions…';
     if (overlaySub)  overlaySub.textContent  = 'Écriture dans Firestore…';
 
-    const count = await fetchAndStagePending(reqId);
+    const count = await fetchAndStagePending(reqId, (document.getElementById('sync-date-from')||{}).value || '');
 
     if (overlayText) overlayText.textContent = `✅ ${count} dépense(s) prêtes !`;
     if (overlaySub)  overlaySub.textContent  = 'Redirection vers la validation…';
