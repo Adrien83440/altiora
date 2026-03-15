@@ -27,6 +27,9 @@
     'rh-contrats.html', 'rh-pointages.html', 'rh-emargements.html', 'rh-urgence.html'
   ];
 
+  // Pages Fidélisation (détection sidebar dorée)
+  const FID_PAGES = ['fidelisation.html'];
+
   // ════════════════════════════════════════════════
   // PAGE ACTIVE
   // ════════════════════════════════════════════════
@@ -51,7 +54,7 @@
     const rhOpen    = RH_PAGES.includes(PAGE)                                    ? 'style="max-height:4000px"' : '';
 
     return `
-<nav id="alteore-nav"${RH_PAGES.includes(PAGE) ? ' class="rh-mode"' : ''}>
+<nav id="alteore-nav"${RH_PAGES.includes(PAGE) ? ' class="rh-mode"' : FID_PAGES.includes(PAGE) ? ' class="fid-mode"' : ''}>
   <div class="nav-scroll-area">
 
     <div class="logo">
@@ -120,17 +123,17 @@
     </div>
 
     <!-- Fidélisation -->
-    <div class="ns">Fidélisation</div>
-    <div class="ni${a('fidelisation.html')}" id="nav-fid" onclick="toggleAlteoreNav('fid-nav-sub',this)">
-      <span>💎</span><span style="flex:1">Fidélisation</span><span class="chev">›</span>
+    <div class="ns fid-ns">Fidélisation</div>
+    <div class="ni fid-ni${a('fidelisation.html')}" id="nav-fid" onclick="toggleAlteoreNav('fid-nav-sub',this)">
+      <span>💎</span><span style="flex:1">Fidélisation</span><span class="chev fid-chev">›</span>
     </div>
     <div class="sub" id="fid-nav-sub" ${fidOpen}>
-      <div class="si" id="fid-si-dashboard" onclick="goFid('dashboard')"><span class="dot"></span>Dashboard fidélité</div>
-      <div class="si" id="fid-si-clients" onclick="goFid('clients')"><span class="dot"></span>Clients</div>
-      <div class="si" id="fid-si-carte" onclick="goFid('carte')"><span class="dot"></span>Carte fidélité</div>
-      <div class="si" id="fid-si-points" onclick="goFid('points')"><span class="dot"></span>Points &amp; Récompenses</div>
-      <div class="si" id="fid-si-coupons" onclick="goFid('coupons')"><span class="dot"></span>Coupons &amp; Offres</div>
-      <div class="si" id="fid-si-campagnes" onclick="goFid('campagnes')"><span class="dot"></span>Campagnes</div>
+      <div class="si fid-si" id="fid-si-dashboard" onclick="goFid('dashboard')"><span class="dot fid-dot"></span>Dashboard fidélité</div>
+      <div class="si fid-si" id="fid-si-clients" onclick="goFid('clients')"><span class="dot fid-dot"></span>Clients</div>
+      <div class="si fid-si" id="fid-si-carte" onclick="goFid('carte')"><span class="dot fid-dot"></span>Carte fidélité</div>
+      <div class="si fid-si" id="fid-si-points" onclick="goFid('points')"><span class="dot fid-dot"></span>Points &amp; Récompenses</div>
+      <div class="si fid-si" id="fid-si-coupons" onclick="goFid('coupons')"><span class="dot fid-dot"></span>Coupons &amp; Offres</div>
+      <div class="si fid-si" id="fid-si-campagnes" onclick="goFid('campagnes')"><span class="dot fid-dot"></span>Campagnes</div>
     </div>
 
     <!-- ═══════════════════════════════════ -->
@@ -300,6 +303,31 @@ nav#alteore-nav.rh-mode .uav{background:linear-gradient(135deg,#10b981,#34d399)}
 nav#alteore-nav.rh-mode .chev{color:rgba(52,211,153,.35)}
 nav#alteore-nav.rh-mode .rh-chev{color:rgba(52,211,153,.7)!important}
 nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgba(52,211,153,.3)}
+
+/* ── THÈME DORÉ quand FIDÉLISATION ouvert ── */
+nav#alteore-nav.fid-mode{background:linear-gradient(180deg,#451a03 0%,#78350f 50%,#92400e 100%);transition:background .45s ease}
+nav#alteore-nav.fid-mode .logo{border-bottom-color:rgba(251,191,36,.15)}
+nav#alteore-nav.fid-mode .logo-t{background:linear-gradient(135deg,#fbbf24,#fde68a);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+nav#alteore-nav.fid-mode .ns{color:rgba(251,191,36,.3)}
+nav#alteore-nav.fid-mode .fid-ns{color:rgba(251,191,36,.65)}
+nav#alteore-nav.fid-mode .ni{color:rgba(255,255,255,.5);transition:.15s}
+nav#alteore-nav.fid-mode .ni:hover{background:rgba(251,191,36,.08)}
+nav#alteore-nav.fid-mode .ni.on{background:rgba(251,191,36,.1);border-left-color:#fbbf24}
+nav#alteore-nav.fid-mode .ni.fid-ni.on{background:rgba(251,191,36,.16);border-left-color:#f59e0b}
+nav#alteore-nav.fid-mode .si{color:rgba(255,255,255,.38)}
+nav#alteore-nav.fid-mode .si:hover{background:rgba(251,191,36,.07)}
+nav#alteore-nav.fid-mode .si.on{background:rgba(251,191,36,.13);border-left-color:rgba(251,191,36,.6)}
+nav#alteore-nav.fid-mode .si.on .dot{background:#fbbf24}
+nav#alteore-nav.fid-mode .fid-si:hover{background:rgba(251,191,36,.1)}
+nav#alteore-nav.fid-mode .fid-si.on{background:rgba(251,191,36,.18);border-left-color:#f59e0b}
+nav#alteore-nav.fid-mode .fid-si.on .fid-dot{background:#f59e0b}
+nav#alteore-nav.fid-mode .fid-dot{background:rgba(251,191,36,.28)}
+nav#alteore-nav.fid-mode .nav-footer{border-top-color:rgba(251,191,36,.12);background:linear-gradient(180deg,transparent,#92400e 18px)}
+nav#alteore-nav.fid-mode .ucard{background:rgba(251,191,36,.08)}
+nav#alteore-nav.fid-mode .uav{background:linear-gradient(135deg,#f59e0b,#fbbf24)}
+nav#alteore-nav.fid-mode .chev{color:rgba(251,191,36,.3)}
+nav#alteore-nav.fid-mode .fid-chev{color:rgba(251,191,36,.65)!important}
+nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgba(251,191,36,.25)}
 
 /* ── HAMBURGER MOBILE ── */
 .alteore-hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#0f1f5c;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;box-shadow:0 4px 16px rgba(15,31,92,.45);-webkit-tap-highlight-color:transparent}
