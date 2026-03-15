@@ -75,7 +75,7 @@
     <div class="ns">Principal</div>
 
     <div class="ni${a('dashboard.html')}" id="nav-dashboard" onclick="location.href='dashboard.html'">
-      <span>🏠</span><span>Tableau de bord</span>
+      <span>🏠</span><span style="font-weight:700">Tableau de bord</span>
     </div>
 
     <div class="ni${a('suivi-ca.html')}" id="nav-suivi" onclick="location.href='suivi-ca.html'">
@@ -125,7 +125,7 @@
     <!-- Fidélisation -->
     <div class="ns fid-ns">Fidélisation</div>
     <div class="ni fid-ni${a('fidelisation.html')}" id="nav-fid" onclick="toggleAlteoreNav('fid-nav-sub',this)">
-      <span>💎</span><span style="flex:1">Fidélisation</span><span class="chev fid-chev">›</span>
+      <span>💎</span><span style="flex:1;font-weight:700">Fidélisation</span><span class="chev fid-chev">›</span>
     </div>
     <div class="sub" id="fid-nav-sub" ${fidOpen}>
       <div class="si fid-si" id="fid-si-dashboard" onclick="goFid('dashboard')"><span class="dot fid-dot"></span>Dashboard fidélité</div>
@@ -141,7 +141,7 @@
     <!-- ═══════════════════════════════════ -->
     <div class="ns rh-ns">Ressources Humaines</div>
     <div class="ni rh-ni${aNI(RH_PAGES)}" id="nav-rh" onclick="toggleAlteoreNav('rh-nav-sub',this)">
-      <span>👥</span><span style="flex:1">Module RH</span>
+      <span>👥</span><span style="flex:1;font-weight:700">Module RH</span>
       <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.2);color:#6ee7b7;padding:2px 6px;border-radius:20px;margin-right:4px">Master</span>
       <span class="chev rh-chev">›</span>
     </div>
