@@ -385,7 +385,9 @@ async function callAPI(userMessage){
   if(h.length>0&&h[h.length-1].role==='user')h.pop();
   var messages=h.concat([{role:'user',content:userMessage}]);
   try{
-    var r=await fetch('/api/chatbot',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:messages,system:SYSTEM_PROMPT,uid:window._uid||null})});
+    var _hdr={'Content-Type':'application/json'};
+    try{if(window._auth&&window._auth.currentUser){var _tk=await window._auth.currentUser.getIdToken();if(_tk)_hdr['Authorization']='Bearer '+_tk;}}catch(e){}
+    var r=await fetch('/api/chatbot',{method:'POST',headers:_hdr,body:JSON.stringify({messages:messages,system:SYSTEM_PROMPT})});
     if(!r.ok)throw new Error('API '+r.status);
     var d=await r.json();
     return d.response||fallback(userMessage);
