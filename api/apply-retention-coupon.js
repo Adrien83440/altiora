@@ -1,6 +1,7 @@
 // api/apply-retention-coupon.js
 // Applique le coupon de rétention -50% pendant 3 mois sur l'abonnement Stripe de l'utilisateur
 // + log la tentative de rétention dans Firebase
+// SÉCURISÉ : vérification token Firebase avant toute action
 
 const Stripe = require('stripe');
 const { initializeApp, cert, getApps } = require('firebase-admin/app');
@@ -20,33 +21,61 @@ function getDb() {
   return getFirestore();
 }
 
+// ── Vérification du token Firebase côté serveur ─────────────────────────────
+async function verifyFirebaseToken(idToken) {
+  const fbKey = process.env.FIREBASE_API_KEY;
+  if (!fbKey) throw new Error('FIREBASE_API_KEY non configurée');
+  const res = await fetch(
+    'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + fbKey,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken })
+    }
+  );
+  if (!res.ok) throw new Error('Token invalide');
+  const data = await res.json();
+  const uid = data.users?.[0]?.localId;
+  if (!uid) throw new Error('Utilisateur introuvable');
+  return uid;
+}
+
 // ── Coupon ID à créer dans Stripe Dashboard ──────────────────────────────────
-// Créer un coupon dans https://dashboard.stripe.com/coupons avec :
-//   - ID personnalisé : ALTEORE_RETENTION_50_3M
-//   - Pourcentage     : 50%
-//   - Durée           : 3 répétitions (repeating, 3 months)
 const RETENTION_COUPON_ID = process.env.STRIPE_RETENTION_COUPON_ID || 'ALTEORE_RETENTION_50_3M';
 
 module.exports = async function handler(req, res) {
   // CORS
   res.setHeader('Access-Control-Allow-Origin', process.env.APP_URL || 'https://alteore.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Méthode non autorisée' });
   }
 
-  const { uid, reason } = req.body || {};
-  if (!uid) return res.status(400).json({ error: 'uid requis' });
+  // ── AUTH : vérifier le token Firebase ──
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!token) {
+    return res.status(401).json({ error: "Token d'authentification manquant." });
+  }
+
+  let verifiedUid;
+  try {
+    verifiedUid = await verifyFirebaseToken(token);
+  } catch (e) {
+    return res.status(401).json({ error: 'Token invalide : ' + e.message });
+  }
+
+  const { reason } = req.body || {};
 
   const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
   const db     = getDb();
 
   try {
-    // 1. Récupérer l'utilisateur dans Firebase
-    const userRef  = db.collection('users').doc(uid);
+    // 1. Récupérer l'utilisateur dans Firebase (uid vérifié par le token)
+    const userRef  = db.collection('users').doc(verifiedUid);
     const userSnap = await userRef.get();
 
     if (!userSnap.exists) {
@@ -80,7 +109,7 @@ module.exports = async function handler(req, res) {
 
     // 5. Log optionnel dans collection analytics
     await db.collection('retention_logs').add({
-      uid,
+      uid: verifiedUid,
       reason: reason || null,
       couponId: RETENTION_COUPON_ID,
       subscriptionId,
