@@ -1,14 +1,46 @@
 // api/fetch-sheet.js
 // Proxy Vercel : liste les onglets d'un Google Sheet public via API v4, puis fetch un onglet en CSV + analyse IA
+// SÉCURISÉ : vérification token Firebase
 
 export const config = { maxDuration: 30 };
+
+// ── Vérification du token Firebase côté serveur ──
+async function verifyFirebaseToken(idToken) {
+  const fbKey = process.env.FIREBASE_API_KEY;
+  if (!fbKey) throw new Error('FIREBASE_API_KEY non configurée');
+  const res = await fetch(
+    'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + fbKey,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken })
+    }
+  );
+  if (!res.ok) throw new Error('Token invalide');
+  const data = await res.json();
+  const uid = data.users?.[0]?.localId;
+  if (!uid) throw new Error('Utilisateur introuvable');
+  return uid;
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  // ── AUTH : vérifier le token Firebase ──
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!token) {
+    return res.status(401).json({ error: "Token d'authentification manquant." });
+  }
+  try {
+    await verifyFirebaseToken(token);
+  } catch (e) {
+    return res.status(401).json({ error: 'Token invalide.' });
+  }
 
   const { url, gid, analyze = false, headerRow = 1 } = req.body || {};
   if (!url) return res.status(400).json({ error: 'URL manquante' });
