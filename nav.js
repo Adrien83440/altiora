@@ -551,7 +551,7 @@ nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgb
     if (PAGE === 'rapport-annuel.html' && !CAN_RAPPORT.includes(plan))      { showUpgradeModal('rapport');      return false; }
     if (RH_PAGES.includes(PAGE)        && !CAN_RH.includes(plan))           { showUpgradeModal('rh');           return false; }
     if (PAGE === 'scenarios.html'       && !CAN_SCENARIOS.includes(plan))     { showUpgradeModal('scenarios');    return false; }
-    const corePages = ['dashboard.html','pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','cashflow.html'];
+    const corePages = ['dashboard.html','pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','cashflow.html','banque.html','bank-validation.html'];
     if (corePages.includes(PAGE) && !CAN_CORE.includes(plan)) { showUpgradeModal('core'); return false; }
     return true;
   }
