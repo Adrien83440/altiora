@@ -706,24 +706,27 @@ function extractMonthData(d,isFuture){
   const rentrees=d.rentreesSupp?d.rentreesSupp.reduce((s,r)=>s+(parseFloat(r.montant)||0),0):0;
   const prevCA=d.previsionCA?d.previsionCA.reduce((s,r)=>s+(parseFloat(r.montant)||0),0):0;
   const fixesHT=d.chargesFixe?d.chargesFixe.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
+  const fixesTTC=d.chargesFixe?d.chargesFixe.reduce((s,r)=>{var h=parseFloat(r.montantHT)||0;return s+h*(1+(parseFloat(r.tvaRate)||0)/100);},0):0;
   const varHT=d.chargesVar?d.chargesVar.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
+  const varTTC=d.chargesVar?d.chargesVar.reduce((s,r)=>{var h=parseFloat(r.montantHT)||0;return s+h*(1+(parseFloat(r.tvaRate)||0)/100);},0):0;
   const leasingHT=d.leasing?d.leasing.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
+  const leasingTTC=d.leasing?d.leasing.reduce((s,r)=>{var h=parseFloat(r.montantHT)||0;return s+h*(1+(parseFloat(r.tvaRate)||0)/100);},0):0;
   let creditsHT=0;
   if(d.credits)d.credits.forEach((r,i)=>{
     if(r.ligneType==='principal')creditsHT+=parseFloat(r.montant)||0;
     else{let mt=parseFloat(r.montant)||0;if(r.tvaAuto&&parseFloat(r.tauxInteret)>0){const p=d.credits.slice(0,i).reverse().find(c=>c.fournisseur===r.fournisseur&&c.ligneType==='principal');if(p)mt=(parseFloat(p.montant)||0)*parseFloat(r.tauxInteret)/100/12;}creditsHT+=mt;}
   });
-  const chargesHT=fixesHT+varHT+creditsHT+leasingHT+_calcMS(d);
+  const masseSalHT=_calcMS(d);
+  const chargesHT=fixesHT+varHT+creditsHT+leasingHT+masseSalHT;
   const prevCharges=isFuture?chargesHT:0;
   const prevCAFutur=isFuture?(caHT||0):0;
   const caHTReel=isFuture?0:caHT;
   const chargesReel=isFuture?0:chargesHT;
   const resultat=isFuture?0:(caHT+rentrees-chargesHT);
-  const cashflow=isFuture?0:(caTTC+rentrees-(fixesHT*(1+0.2)+varHT*(1+0.2)+creditsHT+leasingHT*(1+0.2)));
+  const cashflow=isFuture?0:(caTTC+rentrees-(fixesTTC+varTTC+creditsHT+leasingTTC+masseSalHT));
   const prevCAFinal=isFuture?(prevCA||prevCAFutur):prevCA;
   // Extraire les ventes journalières du mois
   const caJournalier=d.ca||[];
-  const masseSalHT=_calcMS(d);
   return{caHT:caHTReel,caTTC:isFuture?0:caTTC,tvaCollectee:isFuture?0:tvaCollectee,
     rentrees:isFuture?0:rentrees,prevCA:prevCAFinal,
     fixesHT:isFuture?0:fixesHT,varHT:isFuture?0:varHT,creditsHT:isFuture?0:creditsHT,
