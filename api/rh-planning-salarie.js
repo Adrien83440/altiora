@@ -56,7 +56,7 @@ module.exports = async function handler(req, res) {
       const dow = mon.getDay();
       const diff = (dow === 0) ? -6 : 1 - dow;
       mon.setDate(mon.getDate() + diff);
-      mon.setHours(0, 0, 0, 0);
+      mon.setHours(12, 0, 0, 0);
       const wk = mon.toISOString().slice(0, 10).replace(/-/g, '');
       weekKeys.add(wk);
     }
