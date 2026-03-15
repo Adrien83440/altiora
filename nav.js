@@ -74,7 +74,7 @@
 
     <div class="ns">Principal</div>
 
-    <div class="ni${a('dashboard.html')}" id="nav-dashboard" onclick="location.href='dashboard.html'">
+    <div class="ni dash-ni${a('dashboard.html')}" id="nav-dashboard" onclick="location.href='dashboard.html'">
       <span>🏠</span><span style="font-weight:700">Tableau de bord</span>
     </div>
 
@@ -253,6 +253,16 @@ nav#alteore-nav .ns{font-size:10px;font-weight:700;color:rgba(255,255,255,.28);l
 nav#alteore-nav .ni{display:flex;align-items:center;gap:9px;padding:9px 18px;color:rgba(255,255,255,.55);font-size:12.5px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:.15s}
 nav#alteore-nav .ni:hover{color:#fff;background:rgba(255,255,255,.06)}
 nav#alteore-nav .ni.on{color:#fff;background:rgba(255,255,255,.1);border-left-color:#4f7ef8}
+/* ── MODULES PRINCIPAUX — blanc gras + hover couleur module ── */
+nav#alteore-nav .ni.dash-ni{color:#fff;font-weight:700}
+nav#alteore-nav .ni.dash-ni:hover{background:rgba(96,165,250,.12);border-left-color:rgba(96,165,250,.5)}
+nav#alteore-nav .ni.dash-ni.on{background:rgba(96,165,250,.18);border-left-color:#60a5fa}
+nav#alteore-nav .ni.fid-ni{color:#fff;font-weight:700}
+nav#alteore-nav .ni.fid-ni:hover{background:rgba(251,191,36,.1);border-left-color:rgba(251,191,36,.45)}
+nav#alteore-nav .ni.fid-ni.on{background:rgba(251,191,36,.15);border-left-color:#fbbf24}
+nav#alteore-nav .ni.rh-ni{color:#fff;font-weight:700;border-left-color:transparent}
+nav#alteore-nav .ni.rh-ni:hover{background:rgba(16,185,129,.1);border-left-color:rgba(16,185,129,.45)}
+nav#alteore-nav .ni.rh-ni.on{color:#fff;background:rgba(16,185,129,.15);border-left-color:#10b981}
 nav#alteore-nav .sub{overflow:hidden;max-height:0;transition:max-height .5s ease}
 nav#alteore-nav .si{display:flex;align-items:center;gap:7px;padding:7px 18px 7px 40px;color:rgba(255,255,255,.4);font-size:12px;cursor:pointer;border-left:3px solid transparent;transition:.15s}
 nav#alteore-nav .si:hover{color:rgba(255,255,255,.75);background:rgba(255,255,255,.04)}
@@ -269,9 +279,6 @@ nav#alteore-nav .lbtn{margin-left:auto;background:none;border:none;color:rgba(25
 
 /* ── RH — couleurs vertes ── */
 nav#alteore-nav .rh-ns{color:rgba(52,211,153,.55)}
-nav#alteore-nav .ni.rh-ni{border-left-color:transparent}
-nav#alteore-nav .ni.rh-ni:hover{background:rgba(16,185,129,.08)}
-nav#alteore-nav .ni.rh-ni.on{color:#fff;background:rgba(16,185,129,.13);border-left-color:#10b981}
 nav#alteore-nav .rh-chev{color:rgba(52,211,153,.45)!important}
 nav#alteore-nav .rh-sub-group{font-size:9px;font-weight:700;color:rgba(52,211,153,.4);letter-spacing:1px;text-transform:uppercase;padding:8px 18px 3px 18px;margin-top:4px}
 nav#alteore-nav .rh-si{color:rgba(255,255,255,.4)}
