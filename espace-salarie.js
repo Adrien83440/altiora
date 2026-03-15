@@ -121,7 +121,7 @@ async function loadPlanningMonth(y, m) {
     var mon = new Date(dt);
     var day = mon.getDay(), diff = (day === 0) ? -6 : 1 - day;
     mon.setDate(mon.getDate() + diff);
-    mon.setHours(0,0,0,0);
+    mon.setHours(12,0,0,0);
     var wk = mon.toISOString().slice(0,10).replace(/-/g,'');
     weekKeys[wk] = true;
   }
