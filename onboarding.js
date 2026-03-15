@@ -342,6 +342,7 @@ try { (function () {
   }
   waitReady(function () {
     loadProgress(function (progress) {
+      if (progress.tutoDisabled) return;
       try { if (PAGE === 'dashboard.html') injectChecklist(progress); } catch(e) {}
       try { if (TOURS[PAGE]) maybeTour(progress); } catch(e) {}
     });
@@ -359,7 +360,8 @@ try { (function () {
     if (progress.checklistDismissed) return;
     _gd()(_dc()(window._db,'users',window._uid)).then(function(snap){
       if(!snap.exists())return;var d=snap.data(),created=d.createdAt;
-      if(created){var cd=created.toDate?created.toDate():new Date(created);if((Date.now()-cd.getTime())/864e5>CHECKLIST_DAYS)return;}
+      if(!created)return;
+      var cd=created.toDate?created.toDate():new Date(created);if((Date.now()-cd.getTime())/864e5>CHECKLIST_DAYS)return;
       try{renderChecklist(progress);}catch(e){}
     }).catch(function(){});
   }
@@ -376,7 +378,7 @@ try { (function () {
         '<div style="padding:12px 16px;display:flex;flex-direction:column;gap:2px">'+
         STEPS.map(function(s,i){var d=!!progress['step_'+s.id];
           return '<div style="display:flex;align-items:center;gap:14px;padding:12px 10px;border-radius:10px;transition:background .15s;'+(d?'opacity:.6':'cursor:pointer;background:#fafbff')+'" '+(d?'':'onclick="location.href=\''+s.link+'\'" onmouseover="this.style.background=\'#f0f4ff\'" onmouseout="this.style.background=\'#fafbff\'"')+'><div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;'+(d?'background:#dcfce7;color:#16a34a':'background:#f0f4ff;border:2px solid #c7d2fe;color:#6366f1')+'">'+(d?'✓':(i+1))+'</div><div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:700;color:'+(d?'#94a3b8':'#1e293b')+';'+(d?'text-decoration:line-through':'')+'">'+s.icon+' '+s.title+'</div><div style="font-size:12px;color:#94a3b8;margin-top:2px">'+s.desc+'</div></div>'+(d?'':'<div style="font-size:12px;font-weight:700;color:#1a3dce;white-space:nowrap">'+s.cta+'</div>')+'</div>';
-        }).join('')+'</div></div>';
+        }).join('')+'</div><div style="text-align:center;padding:8px 16px 14px"><button onclick="if(confirm(\'Désactiver définitivement les tutoriels et tours guidés ?\')){window._obDisableAll();}" style="background:none;border:none;font-size:11px;color:#94a3b8;cursor:pointer;text-decoration:underline">Ne plus afficher les tutoriels</button></div></div>';
     var mc=document.getElementById('mainContent')||document.querySelector('.content');
     if(mc&&mc.parentNode)mc.parentNode.insertBefore(el,mc);
     if(!document.getElementById('ob-css')){var s=document.createElement('style');s.id='ob-css';
@@ -384,6 +386,7 @@ try { (function () {
       document.head.appendChild(s);}
   }
   window._obDismiss=function(){saveField('checklistDismissed',true);};
+  window._obDisableAll=function(){saveField('tutoDisabled',true);var el=document.getElementById('onboarding-checklist');if(el)el.remove();try{close();}catch(e){}try{cleanup();}catch(e){}};
   function maybeTour(p){var t=TOURS[PAGE];if(!t||p[t.id])return;
     setTimeout(function(){try{startTour(t);}catch(e){cleanup();}},t.delay||2500);}
   var _ov,_tt,_ix,_cf;
@@ -401,7 +404,7 @@ try { (function () {
     var r=el.getBoundingClientRect(),p=8,sp=document.getElementById('tour-spotlight');
     if(sp){sp.style.top=(r.top+window.scrollY-p)+'px';sp.style.left=(r.left+window.scrollX-p)+'px';sp.style.width=(r.width+p*2)+'px';sp.style.height=(r.height+p*2)+'px';}
     var dots='';for(var j=0;j<steps.length;j++)dots+='<div class="tt-dot '+(j===i?'on':'')+'"></div>';
-    _tt.innerHTML='<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">'+_cf.title+' · '+(i+1)+'/'+steps.length+'</div><div class="tt-title">'+step.title+'</div><div class="tt-text">'+step.text+'</div><div class="tt-footer"><div class="tt-dots">'+dots+'</div><div class="tt-btns"><button class="tt-btn tt-btn-skip" onclick="window._tourClose()">Quitter</button><button class="tt-btn tt-btn-next" onclick="window._tourNext()">'+(i===steps.length-1?'✅ Terminé':'Suivant →')+'</button></div></div>';
+    _tt.innerHTML='<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">'+_cf.title+' · '+(i+1)+'/'+steps.length+'</div><div class="tt-title">'+step.title+'</div><div class="tt-text">'+step.text+'</div><div class="tt-footer"><div class="tt-dots">'+dots+'</div><div class="tt-btns"><button class="tt-btn tt-btn-skip" onclick="window._tourClose()">Quitter</button><button class="tt-btn tt-btn-next" onclick="window._tourNext()">'+(i===steps.length-1?'✅ Terminé':'Suivant →')+'</button></div></div><div style="text-align:center;margin-top:10px"><button onclick="window._obDisableAll()" style="background:none;border:none;font-size:10px;color:#94a3b8;cursor:pointer;text-decoration:underline">Ne plus afficher les tutos</button></div>';
     var tw=360,gap=16,left=Math.max(10,Math.min(r.left+window.scrollX,window.innerWidth-tw-20));
     _tt.style.left=left+'px';
     _tt.style.top=(step.pos==='top'?Math.max(10,r.top+window.scrollY-gap-_tt.offsetHeight):(r.bottom+window.scrollY+gap))+'px';
