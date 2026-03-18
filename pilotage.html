@@ -1053,6 +1053,9 @@ async function loadMonth() {
   // Auto-sync : injecter les crédits/leasings depuis Dettes si absents ce mois
   await syncDettesToMonth(data, key);
 
+  // Auto-correction imports bancaires TTC → HT (migration silencieuse)
+  await autoBankTtcFix(data);
+
   renderPage(data, m);
   renderHiddenCredits();
   // Auto-fetch URSSAF taux pour tous les salariés + dirigeant
@@ -2629,114 +2632,41 @@ function openFixedModal() {
   document.getElementById('fixedModal').classList.add('show');
 }
 
-/* ─── CORRECTION IMPORT BANCAIRE (TTC → HT) ─── */
-function _findBankLines(data) {
-  var lines = [];
+/* ─── CORRECTION AUTO IMPORT BANCAIRE (TTC → HT) ─── */
+// Migration silencieuse : détecte les lignes bank_sync sans bankTtcFixed,
+// recalcule HT = montantHT_actuel(=TTC) / (1 + tvaRate/100), sauvegarde.
+async function autoBankTtcFix(data) {
+  var fixed = 0;
   ['chargesFixe','chargesVar','leasing'].forEach(function(sec){
-    (data[sec]||[]).forEach(function(r,i){
+    (data[sec]||[]).forEach(function(r){
       if(r.source==='bank_sync' && !r.bankTtcFixed){
-        lines.push({sec:sec, idx:i, row:r});
+        var ttc = parseFloat(r.montantHT)||0;
+        if(ttc <= 0) return;
+        var rate = parseFloat(r.tvaRate);
+        // Si tvaRate absent/invalide, on assume 20% (c'était le défaut de l'ancien code)
+        if(isNaN(rate) || rate < 0) rate = 20;
+        var ht = rate > 0 ? Math.round(ttc/(1+rate/100)*100)/100 : ttc;
+        r.montantTTC_bank = ttc.toFixed(2);
+        r.montantHT = ht.toFixed(2);
+        r.tvaRate = rate;
+        r.bankTtcFixed = true;
+        fixed++;
       }
     });
   });
-  return lines;
+  if(fixed > 0){
+    try {
+      var mk = getMonthKey();
+      await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',mk), data);
+      showToast('🏦 ' + fixed + ' charge(s) bancaire(s) corrigée(s) — TTC → HT','success');
+    } catch(e) { console.error('autoBankTtcFix save error:', e); }
+  }
+  return fixed;
 }
 
 function buildBankFixBanner(data) {
-  var lines = _findBankLines(data);
-  if(lines.length === 0) return '';
-  var secLabels = {chargesFixe:'Charge fixe',chargesVar:'Charge variable',leasing:'Leasing'};
-  var rows = lines.map(function(l,li){
-    var r = l.row;
-    var ttc = parseFloat(r.montantHT)||0;
-    var rate = parseFloat(r.tvaRate)||20;
-    var htCalc = rate > 0 ? Math.round(ttc/(1+rate/100)*100)/100 : ttc;
-    var tvaCalc = Math.round((ttc - htCalc)*100)/100;
-    return '<tr>' +
-      '<td style="font-weight:600">' + (r.fournisseur||'—') + '</td>' +
-      '<td>' + secLabels[l.sec] + '</td>' +
-      '<td style="text-align:right"><span class="old-val">' + fmtN(ttc) + ' € HT</span></td>' +
-      '<td style="text-align:right;font-weight:700">' + fmtN(ttc) + ' € TTC</td>' +
-      '<td><select class="bank-fix-tva-sel" id="bfix-tva-'+li+'" onchange="previewBankFix()"><option value="0"'+(rate===0?' selected':'')+'>0%</option><option value="5.5"'+(rate===5.5?' selected':'')+'>5,5%</option><option value="10"'+(rate===10?' selected':'')+'>10%</option><option value="20"'+(rate===20?' selected':'')+'>20%</option></select></td>' +
-      '<td style="text-align:right" class="new-val" id="bfix-ht-'+li+'">' + fmtN(htCalc) + ' €</td>' +
-      '<td style="text-align:right;color:var(--muted)" id="bfix-tva-val-'+li+'">' + fmtN(tvaCalc) + ' €</td>' +
-    '</tr>';
-  }).join('');
-
-  return '<div class="bank-fix-banner" id="bank-fix-banner">' +
-    '<div class="bank-fix-title">🏦 Correction nécessaire — Imports bancaires</div>' +
-    '<div class="bank-fix-desc">' +
-      'Les <strong>' + lines.length + ' charge(s)</strong> ci-dessous ont été importées depuis votre compte bancaire. ' +
-      'Le montant bancaire est en <strong>TTC</strong>, mais il avait été enregistré comme HT. ' +
-      'Vérifiez le taux de TVA de chaque ligne puis cliquez sur <strong>Corriger</strong> pour recalculer les montants HT.' +
-    '</div>' +
-    '<div style="overflow-x:auto">' +
-    '<table class="bank-fix-table">' +
-      '<thead><tr><th>Fournisseur</th><th>Type</th><th>Ancien HT (faux)</th><th>Montant TTC réel</th><th>Taux TVA</th><th>Nouveau HT</th><th>TVA</th></tr></thead>' +
-      '<tbody>' + rows + '</tbody>' +
-    '</table></div>' +
-    '<div class="bank-fix-actions">' +
-      '<button class="btn btn-success btn-sm" onclick="applyBankFix()">✅ Corriger ces ' + lines.length + ' ligne(s)</button>' +
-      '<button class="btn btn-outline btn-sm" onclick="dismissBankFix()">Ignorer pour ce mois</button>' +
-      '<span class="bank-fix-count">' + lines.length + ' ligne(s) à vérifier</span>' +
-    '</div>' +
-  '</div>';
-}
-
-function previewBankFix(){
-  var lines = _findBankLines(_data);
-  lines.forEach(function(l,li){
-    var sel = document.getElementById('bfix-tva-'+li);
-    if(!sel) return;
-    var rate = parseFloat(sel.value)||0;
-    var ttc = parseFloat(l.row.montantHT)||0;
-    var ht = rate > 0 ? Math.round(ttc/(1+rate/100)*100)/100 : ttc;
-    var tva = Math.round((ttc - ht)*100)/100;
-    var elHT = document.getElementById('bfix-ht-'+li);
-    var elTVA = document.getElementById('bfix-tva-val-'+li);
-    if(elHT) elHT.textContent = fmtN(ht) + ' €';
-    if(elTVA) elTVA.textContent = fmtN(tva) + ' €';
-  });
-}
-
-async function applyBankFix(){
-  if(!window._uid || !_data) return;
-  var lines = _findBankLines(_data);
-  if(!lines.length){showToast('Aucune ligne à corriger','info');return;}
-  var btn = document.querySelector('.bank-fix-actions .btn-success');
-  if(btn){btn.disabled=true;btn.textContent='⏳ Correction...';}
-  try {
-    lines.forEach(function(l,li){
-      var sel = document.getElementById('bfix-tva-'+li);
-      var rate = sel ? parseFloat(sel.value)||0 : (parseFloat(l.row.tvaRate)||20);
-      var ttc = parseFloat(l.row.montantHT)||0;
-      var ht = rate > 0 ? Math.round(ttc/(1+rate/100)*100)/100 : ttc;
-      // Corriger les données in-memory
-      _data[l.sec][l.idx].montantTTC_bank = ttc.toFixed(2);
-      _data[l.sec][l.idx].montantHT = ht.toFixed(2);
-      _data[l.sec][l.idx].tvaRate = rate;
-      _data[l.sec][l.idx].bankTtcFixed = true;
-    });
-    // Sauvegarder dans Firestore
-    var mk = getMonthKey();
-    await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',mk), _data);
-    showToast('✅ ' + lines.length + ' ligne(s) corrigée(s) — montants HT recalculés','success');
-    // Re-render la page
-    var m = parseInt(document.getElementById('monthSelect').value);
-    renderPage(_data, m);
-  } catch(e) {
-    showToast('❌ Erreur : ' + e.message,'warning');
-    if(btn){btn.disabled=false;btn.textContent='✅ Corriger';}
-  }
-}
-
-function dismissBankFix(){
-  // Marquer les lignes comme "ignorées" pour ce mois sans recalcul
-  var lines = _findBankLines(_data);
-  lines.forEach(function(l){ _data[l.sec][l.idx].bankTtcFixed = true; });
-  var banner = document.getElementById('bank-fix-banner');
-  if(banner) banner.style.display='none';
-  showToast('Bandeau masqué — les montants n\'ont pas été modifiés','info');
+  // Plus de bandeau interactif — la migration est automatique
+  return '';
 }
 
 /* ─── CALCULS ─── */
@@ -4003,9 +3933,6 @@ function onFicheTypeChange() {
   if (bloc) bloc.style.display = type === 'prestataire' ? 'block' : 'none';
 }
 window.onFicheTypeChange = onFicheTypeChange;
-window.applyBankFix = applyBankFix;
-window.dismissBankFix = dismissBankFix;
-window.previewBankFix = previewBankFix;
 
 document.addEventListener('DOMContentLoaded', function() {
   var _checkFb2 = setInterval(function() {
