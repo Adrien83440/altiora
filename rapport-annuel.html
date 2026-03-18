@@ -637,8 +637,10 @@ function computeMonth(d,key,isFuture){
   var caFP=fp055+fp10+fp20;
   var caHT=caJ+caFP;
   var caHT055=h055+fp055,caHT10=h10+fp10,caHT20=h20+fp20;
-  // TVA collectée
-  var tvaCollectee=caHT055*0.055+caHT10*0.10+caHT20*0.20;
+  // TVA collectée — arrondi ligne par ligne
+  var tvaCollectee=(d.ca||[]).reduce(function(s,r){var a=parseFloat(r.ht055)||0,b=parseFloat(r.ht10)||0,c=parseFloat(r.ht20)||0;return s+Math.round(a*0.055*100)/100+Math.round(b*0.10*100)/100+Math.round(c*0.20*100)/100;},0);
+  (d.facturesPro||[]).forEach(function(r){var a=parseFloat(r.ht055)||0,b=parseFloat(r.ht10)||0,c=parseFloat(r.ht20)||0;tvaCollectee+=Math.round(a*0.055*100)/100+Math.round(b*0.10*100)/100+Math.round(c*0.20*100)/100;});
+  tvaCollectee=Math.round(tvaCollectee*100)/100;
   // Rentrées
   var rentrees=(d.rentreesSupp||[]).reduce(function(s,r){return s+(parseFloat(r.montant)||0);},0);
   // Charges fixes
@@ -646,14 +648,14 @@ function computeMonth(d,key,isFuture){
   (d.chargesFixe||[]).forEach(function(r){
     var h=pf(r.montantHT),t=pf(r.tvaRate);
     fixe+=h;
-    if(r.deductible!=='Non')tvaDedFix+=h*t/100;
+    if(r.deductible!=='Non')tvaDedFix+=Math.round(h*t/100*100)/100;
   });
   // Charges variables
   var variable=0,tvaDedVar=0;
   (d.chargesVar||[]).forEach(function(r){
     var h=pf(r.montantHT),t=pf(r.tvaRate);
     variable+=h;
-    if(r.deductible!=='Non')tvaDedVar+=h*t/100;
+    if(r.deductible!=='Non')tvaDedVar+=Math.round(h*t/100*100)/100;
   });
   // Crédits
   var credit=0;
@@ -669,7 +671,7 @@ function computeMonth(d,key,isFuture){
     if(key&&r.dateDebut&&r.dateFin){if(key<r.dateDebut||key>r.dateFin)return;}
     var h=pf(r.montantHT),t=pf(r.tvaRate);
     leasing+=h;
-    if(r.deductible!=='Non')tvaDedLeas+=h*t/100;
+    if(r.deductible!=='Non')tvaDedLeas+=Math.round(h*t/100*100)/100;
   });
   var tvaDed=tvaDedFix+tvaDedVar+tvaDedLeas;
   var tvaDue=tvaCollectee-tvaDed;
@@ -1479,9 +1481,9 @@ function renderRapport(){
   tabTva+='<div class="bilan-block">'+
     '<div class="block-header"><div class="block-title">🔢 TVA collectée par taux</div></div>'+
     '<table class="bilan-table"><thead><tr><th>Taux TVA</th><th>Base HT</th><th>TVA</th><th>% base</th></tr></thead><tbody>';
-  if(T.caHT055>0)tabTva+='<tr><td><span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">5,5%</span></td><td>'+fmt(T.caHT055)+'</td><td>'+fmt(T.caHT055*0.055)+'</td><td>'+fmtPct(T.caHT>0?T.caHT055/T.caHT*100:0,true)+'</td></tr>';
-  if(T.caHT10>0)tabTva+='<tr><td><span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">10%</span></td><td>'+fmt(T.caHT10)+'</td><td>'+fmt(T.caHT10*0.10)+'</td><td>'+fmtPct(T.caHT>0?T.caHT10/T.caHT*100:0,true)+'</td></tr>';
-  if(T.caHT20>0)tabTva+='<tr><td><span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">20%</span></td><td>'+fmt(T.caHT20)+'</td><td>'+fmt(T.caHT20*0.20)+'</td><td>'+fmtPct(T.caHT>0?T.caHT20/T.caHT*100:0,true)+'</td></tr>';
+  if(T.caHT055>0)tabTva+='<tr><td><span style="background:#dcfce7;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">5,5%</span></td><td>'+fmt(T.caHT055)+'</td><td>'+fmt(Math.round(T.caHT055*0.055*100)/100)+'</td><td>'+fmtPct(T.caHT>0?T.caHT055/T.caHT*100:0,true)+'</td></tr>';
+  if(T.caHT10>0)tabTva+='<tr><td><span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">10%</span></td><td>'+fmt(T.caHT10)+'</td><td>'+fmt(Math.round(T.caHT10*0.10*100)/100)+'</td><td>'+fmtPct(T.caHT>0?T.caHT10/T.caHT*100:0,true)+'</td></tr>';
+  if(T.caHT20>0)tabTva+='<tr><td><span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700">20%</span></td><td>'+fmt(T.caHT20)+'</td><td>'+fmt(Math.round(T.caHT20*0.20*100)/100)+'</td><td>'+fmtPct(T.caHT>0?T.caHT20/T.caHT*100:0,true)+'</td></tr>';
   tabTva+='<tr class="row-total"><td>Total</td><td>'+fmt(T.caHT)+'</td><td>'+fmt(T.tvaCollectee)+'</td><td>100%</td></tr>';
   tabTva+='</tbody></table></div>';
 
@@ -2245,9 +2247,9 @@ function exportPDF(){
       {label:'% base', x:MG+162, w:20, r:true},
     ];
     var trows=[];
-    if(T.caHT055>0)trows.push(['5,5%',fmtP(T.caHT055),fmtP(T.caHT055*0.055),fmtPctP(T.caHT>0?T.caHT055/T.caHT*100:0,true)]);
-    if(T.caHT10>0) trows.push(['10%', fmtP(T.caHT10), fmtP(T.caHT10*0.10), fmtPctP(T.caHT>0?T.caHT10/T.caHT*100:0,true)]);
-    if(T.caHT20>0) trows.push(['20%', fmtP(T.caHT20), fmtP(T.caHT20*0.20), fmtPctP(T.caHT>0?T.caHT20/T.caHT*100:0,true)]);
+    if(T.caHT055>0)trows.push(['5,5%',fmtP(T.caHT055),fmtP(Math.round(T.caHT055*0.055*100)/100),fmtPctP(T.caHT>0?T.caHT055/T.caHT*100:0,true)]);
+    if(T.caHT10>0) trows.push(['10%', fmtP(T.caHT10), fmtP(Math.round(T.caHT10*0.10*100)/100), fmtPctP(T.caHT>0?T.caHT10/T.caHT*100:0,true)]);
+    if(T.caHT20>0) trows.push(['20%', fmtP(T.caHT20), fmtP(Math.round(T.caHT20*0.20*100)/100), fmtPctP(T.caHT>0?T.caHT20/T.caHT*100:0,true)]);
     if(!trows.length)trows.push(['Aucun CA TVA enregistre','-','-','-']);
     tableHeader(tCols);
     trows.forEach(function(r,i){tableRow(tCols,r,i,{reHead:function(){tableHeader(tCols);}});});
