@@ -130,6 +130,14 @@
     .toast{position:fixed;bottom:24px;right:24px;background:#1a1f36;color:white;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;transform:translateY(80px);opacity:0;transition:all .3s;}
     .toast.show{transform:translateY(0);opacity:1;}
     .toast.success{background:#10b981;} .toast.error{background:#ef4444;} .toast.warning{background:#f59e0b;color:#1a1f36;}
+    .tva-select{padding:3px 6px;border:1.5px solid var(--border);border-radius:6px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:600;cursor:pointer;outline:none;background:white;width:64px;transition:border-color .15s;}
+    .tva-select:focus{border-color:var(--blue-main);}
+    .tva-select:disabled{opacity:.5;cursor:not-allowed;}
+    .ht-calc{font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;}
+    .ht-calc strong{color:var(--text);font-weight:700;}
+    .bank-tva-info{display:flex;align-items:flex-start;gap:10px;padding:12px 16px;background:linear-gradient(135deg,rgba(251,191,36,0.08),rgba(245,158,11,0.04));border:1px solid rgba(245,158,11,0.2);border-radius:12px;font-size:12px;color:#92400e;line-height:1.6;}
+    .bank-tva-info .info-icon{font-size:18px;flex-shrink:0;margin-top:1px;}
+    .bank-tva-info strong{font-weight:700;}
     html,body{overflow-x:hidden;}
     .hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#0f1f5c;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;}
     .hamburger span{display:block;width:20px;height:2.5px;background:#fff;border-radius:2px;transition:all .25s;}
@@ -351,6 +359,7 @@ async function loadPending(){
         accountName:tx.accountName||'', accountIban:tx.accountIban||'',
         bankTxId:tx.bankTxId||('bk_'+idx),
         cat, status:'pending',
+        tvaRate:null,
         doublonInfo:isDebit?detectDbl(tx,montant):null,
         replaceMode:false,
       };
@@ -402,7 +411,7 @@ function renderAll(){
   const imported=debits.filter(t=>t.status==='imported');
   const ignored=debits.filter(t=>t.status==='ignored');
   const dblCount=debits.filter(t=>t.doublonInfo&&t.status==='pending').length;
-  const readyToImport=debits.filter(t=>t.status==='pending'&&t.cat&&t.cat!=='ignore');
+  const readyToImport=debits.filter(t=>t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined);
   const totalDebit=debits.reduce((s,t)=>s+t.montant,0);
   const totalCredit=credits.reduce((s,t)=>s+t.montant,0);
 
@@ -439,6 +448,14 @@ function renderAll(){
       <div class="stat-box"><div class="stat-val green">${imported.length}</div><div class="stat-lbl">Importées</div></div>
     </div>
 
+    <div class="bank-tva-info">
+      <span class="info-icon">🏦</span>
+      <div>
+        <strong>Les données bancaires ne contiennent pas d'information sur la TVA.</strong><br>
+        Les montants affichés sont en <strong>TTC</strong> (tel que débité sur votre compte). Alteore convertit automatiquement en HT selon le taux de TVA sélectionné. Vérifiez le taux pour chaque dépense — par défaut 20%, mais certaines factures peuvent être à 10%, 5,5% ou 0%.
+      </div>
+    </div>
+
     <div class="filters-bar">
       <button class="filter-btn ${_filter==='all'?'active':''}" onclick="setFilter('all')">Tout (${_txList.length})</button>
       <button class="filter-btn f-debit ${_filter==='debit'?'active':''}" onclick="setFilter('debit')">🔴 Dépenses (${debits.length})</button>
@@ -468,7 +485,8 @@ function renderAll(){
             <th class="${thCls('label')}" onclick="sortBy('label')">Libellé banque<span class="sort-icon"></span></th>
             <th>Libellé Pilotage</th>
             <th>Compte</th>
-            <th class="${thCls('montant')}" style="text-align:right" onclick="sortBy('montant')">Montant<span class="sort-icon"></span></th>
+            <th class="${thCls('montant')}" style="text-align:right" onclick="sortBy('montant')">Montant TTC<span class="sort-icon"></span></th>
+            <th>TVA</th>
             <th>→ Pilotage</th>
             <th>Statut</th>
             <th>Actions</th>
@@ -486,6 +504,7 @@ function renderAll(){
       <div class="footer-info">
         <strong>${readyToImport.length}</strong> dépense(s) prête(s) ·
         Total : <strong>−${fmt(readyToImport.reduce((s,t)=>s+t.montant,0))}</strong>
+        ${(function(){var noTva=debits.filter(t=>t.status==='pending'&&t.cat&&t.cat!=='ignore'&&(t.tvaRate===null||t.tvaRate===undefined)).length;return noTva>0?'<span style="color:var(--orange);margin-left:8px">⚠ '+noTva+' ligne(s) sans TVA</span>':'';})()}
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-outline btn-sm" onclick="window.location.href='banque.html'">← Annuler</button>
@@ -504,6 +523,29 @@ function renderRow(tx){
   const typeBadge=tx.type==='credit'
     ?`<span class="type-credit">Encaissement</span>`
     :`<span class="type-debit">Dépense</span>`;
+
+  // TVA : null = pas encore choisi par l'utilisateur
+  const tvaChosen = tx.tvaRate !== null && tx.tvaRate !== undefined;
+  const htCalc = tvaChosen ? (tx.tvaRate > 0 ? Math.round(tx.montant / (1 + tx.tvaRate/100) * 100) / 100 : tx.montant) : null;
+  let tvaHtml='';
+  if(tx.type==='credit'){
+    tvaHtml=`<span style="font-size:11px;color:var(--muted)">—</span>`;
+  } else {
+    const dis=tx.status!=='pending'?'disabled':'';
+    tvaHtml=`<div>
+      <select class="tva-select" style="${!tvaChosen?'border-color:var(--orange);background:#fef3c7':''}" onchange="updateTva(${tx.id},this.value)" ${dis}>
+        <option value="" ${!tvaChosen?'selected':''}>TVA ?</option>
+        <option value="0" ${tvaChosen&&tx.tvaRate===0?'selected':''}>0%</option>
+        <option value="5.5" ${tvaChosen&&tx.tvaRate===5.5?'selected':''}>5,5%</option>
+        <option value="10" ${tvaChosen&&tx.tvaRate===10?'selected':''}>10%</option>
+        <option value="20" ${tvaChosen&&tx.tvaRate===20?'selected':''}>20%</option>
+      </select>
+      <div class="ht-calc" id="ht-${tx.id}">${tvaChosen?'HT : <strong>'+fmt(htCalc)+'</strong>':'<span style="color:var(--orange)">⚠ Choisir TVA</span>'}</div>
+    </div>`;
+  }
+
+  // Import bloqué si pas de catégorie OU pas de TVA choisie
+  const canImport = tx.cat && tx.cat!=='ignore' && tvaChosen;
 
   let destHtml='';
   if(tx.type==='credit'){
@@ -532,7 +574,7 @@ function renderRow(tx){
   else if(tx.status==='imported') actHtml=`<button class="btn-ign" onclick="unimport(${tx.id})" title="Annuler l'import">↩</button>`;
   else if(tx.status==='ignored')  actHtml=`<button class="btn-ign" onclick="restore(${tx.id})">↩ Rétablir</button>`;
   else actHtml=`<div class="act-row">
-    <button class="btn-import-one" onclick="importOne(${tx.id})" title="Importer cette ligne dans Pilotage" ${!tx.cat||tx.cat==='ignore'?'disabled':''}>⬇️</button>
+    <button class="btn-import-one" onclick="importOne(${tx.id})" title="${!canImport?'Renseignez la catégorie et le taux de TVA':'Importer cette ligne dans Pilotage'}" ${!canImport?'disabled':''}>⬇️</button>
     <button class="btn-ign" onclick="ignoreOne(${tx.id})" title="Ignorer">🚫</button>
     <button class="btn-rule" onclick="learnRule(${tx.id})" title="Mémoriser règle">🧠</button>
   </div>`;
@@ -543,6 +585,7 @@ function renderRow(tx){
     <td><input class="label-input" value="${escHtml(tx.customLabel)}" oninput="updateLabel(${tx.id},this.value)" placeholder="Libellé dans Pilotage" ${tx.status!=='pending'?'disabled':''}/></td>
     <td style="font-size:11px;color:var(--muted);white-space:nowrap">${tx.accountName||'—'}</td>
     <td style="text-align:right" class="${amtCls}">${amtSign}${fmt(tx.montant)}</td>
+    <td>${tvaHtml}</td>
     <td>${destHtml}</td>
     <td>${statusHtml}</td>
     <td>${actHtml}</td>
@@ -550,6 +593,24 @@ function renderRow(tx){
 }
 
 function updateLabel(id,v){_txList[id].customLabel=v;}
+function updateTva(id,v){
+  if(v===''){_txList[id].tvaRate=null;}
+  else{_txList[id].tvaRate=parseFloat(v);}
+  const tx=_txList[id];
+  const tvaChosen=tx.tvaRate!==null&&tx.tvaRate!==undefined;
+  const ht=tvaChosen?(tx.tvaRate>0?Math.round(tx.montant/(1+tx.tvaRate/100)*100)/100:tx.montant):null;
+  const el=document.getElementById('ht-'+id);
+  if(el)el.innerHTML=tvaChosen?'HT : <strong>'+fmt(ht)+'</strong>':'<span style="color:var(--orange)">⚠ Choisir TVA</span>';
+  // Style du select
+  const sel=document.querySelector('#row-'+id+' .tva-select');
+  if(sel){sel.style.borderColor=tvaChosen?'':'var(--orange)';sel.style.background=tvaChosen?'white':'#fef3c7';}
+  // Mettre à jour le bouton import de cette ligne
+  const canImport=tx.cat&&tx.cat!=='ignore'&&tvaChosen;
+  const btn=document.querySelector('#row-'+id+' .btn-import-one');
+  if(btn){btn.disabled=!canImport;btn.title=canImport?'Importer cette ligne dans Pilotage':'Renseignez la catégorie et le taux de TVA';}
+  // Mettre à jour compteurs globaux
+  updateImportCounters();
+}
 function updateDate(id,v){
   _txList[id].customDate=v;
   // Mettre à jour monthKey si date valide dd/mm/yyyy
@@ -561,14 +622,21 @@ function updateDate(id,v){
     }
   }
 }
+function updateImportCounters(){
+  const ready=_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined).length;
+  const btn=document.getElementById('btn-import');
+  if(btn){btn.disabled=ready===0;btn.textContent=`⬇️ Importer (${ready})`;}
+}
 function updateCat(id,v){
   _txList[id].cat=v||null;
   const sel=document.getElementById('dest-'+id);
   if(sel) sel.className='dest-select '+(v?CAT_CLS[v]||'':'');
-  // Refresh bouton
-  const ready=_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore').length;
-  const btn=document.getElementById('btn-import');
-  if(btn){btn.disabled=ready===0;btn.textContent=`⬇️ Importer (${ready})`;}
+  // Mettre à jour le bouton import de cette ligne
+  const tx=_txList[id];
+  const canImport=tx.cat&&tx.cat!=='ignore'&&tx.tvaRate!==null&&tx.tvaRate!==undefined;
+  const rowBtn=document.querySelector('#row-'+id+' .btn-import-one');
+  if(rowBtn){rowBtn.disabled=!canImport;}
+  updateImportCounters();
 }
 function ignoreOne(id){_txList[id].status='ignored';renderAll();}
 function restore(id){_txList[id].status='pending';renderAll();}
@@ -615,6 +683,7 @@ function dblReplace(){if(_dblCtx===null)return;_txList[_dblCtx].replaceMode=true
 async function importOne(id){
   const tx = _txList[id];
   if(!tx || tx.type!=='debit' || tx.status!=='pending' || !tx.cat || tx.cat==='ignore') return;
+  if(tx.tvaRate===null||tx.tvaRate===undefined){showToast('⚠️ Choisissez le taux de TVA avant d\'importer','warning');return;}
 
   // Désactiver le bouton pendant l'import
   const btn = document.querySelector(`#row-${id} .btn-import-one`);
@@ -637,16 +706,21 @@ async function importOne(id){
 
     // Remplacer doublon si demandé
     if(tx.replaceMode && tx.doublonInfo){
-      data[tx.doublonInfo.section]=(data[tx.doublonInfo.section]||[]).filter(r=>Math.abs(parseFloat(r.montantHT||0)-tx.montant)>=0.5);
+      var htCheck = tx.tvaRate > 0 ? Math.round(tx.montant/(1+tx.tvaRate/100)*100)/100 : tx.montant;
+      data[tx.doublonInfo.section]=(data[tx.doublonInfo.section]||[]).filter(r=>{var ex=parseFloat(r.montantHT||0);return Math.abs(ex-tx.montant)>=0.5 && Math.abs(ex-htCheck)>=0.5;});
     }
+
+    const tvaRate = tx.tvaRate !== undefined ? tx.tvaRate : 20;
+    const montantHT = tvaRate > 0 ? Math.round(tx.montant / (1 + tvaRate/100) * 100) / 100 : tx.montant;
 
     data[sec].push({
       fournisseur: tx.customLabel,
       date:        tx.customDate || tx.date || '',
       type:        sec==='chargesFixe'?'Charge fixe':sec==='leasing'?'Leasing / LOA':'Charge variable',
-      montantHT:   tx.montant.toFixed(2),
-      tvaRate:20, deductible:'Oui', pointe:'Non',
+      montantHT:   montantHT.toFixed(2),
+      tvaRate:tvaRate, deductible:'Oui', pointe:'Non',
       source:'bank_sync', bankTxId:tx.bankTxId,
+      montantTTC_bank: tx.montant.toFixed(2),
       importedAt:  new Date().toISOString()
     });
 
@@ -678,8 +752,8 @@ async function importOne(id){
 
 
 async function importSelected(){
-  const toImport=_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore');
-  if(!toImport.length) return;
+  const toImport=_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined);
+  if(!toImport.length){showToast('⚠️ Renseignez la catégorie et le taux de TVA pour chaque ligne','warning');return;}
   const btn=document.getElementById('btn-import');
   btn.disabled=true; btn.textContent='⏳ Import…';
   try{
@@ -698,7 +772,8 @@ async function importSelected(){
         if(!data[sec]) data[sec]=[];
         // Supprimer doublon si remplacement
         if(tx.replaceMode&&tx.doublonInfo){
-          data[tx.doublonInfo.section]=(data[tx.doublonInfo.section]||[]).filter(r=>Math.abs(parseFloat(r.montantHT||0)-tx.montant)>=0.5);
+          var htChk=tx.tvaRate>0?Math.round(tx.montant/(1+tx.tvaRate/100)*100)/100:tx.montant;
+          data[tx.doublonInfo.section]=(data[tx.doublonInfo.section]||[]).filter(r=>{var ex=parseFloat(r.montantHT||0);return Math.abs(ex-tx.montant)>=0.5&&Math.abs(ex-htChk)>=0.5;});
         }
         // Dédupliquer par bankTxId
         if((data[sec]||[]).some(r=>r.bankTxId===tx.bankTxId)) continue;
@@ -706,9 +781,10 @@ async function importSelected(){
           fournisseur:tx.customLabel,
           date: tx.customDate || tx.date || '',
           type:sec==='chargesFixe'?'Charge fixe':sec==='leasing'?'Leasing / LOA':'Charge variable',
-          montantHT:tx.montant.toFixed(2),
-          tvaRate:20, deductible:'Oui', pointe:'Non',
+          montantHT:(function(){ var rate=tx.tvaRate||0; return rate>0?Math.round(tx.montant/(1+rate/100)*100)/100:tx.montant; })().toFixed(2),
+          tvaRate:tx.tvaRate||0, deductible:'Oui', pointe:'Non',
           source:'bank_sync', bankTxId:tx.bankTxId,
+          montantTTC_bank: tx.montant.toFixed(2),
           importedAt:new Date().toISOString()
         };
         if(sec==='leasing'){entry.dateDebut='';entry.dateFin='';}
@@ -775,7 +851,7 @@ function showToast(msg,type=''){const t=document.getElementById('toast');t.textC
 async function handleLogout(){await window._signOut(window._auth);window.location.href='index.html';}
 
 window.initPage=initPage;window.setFilter=setFilter;window.setSearch=setSearch;
-window.updateLabel=updateLabel;window.updateDate=updateDate;window.updateCat=updateCat;
+window.updateLabel=updateLabel;window.updateDate=updateDate;window.updateCat=updateCat;window.updateTva=updateTva;
 window.sortBy=sortBy;
 window.importOne=importOne;
 window.ignoreOne=ignoreOne;window.restore=restore;window.unimport=unimport;
