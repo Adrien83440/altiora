@@ -17,6 +17,7 @@
   const CAN_RAPPORT      = ['trial', 'pro', 'max', 'master', 'dev'];
   const CAN_RH           = ['master', 'trial', 'dev'];
   const CAN_SCENARIOS    = ['max', 'master', 'trial', 'dev'];
+  const CAN_PREVISIONS   = ['master', 'trial', 'dev'];
 
   // Pages RH (contrôle d'accès + détection page active)
   const RH_PAGES = [
@@ -49,7 +50,7 @@
 
     const kpisPages = ['cout-revient.html', 'marges.html', 'panier-moyen.html', 'dettes.html', 'gestion-stock.html'];
     const kpisOpen  = kpisPages.includes(PAGE)                                   ? 'style="max-height:500px"' : '';
-    const pilOpen   = ['pilotage.html', 'cashflow.html'].includes(PAGE)          ? 'style="max-height:500px"' : '';
+    const pilOpen   = ['pilotage.html', 'cashflow.html', 'previsions.html'].includes(PAGE)          ? 'style="max-height:500px"' : '';
     const fidOpen   = PAGE === 'fidelisation.html'                               ? 'style="max-height:500px"' : '';
     const rhOpen    = RH_PAGES.includes(PAGE)                                    ? 'style="max-height:4000px"' : '';
 
@@ -95,13 +96,17 @@
     </div>
 
     <!-- Pilotage -->
-    <div class="ni${aNI(['pilotage.html','cashflow.html'])}" id="nav-pilotage" onclick="toggleAlteoreNav('pil-sub',this)">
+    <div class="ni${aNI(['pilotage.html','cashflow.html','previsions.html'])}" id="nav-pilotage" onclick="toggleAlteoreNav('pil-sub',this)">
       <span>🧭</span><span style="flex:1">Pilotage</span><span class="chev" id="chev-pil">›</span>
     </div>
     <div class="sub" id="pil-sub" ${pilOpen}>
       ${PIL_YEARS.map(y => `<div class="si${PAGE === 'pilotage.html' && ACTIVE_YEAR === y ? ' on' : ''}" onclick="location.href='pilotage.html?year=${y}'"><span class="dot"></span>Pilotage ${y}</div>`).join('\n      ')}
       <div class="si${a('cashflow.html')}" onclick="location.href='cashflow.html'" style="border-top:1px solid rgba(255,255,255,.06);margin-top:4px;padding-top:8px">
         <span class="dot" style="background:#0d9488"></span>💧 Cashflow
+      </div>
+      <div class="si${a('previsions.html')}" id="nav-previsions" onclick="location.href='previsions.html'" style="border-top:1px solid rgba(255,255,255,.06);margin-top:4px;padding-top:8px">
+        <span class="dot" style="background:#7c3aed"></span>🔮 Prévisions IA
+        <span style="font-size:9px;font-weight:700;background:rgba(124,58,237,.25);color:#c4b5fd;padding:2px 6px;border-radius:20px;margin-left:auto">Master</span>
       </div>
     </div>
 
@@ -503,6 +508,7 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       import:       { icon: '📥', title: 'Import/Export — Plan Pro requis',        desc: "L'import et l'export de données est disponible dès le plan <strong>Pro (69€/mois)</strong>.", cta: '⭐ Passer au plan Pro' },
       rh:           { icon: '👥', title: 'Module RH — Plan Master requis',         desc: 'La gestion complète des ressources humaines (employés, planning, congés, paie, rémunération dirigeant…) est disponible avec le plan <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Master' },
       scenarios:    { icon: '🎯', title: 'Scénarios & IA avancée — Plan Max requis', desc: 'Les scénarios \"Et si...\", l\'assistant vocal IA et l\'analyse IA du stock sont disponibles dès le plan <strong>Max (99€/mois)</strong>.', cta: '⭐ Passer au plan Max' },
+      previsions:   { icon: '🔮', title: 'Prévisions IA — Plan Master requis',    desc: 'Les prévisions de demande par intelligence artificielle (météo, fériés, événements, historique de ventes) sont disponibles avec le plan <strong>Master (169€/mois)</strong>.', cta: '⭐ Passer au plan Master' },
       core:         { icon: '📊', title: 'Fonctionnalité Premium',                 desc: 'Cette fonctionnalité est disponible dès le plan <strong>Pro (69€/mois)</strong>.', cta: '⭐ Voir les plans' },
       trial_expired:{ icon: '⏰', title: 'Votre essai gratuit a expiré',           desc: 'Votre période d\'essai de 15 jours est terminée.<br><br>Souscrivez à un abonnement pour <strong>continuer à utiliser Alteore</strong> et conserver toutes vos données.<br><br>⚠️ <strong>Sans abonnement, vos données seront définitivement supprimées 15 jours après l\'expiration.</strong>', cta: '⭐ Choisir mon plan →' },
       deleted:      { icon: '🗑', title: 'Vos données ont été supprimées',          desc: 'Votre essai a expiré il y a plus de 15 jours. <strong>Toutes vos données ont été définitivement supprimées</strong> conformément à nos conditions.<br><br>Pour utiliser Alteore, vous pouvez créer un nouveau compte et souscrire à un abonnement.', cta: 'Créer un nouveau compte →' },
@@ -564,6 +570,7 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
     if (!CAN_RAPPORT.includes(plan))      lockNavItem('nav-rapport','Pro+',   'rapport');
     if (!CAN_RH.includes(plan))           lockNavItem('nav-rh',     'Master', 'rh');
     if (!CAN_SCENARIOS.includes(plan))     lockNavItem('nav-scenarios','Max+', 'scenarios');
+    if (!CAN_PREVISIONS.includes(plan))    lockNavItem('nav-previsions','Master', 'previsions');
 
     const mainEl = document.querySelector('main, .main');
     if (mainEl) mainEl.style.visibility = 'visible';
@@ -586,6 +593,7 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
     if (PAGE === 'rapport-annuel.html' && !CAN_RAPPORT.includes(plan))      { showUpgradeModal('rapport');      return false; }
     if (RH_PAGES.includes(PAGE)        && !CAN_RH.includes(plan))           { showUpgradeModal('rh');           return false; }
     if (PAGE === 'scenarios.html'       && !CAN_SCENARIOS.includes(plan))     { showUpgradeModal('scenarios');    return false; }
+    if (PAGE === 'previsions.html'     && !CAN_PREVISIONS.includes(plan))    { showUpgradeModal('previsions');   return false; }
     const corePages = ['dashboard.html','pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','cashflow.html','banque.html','bank-validation.html'];
     if (corePages.includes(PAGE) && !CAN_CORE.includes(plan)) { showUpgradeModal('core'); return false; }
     return true;
