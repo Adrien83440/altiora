@@ -272,6 +272,8 @@ main{margin-left:250px;flex:1;display:flex;flex-direction:column}
   .saisie-toolbar{flex-direction:column!important;align-items:flex-start!important}
   .hist-table{min-width:500px!important}
   div[style*="overflow-x:auto"]{-webkit-overflow-scrolling:touch!important}
+  .pred-table{min-width:600px!important}
+  div[style*="grid-template-columns:repeat(3"]{grid-template-columns:1fr!important;gap:8px!important}
 }
 @media(max-width:420px){
   .kpi-row{grid-template-columns:1fr!important}
@@ -466,6 +468,11 @@ var _historyCache = {};    // { 'YYYY-MM': { entries: [...] } }
 var _stockMovements = [];  // Stock movements for sync
 var _todayEntries = {};    // Current saisie form state: { productId: {produit,vendu,jete,donne,restant} }
 
+// Wave 3 — Prédictions IA
+var _currentPredictions = null; // Résultat API pour la semaine affichée
+var _predictionsCache = {};     // { 'YYYY-Www': {...} } cache par semaine
+var _lastMeteo = null;          // Météo de la semaine (réutilisée pour l'API)
+
 // ── HELPERS ──
 function pf(v){return parseFloat((''+( v||0)).replace(',','.'))||0}
 function fmtE(n){return(parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'}
@@ -520,9 +527,10 @@ function updateWeekLabel(){
   document.getElementById('topbar-sub').textContent='Prévision de demande par produit · Semaine '+w+' ('+d0.getDate()+'/'+(d0.getMonth()+1)+' – '+d6.getDate()+'/'+(d6.getMonth()+1)+')';
 }
 
-function changeWeek(dir){
+async function changeWeek(dir){
   _weekOffset+=dir;
   updateWeekLabel();
+  await loadSavedPredictions();
   renderPage();
 }
 
@@ -604,6 +612,22 @@ window.initPrevisions = async function(){
   // Activer le bouton générer si on a des produits
   document.getElementById('btnGenerate').disabled=_config.products.length===0;
 
+  // Pre-load history for last 5 weeks (for IA context)
+  var now=new Date();
+  var monthsToLoad={};
+  for(var w=-5;w<=0;w++){
+    var wd=getWeekDates(w);
+    monthsToLoad[monthKey(wd[0])]=true;
+    monthsToLoad[monthKey(wd[6])]=true;
+  }
+  var mks=Object.keys(monthsToLoad);
+  for(var mi=0;mi<mks.length;mi++){
+    await loadHistoryMonth(mks[mi]);
+  }
+
+  // Load saved predictions for current week
+  await loadSavedPredictions();
+
   renderPage();
 };
 
@@ -621,12 +645,15 @@ async function renderPage(){
 
   // Météo
   var meteo=await fetchWeekMeteo(days);
+  _lastMeteo=meteo;
 
   var html='';
 
   // ── KPI ROW ──
   var nbProduits=_config.products.length;
-  var histCount=Object.keys(_historyCache).reduce(function(s,k){return s+(_historyCache[k].entries||[]).length},0);
+  var histCount=0;
+  var _seenDates={};
+  Object.keys(_historyCache).forEach(function(k){(_historyCache[k].entries||[]).forEach(function(e){if(e.date&&!_seenDates[e.date]){_seenDates[e.date]=true;histCount++}})});
   html+='<div class="kpi-row">';
   html+='<div class="kpi purple"><div class="kpi-icon">🎯</div><div class="kpi-label">Fiabilité prédictions</div><div class="kpi-val" style="color:var(--muted)">—</div><div class="kpi-sub">Disponible après 2 semaines</div></div>';
   html+='<div class="kpi green"><div class="kpi-icon">🗑</div><div class="kpi-label">Gaspillage évité</div><div class="kpi-val" style="color:var(--muted)">—</div><div class="kpi-sub">vs production au feeling</div></div>';
@@ -686,17 +713,31 @@ async function renderPage(){
     html+='</div>';
   }
 
-  // ── TABLEAU PRÉVISIONS (placeholder Wave 3) ──
+  // ── TABLEAU PRÉVISIONS ──
   if(nbProduits>0){
-    html+='<div class="gcard">';
+    var wk=getWeekKey(_weekOffset);
+    _currentPredictions=_predictionsCache[wk]||null;
+
+    html+='<div class="gcard" id="predictions-card">';
     html+='<div class="gcard-head"><div class="gcard-title">📊 Prévisions de la semaine</div>';
-    html+='<button class="btn btn-ai btn-sm" onclick="generatePredictions()" id="btnGenerate2"'+(nbProduits===0?' disabled':'')+'>🔮 Générer</button>';
-    html+='</div><div class="gcard-body">';
-    html+='<div class="empty" style="padding:40px 20px"><div class="empty-icon">🔮</div>';
-    html+='<h3>Prêt pour la prédiction</h3>';
-    html+='<p>Vous avez <b>'+nbProduits+' produit'+(nbProduits>1?'s':'')+' configuré'+(nbProduits>1?'s':'')+'</b>. Cliquez sur "Générer les prévisions" pour obtenir les quantités recommandées pour chaque jour de la semaine.</p>';
-    html+='<p style="margin-top:8px;font-size:11px;color:var(--orange)">💡 Plus vous aurez d\'historique de ventes, plus les prévisions seront précises.</p>';
-    html+='</div></div></div>';
+    html+='<div style="display:flex;gap:6px;align-items:center">';
+    if(_currentPredictions){
+      html+='<span style="font-size:10px;color:var(--green);font-weight:600">✓ Généré</span>';
+    }
+    html+='<button class="btn btn-ai btn-sm" onclick="generatePredictions()" id="btnGenerate2">🔮 '+ (_currentPredictions?'Regénérer':'Générer')+'</button>';
+    html+='</div></div>';
+    html+='<div class="gcard-body" id="predictions-body">';
+
+    if(_currentPredictions){
+      html+=renderPredictionsTable(_currentPredictions,days,feries);
+    } else {
+      html+='<div class="empty" style="padding:40px 20px"><div class="empty-icon">🔮</div>';
+      html+='<h3>Prêt pour la prédiction</h3>';
+      html+='<p>Vous avez <b>'+nbProduits+' produit'+(nbProduits>1?'s':'')+' configuré'+(nbProduits>1?'s':'')+'</b>. Cliquez sur "Générer les prévisions" pour obtenir les quantités recommandées pour chaque jour de la semaine.</p>';
+      html+='<p style="margin-top:8px;font-size:11px;color:var(--orange)">💡 Plus vous aurez d\'historique de ventes, plus les prévisions seront précises.</p>';
+      html+='</div>';
+    }
+    html+='</div></div>';
   }
 
   // ── SAISIE VENTES RÉELLES ──
@@ -759,10 +800,225 @@ async function renderPage(){
   }
 }
 
-// ── GENERATE PREDICTIONS (placeholder — Wave 3) ──
+// ═══════════════════════════════════════════
+// WAVE 3 — GÉNÉRATION PRÉVISIONS IA
+// ═══════════════════════════════════════════
+
 async function generatePredictions(){
   if(_config.products.length===0){showToast('Ajoutez des produits d\'abord','');return}
-  showToast('🔮 Les prévisions IA seront disponibles dans la prochaine mise à jour','');
+
+  // Collect historique from cache (all loaded months)
+  var allHist=[];
+  Object.keys(_historyCache).forEach(function(mk){
+    (_historyCache[mk].entries||[]).forEach(function(e){allHist.push(e)});
+  });
+  // Sort by date asc
+  allHist.sort(function(a,b){return (a.date||'').localeCompare(b.date||'')});
+
+  // Week dates
+  var days=getWeekDates(_weekOffset);
+  var dateDebut=fmtDate(days[0]);
+  var dateFin=fmtDate(days[6]);
+
+  // Fériés
+  var feries=getJoursFeries(days[0].getFullYear());
+  if(days[6].getFullYear()!==days[0].getFullYear()) feries=feries.concat(getJoursFeries(days[6].getFullYear()));
+  // Filtrer fériés dans la période
+  var feriesSemaine=feries.filter(function(f){return f>=dateDebut && f<=dateFin});
+
+  // Météo
+  var meteoPayload=null;
+  if(_lastMeteo){
+    meteoPayload={forecast:_lastMeteo};
+  }
+
+  // Events (future V2)
+  var events=[];
+
+  // UI: loading state
+  var body=document.getElementById('predictions-body');
+  if(body) body.innerHTML='<div class="loader-wrap"><div class="spin"></div><span style="font-size:12px;color:var(--muted)">🔮 Génération en cours… L\'IA analyse votre historique, la météo et les tendances.</span></div>';
+  var btn1=document.getElementById('btnGenerate');
+  var btn2=document.getElementById('btnGenerate2');
+  if(btn1){btn1.disabled=true;btn1.textContent='⏳ Génération…'}
+  if(btn2){btn2.disabled=true;btn2.textContent='⏳ …'}
+
+  try{
+    // Get auth token
+    var token=await window._auth.currentUser.getIdToken();
+
+    var resp=await fetch('/api/previsions-ai',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({
+        products:_config.products,
+        historique:allHist,
+        meteo:meteoPayload,
+        joursFeries:feriesSemaine,
+        events:events,
+        dateDebut:dateDebut,
+        dateFin:dateFin
+      })
+    });
+
+    if(!resp.ok){
+      var errData=await resp.json().catch(function(){return{error:'Erreur '+resp.status}});
+      throw new Error(errData.error||'Erreur API');
+    }
+
+    var result=await resp.json();
+    var wk=getWeekKey(_weekOffset);
+    _currentPredictions=result;
+    _predictionsCache[wk]=result;
+
+    // Save to Firestore
+    try{
+      await window._setDoc(window._doc(window._db,'previsions',window._uid,'predictions',wk),{
+        generatedAt:new Date().toISOString(),
+        weekKey:wk,
+        dateDebut:dateDebut,
+        dateFin:dateFin,
+        predictions:result.predictions||[],
+        alertes:result.alertes||[],
+        insights:result.insights||{}
+      });
+    }catch(e){console.warn('Save predictions error:',e)}
+
+    // Re-render predictions section
+    if(body) body.innerHTML=renderPredictionsTable(result,days,feries);
+    showToast('✅ Prévisions générées pour la semaine','success');
+
+  }catch(err){
+    console.error('generatePredictions error:',err);
+    if(body) body.innerHTML='<div class="alert-card warning" style="margin:20px 0"><span class="alert-icon">⚠️</span><div class="alert-text"><b>Erreur lors de la génération.</b> '+err.message+'<br><br>Réessayez dans quelques instants.</div></div>';
+    showToast('Erreur : '+err.message,'');
+  }
+
+  // Restore buttons
+  if(btn1){btn1.disabled=false;btn1.textContent='🔮 Générer les prévisions'}
+  if(btn2){btn2.disabled=false;btn2.textContent='🔮 Générer'}
+}
+
+// ── RENDER PREDICTIONS TABLE ──
+function renderPredictionsTable(result, days, feries){
+  var preds=result.predictions||[];
+  var alertes=result.alertes||[];
+  var insights=result.insights||{};
+
+  if(preds.length===0){
+    return '<div class="alert-card warning"><span class="alert-icon">⚠️</span><div class="alert-text"><b>Aucune prédiction retournée.</b> Vérifiez que vous avez suffisamment d\'historique (14 jours recommandés).</div></div>';
+  }
+
+  var h='';
+
+  // Insights banner
+  h+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">';
+  h+='<div style="padding:12px 14px;background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(167,139,250,0.05));border:1px solid rgba(99,102,241,0.15);border-radius:12px;text-align:center">';
+  h+='<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase">CA prévisionnel</div>';
+  h+='<div style="font-size:18px;font-weight:800;color:var(--accent);margin-top:4px">'+fmtE(insights.caPrevisionnel||0)+'</div></div>';
+  h+='<div style="padding:12px 14px;background:linear-gradient(135deg,rgba(239,68,68,0.06),rgba(248,113,113,0.03));border:1px solid rgba(239,68,68,0.12);border-radius:12px;text-align:center">';
+  h+='<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase">Coût MP estimé</div>';
+  h+='<div style="font-size:18px;font-weight:800;color:var(--red);margin-top:4px">'+fmtE(insights.coutMPPrevisionnel||0)+'</div></div>';
+  h+='<div style="padding:12px 14px;background:linear-gradient(135deg,rgba(16,185,129,0.08),rgba(52,211,153,0.04));border:1px solid rgba(16,185,129,0.15);border-radius:12px;text-align:center">';
+  h+='<div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase">Marge prév.</div>';
+  h+='<div style="font-size:18px;font-weight:800;color:var(--green);margin-top:4px">'+fmtE(insights.margePrevisionnel||0)+'</div></div>';
+  h+='</div>';
+
+  // Tendance
+  if(insights.commentaire){
+    var tendIcon=insights.tendanceGlobale==='hausse'?'📈':insights.tendanceGlobale==='baisse'?'📉':'➡️';
+    h+='<div class="alert-card info" style="margin-bottom:14px"><span class="alert-icon">'+tendIcon+'</span><div class="alert-text">';
+    h+=insights.commentaire;
+    if(insights.jourPic) h+=' · Jour pic : <b>'+insights.jourPic+'</b>';
+    if(insights.jourCreux) h+=' · Jour creux : <b>'+insights.jourCreux+'</b>';
+    h+='</div></div>';
+  }
+
+  // Table
+  h+='<div style="overflow-x:auto"><table class="pred-table">';
+  h+='<thead><tr><th style="text-align:left">Produit</th>';
+  for(var di=0;di<7;di++){
+    var d=days[di];
+    var dStr=fmtDate(d);
+    var isFerie=feries.indexOf(dStr)>=0;
+    h+='<th>'+JOURS[di]+' '+d.getDate()+'/'+(d.getMonth()+1)+(isFerie?' 🔴':'')+'</th>';
+  }
+  h+='<th>Total</th></tr></thead><tbody>';
+
+  // Group predictions by product
+  var prodMap={};
+  _config.products.forEach(function(p){prodMap[p.id]=p});
+  var prodTotals={};
+  var dayTotals=[0,0,0,0,0,0,0];
+  var dayCA=[0,0,0,0,0,0,0];
+
+  _config.products.forEach(function(p){
+    var total=0;
+    h+='<tr>';
+    h+='<td>'+(p.emoji||'📦')+' '+p.name+'</td>';
+    for(var di=0;di<7;di++){
+      var dStr=fmtDate(days[di]);
+      var pred=preds.find(function(pr){return pr.productId===p.id && pr.date===dStr});
+      var val=pred?pred.predicted:0;
+      var conf=pred?pred.confidence:0;
+      var confColor=conf>=0.8?'var(--green)':conf>=0.5?'var(--orange)':'var(--red)';
+      var comment=pred?pred.comment:'';
+      total+=val;
+      dayTotals[di]+=val;
+      dayCA[di]+=val*(p.pvHT||0);
+      h+='<td title="'+(comment||'')+'" style="cursor:help">';
+      h+='<div style="font-size:15px;font-weight:800">'+val+'</div>';
+      h+='<div style="font-size:8px;color:'+confColor+';margin-top:1px">●'+(conf*100).toFixed(0)+'%</div>';
+      h+='</td>';
+    }
+    h+='<td style="font-weight:800;font-size:14px;color:var(--accent)">'+total+'</td>';
+    h+='</tr>';
+  });
+
+  // Total row
+  h+='<tr style="background:rgba(99,102,241,0.06);font-weight:700;border-top:2px solid var(--accent-border)">';
+  h+='<td style="color:var(--accent)">Total unités</td>';
+  var grandTotal=0;
+  for(var di=0;di<7;di++){grandTotal+=dayTotals[di];h+='<td><b>'+dayTotals[di]+'</b></td>';}
+  h+='<td style="font-size:14px;color:var(--accent)"><b>'+grandTotal+'</b></td></tr>';
+
+  // CA row
+  h+='<tr style="background:rgba(16,185,129,0.04)">';
+  h+='<td style="color:var(--green)">💰 CA HT prévu</td>';
+  var grandCA=0;
+  for(var di=0;di<7;di++){grandCA+=dayCA[di];h+='<td style="font-size:11px;font-weight:700;color:var(--green)">'+fmtE(dayCA[di])+'</td>';}
+  h+='<td style="font-weight:800;color:var(--green)">'+fmtE(grandCA)+'</td></tr>';
+
+  h+='</tbody></table></div>';
+
+  // Alertes IA
+  if(alertes.length>0){
+    h+='<div style="margin-top:16px;display:flex;flex-direction:column;gap:6px">';
+    alertes.forEach(function(a){
+      var cls=a.severity==='danger'?'warning':a.severity==='warning'?'warning':'info';
+      h+='<div class="alert-card '+cls+'"><span class="alert-icon">'+a.icon+'</span><div class="alert-text">'+a.message+'</div></div>';
+    });
+    h+='</div>';
+  }
+
+  // Factors legend
+  h+='<div style="margin-top:14px;padding:12px 14px;background:rgba(99,102,241,0.04);border-radius:10px;font-size:11px;color:var(--muted)">';
+  h+='💡 <b>Légende confiance :</b> <span style="color:var(--green)">● ≥80%</span> fiable · <span style="color:var(--orange)">● 50-79%</span> modéré · <span style="color:var(--red)">● &lt;50%</span> incertain — Survolez une cellule pour voir les facteurs.';
+  h+='</div>';
+
+  return h;
+}
+
+// ── LOAD SAVED PREDICTIONS FOR CURRENT WEEK ──
+async function loadSavedPredictions(){
+  var wk=getWeekKey(_weekOffset);
+  if(_predictionsCache[wk]) return;
+  try{
+    var snap=await window._getDoc(window._doc(window._db,'previsions',window._uid,'predictions',wk));
+    if(snap.exists()){
+      _predictionsCache[wk]=snap.data();
+    }
+  }catch(e){console.warn('Load predictions error:',e)}
 }
 
 // ═══════════════════════════════════════════
