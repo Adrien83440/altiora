@@ -44,7 +44,7 @@ export default async function handler(req, res) {
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY manquante' });
 
   try {
-    const { products, historique, meteo, joursFeries, events, dateDebut, dateFin } = req.body;
+    const { products, historique, meteo, joursFeries, events, dateDebut, dateFin, businessType } = req.body;
 
     if (!products || !products.length) return res.status(400).json({ error: 'Aucun produit fourni.' });
     if (!dateDebut || !dateFin) return res.status(400).json({ error: 'Dates manquantes.' });
@@ -53,7 +53,15 @@ export default async function handler(req, res) {
     const maxHistEntries = 500;
     const histTrunc = (historique || []).slice(-maxHistEntries);
 
-    const prompt = `Tu es un expert en prévision de demande pour commerces de proximité français (boulangeries, restaurants, traiteurs, épiceries, commerces de détail). Tu analyses l'historique de ventes, la météo, les jours de la semaine, les jours fériés et les événements locaux pour prédire les quantités de vente par produit.
+    // Adapter le contexte au type d'activité
+    const btContexts = {
+      alimentaire: `Tu es un expert en prévision de demande pour commerces alimentaires français (boulangeries, restaurants, traiteurs, épiceries). Les pertes (jeté, donné) sont un KPI majeur. Le gaspillage alimentaire est un enjeu clé.`,
+      commerce: `Tu es un expert en prévision de ventes pour commerces de détail français (boutiques vêtements, accessoires, décoration, retail). Il n'y a PAS de notion de "jeté" — les produits invendus restent en stock. L'analyse porte sur les tendances de vente par catégorie, la saisonnalité des collections, et les pics de fréquentation.`,
+      service: `Tu es un expert en prévision de demande pour activités de service françaises (salon de coiffure, institut de beauté, consulting, agence). L'analyse porte sur le taux de remplissage des créneaux, les annulations, et l'optimisation du planning.`
+    };
+    const btContext = btContexts[businessType] || btContexts.alimentaire;
+
+    const prompt = `${btContext} Tu analyses l'historique de ventes, la météo, les jours de la semaine, les jours fériés et les événements locaux pour prédire les quantités par produit.
 
 PRODUITS À PRÉVOIR :
 ${JSON.stringify(products.map(p => ({ id: p.id, name: p.name, unit: p.unit || 'pièces', pvHT: p.pvHT || 0, coutUnitaire: p.coutUnitaire || 0 })), null, 1)}
@@ -73,8 +81,12 @@ ${events && events.length ? JSON.stringify(events, null, 1) : 'Aucun'}
 PÉRIODE À PRÉVOIR : du ${dateDebut} au ${dateFin}
 
 RÈGLES D'ANALYSE :
+- Type d'activité : ${businessType || 'alimentaire'}
 - Identifie les patterns par jour de semaine (lundi creux, dimanche pic pour boulangeries, vendredi/samedi pics pour restaurants, etc.)
+- Pour le COMMERCE/RETAIL : analyse les tendances par catégorie, les pics saisonniers (soldes, fêtes, rentrée), pas de notion de gaspillage
+- Pour les SERVICES : analyse le taux de remplissage, les no-shows, les jours de forte demande
 - La météo chaude (>25°C) augmente glaces/boissons fraîches, baisse soupes/viennoiseries lourdes
+- La météo chaude augmente aussi les sorties shopping et la fréquentation des terrasses
 - La pluie réduit la fréquentation globale de 10-20%
 - Le vent fort (>40km/h) réduit la fréquentation de 5-15%
 - Les jours fériés = pattern dimanche (fermeture possible, ou pic si ouvert)
