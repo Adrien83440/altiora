@@ -492,13 +492,22 @@ onAuthStateChanged(auth,async(user)=>{
     }
   }catch(e){}
 
-  // Charger localisation depuis profil
+  // Charger localisation depuis profil (géocodage CP comme le dashboard)
   try{
     const snap=await getDoc(doc(db,'profil',user.uid,'data','profil'));
     if(snap.exists()){
       const p=snap.data();
-      if(p.codePostal||p.ville){
-        window._userLocation={cp:p.codePostal||'',city:p.ville||'',lat:parseFloat(p.lat)||null,lon:parseFloat(p.lon)||null};
+      const cp=(p.cp||'').trim();
+      if(cp && /^\d{4,5}$/.test(cp)){
+        try{
+          const geo=await fetch('/api/geocode-cp?cp='+encodeURIComponent(cp),{signal:AbortSignal.timeout(5000)});
+          const gj=await geo.json();
+          if(gj&&gj.lat&&gj.lon){
+            window._userLocation={cp:cp,city:gj.city||p.ville||'',lat:parseFloat(gj.lat),lon:parseFloat(gj.lon)};
+          }
+        }catch(e){console.warn('Geocode error:',e)}
+      } else if(p.ville){
+        window._userLocation={cp:'',city:p.ville,lat:null,lon:null};
       }
     }
   }catch(e){}
@@ -666,12 +675,34 @@ function getJoursFeries(year){
   ];
 }
 
-// ── MÉTÉO (Open-Meteo) ──
+// ── MÉTÉO (Open-Meteo) — avec fallback GPS + France ──
 var WEATHER_ICONS={0:'☀️',1:'🌤',2:'⛅',3:'☁️',45:'🌫',48:'🌫',51:'🌦',53:'🌦',55:'🌧',56:'🌧',57:'🌧',61:'🌧',63:'🌧',65:'🌧️',66:'🌧',67:'🌧',71:'❄️',73:'❄️',75:'❄️',77:'❄️',80:'🌦',81:'🌧',82:'⛈',85:'❄️',86:'❄️',95:'⛈',96:'⛈',99:'⛈'};
 
+async function resolveLocation(){
+  // Déjà résolu ?
+  if(_config.location && _config.location.lat) return _config.location;
+  if(window._userLocation && window._userLocation.lat) return window._userLocation;
+
+  // Fallback GPS
+  try{
+    var pos=await new Promise(function(res,rej){
+      if(!navigator.geolocation) return rej();
+      navigator.geolocation.getCurrentPosition(res,rej,{timeout:4000});
+    });
+    var loc={cp:'',city:'Ma position',lat:parseFloat(pos.coords.latitude.toFixed(4)),lon:parseFloat(pos.coords.longitude.toFixed(4))};
+    _config.location=loc;
+    return loc;
+  }catch(e){}
+
+  // Fallback France centre
+  return {cp:'',city:'France',lat:46.2276,lon:2.2137};
+}
+
 async function fetchWeekMeteo(days){
-  var loc=_config.location||window._userLocation;
+  var loc=await resolveLocation();
   if(!loc||!loc.lat||!loc.lon) return null;
+  // Store resolved location for display
+  if(!_config.location||!_config.location.lat) _config.location=loc;
   try{
     var d0=days[0],d6=days[6];
     var fmt=function(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')};
@@ -757,14 +788,40 @@ async function renderPage(){
 
   // ── KPI ROW (dynamique Wave 4) ──
   var nbProduits=_config.products.length;
-  var histCount=0,_seenDates={},totalVenduH=0,totalJeteH=0,econEstimee=0;
+
+  // ══════ ONBOARDING : pas de produits ══════
+  if(nbProduits===0){
+    html+='<div class="gcard" style="border:2px solid var(--accent-border)">';
+    html+='<div class="gcard-body" style="text-align:center;padding:40px 30px">';
+    html+='<div style="font-size:56px;margin-bottom:12px">🔮</div>';
+    html+='<h2 style="font-size:20px;font-weight:800;margin-bottom:8px">Bienvenue dans les Prévisions IA</h2>';
+    html+='<p style="font-size:14px;color:var(--muted);max-width:500px;margin:0 auto 24px;line-height:1.7">Ce module prédit vos ventes pour la semaine à venir en croisant votre historique avec la météo, les jours fériés et vos événements locaux.</p>';
+    html+='<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px">Pour commencer en 3 étapes :</div>';
+    html+='<div style="display:flex;flex-direction:column;gap:12px;max-width:420px;margin:0 auto;text-align:left">';
+    html+='<div style="display:flex;gap:12px;align-items:flex-start;padding:14px;background:var(--accent-bg);border-radius:12px;border:1px solid var(--accent-border)">';
+    html+='<div style="width:28px;height:28px;background:var(--accent);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">1</div>';
+    html+='<div><div style="font-weight:700;font-size:13px">Choisissez votre type d\'activité</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Alimentaire, Commerce/Retail, ou Service — les colonnes et l\'IA s\'adaptent.</div></div></div>';
+    html+='<div style="display:flex;gap:12px;align-items:flex-start;padding:14px;background:var(--accent-bg);border-radius:12px;border:1px solid var(--accent-border)">';
+    html+='<div style="width:28px;height:28px;background:var(--accent);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">2</div>';
+    html+='<div><div style="font-weight:700;font-size:13px">Ajoutez vos produits</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Importez depuis le Stock ou le Coût de revient, ou saisissez manuellement.</div></div></div>';
+    html+='<div style="display:flex;gap:12px;align-items:flex-start;padding:14px;background:var(--accent-bg);border-radius:12px;border:1px solid var(--accent-border)">';
+    html+='<div style="width:28px;height:28px;background:var(--accent);color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex-shrink:0">3</div>';
+    html+='<div><div style="font-weight:700;font-size:13px">Saisissez vos ventes quelques jours</div><div style="font-size:11px;color:var(--muted);margin-top:2px">Puis cliquez "Générer" — l\'IA vous donne les prévisions pour la semaine.</div></div></div>';
+    html+='</div>';
+    html+='</div></div>';
+    // Fall through to config section below
+  }
+
+  // ══════ CONTENU PRINCIPAL (affiché si produits) ══════
+  var histCount=0,_seenDates={},totalVenduH=0,totalJeteH=0,econEstimee=0,bt=btype();
+  if(nbProduits>0){
+
   Object.keys(_historyCache).forEach(function(k){(_historyCache[k].entries||[]).forEach(function(e){
     if(e.date&&!_seenDates[e.date]){_seenDates[e.date]=true;histCount++}
     totalVenduH+=pf(e.vendu);totalJeteH+=pf(e.jete)+pf(e.donne);
     var pr=_config.products.find(function(p){return p.id===e.productId});
     if(pr) econEstimee+=pf(e.jete)*(pr.coutUnitaire||0);
   })});
-  // Fiabilité: prévu vs réel
   var matchCount=0,totalFiab=0;
   Object.keys(_predictionsCache).forEach(function(wk){
     (_predictionsCache[wk].predictions||[]).forEach(function(pr){
@@ -774,7 +831,6 @@ async function renderPage(){
     });
   });
   var fiabPct=matchCount>=3?Math.round(totalFiab/matchCount*100):null;
-  var bt=btype();
 
   html+='<div class="kpi-row">';
   html+='<div class="kpi purple"><div class="kpi-icon">🎯</div><div class="kpi-label">Fiabilité</div>';
@@ -794,8 +850,8 @@ async function renderPage(){
   // ── MÉTÉO STRIP ──
   html+='<div class="gcard">';
   html+='<div class="gcard-head"><div class="gcard-title">🌤 Météo de la semaine'+((_config.location&&_config.location.city)?' — '+_config.location.city:'')+'</div>';
-  if(!_config.location||!_config.location.lat){
-    html+='<span style="font-size:10px;color:var(--orange);font-weight:600">⚠️ Configurez votre localisation dans le Profil</span>';
+  if(_config.location&&_config.location.city==='France'){
+    html+='<span style="font-size:10px;color:var(--orange);font-weight:600">📍 Renseignez votre CP dans le <a href="profil.html" style="color:inherit">Profil</a> pour une météo précise</span>';
   }
   html+='</div><div class="gcard-body"><div class="meteo-strip">';
   for(var i=0;i<7;i++){
@@ -821,8 +877,8 @@ async function renderPage(){
 
   // ── ALERTES ──
   var alertes=[];
-  if(!_config.location||!_config.location.lat){
-    alertes.push({type:'warning',icon:'📍',text:'<b>Localisation non configurée.</b> Allez dans votre <a href="profil.html" style="color:inherit;text-decoration:underline">Profil</a> pour renseigner votre code postal. La météo sera alors intégrée aux prévisions.'});
+  if(_config.location&&_config.location.city==='France'){
+    alertes.push({type:'info',icon:'📍',text:'<b>Météo approximative</b> (centre France). <a href="profil.html" style="color:inherit;text-decoration:underline">Ajoutez votre code postal</a> dans le Profil pour des prévisions locales.'});
   }
   if(nbProduits===0){
     alertes.push({type:'info',icon:'📦',text:'<b>Aucun produit configuré.</b> Ajoutez vos produits ci-dessous pour commencer à générer des prévisions.'});
@@ -843,6 +899,23 @@ async function renderPage(){
     html+='</div>';
   }
 
+  // ── SAISIE VENTES RÉELLES (action quotidienne — en premier) ──
+  if(nbProduits>0){
+    html+='<div class="gcard" id="saisie-card" style="border:1.5px solid var(--accent-border)">';
+    html+='<div class="gcard-head" style="background:linear-gradient(135deg,rgba(99,102,241,0.06),rgba(167,139,250,0.03))">';
+    html+='<div class="gcard-title">📋 Saisie quotidienne — '+(bt.label||'')+'</div>';
+    html+='<span id="saisie-status"></span>';
+    html+='</div>';
+    html+='<div style="padding:12px 20px;background:var(--accent-bg);border-bottom:1px solid var(--accent-border);font-size:12px;color:var(--text);line-height:1.6">';
+    html+='<b>Comment ça marche ?</b> Chaque jour (idéalement le soir ou le lendemain matin), saisissez vos ventes réelles ci-dessous. ';
+    html+=bt.hasPertes?'Indiquez aussi les quantités jetées ou données. ':'';
+    html+='L\'IA utilise cet historique pour améliorer ses prévisions.';
+    html+='</div>';
+    html+='<div class="gcard-body" id="saisie-body">';
+    html+='<div class="loader-wrap"><div class="spin"></div><span style="font-size:11px;color:var(--muted)">Chargement…</span></div>';
+    html+='</div></div>';
+  }
+
   // ── TABLEAU PRÉVISIONS ──
   if(nbProduits>0){
     var wk=getWeekKey(_weekOffset);
@@ -861,25 +934,17 @@ async function renderPage(){
     if(_currentPredictions){
       html+=renderPredictionsTable(_currentPredictions,days,feries);
     } else {
-      html+='<div class="empty" style="padding:40px 20px"><div class="empty-icon">🔮</div>';
+      html+='<div class="empty" style="padding:30px 20px"><div class="empty-icon">🔮</div>';
       html+='<h3>Prêt pour la prédiction</h3>';
-      html+='<p>Vous avez <b>'+nbProduits+' produit'+(nbProduits>1?'s':'')+' configuré'+(nbProduits>1?'s':'')+'</b>. Cliquez sur "Générer les prévisions" pour obtenir les quantités recommandées pour chaque jour de la semaine.</p>';
-      html+='<p style="margin-top:8px;font-size:11px;color:var(--orange)">💡 Plus vous aurez d\'historique de ventes, plus les prévisions seront précises.</p>';
+      html+='<p>Cliquez sur <b>"Générer les prévisions"</b> pour que l\'IA calcule vos quantités recommandées pour chaque jour de la semaine.</p>';
+      html+='<p style="margin-top:8px;font-size:11px;color:var(--orange)">💡 '+(histCount<14?'Saisissez au moins 14 jours de ventes pour des résultats optimaux ('+histCount+'/14).':'Historique suffisant — prêt pour la génération !')+'</p>';
       html+='</div>';
     }
     html+='</div></div>';
   }
 
-  // ── SAISIE VENTES RÉELLES ──
+  // ── HISTORIQUE 7 DERNIERS JOURS ──
   if(nbProduits>0){
-    html+='<div class="gcard" id="saisie-card">';
-    html+='<div class="gcard-head"><div class="gcard-title">📋 Saisie des ventes réelles</div>';
-    html+='<span id="saisie-status"></span>';
-    html+='</div><div class="gcard-body" id="saisie-body">';
-    html+='<div class="loader-wrap"><div class="spin"></div><span style="font-size:11px;color:var(--muted)">Chargement…</span></div>';
-    html+='</div></div>';
-
-    // ── HISTORIQUE 7 DERNIERS JOURS ──
     html+='<div class="gcard">';
     html+='<div class="gcard-head"><div class="gcard-title">📈 Historique récent <span style="font-size:11px;font-weight:400;color:var(--muted)">— 7 derniers jours</span></div></div>';
     html+='<div class="gcard-body" id="history-body" style="padding:0">';
@@ -896,6 +961,8 @@ async function renderPage(){
     html+='<div><div style="font-size:12px;font-weight:700;margin-bottom:8px">Répartition par produit</div><div style="position:relative;height:200px"><canvas id="chartProduits"></canvas></div></div>';
     html+='</div></div>';
   }
+
+  } // end if(nbProduits>0) — sections below always visible
 
   // ── ÉVÉNEMENTS LOCAUX (Wave 6) ──
   html+='<div class="gcard">';
@@ -1285,6 +1352,7 @@ async function prefillFromStock(dateStr){
 function renderSaisieForm(){
   var body=document.getElementById('saisie-body');
   if(!body) return;
+  var bt=btype();
 
   var dateStr=fmtDate(_saisieDate);
   var isQuick=_saisieMode==='quick';
@@ -1496,6 +1564,7 @@ async function loadHistoryMonth(mk){
 async function loadAndRenderHistory(){
   var histBody=document.getElementById('history-body');
   if(!histBody) return;
+  var bt=btype();
 
   // Load last 7 days
   var today=new Date();today.setHours(12,0,0,0);
