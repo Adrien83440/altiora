@@ -397,6 +397,65 @@ main{margin-left:250px;flex:1;display:flex;flex-direction:column}
   </div>
 </div>
 
+<!-- ── MODAL ÉVÉNEMENT ── -->
+<div class="modal-bg" id="modalEvent">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>📅 Ajouter un événement local</h3>
+      <button class="modal-close" onclick="closeModal('modalEvent')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="mfield">
+        <label class="mlabel">Nom de l'événement *</label>
+        <input class="minput" id="ev-label" placeholder="Ex: Marché du samedi, Fête de la musique…"/>
+      </div>
+      <div class="mrow">
+        <div class="mfield">
+          <label class="mlabel">Type</label>
+          <select class="minput" id="ev-type">
+            <option value="marche_local">🏪 Marché local</option>
+            <option value="fete_locale">🎉 Fête locale</option>
+            <option value="match">⚽ Match / Événement sportif</option>
+            <option value="vacances_scolaires">🏖 Vacances scolaires</option>
+            <option value="festival">🎪 Festival / Concert</option>
+            <option value="autre">📌 Autre</option>
+          </select>
+        </div>
+        <div class="mfield">
+          <label class="mlabel">Impact sur la fréquentation</label>
+          <select class="minput" id="ev-impact">
+            <option value="faible">Faible (+10-15%)</option>
+            <option value="moyen" selected>Moyen (+20-30%)</option>
+            <option value="fort">Fort (+30-50%)</option>
+          </select>
+        </div>
+      </div>
+      <div class="mrow">
+        <div class="mfield">
+          <label class="mlabel">Date début *</label>
+          <input class="minput" id="ev-date" type="date"/>
+        </div>
+        <div class="mfield">
+          <label class="mlabel">Date fin (optionnel)</label>
+          <input class="minput" id="ev-dateend" type="date"/>
+        </div>
+      </div>
+      <div class="mfield">
+        <label class="mlabel">Récurrence</label>
+        <select class="minput" id="ev-recurrence">
+          <option value="none">Ponctuel (une seule fois)</option>
+          <option value="weekly">Chaque semaine (ex: marché du samedi)</option>
+          <option value="annual">Chaque année (ex: fête locale)</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-o" onclick="closeModal('modalEvent')">Annuler</button>
+      <button class="btn btn-p" onclick="addEvent()">Ajouter →</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <!-- ── FIREBASE ── -->
@@ -451,27 +510,68 @@ onAuthStateChanged(auth,async(user)=>{
 
 <script>
 /* ═══════════════════════════════════════════
-   PRÉVISIONS & COMMANDES IA — Wave 1+2
-   Config produits + saisie ventes quotidiennes
+   PRÉVISIONS & COMMANDES IA — v2 complète
+   Waves 1-6 : Config + Saisie + IA + KPIs + Events + PDF
    ═══════════════════════════════════════════ */
 
+// ── TYPES D'ACTIVITÉ ──
+var BUSINESS_TYPES = {
+  alimentaire: {
+    label: 'Alimentaire',
+    icon: '🥖',
+    desc: 'Boulangerie, restaurant, traiteur, épicerie',
+    fields: { produit: 'Produit', vendu: 'Vendu', jete: 'Jeté', donne: 'Donné', restant: 'Restant' },
+    quickFields: ['vendu', 'jete'],
+    detailFields: ['produit', 'vendu', 'jete', 'donne', 'restant'],
+    kpiPertes: 'Gaspillage évité',
+    kpiPertesIcon: '🗑',
+    hasPertes: true
+  },
+  commerce: {
+    label: 'Commerce / Retail',
+    icon: '👕',
+    desc: 'Boutique vêtements, accessoires, décoration',
+    fields: { produit: 'En stock', vendu: 'Vendu', jete: 'Invendu', donne: 'Retour', restant: 'Stock fin' },
+    quickFields: ['vendu'],
+    detailFields: ['produit', 'vendu', 'jete', 'donne', 'restant'],
+    kpiPertes: 'Tendances détectées',
+    kpiPertesIcon: '📊',
+    hasPertes: false
+  },
+  service: {
+    label: 'Service',
+    icon: '💼',
+    desc: 'Salon coiffure, consulting, agence',
+    fields: { produit: 'Créneaux', vendu: 'Réalisés', jete: 'Annulés', donne: 'Offerts', restant: 'Dispo.' },
+    quickFields: ['vendu', 'jete'],
+    detailFields: ['produit', 'vendu', 'jete', 'donne', 'restant'],
+    kpiPertes: 'Annulations évitées',
+    kpiPertesIcon: '📅',
+    hasPertes: true
+  }
+};
+
 // ── STATE ──
-var _config = { products: [], location: null };
-var _weekOffset = 0; // 0 = semaine en cours
+var _config = { products: [], location: null, businessType: 'alimentaire', events: [] };
+var _weekOffset = 0;
 var _stockProducts = [];
 var _crProducts = [];
 
 // Wave 2 — Historique & Saisie
-var _saisieMode = 'quick'; // 'quick' | 'detailed'
-var _saisieDate = null;    // Date object for current saisie
-var _historyCache = {};    // { 'YYYY-MM': { entries: [...] } }
-var _stockMovements = [];  // Stock movements for sync
-var _todayEntries = {};    // Current saisie form state: { productId: {produit,vendu,jete,donne,restant} }
+var _saisieMode = 'quick';
+var _saisieDate = null;
+var _historyCache = {};
+var _stockMovements = [];
+var _todayEntries = {};
 
 // Wave 3 — Prédictions IA
-var _currentPredictions = null; // Résultat API pour la semaine affichée
-var _predictionsCache = {};     // { 'YYYY-Www': {...} } cache par semaine
-var _lastMeteo = null;          // Météo de la semaine (réutilisée pour l'API)
+var _currentPredictions = null;
+var _predictionsCache = {};
+var _lastMeteo = null;
+
+// Wave 4 — Charts
+var _chartPrevReal = null;
+var _chartFiabilite = null;
 
 // ── HELPERS ──
 function pf(v){return parseFloat((''+( v||0)).replace(',','.'))||0}
@@ -485,6 +585,10 @@ function fmtDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2
 function fmtDateFR(d){return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear()}
 function monthKey(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')}
 function parseDate(s){var p=s.split('-');return new Date(parseInt(p[0]),parseInt(p[1])-1,parseInt(p[2]),12,0,0,0)}
+
+// Business type helper
+function btype(){return BUSINESS_TYPES[_config.businessType]||BUSINESS_TYPES.alimentaire}
+function bf(field){return btype().fields[field]||field}
 
 // ── WEEK HELPERS ──
 function getWeekDates(offset){
@@ -600,6 +704,8 @@ window.initPrevisions = async function(){
     if(snap.exists()){
       var data=snap.data();
       _config.products=data.products||[];
+      _config.businessType=data.businessType||'alimentaire';
+      _config.events=data.events||[];
       if(data.location) _config.location=data.location;
     }
   }catch(e){console.warn('Config load error:',e)}
@@ -649,16 +755,40 @@ async function renderPage(){
 
   var html='';
 
-  // ── KPI ROW ──
+  // ── KPI ROW (dynamique Wave 4) ──
   var nbProduits=_config.products.length;
-  var histCount=0;
-  var _seenDates={};
-  Object.keys(_historyCache).forEach(function(k){(_historyCache[k].entries||[]).forEach(function(e){if(e.date&&!_seenDates[e.date]){_seenDates[e.date]=true;histCount++}})});
+  var histCount=0,_seenDates={},totalVenduH=0,totalJeteH=0,econEstimee=0;
+  Object.keys(_historyCache).forEach(function(k){(_historyCache[k].entries||[]).forEach(function(e){
+    if(e.date&&!_seenDates[e.date]){_seenDates[e.date]=true;histCount++}
+    totalVenduH+=pf(e.vendu);totalJeteH+=pf(e.jete)+pf(e.donne);
+    var pr=_config.products.find(function(p){return p.id===e.productId});
+    if(pr) econEstimee+=pf(e.jete)*(pr.coutUnitaire||0);
+  })});
+  // Fiabilité: prévu vs réel
+  var matchCount=0,totalFiab=0;
+  Object.keys(_predictionsCache).forEach(function(wk){
+    (_predictionsCache[wk].predictions||[]).forEach(function(pr){
+      var mk2=pr.date?(pr.date.substring(0,7)):'';
+      var real=((_historyCache[mk2]||{}).entries||[]).find(function(h){return h.date===pr.date&&h.productId===pr.productId});
+      if(real&&real.vendu>0){matchCount++;totalFiab+=Math.max(0,1-Math.abs(pr.predicted-real.vendu)/real.vendu)}
+    });
+  });
+  var fiabPct=matchCount>=3?Math.round(totalFiab/matchCount*100):null;
+  var bt=btype();
+
   html+='<div class="kpi-row">';
-  html+='<div class="kpi purple"><div class="kpi-icon">🎯</div><div class="kpi-label">Fiabilité prédictions</div><div class="kpi-val" style="color:var(--muted)">—</div><div class="kpi-sub">Disponible après 2 semaines</div></div>';
-  html+='<div class="kpi green"><div class="kpi-icon">🗑</div><div class="kpi-label">Gaspillage évité</div><div class="kpi-val" style="color:var(--muted)">—</div><div class="kpi-sub">vs production au feeling</div></div>';
-  html+='<div class="kpi red"><div class="kpi-icon">📦</div><div class="kpi-label">Ruptures détectées</div><div class="kpi-val" style="color:var(--muted)">—</div><div class="kpi-sub">Cette semaine</div></div>';
-  html+='<div class="kpi teal"><div class="kpi-icon">💰</div><div class="kpi-label">Jours saisis</div><div class="kpi-val" style="color:'+(histCount>0?'var(--teal)':'var(--muted)')+'">'+histCount+'</div><div class="kpi-sub">'+(histCount>=14?'✅ Prêt pour l\'IA':histCount>0?'Objectif : 14 jours min.':'Commencez la saisie')+'</div></div>';
+  html+='<div class="kpi purple"><div class="kpi-icon">🎯</div><div class="kpi-label">Fiabilité</div>';
+  html+=fiabPct!==null?'<div class="kpi-val" style="color:'+(fiabPct>=75?'var(--green)':fiabPct>=50?'var(--orange)':'var(--red)')+'">'+fiabPct+'%</div><div class="kpi-sub">Sur '+matchCount+' vérifications</div>':'<div class="kpi-val" style="color:var(--muted)">—</div><div class="kpi-sub">Min. 3 prédictions vérifiées</div>';
+  html+='</div>';
+  html+='<div class="kpi green"><div class="kpi-icon">'+bt.kpiPertesIcon+'</div><div class="kpi-label">'+bt.kpiPertes+'</div>';
+  html+=bt.hasPertes&&econEstimee>0?'<div class="kpi-val" style="color:var(--green)">'+fmtE(econEstimee)+'</div><div class="kpi-sub">Valeur pertes identifiées</div>':(!bt.hasPertes&&totalVenduH>0?'<div class="kpi-val" style="color:var(--teal)">'+totalVenduH+'</div><div class="kpi-sub">Ventes suivies</div>':'<div class="kpi-val" style="color:var(--muted)">—</div><div class="kpi-sub">En cours de collecte</div>');
+  html+='</div>';
+  html+='<div class="kpi red"><div class="kpi-icon">'+(bt.hasPertes?'🗑':'📦')+'</div><div class="kpi-label">'+(bt.hasPertes?'Pertes':'Volume')+'</div>';
+  html+=totalJeteH>0?'<div class="kpi-val" style="color:var(--red)">'+totalJeteH+'</div><div class="kpi-sub">'+(totalVenduH>0?Math.round(totalJeteH/(totalVenduH+totalJeteH)*100):0)+'% du total</div>':(totalVenduH>0?'<div class="kpi-val" style="color:var(--green)">'+totalVenduH+'</div><div class="kpi-sub">'+(bt.hasPertes?'0 pertes':'unités vendues')+'</div>':'<div class="kpi-val" style="color:var(--muted)">—</div><div class="kpi-sub">Saisie en attente</div>');
+  html+='</div>';
+  html+='<div class="kpi teal"><div class="kpi-icon">📋</div><div class="kpi-label">Jours saisis</div>';
+  html+='<div class="kpi-val" style="color:'+(histCount>0?'var(--teal)':'var(--muted)')+'">'+histCount+'</div>';
+  html+='<div class="kpi-sub">'+(histCount>=14?'✅ Prêt pour l\'IA':histCount>0?'Objectif : 14 jours':'Commencez la saisie')+'</div></div>';
   html+='</div>';
 
   // ── MÉTÉO STRIP ──
@@ -757,12 +887,59 @@ async function renderPage(){
     html+='</div></div>';
   }
 
-  // ── CONFIG : PRODUITS SUIVIS ──
+  // ── GRAPHIQUES (Wave 4) ──
+  if(nbProduits>0 && histCount>=2){
+    html+='<div class="gcard">';
+    html+='<div class="gcard-head"><div class="gcard-title">📈 Tendances & Fiabilité</div></div>';
+    html+='<div class="gcard-body" style="display:grid;grid-template-columns:1fr 1fr;gap:20px">';
+    html+='<div><div style="font-size:12px;font-weight:700;margin-bottom:8px">Ventes par jour (7 derniers jours)</div><div style="position:relative;height:200px"><canvas id="chartTrend"></canvas></div></div>';
+    html+='<div><div style="font-size:12px;font-weight:700;margin-bottom:8px">Répartition par produit</div><div style="position:relative;height:200px"><canvas id="chartProduits"></canvas></div></div>';
+    html+='</div></div>';
+  }
+
+  // ── ÉVÉNEMENTS LOCAUX (Wave 6) ──
   html+='<div class="gcard">';
-  html+='<div class="gcard-head"><div class="gcard-title">⚙️ Produits suivis <span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:6px">'+nbProduits+' produit'+(nbProduits>1?'s':'')+'</span></div></div>';
+  html+='<div class="gcard-head"><div class="gcard-title">📅 Événements locaux <span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:4px">'+(_config.events||[]).length+' configuré(s)</span></div>';
+  html+='<button class="btn btn-o btn-sm" onclick="openModal(\'modalEvent\')">+ Ajouter</button></div>';
+  html+='<div class="gcard-body">';
+  if((_config.events||[]).length>0){
+    html+='<div class="prod-list" style="max-height:200px">';
+    (_config.events||[]).forEach(function(ev,i){
+      var typeIcons={marche_local:'🏪',fete_locale:'🎉',match:'⚽',vacances_scolaires:'🏖',festival:'🎪',autre:'📌'};
+      var recLbl={none:'Ponctuel',weekly:'Chaque semaine',annual:'Chaque année'};
+      html+='<div class="prod-item">';
+      html+='<div class="prod-emoji">'+(typeIcons[ev.type]||'📌')+'</div>';
+      html+='<div class="prod-info"><div class="prod-name">'+ev.label+'</div>';
+      html+='<div class="prod-meta">'+ev.date+(ev.dateEnd?' → '+ev.dateEnd:'')+' · Impact '+ev.impact+' · '+(recLbl[ev.recurrence]||'Ponctuel')+'</div></div>';
+      html+='<button class="prod-del" onclick="removeEvent('+i+')" title="Supprimer">🗑</button>';
+      html+='</div>';
+    });
+    html+='</div>';
+  } else {
+    html+='<div style="text-align:center;padding:16px;color:var(--muted);font-size:11px">Aucun événement. Ajoutez des marchés, fêtes locales, vacances pour enrichir les prévisions IA.</div>';
+  }
+  html+='</div></div>';
+
+  // ── CONFIG : TYPE D'ACTIVITÉ + PRODUITS ──
+  html+='<div class="gcard">';
+  html+='<div class="gcard-head"><div class="gcard-title">⚙️ Configuration <span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:6px">'+nbProduits+' produit'+(nbProduits>1?'s':'')+'</span></div>';
+  if(_currentPredictions) html+='<button class="btn btn-o btn-sm" onclick="exportPDF()">📄 Export PDF</button>';
+  html+='</div>';
   html+='<div class="gcard-body">';
 
+  // Type d'activité
+  html+='<div style="margin-bottom:18px"><div style="font-size:12px;font-weight:700;margin-bottom:8px">🏪 Type d\'activité</div>';
+  html+='<div class="import-grid">';
+  Object.keys(BUSINESS_TYPES).forEach(function(k){
+    var t=BUSINESS_TYPES[k];
+    var active=_config.businessType===k;
+    html+='<div class="import-card'+(active?' style="border-color:var(--accent);background:var(--accent-bg)"':'')+'" onclick="setBusinessType(\''+k+'\')">';
+    html+='<div class="import-icon">'+t.icon+'</div><div class="import-label">'+t.label+'</div><div class="import-desc">'+t.desc+'</div></div>';
+  });
+  html+='</div></div>';
+
   // Import cards
+  html+='<div style="font-size:12px;font-weight:700;margin-bottom:8px">📦 Produits suivis</div>';
   html+='<div class="import-grid" style="margin-bottom:18px">';
   html+='<div class="import-card" onclick="openImportStock()"><div class="import-icon">📦</div><div class="import-label">Depuis le Stock</div><div class="import-desc">Importer produits + historique sorties</div></div>';
   html+='<div class="import-card" onclick="openImportCR()"><div class="import-icon">🧮</div><div class="import-label">Depuis Coût de revient</div><div class="import-desc">Importer produits + coûts unitaires</div></div>';
@@ -793,10 +970,11 @@ async function renderPage(){
 
   document.getElementById('main-content').innerHTML=html;
 
-  // Post-render: initialize saisie form and history
+  // Post-render: saisie + history + charts
   if(nbProduits>0){
     initSaisieForm();
     loadAndRenderHistory();
+    if(histCount>=2) renderCharts();
   }
 }
 
@@ -832,8 +1010,15 @@ async function generatePredictions(){
     meteoPayload={forecast:_lastMeteo};
   }
 
-  // Events (future V2)
-  var events=[];
+  // Events (from config)
+  var events=(_config.events||[]).filter(function(ev){
+    // Include events relevant to this week (recurring or date match)
+    if(ev.recurrence==='weekly') return true;
+    if(ev.recurrence==='annual') return true;
+    if(ev.date>=dateDebut && ev.date<=dateFin) return true;
+    if(ev.dateEnd && ev.date<=dateFin && ev.dateEnd>=dateDebut) return true;
+    return false;
+  });
 
   // UI: loading state
   var body=document.getElementById('predictions-body');
@@ -856,6 +1041,7 @@ async function generatePredictions(){
         meteo:meteoPayload,
         joursFeries:feriesSemaine,
         events:events,
+        businessType:_config.businessType||'alimentaire',
         dateDebut:dateDebut,
         dateFin:dateFin
       })
@@ -1117,11 +1303,20 @@ function renderSaisieForm(){
   h+='</div>';
   h+='</div>';
 
-  // Header row
+  // Header row (adaptive to business type)
+  var qf=bt.quickFields,df=bt.detailFields;
+  var qCols='36px 1fr'+qf.map(function(){return ' 100px'}).join('')+(bt.hasPertes?' 80px':'');
+  var dCols='36px 1fr'+df.map(function(){return ' 90px'}).join('');
+
   if(isQuick){
-    h+='<div class="saisie-row quick header"><div></div><div>Produit</div><div style="text-align:center">Vendu</div><div style="text-align:center">Jeté</div><div style="text-align:center">Pertes</div></div>';
+    h+='<div class="saisie-row header" style="grid-template-columns:'+qCols+'"><div></div><div>Produit</div>';
+    qf.forEach(function(f){h+='<div style="text-align:center">'+bf(f)+'</div>'});
+    if(bt.hasPertes) h+='<div style="text-align:center">Pertes</div>';
+    h+='</div>';
   } else {
-    h+='<div class="saisie-row detailed header"><div></div><div>Produit</div><div style="text-align:center">Produit</div><div style="text-align:center">Vendu</div><div style="text-align:center">Jeté</div><div style="text-align:center">Donné</div><div style="text-align:center">Restant</div></div>';
+    h+='<div class="saisie-row header" style="grid-template-columns:'+dCols+'"><div></div><div>Produit</div>';
+    df.forEach(function(f){h+='<div style="text-align:center">'+bf(f)+'</div>'});
+    h+='</div>';
   }
 
   // Product rows
@@ -1133,23 +1328,26 @@ function renderSaisieForm(){
     var pertePct=pf(e.produit)>0?Math.round(totalPertes/pf(e.produit)*100):0;
 
     if(isQuick){
-      h+='<div class="saisie-row quick">';
+      h+='<div class="saisie-row" style="display:grid;grid-template-columns:'+qCols+';align-items:center;gap:8px;padding:10px 14px;background:rgba(255,255,255,0.5);border:1px solid var(--glass-border);border-radius:12px">';
       h+='<div class="s-emoji">'+(p.emoji||'📦')+'</div>';
       h+='<div><div class="s-name">'+p.name+'</div><div class="s-unit">'+(p.unit||'pièces')+'</div></div>';
-      h+='<div><input class="s-input '+prefilled+'" type="text" inputmode="numeric" placeholder="0" value="'+(e.vendu||'')+'" data-pid="'+p.id+'" data-field="vendu" oninput="onSaisieInput(this)"'+(prefilled?' title="Pré-rempli depuis le Stock"':'')+'/>'+
-         (prefilled?'<div style="font-size:8px;color:#3b82f6;text-align:center;margin-top:2px">📦 Stock</div>':'')+'</div>';
-      h+='<div><input class="s-input '+((e._prefilled&&e.jete>0)?'prefilled':'')+'" type="text" inputmode="numeric" placeholder="0" value="'+(e.jete||'')+'" data-pid="'+p.id+'" data-field="jete" oninput="onSaisieInput(this)"/></div>';
-      h+='<div class="s-delta '+(totalPertes>0?'loss':'ok')+'">'+(totalPertes>0?'−'+totalPertes+(pertePct>0?' ('+pertePct+'%)':''):'✓')+'</div>';
+      qf.forEach(function(f){
+        var isPre=(f==='vendu'&&prefilled)||(f==='jete'&&e._prefilled&&e.jete>0);
+        h+='<div><input class="s-input '+(isPre?'prefilled':'')+'" type="text" inputmode="numeric" placeholder="0" value="'+(e[f]||'')+'" data-pid="'+p.id+'" data-field="'+f+'" oninput="onSaisieInput(this)"'+(isPre?' title="Pré-rempli depuis le Stock"':'')+'/>'+
+           (f==='vendu'&&prefilled?'<div style="font-size:8px;color:#3b82f6;text-align:center;margin-top:2px">📦 Stock</div>':'')+'</div>';
+      });
+      if(bt.hasPertes){
+        h+='<div class="s-delta '+(totalPertes>0?'loss':'ok')+'">'+(totalPertes>0?'−'+totalPertes+(pertePct>0?' ('+pertePct+'%)':''):'✓')+'</div>';
+      }
       h+='</div>';
     } else {
-      h+='<div class="saisie-row detailed">';
+      h+='<div class="saisie-row" style="display:grid;grid-template-columns:'+dCols+';align-items:center;gap:8px;padding:10px 14px;background:rgba(255,255,255,0.5);border:1px solid var(--glass-border);border-radius:12px">';
       h+='<div class="s-emoji">'+(p.emoji||'📦')+'</div>';
       h+='<div><div class="s-name">'+p.name+'</div><div class="s-unit">'+(p.unit||'pièces')+'</div></div>';
-      h+='<div><input class="s-input" type="text" inputmode="numeric" placeholder="0" value="'+(e.produit||'')+'" data-pid="'+p.id+'" data-field="produit" oninput="onSaisieInput(this)"/></div>';
-      h+='<div><input class="s-input '+prefilled+'" type="text" inputmode="numeric" placeholder="0" value="'+(e.vendu||'')+'" data-pid="'+p.id+'" data-field="vendu" oninput="onSaisieInput(this)"/></div>';
-      h+='<div><input class="s-input" type="text" inputmode="numeric" placeholder="0" value="'+(e.jete||'')+'" data-pid="'+p.id+'" data-field="jete" oninput="onSaisieInput(this)"/></div>';
-      h+='<div><input class="s-input" type="text" inputmode="numeric" placeholder="0" value="'+(e.donne||'')+'" data-pid="'+p.id+'" data-field="donne" oninput="onSaisieInput(this)"/></div>';
-      h+='<div><input class="s-input" type="text" inputmode="numeric" placeholder="0" value="'+(e.restant||'')+'" data-pid="'+p.id+'" data-field="restant" oninput="onSaisieInput(this)"/></div>';
+      df.forEach(function(f){
+        var isPre=(f==='vendu'&&prefilled);
+        h+='<div><input class="s-input '+(isPre?'prefilled':'')+'" type="text" inputmode="numeric" placeholder="0" value="'+(e[f]||'')+'" data-pid="'+p.id+'" data-field="'+f+'" oninput="onSaisieInput(this)"/></div>';
+      });
       h+='</div>';
     }
   });
@@ -1164,7 +1362,7 @@ function renderSaisieForm(){
     totalDonne+=pf(e.donne);
   });
   h+='<div class="saisie-footer">';
-  h+='<div class="saisie-summary">Total : <b>'+totalVendu+'</b> vendu · <b style="color:var(--red)">'+totalJete+'</b> jeté'+(totalDonne>0?' · <b>'+totalDonne+'</b> donné':'')+'</div>';
+  h+='<div class="saisie-summary">Total : <b>'+totalVendu+'</b> '+bf('vendu').toLowerCase()+(bt.hasPertes?' · <b style="color:var(--red)">'+totalJete+'</b> '+bf('jete').toLowerCase():'')+(totalDonne>0?' · <b>'+totalDonne+'</b> '+bf('donne').toLowerCase():'')+'</div>';
   h+='<div style="display:flex;gap:8px;align-items:center">';
   h+='<span id="save-status"></span>';
   h+='<button class="btn btn-p" onclick="saveSaisie()">💾 Enregistrer</button>';
@@ -1333,7 +1531,7 @@ async function loadAndRenderHistory(){
   // Render table
   var h='<div style="overflow-x:auto">';
   h+='<table class="hist-table">';
-  h+='<thead><tr><th>Produit</th><th>Vendu</th><th>Jeté</th><th>Donné</th><th>Pertes</th><th>CA HT</th></tr></thead>';
+  h+='<thead><tr><th>Produit</th><th>'+bf('vendu')+'</th>'+(bt.hasPertes?'<th>'+bf('jete')+'</th><th>'+bf('donne')+'</th><th>Pertes</th>':'')+'<th>CA HT</th></tr></thead>';
 
   allEntries.forEach(function(dayData){
     var d=dayData.date;
@@ -1355,9 +1553,11 @@ async function loadAndRenderHistory(){
       h+='<tr>';
       h+='<td>'+emoji+' '+e.productName+'</td>';
       h+='<td><b>'+e.vendu+'</b></td>';
-      h+='<td class="'+(e.jete>0?'ht-loss':'')+'">'+e.jete+'</td>';
-      h+='<td>'+(e.donne||0)+'</td>';
-      h+='<td class="'+(pertes>0?'ht-loss':'ht-ok')+'">'+pertes+(pertesPct>0?' <span style="font-size:9px">('+pertesPct+'%)</span>':'')+'</td>';
+      if(bt.hasPertes){
+        h+='<td class="'+(e.jete>0?'ht-loss':'')+'">'+e.jete+'</td>';
+        h+='<td>'+(e.donne||0)+'</td>';
+        h+='<td class="'+(pertes>0?'ht-loss':'ht-ok')+'">'+pertes+(pertesPct>0?' <span style="font-size:9px">('+pertesPct+'%)</span>':'')+'</td>';
+      }
       h+='<td>'+fmtE(ca)+'</td>';
       h+='</tr>';
     });
@@ -1366,9 +1566,11 @@ async function loadAndRenderHistory(){
     h+='<tr style="background:rgba(99,102,241,0.05);font-weight:700">';
     h+='<td style="color:var(--accent)">Total du jour</td>';
     h+='<td><b>'+totalVendu+'</b></td>';
-    h+='<td class="'+(totalJete>0?'ht-loss':'')+'">'+totalJete+'</td>';
-    h+='<td>'+totalDonne+'</td>';
-    h+='<td class="'+(totalJete+totalDonne>0?'ht-loss':'ht-ok')+'">'+(totalJete+totalDonne)+'</td>';
+    if(bt.hasPertes){
+      h+='<td class="'+(totalJete>0?'ht-loss':'')+'">'+totalJete+'</td>';
+      h+='<td>'+totalDonne+'</td>';
+      h+='<td class="'+(totalJete+totalDonne>0?'ht-loss':'ht-ok')+'">'+(totalJete+totalDonne)+'</td>';
+    }
     h+='<td>'+fmtE(totalCA)+'</td>';
     h+='</tr>';
     h+='</tbody>';
@@ -1389,6 +1591,8 @@ async function saveConfig(){
     await window._setDoc(window._doc(window._db,'previsions',window._uid,'config','settings'),{
       products:_config.products,
       location:_config.location||null,
+      businessType:_config.businessType||'alimentaire',
+      events:_config.events||[],
       updatedAt:new Date().toISOString()
     });
   }catch(e){console.error('Save config error:',e)}
@@ -1555,6 +1759,165 @@ function confirmImportCR(){
   }
 }
 
+// ═══════════════════════════════════════════
+// WAVE 4 — CHARTS (Chart.js)
+// ═══════════════════════════════════════════
+
+function renderCharts(){
+  // Chart 1: Ventes par jour (7 derniers jours, toutes produits confondus)
+  var ctx1=document.getElementById('chartTrend');
+  if(!ctx1) return;
+  if(_chartPrevReal){try{_chartPrevReal.destroy()}catch(e){}}
+
+  var today=new Date();today.setHours(12,0,0,0);
+  var labels7=[],vendu7=[],jete7=[];
+  for(var i=6;i>=0;i--){
+    var d=new Date(today);d.setDate(today.getDate()-i);
+    var dStr=fmtDate(d);
+    var mk=monthKey(d);
+    var entries=((_historyCache[mk]||{}).entries||[]).filter(function(e){return e.date===dStr});
+    var tv=0,tj=0;
+    entries.forEach(function(e){tv+=pf(e.vendu);tj+=pf(e.jete)+pf(e.donne)});
+    labels7.push(JOURS[(d.getDay()+6)%7]+' '+d.getDate()+'/'+(d.getMonth()+1));
+    vendu7.push(tv);
+    jete7.push(tj);
+  }
+
+  var datasets1=[{label:bf('vendu'),data:vendu7,borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,0.1)',fill:true,tension:0.3,borderWidth:2,pointRadius:3}];
+  if(btype().hasPertes) datasets1.push({label:bf('jete'),data:jete7,borderColor:'#ef4444',backgroundColor:'rgba(239,68,68,0.08)',fill:true,tension:0.3,borderWidth:2,pointRadius:3});
+
+  _chartPrevReal=new Chart(ctx1,{
+    type:'line',
+    data:{labels:labels7,datasets:datasets1},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:10,family:'Plus Jakarta Sans'},usePointStyle:true,padding:12}}},scales:{y:{beginAtZero:true,ticks:{font:{size:10}}},x:{ticks:{font:{size:9},maxRotation:45}}}}
+  });
+
+  // Chart 2: Répartition par produit (doughnut)
+  var ctx2=document.getElementById('chartProduits');
+  if(!ctx2) return;
+  if(_chartFiabilite){try{_chartFiabilite.destroy()}catch(e){}}
+
+  var prodTotals={};
+  var colors=['#6366f1','#10b981','#f59e0b','#ef4444','#14b8a6','#8b5cf6','#f97316','#06b6d4','#ec4899'];
+  _config.products.forEach(function(p){prodTotals[p.id]={name:p.name,emoji:p.emoji,total:0}});
+  Object.keys(_historyCache).forEach(function(k){(_historyCache[k].entries||[]).forEach(function(e){
+    if(prodTotals[e.productId]) prodTotals[e.productId].total+=pf(e.vendu);
+  })});
+  var prodArr=Object.values(prodTotals).filter(function(p){return p.total>0}).sort(function(a,b){return b.total-a.total});
+
+  _chartFiabilite=new Chart(ctx2,{
+    type:'doughnut',
+    data:{
+      labels:prodArr.map(function(p){return(p.emoji||'')+' '+p.name}),
+      datasets:[{data:prodArr.map(function(p){return p.total}),backgroundColor:colors.slice(0,prodArr.length),borderWidth:2,borderColor:'#fff',hoverOffset:6}]
+    },
+    options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'bottom',labels:{font:{size:10,family:'Plus Jakarta Sans'},usePointStyle:true,padding:8}}}}
+  });
+}
+
+// ═══════════════════════════════════════════
+// WAVE 6 — BUSINESS TYPE + EVENTS + PDF
+// ═══════════════════════════════════════════
+
+// ── BUSINESS TYPE ──
+function setBusinessType(type){
+  _config.businessType=type;
+  saveConfig();
+  renderPage();
+  showToast('✅ Type d\'activité : '+BUSINESS_TYPES[type].label,'success');
+}
+
+// ── EVENTS ──
+function addEvent(){
+  var label=document.getElementById('ev-label').value.trim();
+  if(!label){document.getElementById('ev-label').focus();return}
+  var ev={
+    type:document.getElementById('ev-type').value,
+    label:label,
+    date:document.getElementById('ev-date').value,
+    dateEnd:document.getElementById('ev-dateend').value||'',
+    impact:document.getElementById('ev-impact').value,
+    recurrence:document.getElementById('ev-recurrence').value
+  };
+  if(!_config.events) _config.events=[];
+  _config.events.push(ev);
+  closeModal('modalEvent');
+  saveConfig();
+  renderPage();
+  showToast('✅ Événement ajouté','success');
+}
+
+function removeEvent(idx){
+  if(!confirm('Supprimer cet événement ?')) return;
+  _config.events.splice(idx,1);
+  saveConfig();
+  renderPage();
+  showToast('Événement supprimé','');
+}
+
+// ── EXPORT PDF ──
+function exportPDF(){
+  if(!_currentPredictions||!_currentPredictions.predictions){showToast('Aucune prédiction à exporter','');return}
+  var days=getWeekDates(_weekOffset);
+  var wk=getWeekKey(_weekOffset);
+  var ins=_currentPredictions.insights||{};
+
+  // Build printable HTML
+  var w=window.open('','_blank');
+  var h='<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Prévisions '+wk+'</title>';
+  h+='<style>body{font-family:Arial,sans-serif;padding:30px;font-size:12px;color:#1a1f36}';
+  h+='h1{font-size:20px;margin-bottom:4px}h2{font-size:14px;margin:18px 0 8px;color:#6366f1}';
+  h+='table{width:100%;border-collapse:collapse;margin:10px 0}th,td{border:1px solid #ddd;padding:8px;text-align:center}th{background:#f0f4ff;font-size:10px;text-transform:uppercase}';
+  h+='td:first-child{text-align:left;font-weight:600}.summary{display:flex;gap:20px;margin:12px 0}.sbox{flex:1;background:#f8faff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;text-align:center}';
+  h+='.sbox .val{font-size:20px;font-weight:800}.sbox .lbl{font-size:10px;color:#64748b;text-transform:uppercase}';
+  h+='.footer{margin-top:30px;font-size:10px;color:#94a3b8;text-align:center;border-top:1px solid #e2e8f0;padding-top:10px}';
+  h+='@media print{body{padding:15px}}</style></head><body>';
+  h+='<h1>🔮 Prévisions & Commandes — '+wk+'</h1>';
+  h+='<p style="color:#64748b">'+fmtDateFR(days[0])+' → '+fmtDateFR(days[6])+' · Généré le '+fmtDateFR(new Date())+' · ALTEORE</p>';
+
+  // Summary
+  h+='<div class="summary">';
+  h+='<div class="sbox"><div class="val" style="color:#6366f1">'+fmtE(ins.caPrevisionnel||0)+'</div><div class="lbl">CA prévisionnel HT</div></div>';
+  h+='<div class="sbox"><div class="val" style="color:#dc2626">'+fmtE(ins.coutMPPrevisionnel||0)+'</div><div class="lbl">Coût MP estimé</div></div>';
+  h+='<div class="sbox"><div class="val" style="color:#059669">'+fmtE(ins.margePrevisionnel||0)+'</div><div class="lbl">Marge prévisionnelle</div></div>';
+  h+='</div>';
+
+  if(ins.commentaire) h+='<p style="background:#f0f4ff;padding:10px;border-radius:6px;margin:10px 0">'+ins.commentaire+'</p>';
+
+  // Table
+  h+='<h2>📊 Détail par produit et par jour</h2>';
+  h+='<table><thead><tr><th>Produit</th>';
+  for(var di=0;di<7;di++) h+='<th>'+JOURS[di]+' '+days[di].getDate()+'/'+(days[di].getMonth()+1)+'</th>';
+  h+='<th>Total</th></tr></thead><tbody>';
+
+  var preds=_currentPredictions.predictions;
+  _config.products.forEach(function(p){
+    h+='<tr><td>'+(p.emoji||'')+' '+p.name+'</td>';
+    var total=0;
+    for(var di=0;di<7;di++){
+      var dStr=fmtDate(days[di]);
+      var pred=preds.find(function(pr){return pr.productId===p.id&&pr.date===dStr});
+      var val=pred?pred.predicted:0;total+=val;
+      h+='<td>'+val+'</td>';
+    }
+    h+='<td style="font-weight:800">'+total+'</td></tr>';
+  });
+  h+='</tbody></table>';
+
+  // Alertes
+  var alertes=_currentPredictions.alertes||[];
+  if(alertes.length){
+    h+='<h2>⚠️ Alertes</h2><ul>';
+    alertes.forEach(function(a){h+='<li>'+a.icon+' '+a.message+'</li>'});
+    h+='</ul>';
+  }
+
+  h+='<div class="footer">Généré par ALTEORE — Prévisions & Commandes IA · alteore.com</div>';
+  h+='<script>setTimeout(function(){window.print()},500)<\/script>';
+  h+='</body></html>';
+  w.document.write(h);w.document.close();
+}
+
 // ── EXPOSE ──
 window.changeWeek=changeWeek;
 window.generatePredictions=generatePredictions;
@@ -1572,6 +1935,11 @@ window.changeSaisieDate=changeSaisieDate;
 window.setSaisieDateYesterday=setSaisieDateYesterday;
 window.setSaisieMode=setSaisieMode;
 window.saveSaisie=saveSaisie;
+// Wave 4-6
+window.setBusinessType=setBusinessType;
+window.addEvent=addEvent;
+window.removeEvent=removeEvent;
+window.exportPDF=exportPDF;
 </script>
 
 <script src="nav.js"></script>
