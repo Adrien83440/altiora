@@ -99,6 +99,10 @@ module.exports = async (req, res) => {
       ...(uid ? { 'metadata[uid]': uid } : {}),
       ...(email ? { customer_email: email } : {}),
       ...(referralCode ? { 'metadata[referralCode]': referralCode.toUpperCase().trim() } : {}),
+      // Copier les metadata sur la subscription (accessibles dans invoice.payment_succeeded)
+      ...(uid ? { 'subscription_data[metadata][uid]': uid } : {}),
+      'subscription_data[metadata][plan]': plan,
+      ...(referralCode ? { 'subscription_data[metadata][referralCode]': referralCode.toUpperCase().trim() } : {}),
     };
 
     const res2 = await fetch('https://api.stripe.com/v1/checkout/sessions', {

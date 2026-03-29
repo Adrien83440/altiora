@@ -451,8 +451,25 @@ module.exports = async (req, res) => {
         return res.status(200).end();
       }
 
-      const uid = await getUidFromCustomer(invoice.customer);
-      if (!uid) return res.status(200).end();
+      // Trouver l'uid : d'abord par stripeCustomerId, sinon par metadata de la subscription
+      let uid = await getUidFromCustomer(invoice.customer);
+
+      // Fallback : si la query Firestore ne trouve pas encore le customer (race condition avec checkout.session.completed)
+      if (!uid && invoice.subscription && stripeKey) {
+        try {
+          const subRes = await fetch(`https://api.stripe.com/v1/subscriptions/${invoice.subscription}`, {
+            headers: { Authorization: 'Bearer ' + stripeKey }
+          });
+          const sub = await subRes.json();
+          uid = sub.metadata?.uid || null;
+          if (uid) console.log(`[Webhook] uid récupéré depuis metadata subscription: ${uid}`);
+        } catch(e) {}
+      }
+
+      if (!uid) {
+        console.warn('[Webhook] invoice.payment_succeeded: uid introuvable pour customer', invoice.customer);
+        return res.status(200).end();
+      }
 
       // Récupérer la subscription pour connaître le plan
       let plan = null;
