@@ -1,6 +1,31 @@
 // api/send-welcome.js — Email de bienvenue (trial OU abonnement payé)
-// POST { email, name, plan? }
+// POST { email, name, plan?, billing?, source? }
 // plan absent ou 'trial' → email trial / plan = 'pro'|'max'|'master' → email payé
+
+// ── Notification Make (fire-and-forget) ──
+async function notifyMake(data) {
+  const url = process.env.MAKE_WEBHOOK_URL;
+  if (!url) return;
+  try {
+    const isPaid = data.plan && ['pro', 'max', 'master'].includes(data.plan);
+    await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event:   isPaid ? 'paiement' : 'inscription',
+        email:   data.email || '',
+        name:    data.name || '',
+        plan:    data.plan || 'trial',
+        billing: data.billing || '',
+        source:  data.source || 'direct',
+        date:    new Date().toISOString(),
+      })
+    });
+    console.log(`[send-welcome] Make notifié (${isPaid ? 'paiement' : 'inscription'}) ${data.email}`);
+  } catch (e) {
+    console.warn('[send-welcome] Make webhook failed (non-bloquant):', e.message);
+  }
+}
 
 module.exports = async (req, res) => {
   const origin = req.headers.origin || '';
@@ -13,7 +38,7 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { email, name, plan } = req.body || {};
+    const { email, name, plan, billing, source } = req.body || {};
     if (!email) return res.status(400).json({ error: 'Email requis' });
 
     const apiKey = process.env.RESEND_API_KEY;
@@ -37,6 +62,8 @@ module.exports = async (req, res) => {
     const data = await r.json();
     if (r.ok) {
       console.log(`[send-welcome] ✅ Email ${isPaid ? plan : 'trial'} envoyé à ${email}`);
+      // Notification Make (fire-and-forget, non-bloquant)
+      notifyMake({ email, name, plan, billing, source }).catch(function() {});
       return res.status(200).json({ ok: true });
     } else {
       console.error('[send-welcome] ❌ Resend error:', data);

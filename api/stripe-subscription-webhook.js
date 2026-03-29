@@ -380,7 +380,13 @@ module.exports = async (req, res) => {
             await fetch(appUrl + '/api/send-welcome', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: session.customer_email || session.customer_details?.email, name: session.customer_details?.name || '', plan: activePlan })
+              body: JSON.stringify({
+                email: session.customer_email || session.customer_details?.email,
+                name: session.customer_details?.name || '',
+                plan: activePlan,
+                billing: session.metadata?.billing || '',
+                source: session.metadata?.referralCode ? 'parrainage' : 'direct'
+              })
             });
           } catch(emailErr) { console.warn('[Webhook] Email welcome failed:', emailErr.message); }
 
