@@ -370,6 +370,18 @@ module.exports = async (req, res) => {
         });
 
         console.log(`[Webhook] checkout.session.completed uid=${uid} plan=${activePlan} status=${subStatus}`);
+
+        // Envoyer l'email de bienvenue adapté (trial ou payé)
+        if (!isTrial) {
+          try {
+            const appUrl = process.env.APP_URL || 'https://alteore.com';
+            await fetch(appUrl + '/api/send-welcome', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: session.customer_email || session.customer_details?.email, name: session.customer_details?.name || '', plan: activePlan })
+            });
+          } catch(emailErr) { console.warn('[Webhook] Email welcome failed:', emailErr.message); }
+        }
       }
     }
 
