@@ -119,6 +119,7 @@ module.exports = async (req, res) => {
     // 3. Mettre à jour Firestore
     const now = new Date().toISOString();
     const deleteDate = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
+    const deleteDateFR = new Date(Date.now() + 14 * 86400000).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 
     await fsSet(`users/${uid}`, {
       plan: 'free',
@@ -146,6 +147,48 @@ module.exports = async (req, res) => {
       console.warn('[cancel-subscription] Log failed:', logErr.message);
     }
 
+    // 5. Envoyer l'email de confirmation de résiliation
+    const userEmail = fv(userDoc, 'email');
+    const userName = fv(userDoc, 'name') || '';
+    const firstName = userName ? userName.split(' ')[0] : '';
+    if (userEmail) {
+      try {
+        const resendKey = process.env.RESEND_API_KEY;
+        if (resendKey) {
+          // Email au client
+          await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + resendKey },
+            body: JSON.stringify({
+              from: process.env.RESEND_FROM || 'ALTEORE <noreply@alteore.com>',
+              to: [userEmail],
+              subject: 'Confirmation de résiliation — Alteore',
+              html: emailCancellation(firstName, deleteDateFR, currentPlan)
+            })
+          });
+
+          // Notification à l'équipe
+          await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + resendKey },
+            body: JSON.stringify({
+              from: process.env.RESEND_FROM || 'ALTEORE <noreply@alteore.com>',
+              to: ['support@alteore.com'],
+              subject: '⚠️ Résiliation — ' + (userName || userEmail) + ' (' + (currentPlan || '?') + ')',
+              html: '<p><strong>' + (userName || userEmail) + '</strong> a résilié son abonnement <strong>' + (currentPlan || '?') + '</strong>.</p>' +
+                '<p>Raison : ' + (reason || 'non précisée') + '</p>' +
+                '<p>Détail : ' + (detail || '-') + '</p>' +
+                '<p>Suppression prévue : ' + deleteDateFR + '</p>'
+            })
+          });
+
+          console.log('[cancel-subscription] Emails envoyés à ' + userEmail + ' + support');
+        }
+      } catch(emailErr) {
+        console.warn('[cancel-subscription] Email failed:', emailErr.message);
+      }
+    }
+
     console.log(`[cancel-subscription] ✅ uid=${uid} plan=${currentPlan}→free reason=${reason}`);
     return res.status(200).json({ ok: true, deleteDate });
 
@@ -154,3 +197,35 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: e.message });
   }
 };
+
+function emailCancellation(name, deleteDate, plan) {
+  var g = name ? 'Bonjour ' + name + ',' : 'Bonjour,';
+  var pn = { pro: 'Pro', max: 'Max', master: 'Master' }[plan] || plan || '';
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body style="margin:0;padding:0;background:#f5f7ff;font-family:Arial,Helvetica,sans-serif">' +
+'<div style="max-width:560px;margin:0 auto;padding:20px">' +
+'  <div style="text-align:center;padding:24px 0"><span style="font-size:22px;font-weight:800;color:#0f1f5c;letter-spacing:1px">ALTEORE</span></div>' +
+'  <div style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,31,92,0.08)">' +
+'    <div style="background:linear-gradient(135deg,#6b7280,#9ca3af);padding:32px;color:white;text-align:center">' +
+'      <div style="font-size:36px;margin-bottom:12px">👋</div>' +
+'      <h1 style="margin:0;font-size:22px;font-weight:800">Résiliation confirmée</h1>' +
+'      <p style="margin:10px 0 0;font-size:14px;opacity:0.9">Votre abonnement' + (pn ? ' ' + pn : '') + ' a bien été résilié.</p>' +
+'    </div>' +
+'    <div style="padding:28px 32px">' +
+'      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">' + g + '</p>' +
+'      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 20px">Nous confirmons la résiliation de votre abonnement Alteore. Nous sommes désolés de vous voir partir.</p>' +
+'      <div style="background:#fef3c7;border:1.5px solid #fbbf24;border-radius:12px;padding:20px;margin-bottom:24px">' +
+'        <p style="font-size:13px;font-weight:700;color:#92400e;margin:0 0 8px">📅 Ce qui va se passer :</p>' +
+'        <p style="font-size:13px;color:#92400e;line-height:1.7;margin:0">Vos données seront conservées jusqu\'au <strong>' + deleteDate + '</strong>. Pendant cette période, vous pouvez réactiver votre compte à tout moment en vous reconnectant et en choisissant un plan.</p>' +
+'      </div>' +
+'      <div style="background:#f0f4ff;border-radius:12px;padding:20px;margin-bottom:24px">' +
+'        <p style="font-size:13px;font-weight:700;color:#0f1f5c;margin:0 0 8px">💡 Vous changez d\'avis ?</p>' +
+'        <p style="font-size:13px;color:#374151;line-height:1.7;margin:0">Reconnectez-vous simplement sur <a href="https://alteore.com/login.html" style="color:#1a3dce;font-weight:700">alteore.com</a> et choisissez un plan. Toutes vos données seront restaurées instantanément.</p>' +
+'      </div>' +
+'      <div style="border-top:1px solid #e5e7eb;padding-top:20px">' +
+'        <p style="font-size:13px;color:#6b7280;line-height:1.7;margin:0">Merci d\'avoir utilisé Alteore. Si vous avez des retours à nous faire, n\'hésitez pas à nous écrire à <a href="mailto:support@alteore.com" style="color:#1a3dce">support@alteore.com</a></p>' +
+'      </div>' +
+'    </div>' +
+'  </div>' +
+'  <div style="text-align:center;padding:20px 0;font-size:11px;color:#94a3b8;line-height:1.5">ALTEORE — Logiciel de gestion pour TPE & PME<br/><a href="https://alteore.com" style="color:#94a3b8">alteore.com</a></div>' +
+'</div></body></html>';
+}
