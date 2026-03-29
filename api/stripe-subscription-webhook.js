@@ -220,34 +220,36 @@ async function rewardParrain(parrainUid, filleulUid, referralCode, stripeKey) {
     // 4. Mettre à jour Firestore : statut de l'utilisation + compteurs parrain
     const now = new Date().toISOString();
 
-    // Marquer l'utilisation comme récompensée
-    await updateFirestore(`referrals/${referralCode}/uses/${filleulUid}`.replace('users/', ''), {});
-    // Note : updateFirestore cible users/{uid}, on utilise fsSet direct
-    const fsSetDirect = async (path, fields) => {
-      const fbKeyVal = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+    // Helper : écriture Firestore authentifiée pour n'importe quel path
+    const fsSetAdmin = async (path, fields) => {
+      const token = await getAdminToken();
       const firestoreFields = {};
       for (const [k, v] of Object.entries(fields)) {
         if (typeof v === 'string')      firestoreFields[k] = { stringValue: v };
-        else if (typeof v === 'number') firestoreFields[k] = { integerValue: v };
+        else if (typeof v === 'number') firestoreFields[k] = { integerValue: String(v) };
         else if (v === null)            firestoreFields[k] = { nullValue: null };
+        else                            firestoreFields[k] = { stringValue: String(v) };
       }
       const mask = Object.keys(fields).map(k => `updateMask.fieldPaths=${k}`).join('&');
-      const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}?${mask}&key=${fbKeyVal}`;
+      const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}?${mask}`;
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = 'Bearer ' + token;
       const r = await fetch(url, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ fields: firestoreFields })
       });
-      if (!r.ok) throw new Error('fsSet failed: ' + await r.text());
+      if (!r.ok) throw new Error('fsSetAdmin failed on ' + path + ': ' + await r.text());
     };
 
-    await fsSetDirect(`referrals/${referralCode}/uses/${filleulUid}`, {
+    // Marquer l'utilisation comme récompensée
+    await fsSetAdmin(`referrals/${referralCode}/uses/${filleulUid}`, {
       status: 'rewarded',
       rewardedAt: now,
       stripeCouponId: coupon.id,
     });
 
-    // Incrémenter le compteur de récompenses du parrain + le compteur global
+    // Incrémenter le compteur de récompenses du parrain
     const currentRewards = parseInt(fv(parrainDoc, 'referralRewards') || 0);
     await updateFirestore(parrainUid, {
       referralRewards: currentRewards + 1,
@@ -256,7 +258,7 @@ async function rewardParrain(parrainUid, filleulUid, referralCode, stripeKey) {
     // Incrémenter totalRewarded sur le document referrals/{code}
     const refDoc = await fsGet(`referrals/${referralCode}`);
     const currentRewarded = parseInt(fv(refDoc, 'totalRewarded') || 0);
-    await fsSetDirect(`referrals/${referralCode}`, {
+    await fsSetAdmin(`referrals/${referralCode}`, {
       totalRewarded: currentRewarded + 1,
     });
 
