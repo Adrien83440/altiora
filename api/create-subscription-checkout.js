@@ -31,6 +31,47 @@ async function verifyFirebaseToken(idToken) {
   return { uid: user.localId, email: user.email };
 }
 
+// ── Coupon filleul parrainage : -50% sur le 1er mois ──
+// Utilise un coupon Stripe fixe (id = PARRAINAGE_FILLEUL_50), le crée s'il n'existe pas
+const FILLEUL_COUPON_ID = 'PARRAINAGE_FILLEUL_50';
+
+async function getOrCreateFilleulCoupon(stripeKey) {
+  try {
+    // 1. Vérifier si le coupon existe déjà
+    const checkRes = await fetch(`https://api.stripe.com/v1/coupons/${FILLEUL_COUPON_ID}`, {
+      headers: { Authorization: 'Bearer ' + stripeKey }
+    });
+    if (checkRes.ok) {
+      const existing = await checkRes.json();
+      if (!existing.deleted) return existing.id;
+    }
+
+    // 2. Le créer s'il n'existe pas
+    const createRes = await fetch('https://api.stripe.com/v1/coupons', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + stripeKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        id: FILLEUL_COUPON_ID,
+        percent_off: '50',
+        duration: 'once',
+        name: 'Parrainage filleul -50%',
+        'metadata[type]': 'parrainage_filleul',
+      }).toString()
+    });
+    const coupon = await createRes.json();
+    if (coupon.id) return coupon.id;
+
+    console.error('[Checkout] Erreur création coupon filleul:', coupon);
+    return null;
+  } catch (e) {
+    console.error('[Checkout] getOrCreateFilleulCoupon error:', e);
+    return null;
+  }
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -81,6 +122,32 @@ module.exports = async (req, res) => {
       // Si code invalide, on continue sans — le client pourra le retaper sur Stripe
     }
 
+    // ── Si un code parrainage est fourni, préparer le coupon filleul -50% ──
+    let filleulCouponId = null;
+    if (referralCode) {
+      filleulCouponId = await getOrCreateFilleulCoupon(stripeKey);
+      if (filleulCouponId) {
+        console.log(`[Checkout] Coupon filleul ${filleulCouponId} appliqué pour parrainage ${referralCode}`);
+      }
+    }
+
+    // ── Construire les discounts selon le cas ──
+    //  - parrainage + promo → discounts[0]=coupon filleul, discounts[1]=promo
+    //  - parrainage seul   → discounts[0]=coupon filleul
+    //  - promo seul        → discounts[0]=promo
+    //  - rien              → allow_promotion_codes libre
+    const discountParams = {};
+    if (filleulCouponId && promoId) {
+      discountParams['discounts[0][coupon]'] = filleulCouponId;
+      discountParams['discounts[1][promotion_code]'] = promoId;
+    } else if (filleulCouponId) {
+      discountParams['discounts[0][coupon]'] = filleulCouponId;
+    } else if (promoId) {
+      discountParams['discounts[0][promotion_code]'] = promoId;
+    } else {
+      discountParams['allow_promotion_codes'] = 'true';
+    }
+
     const params = {
       mode: 'subscription',
       'line_items[0][price]': priceId,
@@ -88,10 +155,7 @@ module.exports = async (req, res) => {
       'automatic_tax[enabled]': 'true',
       ...(!skipTrial ? { 'subscription_data[trial_period_days]': '15' } : {}),
       'payment_method_collection': 'if_required',
-      // Si promo pré-appliqué → discounts, sinon → champ libre sur le checkout
-      ...(promoId
-        ? { 'discounts[0][promotion_code]': promoId }
-        : { 'allow_promotion_codes': 'true' }),
+      ...discountParams,
       success_url: baseUrl + '/dashboard.html?subscription=success&plan=' + plan,
       cancel_url: baseUrl + '/pricing.html?cancelled=1',
       'metadata[plan]': plan,
