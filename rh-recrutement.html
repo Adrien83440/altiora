@@ -65,7 +65,7 @@
     .card-title{font-size:13px;font-weight:700;display:flex;align-items:center;gap:7px;}
     .card-body{padding:16px 18px;}
     /* PIPELINE */
-    .pipeline-wrap{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;min-height:400px;}
+    .pipeline-wrap{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;min-height:400px;}
     .pipeline-col{background:rgba(250,255,254,0.5);border:1px solid var(--border);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0;}
     .pipeline-col-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;}
     .pipeline-col-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
@@ -93,6 +93,13 @@
     .st-nouveau{background:#e0f2fe;color:#0369a1;}
     .st-screening{background:#ede9fe;color:#6d28d9;}
     .st-entretien{background:#fef3c7;color:#92400e;}
+    .st-entretien_1{background:#ede9fe;color:#6d28d9;}
+    .st-entretien_2{background:#e0e7ff;color:#4338ca;}
+    .st-entretien_3{background:#fce7f3;color:#9d174d;}
+    .pipe-add-col{display:flex;align-items:center;justify-content:center;background:rgba(250,255,254,0.3);border:2px dashed var(--border);border-radius:10px;min-height:120px;cursor:pointer;transition:all .18s;opacity:.6;}
+    .pipe-add-col:hover{opacity:1;border-color:var(--rh-light);background:rgba(250,255,254,0.6);}
+    .pipe-rm-btn{font-size:10px;cursor:pointer;opacity:.4;transition:opacity .15s;margin-left:4px;background:none;border:none;padding:0;line-height:1;}
+    .pipe-rm-btn:hover{opacity:1;color:#ef4444;}
     .st-test{background:#fff7ed;color:#c2410c;}
     .st-offre{background:#d1fae5;color:#065f46;}
     .st-rejete{background:#fee2e2;color:#991b1b;}
@@ -330,13 +337,6 @@
             <input type="text" class="modal-input" id="search-candidat" placeholder="🔍 Rechercher..." style="width:200px;padding:5px 10px;font-size:12px" oninput="renderCandidatTable()"/>
             <select class="modal-input" id="filter-statut" style="width:150px;padding:5px 10px;font-size:12px" onchange="renderCandidatTable()">
               <option value="">Tous les statuts</option>
-              <option value="nouveau">Nouveau</option>
-              <option value="screening">Screening</option>
-              <option value="entretien">Entretien</option>
-              <option value="test">Test technique</option>
-              <option value="offre">Offre envoyée</option>
-              <option value="embauche">Embauché</option>
-              <option value="rejete">Rejeté</option>
             </select>
             <select class="modal-input" id="filter-offre" style="width:180px;padding:5px 10px;font-size:12px" onchange="renderCandidatTable()">
               <option value="">Toutes les offres</option>
@@ -435,9 +435,7 @@
       <div class="modal-row">
         <div class="modal-field"><label class="modal-label">Statut</label>
           <select class="modal-input" id="mc-statut">
-            <option value="nouveau">Nouveau</option><option value="screening">Screening</option>
-            <option value="entretien">Entretien</option><option value="test">Test technique</option>
-            <option value="offre">Offre envoyée</option><option value="embauche">Embauché</option><option value="rejete">Rejeté</option>
+            <option value="nouveau">Nouveau</option>
           </select>
         </div>
         <div class="modal-field"><label class="modal-label">Priorité</label>
@@ -576,9 +574,6 @@
         <span style="font-size:12px;font-weight:600;color:var(--muted)">Passer à :</span>
         <select class="modal-input" id="detail-statut-change" style="width:160px;padding:5px 10px;font-size:12px" onchange="changeStatutFromDetail(this.value)">
           <option value="">--- Changer statut ---</option>
-          <option value="screening">Screening</option><option value="entretien">Entretien</option>
-          <option value="test">Test technique</option><option value="offre">Offre envoyée</option>
-          <option value="embauche">✅ Embauché</option><option value="rejete">❌ Rejeter</option>
         </select>
       </div>
     </div>
@@ -618,10 +613,96 @@
 
 <script>
 var _offres={},_candidats={},_entretiens={},_scoreSelected=0,_detailCurrentId=null;
+var _pipelineConfig={nbEntretiens:1};
+
+var ENTRETIEN_STYLES=[
+  {color:'#8b5cf6',bb:'#ede9fe',bc:'#6d28d9'},
+  {color:'#4f46e5',bb:'#e0e7ff',bc:'#4338ca'},
+  {color:'#db2777',bb:'#fce7f3',bc:'#9d174d'}
+];
+
+function buildPipeCols(){
+  var cols=[
+    {key:'nouveau',label:'Nouveau',color:'#64748b',bb:'#f1f5f9',bc:'#475569'},
+    {key:'screening',label:'Screening',color:'#3b82f6',bb:'#dbeafe',bc:'#1d4ed8'}
+  ];
+  for(var i=1;i<=_pipelineConfig.nbEntretiens;i++){
+    var st=ENTRETIEN_STYLES[i-1];
+    cols.push({key:'entretien_'+i,label:'Entretien '+i,color:st.color,bb:st.bb,bc:st.bc});
+  }
+  cols.push({key:'test',label:'Test technique',color:'#f59e0b',bb:'#fef3c7',bc:'#92400e'});
+  cols.push({key:'offre',label:'Offre envoyée',color:'#10b981',bb:'#d1fae5',bc:'#065f46'});
+  cols.push({key:'rejete',label:'Rejeté',color:'#ef4444',bb:'#fee2e2',bc:'#991b1b'});
+  return cols;
+}
+
+function getAllStatuts(){
+  var s=['nouveau','screening'];
+  for(var i=1;i<=_pipelineConfig.nbEntretiens;i++) s.push('entretien_'+i);
+  s.push('test','offre','embauche','rejete');
+  return s;
+}
+
+function refreshStatutSelects(){
+  var statuts=getAllStatuts();
+  // Filter select
+  var fs=document.getElementById('filter-statut');
+  if(fs){var fv=fs.value;fs.innerHTML='<option value="">Tous les statuts</option>'+statuts.map(function(s){return'<option value="'+s+'">'+statutLabel(s)+'</option>';}).join('');fs.value=fv;}
+  // Candidat form select
+  var mc=document.getElementById('mc-statut');
+  if(mc){var mv=mc.value;mc.innerHTML=statuts.map(function(s){return'<option value="'+s+'">'+statutLabel(s)+'</option>';}).join('');mc.value=mv||'nouveau';}
+  // Detail select
+  var ds=document.getElementById('detail-statut-change');
+  if(ds){ds.innerHTML='<option value="">--- Changer statut ---</option>'+statuts.filter(function(s){return s!=='nouveau';}).map(function(s){var pre=s==='embauche'?'✅ ':s==='rejete'?'❌ ':'';return'<option value="'+s+'">'+pre+statutLabel(s)+'</option>';}).join('');}
+}
+
+async function loadPipelineConfig(){
+  try{
+    var d=await window._getDoc(window._doc(window._db,'rh_recrutement',window._uid,'config','pipeline'));
+    if(d.exists()){_pipelineConfig=d.data();}
+  }catch(e){console.warn('Config pipeline:',e);}
+}
+async function savePipelineConfig(){
+  await window._setDoc(window._doc(window._db,'rh_recrutement',window._uid,'config','pipeline'),_pipelineConfig);
+}
+async function addEntretienStep(){
+  if(_pipelineConfig.nbEntretiens>=3){showToast('Maximum 3 entretiens','warn');return;}
+  _pipelineConfig.nbEntretiens++;
+  await savePipelineConfig();
+  refreshStatutSelects();renderAll();
+  showToast('Entretien '+_pipelineConfig.nbEntretiens+' ajouté','ok');
+}
+async function removeEntretienStep(){
+  if(_pipelineConfig.nbEntretiens<=1){showToast('Minimum 1 entretien','warn');return;}
+  var lastKey='entretien_'+_pipelineConfig.nbEntretiens;
+  var stuck=Object.values(_candidats).filter(function(c){return c.statut===lastKey;});
+  if(stuck.length>0){
+    if(!confirm(stuck.length+' candidat(s) en '+statutLabel(lastKey)+'. Ils seront déplacés vers Entretien '+(  _pipelineConfig.nbEntretiens-1)+'. Continuer ?'))return;
+    var prevKey='entretien_'+(_pipelineConfig.nbEntretiens-1);
+    for(var i=0;i<stuck.length;i++){stuck[i].statut=prevKey;await saveRecord('candidats',stuck[i].id,stuck[i]);}
+  }
+  _pipelineConfig.nbEntretiens--;
+  await savePipelineConfig();
+  refreshStatutSelects();renderAll();
+  showToast('Colonne supprimée','ok');
+}
+
+async function migrateOldEntretienStatut(){
+  var migrated=false;
+  var items=Object.values(_candidats).filter(function(c){return c.statut==='entretien';});
+  for(var i=0;i<items.length;i++){
+    items[i].statut='entretien_1';
+    await saveRecord('candidats',items[i].id,items[i]);
+    migrated=true;
+  }
+  if(migrated)console.log('[recrutement] Migré '+items.length+' candidat(s) entretien → entretien_1');
+}
 
 window.initRecrutement=async function(){
   if(!window._uid)return;
-  await Promise.all([loadOffres(),loadCandidats(),loadEntretiens()]);
+  await Promise.all([loadOffres(),loadCandidats(),loadEntretiens(),loadPipelineConfig()]);
+  await migrateOldEntretienStatut();
+  refreshStatutSelects();
   renderAll();
 };
 
@@ -629,7 +710,7 @@ async function loadOffres(){try{var s=await window._getDocs(window._collection(w
 async function loadCandidats(){try{var s=await window._getDocs(window._collection(window._db,'rh_recrutement',window._uid,'candidats'));_candidats={};s.forEach(function(d){_candidats[d.id]={id:d.id,...d.data()};});}catch(e){console.warn(e);}}
 async function loadEntretiens(){try{var s=await window._getDocs(window._collection(window._db,'rh_recrutement',window._uid,'entretiens'));_entretiens={};s.forEach(function(d){_entretiens[d.id]={id:d.id,...d.data()};});}catch(e){console.warn(e);}}
 
-function renderAll(){refreshOffreSelects();renderKPIs();renderPipeline();renderCandidatTable();renderOffres();renderEntretiens();renderAnalytics();}
+function renderAll(){refreshOffreSelects();refreshStatutSelects();renderKPIs();renderPipeline();renderCandidatTable();renderOffres();renderEntretiens();renderAnalytics();}
 
 function renderKPIs(){
   var cands=Object.values(_candidats),offresA=Object.values(_offres).filter(function(o){return o.statut==='active';});
@@ -650,21 +731,16 @@ function renderKPIs(){
   document.getElementById('kpi-taux').textContent=taux+'%';
 }
 
-var PIPE_COLS=[
-  {key:'nouveau',label:'Nouveau',color:'#64748b',bb:'#f1f5f9',bc:'#475569'},
-  {key:'screening',label:'Screening',color:'#3b82f6',bb:'#dbeafe',bc:'#1d4ed8'},
-  {key:'entretien',label:'Entretien',color:'#8b5cf6',bb:'#ede9fe',bc:'#6d28d9'},
-  {key:'test',label:'Test technique',color:'#f59e0b',bb:'#fef3c7',bc:'#92400e'},
-  {key:'offre',label:'Offre envoyée',color:'#10b981',bb:'#d1fae5',bc:'#065f46'},
-  {key:'rejete',label:'Rejeté',color:'#ef4444',bb:'#fee2e2',bc:'#991b1b'}
-];
-
 function renderPipeline(){
+  var PIPE_COLS=buildPipeCols();
   var filterOff=document.getElementById('pipeline-filter-offre')?document.getElementById('pipeline-filter-offre').value:'';
   var board=document.getElementById('pipeline-board');if(!board)return;
   var cands=Object.values(_candidats).filter(function(c){return c.statut!=='embauche'&&(!filterOff||c.offreId===filterOff);});
+  var totalCols=PIPE_COLS.length+(_pipelineConfig.nbEntretiens<3?1:0);
+  board.style.gridTemplateColumns='repeat('+totalCols+',1fr)';
   board.innerHTML=PIPE_COLS.map(function(col){
     var items=cands.filter(function(c){return c.statut===col.key;});
+    var isLastEntretien=col.key==='entretien_'+_pipelineConfig.nbEntretiens&&_pipelineConfig.nbEntretiens>1;
     var cardsHtml=items.map(function(c){
       var sc=parseInt(c.score)||0,scCls=sc>=7?'score-high':sc>=4?'score-mid':sc>0?'score-low':'';
       var offre=_offres[c.offreId];
@@ -677,11 +753,15 @@ function renderPipeline(){
     }).join('');
     return '<div class="pipeline-col" id="pcol-'+col.key+'" data-col="'+col.key+'">'
       +'<div class="pipeline-col-head"><div class="pipeline-col-title" style="color:'+col.color+'">'+col.label+'</div>'
-      +'<div class="pipeline-badge" style="background:'+col.bb+';color:'+col.bc+'">'+items.length+'</div></div>'
+      +'<div style="display:flex;align-items:center;gap:4px">'
+      +(isLastEntretien?'<button class="pipe-rm-btn" onclick="removeEntretienStep()" title="Supprimer cette étape">✕</button>':'')
+      +'<div class="pipeline-badge" style="background:'+col.bb+';color:'+col.bc+'">'+items.length+'</div>'
+      +'</div></div>'
       +(items.length===0?'<div class="empty-col"><div class="empty-col-icon">○</div><div class="empty-col-text">Aucun</div></div>':'')
       +cardsHtml
       +'</div>';
-  }).join('');
+  }).join('')
+  +(_pipelineConfig.nbEntretiens<3?'<div class="pipe-add-col" onclick="addEntretienStep()" title="Ajouter une étape d\'entretien"><div style="text-align:center"><div style="font-size:24px;margin-bottom:4px">+</div><div style="font-size:10px;font-weight:600;color:var(--muted)">Entretien '+(_pipelineConfig.nbEntretiens+1)+'</div></div></div>':'');
   board.querySelectorAll('.pipeline-card').forEach(function(card){
     card.addEventListener('dragstart',function(e){dragStart(e,card.dataset.id);});
     card.addEventListener('click',function(){openDetail(card.dataset.id);});
@@ -701,7 +781,19 @@ async function dropOnCol(e,ns){
   _candidats[_dragId].statut=ns;
   await saveRecord('candidats',_dragId,_candidats[_dragId]);
   renderPipeline();renderCandidatTable();renderKPIs();renderAnalytics();
-  showToast('Statut mis à jour','ok');_dragId=null;
+  showToast('Statut mis à jour','ok');
+  // Propose de planifier si drop sur une colonne entretien
+  if(ns.startsWith('entretien_')){
+    var candId=_dragId;
+    _dragId=null;
+    setTimeout(function(){
+      if(confirm('Planifier un entretien pour '+_candidats[candId].prenom+' '+_candidats[candId].nom+' ?')){
+        openEntretienFor(candId);
+      }
+    },300);
+    return;
+  }
+  _dragId=null;
 }
 
 function renderCandidatTable(){
@@ -855,12 +947,22 @@ function renderAnalytics(){
   document.getElementById('ana-score').textContent=avgScore;
   var stages=[
     {label:'Candidatures',count:total,color:'#1a3dce'},
-    {label:'Screening',count:cands.filter(function(c){return['screening','entretien','test','offre','embauche'].includes(c.statut);}).length,color:'#3b82f6'},
-    {label:'Entretiens',count:cands.filter(function(c){return['entretien','test','offre','embauche'].includes(c.statut);}).length,color:'#8b5cf6'},
+    {label:'Screening',count:cands.filter(function(c){var a=getAllStatuts();return a.slice(a.indexOf('screening')).includes(c.statut);}).length,color:'#3b82f6'}
+  ];
+  // Entretien stages in funnel
+  for(var ei=1;ei<=_pipelineConfig.nbEntretiens;ei++){
+    var ek='entretien_'+ei;
+    var st=ENTRETIEN_STYLES[ei-1];
+    (function(ek2,st2,ei2){
+      var allAfter=getAllStatuts();var idx=allAfter.indexOf(ek2);allAfter=allAfter.slice(idx);
+      stages.push({label:'Entretien '+ei2,count:cands.filter(function(c){return allAfter.includes(c.statut);}).length,color:st2.color});
+    })(ek,st,ei);
+  }
+  stages.push(
     {label:'Tests',count:cands.filter(function(c){return['test','offre','embauche'].includes(c.statut);}).length,color:'#f59e0b'},
     {label:'Offres',count:cands.filter(function(c){return['offre','embauche'].includes(c.statut);}).length,color:'#10b981'},
     {label:'Embauchés',count:embauche,color:'#065f46'}
-  ];
+  );
   var fw=document.getElementById('funnel-wrap');
   if(fw)fw.innerHTML='<div class="funnel-wrap">'+stages.map(function(s){var pct=total>0?s.count/total*100:0;return'<div class="funnel-row"><div class="funnel-label">'+s.label+'</div><div class="funnel-bar-bg"><div class="funnel-bar-fill" style="width:'+pct+'%;background:'+s.color+'">'+(pct>12?'<span class="funnel-bar-text">'+s.count+'</span>':'')+'</div></div><div class="funnel-count">'+s.count+'</div><div class="funnel-pct">'+pct.toFixed(0)+'%</div></div>';}).join('')+'</div>';
   var srcCount={};cands.forEach(function(c){var s=c.source||'autre';srcCount[s]=(srcCount[s]||0)+1;});
@@ -869,9 +971,13 @@ function renderAnalytics(){
   var maxSrc=srcSorted[0]?srcSorted[0][1]:1;
   var sw=document.getElementById('sources-wrap');
   if(sw)sw.innerHTML='<div class="source-list">'+srcSorted.map(function(e){return'<div class="source-row"><div class="source-name">'+sourceLabel(e[0])+'</div><div class="source-bar-bg"><div class="source-bar-fill" style="width:'+e[1]/maxSrc*100+'%;background:'+(srcColors[e[0]]||'#94a3b8')+'"></div></div><div class="source-num">'+e[1]+'</div></div>';}).join('')+'</div>';
-  var steps2=['screening','entretien','test','offre','embauche'],stepD={screening:3,entretien:7,test:5,offre:3,embauche:2};
+  var steps2=['screening'];
+  for(var ti=1;ti<=_pipelineConfig.nbEntretiens;ti++) steps2.push('entretien_'+ti);
+  steps2.push('test','offre','embauche');
+  var stepD={screening:3,test:5,offre:3,embauche:2};
+  for(var di=1;di<=3;di++) stepD['entretien_'+di]=7;
   var dw=document.getElementById('duree-wrap');
-  if(dw)dw.innerHTML=steps2.map(function(s){return'<div style="background:#f8fffe;border:1px solid var(--rh-border);border-radius:10px;padding:14px;text-align:center"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">'+statutLabel(s)+'</div><div style="font-size:22px;font-weight:800;color:var(--rh-main)">'+stepD[s]+'j</div><div style="font-size:10px;color:var(--muted)">Durée moy.</div></div>';}).join('');
+  if(dw)dw.innerHTML=steps2.map(function(s){return'<div style="background:#f8fffe;border:1px solid var(--rh-border);border-radius:10px;padding:14px;text-align:center"><div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:6px">'+statutLabel(s)+'</div><div style="font-size:22px;font-weight:800;color:var(--rh-main)">'+(stepD[s]||5)+'j</div><div style="font-size:10px;color:var(--muted)">Durée moy.</div></div>';}).join('');
 }
 
 function openDetail(id){
@@ -993,7 +1099,9 @@ function openDetail(id){
 }
 
 function buildTimeline(c){
-  var steps=['nouveau','screening','entretien','test','offre','embauche'];
+  var steps=['nouveau','screening'];
+  for(var i=1;i<=_pipelineConfig.nbEntretiens;i++) steps.push('entretien_'+i);
+  steps.push('test','offre','embauche');
   var idx=steps.indexOf(c.statut);
   return steps.map(function(s,i){return'<div class="timeline-item '+(i<=idx&&c.statut!=='rejete'?'done':'')+'"><div class="timeline-dot"></div><div class="timeline-head">'+statutLabel(s)+'</div><div class="timeline-sub">'+(i<=idx&&c.statut!=='rejete'?'✓ Complété':'En attente')+'</div></div>';}).join('')
     +(c.statut==='rejete'?'<div class="timeline-item done" style="opacity:.5"><div class="timeline-dot" style="border-color:#ef4444;background:#ef4444"></div><div class="timeline-head" style="color:#ef4444">Rejeté</div></div>':'');
@@ -1154,7 +1262,12 @@ function setScore(n){
 window.setScore=setScore;
 
 function formatDate(d){if(!d)return'—';try{return new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'});}catch(e){return d;}}
-function statutLabel(s){return{nouveau:'Nouveau',screening:'Screening',entretien:'Entretien',test:'Test tech.',offre:'Offre envoyée',embauche:'Embauché',rejete:'Rejeté'}[s]||s||'—';}
+function statutLabel(s){
+  var base={nouveau:'Nouveau',screening:'Screening',test:'Test tech.',offre:'Offre envoyée',embauche:'Embauché',rejete:'Rejeté',entretien:'Entretien'};
+  if(base[s])return base[s];
+  if(s&&s.startsWith('entretien_')){var n=s.split('_')[1];return'Entretien '+n;}
+  return s||'—';
+}
 function sourceLabel(s){return{linkedin:'LinkedIn',indeed:'Indeed',cooptation:'Cooptation',spontanee:'Spontanée',"pole-emploi":"France Travail",autre:'Autre'}[s]||s||'—';}
 function typeLabel(t){return{telephone:'Téléphonique',visio:'Visioconférence',presentiel:'Présentiel',technique:'Technique',rh:'RH',direction:'Direction'}[t]||t||'—';}
 function prioLabel(p){return{haute:'🔴 Haute',normale:'🟡 Normale',basse:'⚫ Basse'}[p]||'—';}
@@ -1188,6 +1301,7 @@ window.deleteCandidatFromDetail=deleteCandidatFromDetail;window.addNote=addNote;
 window.saveCandidat=saveCandidat;window.editCandidat=editCandidat;window.deleteCandidat=deleteCandidat;
 window.saveOffre=saveOffre;window.editOffre=editOffre;window.deleteOffre=deleteOffre;window.prefillOffre=prefillOffre;
 window.saveEntretien=saveEntretien;window.deleteEntretien=deleteEntretien;window.openEntretienFor=openEntretienFor;
+window.addEntretienStep=addEntretienStep;window.removeEntretienStep=removeEntretienStep;
 </script>
 
 <script src="nav.js"></script>
