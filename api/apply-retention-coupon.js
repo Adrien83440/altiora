@@ -1,32 +1,17 @@
 // api/apply-retention-coupon.js
-// Applique le coupon de rétention -50% pendant 3 mois sur l'abonnement Stripe de l'utilisateur
+// Applique le coupon de rétention -50% pendant 3 mois sur l'abonnement Stripe
 // + log la tentative de rétention dans Firebase
 // SÉCURISÉ : vérification token Firebase avant toute action
+// ✅ REST API only — pas de Firebase Admin SDK ni Stripe SDK
 
-const Stripe = require('stripe');
-const { initializeApp, cert, getApps } = require('firebase-admin/app');
-const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+const FIREBASE_PROJECT = 'altiora-70599';
+const RETENTION_COUPON_ID = process.env.STRIPE_RETENTION_COUPON_ID || 'ALTEORE_RETENTION_50_3M';
 
-// ── Firebase Admin init (singleton) ─────────────────────────────────────────
-function getDb() {
-  if (!getApps().length) {
-    initializeApp({
-      credential: cert({
-        projectId: 'altiora-70599',
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-      }),
-    });
-  }
-  return getFirestore();
-}
-
-// ── Vérification du token Firebase côté serveur ─────────────────────────────
+// ── Vérification du token Firebase ──
 async function verifyFirebaseToken(idToken) {
-  const fbKey = process.env.FIREBASE_API_KEY;
-  if (!fbKey) throw new Error('FIREBASE_API_KEY non configurée');
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
   const res = await fetch(
-    'https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=' + fbKey,
+    `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${fbKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -40,26 +25,72 @@ async function verifyFirebaseToken(idToken) {
   return uid;
 }
 
-// ── Coupon ID à créer dans Stripe Dashboard ──────────────────────────────────
-const RETENTION_COUPON_ID = process.env.STRIPE_RETENTION_COUPON_ID || 'ALTEORE_RETENTION_50_3M';
+// ── Admin token Firebase (pour écrire dans retention_logs) ──
+async function getAdminToken() {
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const email = process.env.FIREBASE_API_EMAIL;
+  const password = process.env.FIREBASE_API_PASSWORD;
+  if (!email || !password) return null;
+  const r = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${fbKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: true })
+    }
+  );
+  const data = await r.json();
+  return data.idToken || null;
+}
+
+// ── Lecture Firestore REST ──
+async function fsGet(path, token) {
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}`;
+  const headers = {};
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(url + (token ? '' : '?key=' + (process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4')), { headers });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+function fv(doc, field) {
+  const f = doc?.fields?.[field];
+  return f?.stringValue ?? f?.integerValue ?? f?.booleanValue ?? null;
+}
+
+// ── Écriture Firestore REST ──
+async function fsSet(path, fields, token) {
+  const ff = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (typeof v === 'string')       ff[k] = { stringValue: v };
+    else if (typeof v === 'number')  ff[k] = { integerValue: String(v) };
+    else if (typeof v === 'boolean') ff[k] = { booleanValue: v };
+    else if (v === null)             ff[k] = { nullValue: null };
+    else                             ff[k] = { stringValue: String(v) };
+  }
+  const mask = Object.keys(fields).map(k => `updateMask.fieldPaths=${k}`).join('&');
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}?${mask}`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify({ fields: ff }) });
+  if (!res.ok) throw new Error('Firestore PATCH failed: ' + await res.text());
+  return res.json();
+}
 
 module.exports = async function handler(req, res) {
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', process.env.APP_URL || 'https://alteore.com');
+  res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Méthode non autorisée' });
 
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Méthode non autorisée' });
-  }
+  const stripeKey = process.env.STRIPE_SECRET_KEY;
+  if (!stripeKey) return res.status(500).json({ error: 'Config serveur manquante' });
 
-  // ── AUTH : vérifier le token Firebase ──
+  // ── AUTH ──
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  if (!token) {
-    return res.status(401).json({ error: "Token d'authentification manquant." });
-  }
+  if (!token) return res.status(401).json({ error: "Token d'authentification manquant." });
 
   let verifiedUid;
   try {
@@ -70,53 +101,67 @@ module.exports = async function handler(req, res) {
 
   const { reason } = req.body || {};
 
-  const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
-  const db     = getDb();
-
   try {
-    // 1. Récupérer l'utilisateur dans Firebase (uid vérifié par le token)
-    const userRef  = db.collection('users').doc(verifiedUid);
-    const userSnap = await userRef.get();
+    // 1. Récupérer l'utilisateur
+    const userDoc = await fsGet(`users/${verifiedUid}`, token);
+    if (!userDoc) return res.status(404).json({ error: 'Utilisateur introuvable' });
 
-    if (!userSnap.exists) {
-      return res.status(404).json({ error: 'Utilisateur introuvable' });
-    }
-
-    const userData = userSnap.data();
-    const subscriptionId = userData.stripeSubscriptionId;
+    const subscriptionId = fv(userDoc, 'stripeSubscriptionId');
+    const currentPlan = fv(userDoc, 'plan');
 
     if (!subscriptionId) {
       return res.status(400).json({ error: 'Aucun abonnement Stripe actif trouvé' });
     }
 
     // 2. Vérifier que la remise n'a pas déjà été appliquée
-    if (userData.retentionCouponApplied) {
+    if (fv(userDoc, 'retentionCouponApplied') === true) {
       return res.status(409).json({ error: 'La remise de rétention a déjà été utilisée' });
     }
 
-    // 3. Appliquer le coupon sur l'abonnement Stripe
-    const updatedSub = await stripe.subscriptions.update(subscriptionId, {
-      coupon: RETENTION_COUPON_ID,
+    // 3. Appliquer le coupon sur l'abonnement Stripe (via discounts pour billing_mode=flexible)
+    const subUpdateRes = await fetch(`https://api.stripe.com/v1/subscriptions/${subscriptionId}`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + stripeKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({ 'discounts[0][coupon]': RETENTION_COUPON_ID }).toString()
     });
+    const updatedSub = await subUpdateRes.json();
+    if (updatedSub.error) {
+      console.error('[apply-retention-coupon] Stripe error:', updatedSub.error);
+      return res.status(400).json({
+        error: `Coupon Stripe invalide : ${updatedSub.error.message}. Vérifiez que le coupon "${RETENTION_COUPON_ID}" existe dans Stripe.`
+      });
+    }
 
-    // 4. Logger dans Firebase
-    await userRef.update({
+    // 4. Mettre à jour Firestore (user)
+    const now = new Date().toISOString();
+    await fsSet(`users/${verifiedUid}`, {
       retentionCouponApplied: true,
-      retentionCouponAppliedAt: FieldValue.serverTimestamp(),
-      retentionReason: reason || null,
+      retentionCouponAppliedAt: now,
+      retentionReason: reason || '',
       retentionCouponId: RETENTION_COUPON_ID,
-    });
+    }, token);
 
-    // 5. Log optionnel dans collection analytics
-    await db.collection('retention_logs').add({
-      uid: verifiedUid,
-      reason: reason || null,
-      couponId: RETENTION_COUPON_ID,
-      subscriptionId,
-      appliedAt: FieldValue.serverTimestamp(),
-      planAtTime: userData.plan,
-    });
+    // 5. Log dans retention_logs (via admin token)
+    try {
+      const adminToken = await getAdminToken();
+      const logId = verifiedUid + '_' + Date.now();
+      await fsSet(`retention_logs/${logId}`, {
+        uid: verifiedUid,
+        action: 'retention_coupon_applied',
+        reason: reason || '',
+        couponId: RETENTION_COUPON_ID,
+        subscriptionId,
+        appliedAt: now,
+        planAtTime: currentPlan || '',
+      }, adminToken);
+    } catch(logErr) {
+      console.warn('[apply-retention-coupon] Log failed:', logErr.message);
+    }
 
+    console.log(`[apply-retention-coupon] ✅ uid=${verifiedUid} coupon=${RETENTION_COUPON_ID}`);
     return res.status(200).json({
       success: true,
       subscriptionId: updatedSub.id,
@@ -124,15 +169,7 @@ module.exports = async function handler(req, res) {
     });
 
   } catch (err) {
-    console.error('[apply-retention-coupon] Error:', err);
-
-    // Stripe error spécifique : coupon invalide
-    if (err.type === 'StripeInvalidRequestError') {
-      return res.status(400).json({
-        error: `Coupon Stripe invalide : ${err.message}. Vérifiez que le coupon "${RETENTION_COUPON_ID}" existe dans votre dashboard Stripe.`,
-      });
-    }
-
+    console.error('[apply-retention-coupon] Error:', err.message);
     return res.status(500).json({ error: 'Erreur interne. Veuillez réessayer.' });
   }
 };

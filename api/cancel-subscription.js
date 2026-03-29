@@ -57,15 +57,36 @@ function fv(doc, field) {
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
   const stripeKey = process.env.STRIPE_SECRET_KEY;
   if (!stripeKey) return res.status(500).json({ error: 'Config serveur manquante' });
 
-  const { uid, reason, detail } = req.body || {};
-  if (!uid) return res.status(400).json({ error: 'uid requis' });
+  // ── AUTH : vérifier le token Firebase ──
+  const authHeader = req.headers.authorization || '';
+  const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+
+  let uid = null;
+  if (idToken) {
+    // Vérifier le token et récupérer l'uid
+    const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+    try {
+      const verifyRes = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${fbKey}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken }) }
+      );
+      const verifyData = await verifyRes.json();
+      uid = verifyData.users?.[0]?.localId || null;
+    } catch(e) {}
+  }
+
+  // Fallback : uid du body (rétrocompatibilité)
+  if (!uid) uid = (req.body || {}).uid;
+  if (!uid) return res.status(401).json({ error: 'Authentification requise' });
+
+  const { reason, detail } = req.body || {};
 
   try {
     const adminToken = await getAdminToken();
