@@ -1,74 +1,143 @@
 // api/cron-trial-check.js
 // ══════════════════════════════════════════════════════════════════
-// CRON quotidien — Gestion du cycle de vie des essais gratuits
+// CRON quotidien — Gestion du cycle de vie des essais gratuits + promos
+// ✅ REST API only — pas de Firebase Admin SDK
 //
 // Appelé chaque jour à 8h UTC (9-10h heure française) par Vercel Cron
 //
 // Actions :
-//   J-3  → email rappel « Plus que 3 jours »
-//   J-1  → email rappel « Dernier jour demain »
-//   J+0  → plan = trial_expired + email « Essai expiré »
-//   J+15 → suppression des données + email « Données supprimées »
+//   Trial J-3  → email rappel « Plus que 3 jours »
+//   Trial J-1  → email rappel « Dernier jour demain »
+//   Trial J+0  → plan = trial_expired + email « Essai expiré »
+//   Trial J+15 → suppression des données + email « Données supprimées »
+//   Promo J-7  → email rappel « 7 jours restants »
+//   Promo J-1  → email rappel « Dernier jour »
+//   Promo J+0  → plan = promo_expired + email « Offre expirée »
 //
 // Sécurité : vérifie le CRON_SECRET (Vercel envoie Authorization: Bearer <secret>)
 // ══════════════════════════════════════════════════════════════════
 
-const { initializeApp, cert, getApps } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
+const FIREBASE_PROJECT = 'altiora-70599';
+const FB_KEY = 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+const FS_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents`;
 
-// ── Firebase Admin (singleton) ──
-function getDb() {
-  if (!getApps().length) {
-    initializeApp({
-      credential: cert({
-        projectId: 'altiora-70599',
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-      }),
-    });
+// ══════════════════════════════════════════════════════════════════
+// FIREBASE REST HELPERS
+// ══════════════════════════════════════════════════════════════════
+
+let _adminToken = null;
+let _adminTokenExp = 0;
+
+async function getAdminToken() {
+  if (_adminToken && Date.now() < _adminTokenExp - 300000) return _adminToken;
+  const fbKey = process.env.FIREBASE_API_KEY || FB_KEY;
+  const email = process.env.FIREBASE_API_EMAIL;
+  const password = process.env.FIREBASE_API_PASSWORD;
+  if (!email || !password) { console.warn('[cron] No admin credentials'); return null; }
+  const r = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${fbKey}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, returnSecureToken: true }) }
+  );
+  const data = await r.json();
+  if (data.idToken) {
+    _adminToken = data.idToken;
+    _adminTokenExp = Date.now() + (parseInt(data.expiresIn || '3600') * 1000);
+    return _adminToken;
   }
-  return getFirestore();
+  console.error('[cron] Admin login failed:', data.error?.message);
+  return null;
 }
 
-// ── Envoi d'email via Resend REST API ──
-async function sendEmail(to, subject, html) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) { console.warn('[cron-trial] RESEND_API_KEY manquante — email non envoyé'); return false; }
+function authHeaders(token) {
+  return token ? { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+}
 
-  const from = process.env.RESEND_FROM || 'ALTEORE <noreply@alteore.com>';
-  try {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ from, to: [to], subject, html })
-    });
-    const data = await res.json();
-    if (res.ok) {
-      console.log(`[cron-trial] ✅ Email envoyé à ${to}: ${subject}`);
-      return true;
-    } else {
-      console.error(`[cron-trial] ❌ Resend error:`, data);
-      return false;
+// ── Query Firestore (replaces db.collection().where().get()) ──
+async function fsQuery(collectionId, field, op, value, token) {
+  const url = `${FS_BASE}:runQuery`;
+  const fsValue = typeof value === 'string' ? { stringValue: value }
+    : typeof value === 'number' ? { integerValue: String(value) }
+    : Array.isArray(value) ? { arrayValue: { values: value.map(v => ({ stringValue: v })) } }
+    : { stringValue: String(value) };
+
+  // For 'in' operator, use unaryFilter or composite
+  let where;
+  if (op === 'IN') {
+    where = {
+      compositeFilter: {
+        op: 'OR',
+        filters: value.map(v => ({
+          fieldFilter: { field: { fieldPath: field }, op: 'EQUAL', value: { stringValue: v } }
+        }))
+      }
+    };
+  } else {
+    where = { fieldFilter: { field: { fieldPath: field }, op, value: fsValue } };
+  }
+
+  const body = { structuredQuery: { from: [{ collectionId }], where } };
+  const res = await fetch(url, { method: 'POST', headers: authHeaders(token), body: JSON.stringify(body) });
+  const results = await res.json();
+  if (!Array.isArray(results)) return [];
+  return results.filter(r => r.document).map(r => {
+    const name = r.document.name;
+    const uid = name.split('/').pop();
+    const fields = r.document.fields || {};
+    const data = {};
+    for (const [k, v] of Object.entries(fields)) {
+      data[k] = v.stringValue ?? v.integerValue ?? v.booleanValue ?? v.doubleValue ?? null;
+      // Convert string numbers
+      if (v.integerValue !== undefined) data[k] = parseInt(v.integerValue);
     }
-  } catch (e) {
-    console.error(`[cron-trial] ❌ Email exception:`, e.message);
-    return false;
+    return { uid, data, _name: name };
+  });
+}
+
+// ── Update a document (replaces userDoc.ref.update()) ──
+async function fsUpdate(path, fields, token) {
+  const ff = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (typeof v === 'string')       ff[k] = { stringValue: v };
+    else if (typeof v === 'number')  ff[k] = { integerValue: String(v) };
+    else if (typeof v === 'boolean') ff[k] = { booleanValue: v };
+    else if (v === null)             ff[k] = { nullValue: null };
+    else                             ff[k] = { stringValue: String(v) };
+  }
+  const mask = Object.keys(fields).map(k => `updateMask.fieldPaths=${k}`).join('&');
+  const url = `${FS_BASE}/${path}?${mask}`;
+  const res = await fetch(url, { method: 'PATCH', headers: authHeaders(token), body: JSON.stringify({ fields: ff }) });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`fsUpdate ${path} failed: ${err}`);
   }
 }
 
-// ── Calcul des jours entre maintenant et une date ──
-function daysDiff(dateStr) {
-  const end = new Date(dateStr);
-  if (isNaN(end.getTime())) return null;
-  const now = new Date();
-  now.setHours(12, 0, 0, 0);
-  end.setHours(12, 0, 0, 0);
-  return Math.round((end - now) / (1000 * 60 * 60 * 24));
+// ── Delete a document ──
+async function fsDelete(path, token) {
+  const url = `${FS_BASE}/${path}`;
+  const res = await fetch(url, { method: 'DELETE', headers: authHeaders(token) });
+  return res.ok;
 }
 
-// ── Suppression récursive des données utilisateur ──
-async function deleteUserData(db, uid) {
-  // Toutes les collections avec sous-collections liées à un uid
+// ── List documents in a collection (for recursive delete) ──
+async function fsList(path, token) {
+  const url = `${FS_BASE}/${path}?pageSize=300`;
+  const res = await fetch(url, { headers: authHeaders(token) });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return (data.documents || []).map(d => d.name.replace(`projects/${FIREBASE_PROJECT}/databases/(default)/documents/`, ''));
+}
+
+// ── Query by field (for fidelite_public etc.) ──
+async function fsQueryByField(collectionId, field, value, token) {
+  return fsQuery(collectionId, field, 'EQUAL', value, token);
+}
+
+// ══════════════════════════════════════════════════════════════════
+// DATA DELETION
+// ══════════════════════════════════════════════════════════════════
+
+async function deleteUserData(uid, token) {
   const COLLECTIONS_WITH_SUBCOLS = [
     'pilotage', 'marges', 'produits', 'panier', 'dettes',
     'bilans', 'copilote', 'cashflow', 'stock', 'fidelite',
@@ -79,254 +148,181 @@ async function deleteUserData(db, uid) {
     'fiches', 'profil', 'tickets'
   ];
 
-  // Documents simples (sans sous-collections)
   const SIMPLE_DOCS = [
     'catalogues', 'bank_connections', 'bank_pending',
-    'fidelite_public_cfg', 'rh_params'
+    'fidelite_public_cfg', 'rh_params', 'tuto_progress', 'previsions'
   ];
 
   let deleted = 0;
 
-  // 1. Supprimer collections avec sous-collections (recursiveDelete)
+  // 1. Collections with subcollections — list children and delete them, then parent
   for (const col of COLLECTIONS_WITH_SUBCOLS) {
     try {
-      const ref = db.collection(col).doc(uid);
-      const snap = await ref.get();
-      if (snap.exists) {
-        await db.recursiveDelete(ref);
-        deleted++;
-        console.log(`[cron-trial]   🗑 ${col}/${uid} supprimé (récursif)`);
+      // Try to list common subcollection names
+      const subNames = ['months', 'produits', 'params', 'items', 'data', 'years', 'briefings',
+        'config', 'clients', 'demandes', 'fiches', 'daily', 'planning_acks', 'audit',
+        'signatures', 'offres', 'candidats', 'entretiens', 'dossiers', 'events', 'list'];
+      for (const sub of subNames) {
+        const docs = await fsList(`${col}/${uid}/${sub}`, token);
+        for (const docPath of docs) {
+          await fsDelete(docPath, token);
+          deleted++;
+        }
       }
+      // Delete parent
+      await fsDelete(`${col}/${uid}`, token);
+      deleted++;
     } catch (e) {
-      console.warn(`[cron-trial]   ⚠️ Erreur suppression ${col}/${uid}:`, e.message);
+      // Silently skip non-existent collections
     }
   }
 
-  // 2. Supprimer documents simples
+  // 2. Simple docs
   for (const col of SIMPLE_DOCS) {
     try {
-      const ref = db.collection(col).doc(uid);
-      const snap = await ref.get();
-      if (snap.exists) {
-        await ref.delete();
-        deleted++;
-        console.log(`[cron-trial]   🗑 ${col}/${uid} supprimé`);
-      }
-    } catch (e) {
-      console.warn(`[cron-trial]   ⚠️ Erreur suppression ${col}/${uid}:`, e.message);
-    }
+      await fsDelete(`${col}/${uid}`, token);
+      deleted++;
+    } catch (e) {}
   }
 
-  // 3. Supprimer les docs fidelite_public où merchantUid == uid
+  // 3. fidelite_public where merchantUid == uid
   try {
-    const fidPubSnap = await db.collection('fidelite_public')
-      .where('merchantUid', '==', uid).get();
-    for (const doc of fidPubSnap.docs) {
-      await doc.ref.delete();
+    const fidDocs = await fsQueryByField('fidelite_public', 'merchantUid', uid, token);
+    for (const doc of fidDocs) {
+      await fsDelete(`fidelite_public/${doc.uid}`, token);
       deleted++;
     }
-    if (fidPubSnap.size > 0) {
-      console.log(`[cron-trial]   🗑 ${fidPubSnap.size} fidelite_public supprimés`);
-    }
-  } catch (e) {
-    console.warn('[cron-trial]   ⚠️ Erreur suppression fidelite_public:', e.message);
-  }
+  } catch (e) {}
 
-  // 4. Supprimer les docs rh_employes_public (besoin d'une query par ownerUid ou parcours)
+  // 4. rh_employes_public where ownerUid == uid
   try {
-    const rhPubSnap = await db.collection('rh_employes_public')
-      .where('ownerUid', '==', uid).get();
-    for (const doc of rhPubSnap.docs) {
-      await doc.ref.delete();
+    const rhDocs = await fsQueryByField('rh_employes_public', 'ownerUid', uid, token);
+    for (const doc of rhDocs) {
+      await fsDelete(`rh_employes_public/${doc.uid}`, token);
       deleted++;
     }
-    const rhProfilSnap = await db.collection('rh_employes_public_profil')
-      .where('ownerUid', '==', uid).get();
-    for (const doc of rhProfilSnap.docs) {
-      await doc.ref.delete();
+    const rhProfDocs = await fsQueryByField('rh_employes_public_profil', 'ownerUid', uid, token);
+    for (const doc of rhProfDocs) {
+      await fsDelete(`rh_employes_public_profil/${doc.uid}`, token);
       deleted++;
     }
-  } catch (e) {
-    console.warn('[cron-trial]   ⚠️ Erreur suppression rh_employes_public:', e.message);
-  }
+  } catch (e) {}
 
   return deleted;
 }
 
 // ══════════════════════════════════════════════════════════════════
-// TEMPLATES EMAIL
+// EMAIL
 // ══════════════════════════════════════════════════════════════════
 
-function emailWrapper(content) {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body style="margin:0;padding:0;background:#f5f7ff;font-family:Arial,Helvetica,sans-serif">
-<div style="max-width:560px;margin:0 auto;padding:20px">
-  <div style="text-align:center;padding:24px 0">
-    <span style="font-size:22px;font-weight:800;color:#0f1f5c;letter-spacing:1px">ALTEORE</span>
-  </div>
-  <div style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,31,92,0.08)">
-    ${content}
-  </div>
-  <div style="text-align:center;padding:20px 0;font-size:11px;color:#94a3b8;line-height:1.5">
-    ALTEORE — Logiciel de gestion pour commerçants<br/>
-    <a href="https://alteore.com" style="color:#94a3b8">alteore.com</a>
-  </div>
-</div></body></html>`;
+async function sendEmail(to, subject, html) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) { console.warn('[cron] RESEND_API_KEY manquante'); return false; }
+  const from = process.env.RESEND_FROM || 'ALTEORE <noreply@alteore.com>';
+  try {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ from, to: [to], subject, html })
+    });
+    const data = await res.json();
+    if (res.ok) { console.log(`[cron] ✅ Email → ${to}: ${subject}`); return true; }
+    console.error('[cron] ❌ Resend:', data);
+    return false;
+  } catch (e) { console.error('[cron] ❌ Email:', e.message); return false; }
+}
+
+function daysDiff(dateStr) {
+  const end = new Date(dateStr);
+  if (isNaN(end.getTime())) return null;
+  const now = new Date();
+  now.setHours(12, 0, 0, 0);
+  end.setHours(12, 0, 0, 0);
+  return Math.round((end - now) / (1000 * 60 * 60 * 24));
+}
+
+// ══════════════════════════════════════════════════════════════════
+// EMAIL TEMPLATES
+// ══════════════════════════════════════════════════════════════════
+
+function ew(content) {
+  return '<!DOCTYPE html><html><head><meta charset="utf-8"/></head><body style="margin:0;padding:0;background:#f5f7ff;font-family:Arial,Helvetica,sans-serif">' +
+    '<div style="max-width:560px;margin:0 auto;padding:20px">' +
+    '<div style="text-align:center;padding:24px 0"><span style="font-size:22px;font-weight:800;color:#0f1f5c;letter-spacing:1px">ALTEORE</span></div>' +
+    '<div style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,31,92,0.08)">' +
+    content +
+    '</div>' +
+    '<div style="text-align:center;padding:20px 0;font-size:11px;color:#94a3b8;line-height:1.5">ALTEORE — Logiciel de gestion pour commerçants<br/><a href="https://alteore.com" style="color:#94a3b8">alteore.com</a></div>' +
+    '</div></body></html>';
+}
+
+function btn(text, url) {
+  return '<div style="text-align:center"><a href="' + url + '" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#1a3dce,#4f7ef8);color:white;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(26,61,206,0.3)">' + text + '</a></div>';
 }
 
 function emailReminderJ3(name) {
-  return emailWrapper(`
-    <div style="background:linear-gradient(135deg,#f59e0b,#fbbf24);padding:28px 32px;color:#1a1f36">
-      <div style="font-size:28px;margin-bottom:8px">⏳</div>
-      <h1 style="margin:0;font-size:20px;font-weight:800">Plus que 3 jours d'essai</h1>
-      <p style="margin:8px 0 0;font-size:14px;opacity:0.85">Votre période d'essai gratuite arrive bientôt à son terme.</p>
-    </div>
-    <div style="padding:28px 32px">
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Bonjour${name ? ' ' + name : ''},
-      </p>
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Votre essai gratuit d'Alteore expire dans <strong>3 jours</strong>. Pour continuer à utiliser votre tableau de bord, vos analyses de marge, votre pilotage financier et toutes vos données, souscrivez à un abonnement dès maintenant.
-      </p>
-      <p style="font-size:13px;color:#6b7280;line-height:1.7;margin:0 0 24px">
-        💡 Toutes vos données seront conservées si vous souscrivez avant l'expiration. Sans abonnement, votre accès sera bloqué et vos données seront supprimées 15 jours plus tard.
-      </p>
-      <div style="text-align:center">
-        <a href="https://alteore.com/pricing.html" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#1a3dce,#4f7ef8);color:white;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(26,61,206,0.3)">Choisir mon plan →</a>
-      </div>
-      <p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">Annulation à tout moment · Sans engagement</p>
-    </div>`);
+  return ew(
+    '<div style="background:linear-gradient(135deg,#f59e0b,#fbbf24);padding:28px 32px;color:#1a1f36"><div style="font-size:28px;margin-bottom:8px">⏳</div><h1 style="margin:0;font-size:20px;font-weight:800">Plus que 3 jours d\'essai</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Votre période d\'essai gratuite arrive bientôt à son terme.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Votre essai gratuit d\'Alteore expire dans <strong>3 jours</strong>. Pour continuer à utiliser votre tableau de bord et toutes vos données, souscrivez à un abonnement dès maintenant.</p>' +
+    '<p style="font-size:13px;color:#6b7280;line-height:1.7;margin:0 0 24px">💡 Toutes vos données seront conservées si vous souscrivez avant l\'expiration.</p>' +
+    btn('Choisir mon plan →', 'https://alteore.com/pricing.html') +
+    '<p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">Annulation à tout moment · Sans engagement</p></div>'
+  );
 }
 
 function emailReminderJ1(name) {
-  return emailWrapper(`
-    <div style="background:linear-gradient(135deg,#ef4444,#f87171);padding:28px 32px;color:white">
-      <div style="font-size:28px;margin-bottom:8px">🔔</div>
-      <h1 style="margin:0;font-size:20px;font-weight:800">Dernier jour d'essai demain !</h1>
-      <p style="margin:8px 0 0;font-size:14px;opacity:0.85">Ne perdez pas vos données et votre historique.</p>
-    </div>
-    <div style="padding:28px 32px">
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Bonjour${name ? ' ' + name : ''},
-      </p>
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Votre essai gratuit expire <strong>demain</strong>. Après cette date, vous ne pourrez plus accéder à Alteore.
-      </p>
-      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;margin:0 0 20px">
-        <p style="margin:0;font-size:13px;color:#991b1b;line-height:1.6">
-          ⚠️ <strong>Sans abonnement, vos données seront définitivement supprimées 15 jours après l'expiration.</strong> Saisissez l'opportunité de conserver tout votre travail en souscrivant dès maintenant.
-        </p>
-      </div>
-      <div style="text-align:center">
-        <a href="https://alteore.com/pricing.html" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#1a3dce,#4f7ef8);color:white;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(26,61,206,0.3)">Souscrire maintenant →</a>
-      </div>
-      <p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">À partir de 55€/mois · Annulation à tout moment</p>
-    </div>`);
+  return ew(
+    '<div style="background:linear-gradient(135deg,#ef4444,#f87171);padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">🔔</div><h1 style="margin:0;font-size:20px;font-weight:800">Dernier jour d\'essai demain !</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Ne perdez pas vos données et votre historique.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Votre essai gratuit expire <strong>demain</strong>. Après cette date, vous ne pourrez plus accéder à Alteore.</p>' +
+    '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;margin:0 0 20px"><p style="margin:0;font-size:13px;color:#991b1b;line-height:1.6">⚠️ <strong>Sans abonnement, vos données seront définitivement supprimées 15 jours après l\'expiration.</strong></p></div>' +
+    btn('Souscrire maintenant →', 'https://alteore.com/pricing.html') +
+    '<p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">À partir de 55€/mois · Annulation à tout moment</p></div>'
+  );
 }
 
 function emailExpired(name) {
-  return emailWrapper(`
-    <div style="background:linear-gradient(135deg,#1a1f36,#2d3561);padding:28px 32px;color:white">
-      <div style="font-size:28px;margin-bottom:8px">🚫</div>
-      <h1 style="margin:0;font-size:20px;font-weight:800">Votre essai gratuit a expiré</h1>
-      <p style="margin:8px 0 0;font-size:14px;opacity:0.7">Votre accès à Alteore est désormais bloqué.</p>
-    </div>
-    <div style="padding:28px 32px">
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Bonjour${name ? ' ' + name : ''},
-      </p>
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Votre période d'essai de 15 jours est terminée. L'accès au logiciel est maintenant bloqué.
-      </p>
-      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;margin:0 0 16px">
-        <p style="margin:0;font-size:13px;color:#991b1b;line-height:1.6;font-weight:600">
-          ⏰ Vous avez 15 jours pour récupérer vos données en souscrivant à un abonnement. Passé ce délai, toutes vos données seront définitivement supprimées.
-        </p>
-      </div>
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 24px">
-        Souscrivez maintenant pour retrouver immédiatement l'accès à votre tableau de bord et à toutes vos données intactes.
-      </p>
-      <div style="text-align:center">
-        <a href="https://alteore.com/pricing.html" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#1a3dce,#4f7ef8);color:white;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(26,61,206,0.3)">Réactiver mon compte →</a>
-      </div>
-    </div>`);
+  return ew(
+    '<div style="background:linear-gradient(135deg,#1a1f36,#2d3561);padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">🚫</div><h1 style="margin:0;font-size:20px;font-weight:800">Votre essai gratuit a expiré</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.7">Votre accès à Alteore est désormais bloqué.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Votre période d\'essai de 15 jours est terminée. L\'accès au logiciel est maintenant bloqué.</p>' +
+    '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;margin:0 0 16px"><p style="margin:0;font-size:13px;color:#991b1b;line-height:1.6;font-weight:600">⏰ Vous avez 15 jours pour récupérer vos données en souscrivant. Passé ce délai, elles seront définitivement supprimées.</p></div>' +
+    btn('Réactiver mon compte →', 'https://alteore.com/pricing.html') + '</div>'
+  );
 }
 
 function emailDeleted(name) {
-  return emailWrapper(`
-    <div style="background:linear-gradient(135deg,#6b7280,#9ca3af);padding:28px 32px;color:white">
-      <div style="font-size:28px;margin-bottom:8px">🗑</div>
-      <h1 style="margin:0;font-size:20px;font-weight:800">Vos données ont été supprimées</h1>
-      <p style="margin:8px 0 0;font-size:14px;opacity:0.7">Conformément à notre politique, vos données ont été effacées.</p>
-    </div>
-    <div style="padding:28px 32px">
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Bonjour${name ? ' ' + name : ''},
-      </p>
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Votre période d'essai a expiré il y a plus de 15 jours. Conformément à nos conditions, toutes vos données ont été définitivement supprimées de nos serveurs.
-      </p>
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 24px">
-        Si vous souhaitez utiliser Alteore à l'avenir, vous pouvez créer un nouveau compte et souscrire à un abonnement.
-      </p>
-      <div style="text-align:center">
-        <a href="https://alteore.com" style="display:inline-block;padding:14px 32px;background:#e2e8f0;color:#374151;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">Visiter Alteore</a>
-      </div>
-    </div>`);
+  return ew(
+    '<div style="background:linear-gradient(135deg,#6b7280,#9ca3af);padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">🗑</div><h1 style="margin:0;font-size:20px;font-weight:800">Vos données ont été supprimées</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.7">Conformément à notre politique, vos données ont été effacées.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Votre période d\'essai a expiré il y a plus de 15 jours. Toutes vos données ont été définitivement supprimées de nos serveurs.</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 24px">Si vous souhaitez utiliser Alteore à l\'avenir, vous pouvez créer un nouveau compte.</p>' +
+    '<div style="text-align:center"><a href="https://alteore.com" style="display:inline-block;padding:14px 32px;background:#e2e8f0;color:#374151;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px">Visiter Alteore</a></div></div>'
+  );
 }
 
-// ══════════════════════════════════════════════════════════════════
-// TEMPLATES EMAIL — PROMOS
-// ══════════════════════════════════════════════════════════════════
-
 function emailPromoReminder(name, daysLeft) {
-  const urgentColor = daysLeft <= 1 ? '#ef4444' : '#f59e0b';
-  const urgentBg = daysLeft <= 1 ? 'linear-gradient(135deg,#ef4444,#f87171)' : 'linear-gradient(135deg,#f59e0b,#fbbf24)';
-  const dayText = daysLeft <= 1 ? 'demain' : `dans ${daysLeft} jours`;
-  return emailWrapper(`
-    <div style="background:${urgentBg};padding:28px 32px;color:white">
-      <div style="font-size:28px;margin-bottom:8px">⏳</div>
-      <h1 style="margin:0;font-size:20px;font-weight:800">Votre offre expire ${dayText}</h1>
-      <p style="margin:8px 0 0;font-size:14px;opacity:0.85">Votre accès Master gratuit arrive bientôt à son terme.</p>
-    </div>
-    <div style="padding:28px 32px">
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Bonjour${name ? ' ' + name : ''},
-      </p>
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Votre offre découverte Alteore expire <strong>${dayText}</strong>. Après cette date, vous ne pourrez plus accéder au logiciel.
-      </p>
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Pour continuer à utiliser Alteore et <strong>conserver toutes vos données</strong>, souscrivez dès maintenant à un abonnement.
-      </p>
-      <div style="text-align:center">
-        <a href="https://alteore.com/pricing.html" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#1a3dce,#4f7ef8);color:white;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(26,61,206,0.3)">Choisir mon plan →</a>
-      </div>
-      <p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">À partir de 55€/mois · Annulation à tout moment</p>
-    </div>`);
+  var urgentBg = daysLeft <= 1 ? 'linear-gradient(135deg,#ef4444,#f87171)' : 'linear-gradient(135deg,#f59e0b,#fbbf24)';
+  var dayText = daysLeft <= 1 ? 'demain' : 'dans ' + daysLeft + ' jours';
+  return ew(
+    '<div style="background:' + urgentBg + ';padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">⏳</div><h1 style="margin:0;font-size:20px;font-weight:800">Votre offre expire ' + dayText + '</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Votre accès Master gratuit arrive bientôt à son terme.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Votre offre découverte Alteore expire <strong>' + dayText + '</strong>. Pour continuer et <strong>conserver toutes vos données</strong>, souscrivez dès maintenant.</p>' +
+    btn('Choisir mon plan →', 'https://alteore.com/pricing.html') +
+    '<p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">À partir de 55€/mois · Annulation à tout moment</p></div>'
+  );
 }
 
 function emailPromoExpired(name) {
-  return emailWrapper(`
-    <div style="background:linear-gradient(135deg,#1a1f36,#2d3561);padding:28px 32px;color:white">
-      <div style="font-size:28px;margin-bottom:8px">🚫</div>
-      <h1 style="margin:0;font-size:20px;font-weight:800">Votre offre découverte a expiré</h1>
-      <p style="margin:8px 0 0;font-size:14px;opacity:0.7">Votre accès gratuit à Alteore est terminé.</p>
-    </div>
-    <div style="padding:28px 32px">
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Bonjour${name ? ' ' + name : ''},
-      </p>
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        Votre offre découverte de 2 mois est terminée. L'accès à Alteore est maintenant bloqué.
-      </p>
-      <p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">
-        <strong>Bonne nouvelle :</strong> toutes vos données sont intactes et vous attendent ! Il vous suffit de choisir un plan pour reprendre là où vous en étiez.
-      </p>
-      <div style="text-align:center">
-        <a href="https://alteore.com/pricing.html" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#1a3dce,#4f7ef8);color:white;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(26,61,206,0.3)">Choisir mon plan →</a>
-      </div>
-      <p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">À partir de 55€/mois · Annulation à tout moment · Vos données sont conservées</p>
-    </div>`);
+  return ew(
+    '<div style="background:linear-gradient(135deg,#1a1f36,#2d3561);padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">🚫</div><h1 style="margin:0;font-size:20px;font-weight:800">Votre offre découverte a expiré</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.7">Votre accès gratuit à Alteore est terminé.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Votre offre découverte de 2 mois est terminée. L\'accès est maintenant bloqué.</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px"><strong>Bonne nouvelle :</strong> toutes vos données sont intactes et vous attendent !</p>' +
+    btn('Choisir mon plan →', 'https://alteore.com/pricing.html') +
+    '<p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">À partir de 55€/mois · Vos données sont conservées</p></div>'
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -334,202 +330,144 @@ function emailPromoExpired(name) {
 // ══════════════════════════════════════════════════════════════════
 
 module.exports = async (req, res) => {
-  // ── Sécurité : vérifier CRON_SECRET (Vercel Cron envoie Authorization: Bearer <secret>) ──
+  // Sécurité
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
     const auth = req.headers['authorization'];
-    if (auth !== `Bearer ${cronSecret}`) {
-      return res.status(401).json({ error: 'Non autorisé' });
-    }
+    if (auth !== `Bearer ${cronSecret}`) return res.status(401).json({ error: 'Non autorisé' });
   }
+  if (req.method !== 'GET' && req.method !== 'POST') return res.status(405).end();
 
-  if (req.method !== 'GET' && req.method !== 'POST') {
-    return res.status(405).json({ error: 'Méthode non autorisée' });
-  }
+  const token = await getAdminToken();
+  if (!token) return res.status(500).json({ error: 'Admin auth failed' });
 
-  const db = getDb();
   const stats = { checked: 0, reminderJ3: 0, reminderJ1: 0, expired: 0, deleted: 0, errors: 0, promoChecked: 0, promoReminder7: 0, promoReminder1: 0, promoExpired: 0 };
 
   try {
-    // ── 1. Récupérer tous les users en trial ou trial_expired ──
-    const trialSnap = await db.collection('users')
-      .where('plan', 'in', ['trial', 'trial_expired'])
-      .get();
+    // ══════════════════════════════════════════════════════════════
+    // 1. TRIALS
+    // ══════════════════════════════════════════════════════════════
+    const trialUsers = await fsQuery('users', 'plan', 'EQUAL', 'trial', token);
+    const expiredUsers = await fsQuery('users', 'plan', 'EQUAL', 'trial_expired', token);
+    const allTrials = [...trialUsers, ...expiredUsers];
 
-    console.log(`[cron-trial] 🔍 ${trialSnap.size} utilisateur(s) en trial/trial_expired`);
+    console.log(`[cron-trial] 🔍 ${allTrials.length} utilisateur(s) en trial/trial_expired`);
 
-    for (const userDoc of trialSnap.docs) {
+    for (const user of allTrials) {
       stats.checked++;
-      const uid = userDoc.id;
-      const data = userDoc.data();
+      const { uid, data } = user;
       const email = data.email;
-      const name = data.name || data.displayName || '';
+      const name = data.name || '';
       const trialEnd = data.trialEnd;
       const plan = data.plan;
 
-      if (!trialEnd) {
-        console.warn(`[cron-trial] ⚠️ ${uid} — pas de trialEnd, skip`);
-        continue;
-      }
-
+      if (!trialEnd) { console.warn(`[cron] ⚠️ ${uid} — pas de trialEnd`); continue; }
       const daysLeft = daysDiff(trialEnd);
-      if (daysLeft === null) {
-        console.warn(`[cron-trial] ⚠️ ${uid} — trialEnd invalide: ${trialEnd}`);
-        continue;
-      }
+      if (daysLeft === null) continue;
 
       console.log(`[cron-trial] 👤 ${uid} (${email || '?'}) — J${daysLeft >= 0 ? '-' + daysLeft : '+' + Math.abs(daysLeft)} — plan=${plan}`);
 
       try {
-        // ── J-3 : rappel 3 jours ──
+        // J-3
         if (daysLeft === 3 && plan === 'trial' && !data.trialEmailJ3) {
           if (email) await sendEmail(email, '⏳ Plus que 3 jours d\'essai gratuit — Alteore', emailReminderJ3(name));
-          await userDoc.ref.update({ trialEmailJ3: true });
+          await fsUpdate(`users/${uid}`, { trialEmailJ3: true }, token);
           stats.reminderJ3++;
         }
-
-        // ── J-1 : rappel dernier jour ──
+        // J-1
         else if (daysLeft === 1 && plan === 'trial' && !data.trialEmailJ1) {
           if (email) await sendEmail(email, '🔔 Dernier jour d\'essai demain ! — Alteore', emailReminderJ1(name));
-          await userDoc.ref.update({ trialEmailJ1: true });
+          await fsUpdate(`users/${uid}`, { trialEmailJ1: true }, token);
           stats.reminderJ1++;
         }
-
-        // ── J+0 ou déjà expiré : bloquer ──
+        // J+0 : expire
         else if (daysLeft <= 0 && plan === 'trial') {
           if (email && !data.trialEmailExpired) {
             await sendEmail(email, '🚫 Votre essai gratuit a expiré — Alteore', emailExpired(name));
           }
-          await userDoc.ref.update({
-            plan: 'trial_expired',
-            trialEmailExpired: true,
-            trialExpiredAt: new Date().toISOString(),
-          });
+          await fsUpdate(`users/${uid}`, { plan: 'trial_expired', trialEmailExpired: true, trialExpiredAt: new Date().toISOString() }, token);
           stats.expired++;
           console.log(`[cron-trial] 🔒 ${uid} → trial_expired`);
         }
-
-        // ── J+15 après expiration : supprimer les données ──
+        // J+15 : delete data
         else if (plan === 'trial_expired') {
           const expiredAt = data.trialExpiredAt || data.trialEnd;
           const daysSinceExpiry = expiredAt ? -daysDiff(expiredAt) : 999;
 
           if (daysSinceExpiry >= 15 && !data.trialDataDeleted) {
-            console.log(`[cron-trial] 🗑 ${uid} — suppression des données (J+${daysSinceExpiry} après expiration)`);
-
-            const deletedCount = await deleteUserData(db, uid);
-
-            // Envoyer email de suppression
+            console.log(`[cron-trial] 🗑 ${uid} — suppression des données (J+${daysSinceExpiry})`);
+            const deletedCount = await deleteUserData(uid, token);
             if (email) await sendEmail(email, '🗑 Vos données Alteore ont été supprimées', emailDeleted(name));
-
-            // Mettre à jour le document user (on le garde pour trace)
-            await userDoc.ref.update({
-              plan: 'deleted',
-              trialDataDeleted: true,
-              trialDataDeletedAt: new Date().toISOString(),
-              dataDeletedCount: deletedCount,
-            });
+            await fsUpdate(`users/${uid}`, { plan: 'deleted', trialDataDeleted: true, trialDataDeletedAt: new Date().toISOString(), dataDeletedCount: deletedCount }, token);
             stats.deleted++;
-            console.log(`[cron-trial] ✅ ${uid} — ${deletedCount} collections supprimées`);
+            console.log(`[cron-trial] ✅ ${uid} — ${deletedCount} docs supprimés`);
           }
         }
-
       } catch (userErr) {
         stats.errors++;
-        console.error(`[cron-trial] ❌ Erreur pour ${uid}:`, userErr.message);
+        console.error(`[cron-trial] ❌ ${uid}:`, userErr.message);
       }
     }
 
-    console.log(`[cron-trial] ✅ Trials traités:`, stats);
+    console.log('[cron-trial] ✅ Trials:', stats);
 
     // ══════════════════════════════════════════════════════════════
-    // 2. GESTION DES PROMOS EXPIRÉES
+    // 2. PROMOS
     // ══════════════════════════════════════════════════════════════
-    // On cherche les utilisateurs avec un promoEnd défini et un plan
-    // qui correspond à une promo (master sans Stripe actif)
     try {
-      // Firestore ne permet pas de filtrer sur "promoEnd existe", donc on query par plan
-      // et on vérifie promoEnd côté code
-      const promoSnap = await db.collection('users')
-        .where('plan', '==', 'master')
-        .get();
+      const masterUsers = await fsQuery('users', 'plan', 'EQUAL', 'master', token);
 
-      for (const userDoc of promoSnap.docs) {
-        const data = userDoc.data();
+      for (const user of masterUsers) {
+        const { uid, data } = user;
         const promoEnd = data.promoEnd;
-
-        // Skip si pas de promoEnd (= vrai abonné master via Stripe)
-        if (!promoEnd) continue;
-
-        // Skip si abonnement Stripe actif (= a souscrit pendant la promo)
-        if (data.stripeSubscriptionId && ['active', 'trialing'].includes(data.subscriptionStatus)) {
-          continue;
-        }
+        if (!promoEnd) continue; // vrai abonné master
+        if (data.stripeSubscriptionId && ['active', 'trialing'].includes(data.subscriptionStatus)) continue;
 
         stats.promoChecked++;
-        const uid = userDoc.id;
         const email = data.email;
-        const name = data.name || data.displayName || '';
+        const name = data.name || '';
         const daysLeft = daysDiff(promoEnd);
-
         if (daysLeft === null) continue;
 
         console.log(`[cron-promo] 👤 ${uid} (${email || '?'}) — J${daysLeft >= 0 ? '-' + daysLeft : '+' + Math.abs(daysLeft)} — promo ${data.promoCode || '?'}`);
 
         try {
-          // ── J-7 : rappel 7 jours avant fin promo ──
+          // J-7
           if (daysLeft === 7 && !data.promoEmailJ7) {
-            if (email) await sendEmail(email,
-              '⏳ Votre offre Alteore expire dans 7 jours',
-              emailPromoReminder(name, 7)
-            );
-            await userDoc.ref.update({ promoEmailJ7: true });
+            if (email) await sendEmail(email, '⏳ Votre offre Alteore expire dans 7 jours', emailPromoReminder(name, 7));
+            await fsUpdate(`users/${uid}`, { promoEmailJ7: true }, token);
             stats.promoReminder7++;
           }
-
-          // ── J-1 : rappel dernier jour ──
+          // J-1
           else if (daysLeft === 1 && !data.promoEmailJ1) {
-            if (email) await sendEmail(email,
-              '🔔 Dernier jour de votre offre Alteore !',
-              emailPromoReminder(name, 1)
-            );
-            await userDoc.ref.update({ promoEmailJ1: true });
+            if (email) await sendEmail(email, '🔔 Dernier jour de votre offre Alteore !', emailPromoReminder(name, 1));
+            await fsUpdate(`users/${uid}`, { promoEmailJ1: true }, token);
             stats.promoReminder1++;
           }
-
-          // ── J+0 ou déjà expiré : bloquer ──
+          // J+0 : expire
           else if (daysLeft <= 0) {
             if (email && !data.promoEmailExpired) {
-              await sendEmail(email,
-                '🚫 Votre offre Alteore a expiré — Choisissez un plan',
-                emailPromoExpired(name)
-              );
+              await sendEmail(email, '🚫 Votre offre Alteore a expiré — Choisissez un plan', emailPromoExpired(name));
             }
-            await userDoc.ref.update({
-              plan: 'promo_expired',
-              promoEmailExpired: true,
-              promoExpiredAt: new Date().toISOString(),
-            });
+            await fsUpdate(`users/${uid}`, { plan: 'promo_expired', promoEmailExpired: true, promoExpiredAt: new Date().toISOString() }, token);
             stats.promoExpired++;
             console.log(`[cron-promo] 🔒 ${uid} → promo_expired`);
           }
-
         } catch (promoErr) {
           stats.errors++;
-          console.error(`[cron-promo] ❌ Erreur pour ${uid}:`, promoErr.message);
+          console.error(`[cron-promo] ❌ ${uid}:`, promoErr.message);
         }
       }
 
-      console.log(`[cron-promo] ✅ Promos traitées:`, { promoChecked: stats.promoChecked, promoReminder7: stats.promoReminder7, promoReminder1: stats.promoReminder1, promoExpired: stats.promoExpired });
-
+      console.log('[cron-promo] ✅ Promos:', { promoChecked: stats.promoChecked, promoReminder7: stats.promoReminder7, promoReminder1: stats.promoReminder1, promoExpired: stats.promoExpired });
     } catch (promoGlobalErr) {
-      console.error('[cron-promo] ❌ Erreur globale promos:', promoGlobalErr.message);
+      console.error('[cron-promo] ❌ Global:', promoGlobalErr.message);
     }
 
     return res.status(200).json({ ok: true, stats });
 
   } catch (e) {
-    console.error('[cron-trial] ❌ Erreur globale:', e);
+    console.error('[cron] ❌ Global:', e);
     return res.status(500).json({ error: e.message, stats });
   }
 };
