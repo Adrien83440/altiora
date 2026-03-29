@@ -1,6 +1,14 @@
 // ── nav.js — Alteore ── v5 (nav centralisée + module RH Master + dirigeant + chatbot)
 (function () {
 
+  // ── Vercel Analytics ──
+  if (!document.querySelector('script[src*="/_vercel/insights"]')) {
+    var va = document.createElement('script');
+    va.defer = true;
+    va.src = '/_vercel/insights/script.js';
+    document.head.appendChild(va);
+  }
+
   // ════════════════════════════════════════════════
   // CONFIG PLANS
   // ════════════════════════════════════════════════
