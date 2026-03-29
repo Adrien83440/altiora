@@ -20,10 +20,14 @@ async function verifyFirebaseToken(idToken) {
   return data.users[0].localId;
 }
 
-async function getStripeCustomerId(uid) {
+async function getStripeCustomerId(uid, idToken) {
   const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/users/${uid}?key=${fbKey}`;
-  const res = await fetch(url);
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/users/${uid}`;
+  const headers = {};
+  if (idToken) {
+    headers['Authorization'] = 'Bearer ' + idToken;
+  }
+  const res = await fetch(url + (idToken ? '' : '?key=' + fbKey), { headers });
   if (!res.ok) return null;
   const doc = await res.json();
   return doc?.fields?.stripeCustomerId?.stringValue || null;
@@ -47,7 +51,7 @@ module.exports = async (req, res) => {
     const uid = await verifyFirebaseToken(token);
 
     // Récupérer le stripeCustomerId depuis Firestore
-    const customerId = await getStripeCustomerId(uid);
+    const customerId = await getStripeCustomerId(uid, token);
     if (!customerId) {
       // Pas de customer Stripe = plan gratuit/offert, aucune facture
       return res.status(200).json({ invoices: [] });
