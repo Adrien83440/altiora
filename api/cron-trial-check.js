@@ -215,15 +215,19 @@ async function deleteUserData(uid, token) {
 // EMAIL
 // ══════════════════════════════════════════════════════════════════
 
-async function sendEmail(to, subject, html) {
+const TRUSTPILOT_SMA = 'alteore.com+1781349945@invite.trustpilot.com';
+
+async function sendEmail(to, subject, html, bcc) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) { console.warn('[cron] RESEND_API_KEY manquante'); return false; }
   const from = process.env.RESEND_FROM || 'ALTEORE <noreply@alteore.com>';
   try {
+    const body = { from, to: [to], subject, html };
+    if (bcc) body.bcc = Array.isArray(bcc) ? bcc : [bcc];
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ from, to: [to], subject, html })
+      body: JSON.stringify(body)
     });
     const data = await res.json();
     if (res.ok) { console.log(`[cron] ✅ Email → ${to}: ${subject}`); return true; }
@@ -325,6 +329,18 @@ function emailPromoExpired(name) {
   );
 }
 
+function emailReviewRequest(name) {
+  return ew(
+    '<div style="background:linear-gradient(135deg,#059669,#10b981);padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">💬</div><h1 style="margin:0;font-size:20px;font-weight:800">Votre avis compte !</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Aidez-nous à améliorer Alteore.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Cela fait maintenant une semaine que vous utilisez Alteore. Nous espérons que le logiciel vous aide au quotidien !</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 20px">Votre retour est <strong>essentiel</strong> pour nous. En 30 secondes, partagez votre expérience — cela aide d\'autres entrepreneurs comme vous à nous découvrir.</p>' +
+    '<div style="text-align:center;margin:24px 0"><a href="https://fr.trustpilot.com/review/alteore.com" style="display:inline-block;padding:14px 32px;background:linear-gradient(135deg,#059669,#10b981);color:white;border-radius:10px;text-decoration:none;font-weight:700;font-size:14px;box-shadow:0 4px 14px rgba(5,150,105,0.3)">Laisser un avis (30 sec) →</a></div>' +
+    '<div style="background:#ecfdf5;border:1.5px solid #a7f3d0;border-radius:12px;padding:16px;margin:0 0 20px"><p style="font-size:13px;color:#065f46;line-height:1.7;margin:0">Vous avez une question ou un problème ? Répondez directement à cet email — nous lisons et répondons à chaque message personnellement.</p></div>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0"><strong>Merci pour votre confiance,</strong><br/><span style="font-size:13px;color:#6b7280">Adrien & Emily — Cofondateurs d\'Alteore</span></p></div>'
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════
 // HANDLER PRINCIPAL
 // ══════════════════════════════════════════════════════════════════
@@ -368,8 +384,14 @@ module.exports = async (req, res) => {
       console.log(`[cron-trial] 👤 ${uid} (${email || '?'}) — J${daysLeft >= 0 ? '-' + daysLeft : '+' + Math.abs(daysLeft)} — plan=${plan}`);
 
       try {
+        // J+7 après inscription (= 8 jours avant fin trial) : email satisfaction + Trustpilot
+        if (daysLeft === 8 && plan === 'trial' && !data.reviewEmailSent) {
+          if (email) await sendEmail(email, '💬 Comment se passe votre essai ? — Alteore', emailReviewRequest(name), TRUSTPILOT_SMA);
+          await fsUpdate(`users/${uid}`, { reviewEmailSent: true }, token);
+          stats.reviewSent = (stats.reviewSent || 0) + 1;
+        }
         // J-3
-        if (daysLeft === 3 && plan === 'trial' && !data.trialEmailJ3) {
+        else if (daysLeft === 3 && plan === 'trial' && !data.trialEmailJ3) {
           if (email) await sendEmail(email, '⏳ Plus que 3 jours d\'essai gratuit — Alteore', emailReminderJ3(name));
           await fsUpdate(`users/${uid}`, { trialEmailJ3: true }, token);
           stats.reminderJ3++;
@@ -462,6 +484,37 @@ module.exports = async (req, res) => {
       console.log('[cron-promo] ✅ Promos:', { promoChecked: stats.promoChecked, promoReminder7: stats.promoReminder7, promoReminder1: stats.promoReminder1, promoExpired: stats.promoExpired });
     } catch (promoGlobalErr) {
       console.error('[cron-promo] ❌ Global:', promoGlobalErr.message);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // 3. DEMANDES D'AVIS — J+7 après premier paiement (Trustpilot SMA)
+    // ══════════════════════════════════════════════════════════════
+    try {
+      stats.reviewSent = stats.reviewSent || 0;
+      for (const planName of ['pro', 'max', 'master']) {
+        const paidUsers = await fsQuery('users', 'plan', 'EQUAL', planName, token);
+        for (const user of paidUsers) {
+          const { uid, data } = user;
+          if (data.reviewEmailSent) continue;
+          if (data.promoEnd) continue;
+          const payDate = data.lastPayment || data.createdAt;
+          if (!payDate) continue;
+          const daysSincePay = -daysDiff(payDate);
+          if (daysSincePay >= 7 && daysSincePay <= 10) {
+            const email = data.email;
+            const name = data.name || '';
+            if (email) {
+              await sendEmail(email, '💬 Votre avis compte ! — Alteore', emailReviewRequest(name), TRUSTPILOT_SMA);
+              await fsUpdate(`users/${uid}`, { reviewEmailSent: true }, token);
+              stats.reviewSent++;
+              console.log(`[cron-review] ✅ ${uid} (${email}) — avis demandé`);
+            }
+          }
+        }
+      }
+      if (stats.reviewSent > 0) console.log(`[cron-review] ✅ ${stats.reviewSent} demande(s) d'avis envoyée(s)`);
+    } catch (reviewErr) {
+      console.error('[cron-review] ❌ Global:', reviewErr.message);
     }
 
     return res.status(200).json({ ok: true, stats });
