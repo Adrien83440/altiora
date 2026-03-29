@@ -381,6 +381,26 @@ module.exports = async (req, res) => {
               body: JSON.stringify({ email: session.customer_email || session.customer_details?.email, name: session.customer_details?.name || '', plan: activePlan })
             });
           } catch(emailErr) { console.warn('[Webhook] Email welcome failed:', emailErr.message); }
+
+          // ── PARRAINAGE : récompenser le parrain si paiement immédiat (pas trial) ──
+          try {
+            const filleulDoc = await fsGet(`users/${uid}`);
+            const refCode   = fv(filleulDoc, 'referralCode');
+            const parrainId = fv(filleulDoc, 'parrainedBy');
+            console.log(`[Referral] checkout: uid=${uid} refCode=${refCode} parrainId=${parrainId}`);
+
+            if (refCode && parrainId) {
+              const useDoc = await fsGet(`referrals/${refCode}/uses/${uid}`);
+              const useStatus = fv(useDoc, 'status');
+              console.log(`[Referral] useDoc status=${useStatus}`);
+              if (useStatus === 'pending') {
+                await rewardParrain(parrainId, uid, refCode, stripeKey);
+                console.log(`[Referral] ✅ Parrain récompensé depuis checkout.session.completed`);
+              }
+            }
+          } catch(refErr) {
+            console.error('[Referral] Erreur dans checkout:', refErr.message);
+          }
         }
       }
     }
@@ -442,6 +462,9 @@ module.exports = async (req, res) => {
     else if (event.type === 'invoice.payment_succeeded') {
       const invoice = event.data.object;
 
+      // Compatibilité Stripe API 2026-03-25.dahlia : subscription peut être au 1er niveau ou sous parent.subscription_details
+      const invoiceSubscriptionId = invoice.subscription || invoice.parent?.subscription_details?.subscription || null;
+
       // Ignorer uniquement les invoices de trial pur (sans subscription, montant 0 et billing_reason = subscription_create)
       const isFreeTrialInvoice = invoice.amount_paid === 0
         && invoice.billing_reason === 'subscription_create'
@@ -455,9 +478,9 @@ module.exports = async (req, res) => {
       let uid = await getUidFromCustomer(invoice.customer);
 
       // Fallback : si la query Firestore ne trouve pas encore le customer (race condition avec checkout.session.completed)
-      if (!uid && invoice.subscription && stripeKey) {
+      if (!uid && invoiceSubscriptionId && stripeKey) {
         try {
-          const subRes = await fetch(`https://api.stripe.com/v1/subscriptions/${invoice.subscription}`, {
+          const subRes = await fetch(`https://api.stripe.com/v1/subscriptions/${invoiceSubscriptionId}`, {
             headers: { Authorization: 'Bearer ' + stripeKey }
           });
           const sub = await subRes.json();
@@ -471,14 +494,19 @@ module.exports = async (req, res) => {
         return res.status(200).end();
       }
 
+      console.log(`[Webhook] invoice.payment_succeeded: uid=${uid} invoiceSubId=${invoiceSubscriptionId} customer=${invoice.customer}`);
+
       // Récupérer la subscription pour connaître le plan
       let plan = null;
-      if (invoice.subscription && stripeKey) {
-        const subRes = await fetch(`https://api.stripe.com/v1/subscriptions/${invoice.subscription}`, {
+      if (invoiceSubscriptionId && stripeKey) {
+        const subRes = await fetch(`https://api.stripe.com/v1/subscriptions/${invoiceSubscriptionId}`, {
           headers: { Authorization: 'Bearer ' + stripeKey }
         });
         const sub = await subRes.json();
         plan = getPlanFromSubscription(sub);
+        if (!plan) console.warn(`[Webhook] getPlanFromSubscription returned null. priceId=${sub?.items?.data?.[0]?.price?.id}, sub.plan=${sub?.plan?.id}`);
+      } else {
+        console.warn(`[Webhook] Skipping subscription fetch: invoiceSubId=${invoiceSubscriptionId} stripeKey=${!!stripeKey}`);
       }
 
       if (plan) {
