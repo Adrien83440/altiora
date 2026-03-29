@@ -985,7 +985,7 @@
         if (detSnap.exists()) _allData.dettes = detSnap.data().list || [];
         // User info (sans données sensibles)
         _allData.plan = _userData.plan;
-        _allData.email = window._auth.currentUser?.email;
+        _allData.email = window._auth?.currentUser?.email || "";
       } catch(e) { console.warn('loadAllData partial error:', e); }
     }
 
@@ -1026,7 +1026,14 @@
     window.applyRetentionOffer = async function() {
       showLoading('Application de votre remise…');
       try {
-        const idToken = await window._auth.currentUser.getIdToken();
+        let idToken = null;
+        try {
+          const { getAuth } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+          const user = getAuth().currentUser || (window._auth && window._auth.currentUser);
+          if (user) idToken = await user.getIdToken();
+        } catch(e) {}
+        if (!idToken) throw new Error('Authentification requise');
+
         const res = await fetch('/api/apply-retention-coupon', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
@@ -1060,11 +1067,22 @@
     window.confirmCancellation = async function() {
       showLoading('Résiliation en cours…');
       try {
-        const idToken = await window._auth.currentUser.getIdToken();
+        // Récupérer le token Firebase
+        let idToken = null;
+        try {
+          const { getAuth } = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js');
+          const user = getAuth().currentUser || (window._auth && window._auth.currentUser);
+          if (user) idToken = await user.getIdToken();
+        } catch(e) {}
+
+        const headers = { 'Content-Type': 'application/json' };
+        if (idToken) headers['Authorization'] = 'Bearer ' + idToken;
+
         const res = await fetch('/api/cancel-subscription', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          headers,
           body: JSON.stringify({
+            uid: window._uid,
             reason: _selectedReason,
             detail: document.getElementById('reasonDetail')?.value || ''
           })
