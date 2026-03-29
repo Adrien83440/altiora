@@ -85,6 +85,7 @@ module.exports = async (req, res) => {
       mode: 'subscription',
       'line_items[0][price]': priceId,
       'line_items[0][quantity]': '1',
+      'automatic_tax[enabled]': 'true',
       ...(!skipTrial ? { 'subscription_data[trial_period_days]': '15' } : {}),
       'payment_method_collection': 'if_required',
       // Si promo pré-appliqué → discounts, sinon → champ libre sur le checkout
