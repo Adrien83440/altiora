@@ -29,16 +29,18 @@ async function verifyFirebaseToken(idToken) {
 }
 
 // ── Lecture d'un document Firestore via REST ──
-async function fsGet(path) {
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}?key=${fbKey()}`;
-  const res = await fetch(url);
+async function fsGet(path, token) {
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}`;
+  const headers = {};
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(url + (token ? '' : '?key=' + fbKey()), { headers });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error('Firestore GET failed: ' + await res.text());
   return res.json();
 }
 
 // ── Écriture (merge) d'un document Firestore via REST ──
-async function fsSet(path, fields) {
+async function fsSet(path, fields, token) {
   const firestoreFields = {};
   for (const [k, v] of Object.entries(fields)) {
     if (typeof v === 'string')       firestoreFields[k] = { stringValue: v };
@@ -48,10 +50,12 @@ async function fsSet(path, fields) {
     else                             firestoreFields[k] = { stringValue: String(v) };
   }
   const updateMask = Object.keys(fields).map(k => `updateMask.fieldPaths=${k}`).join('&');
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}?${updateMask}&key=${fbKey()}`;
-  const res = await fetch(url, {
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}?${updateMask}`;
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(url + (token ? '' : '&key=' + fbKey()), {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ fields: firestoreFields })
   });
   if (!res.ok) throw new Error('Firestore PATCH failed: ' + await res.text());
@@ -89,7 +93,7 @@ module.exports = async (req, res) => {
 
   try {
     // 1. Vérifier que le code existe dans Firestore
-    const refDoc = await fsGet(`referrals/${code}`);
+    const refDoc = await fsGet(`referrals/${code}`, idToken);
     if (!refDoc) {
       return res.status(404).json({ error: 'Code de parrainage invalide' });
     }
@@ -118,13 +122,13 @@ module.exports = async (req, res) => {
     }
 
     // 3. Vérifier que ce filleul n'a pas déjà utilisé CE code (ou un autre)
-    const existingUse = await fsGet(`referrals/${code}/uses/${filleulUid}`);
+    const existingUse = await fsGet(`referrals/${code}/uses/${filleulUid}`, idToken);
     if (existingUse) {
       return res.status(400).json({ error: 'Vous avez déjà utilisé ce code de parrainage' });
     }
 
     // 4. Vérifier que l'utilisateur n'a pas déjà été parrainé (via un autre code)
-    const filleulDoc = await fsGet(`users/${filleulUid}`);
+    const filleulDoc = await fsGet(`users/${filleulUid}`, idToken);
     if (filleulDoc && fv(filleulDoc, 'parrainedBy')) {
       return res.status(400).json({ error: 'Vous avez déjà été parrainé' });
     }
@@ -139,14 +143,14 @@ module.exports = async (req, res) => {
       rewardedAt:    '',
       referralCode:  code,
       ownerUid,
-    });
+    }, idToken);
 
     // 6. Marquer sur le filleul quel code il a utilisé
     await fsSet(`users/${filleulUid}`, {
       parrainedBy:   ownerUid,
       referralCode:  code,
       parrainedAt:   now,
-    });
+    }, idToken);
 
     console.log(`[Referral] Parrainage enregistré: parrain=${ownerUid} filleul=${filleulUid} code=${code}`);
 
