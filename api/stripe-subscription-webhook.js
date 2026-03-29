@@ -25,7 +25,42 @@ function getPlanFromSubscription(subscription) {
   return PRICE_TO_PLAN[priceId] || null;
 }
 
-// ── Mise à jour Firestore via REST API ──
+// ── Cache du token admin Firebase ──
+let _adminToken = null;
+let _adminTokenExp = 0;
+
+async function getAdminToken() {
+  // Réutiliser le token s'il est encore valide (marge de 5 min)
+  if (_adminToken && Date.now() < _adminTokenExp - 300000) return _adminToken;
+
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const email = process.env.FIREBASE_API_EMAIL;
+  const password = process.env.FIREBASE_API_PASSWORD;
+
+  if (!email || !password) {
+    console.warn('[Webhook] FIREBASE_API_EMAIL ou FIREBASE_API_PASSWORD manquant — fallback API key');
+    return null;
+  }
+
+  const r = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${fbKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: true })
+    }
+  );
+  const data = await r.json();
+  if (data.idToken) {
+    _adminToken = data.idToken;
+    _adminTokenExp = Date.now() + (parseInt(data.expiresIn || '3600') * 1000);
+    return _adminToken;
+  }
+  console.error('[Webhook] Admin login failed:', data.error?.message);
+  return null;
+}
+
+// ── Mise à jour Firestore via REST API (authentifié) ──
 async function updateFirestore(uid, fields) {
   const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/users/${uid}?updateMask.fieldPaths=${Object.keys(fields).join('&updateMask.fieldPaths=')}`;
@@ -40,9 +75,18 @@ async function updateFirestore(uid, fields) {
     else                               firestoreFields[key] = { stringValue: String(val) };
   }
 
+  // Authentification admin
+  const token = await getAdminToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) {
+    headers['Authorization'] = 'Bearer ' + token;
+  } else {
+    headers['x-goog-api-key'] = fbKey;
+  }
+
   const res = await fetch(url, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': fbKey },
+    headers,
     body: JSON.stringify({ fields: firestoreFields })
   });
 
@@ -56,11 +100,15 @@ async function updateFirestore(uid, fields) {
 // ── Récupérer uid depuis customerId (via Firestore query) ──
 async function getUidFromCustomer(customerId) {
   const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents:runQuery?key=${fbKey}`;
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents:runQuery`;
 
-  const res = await fetch(url, {
+  const token = await getAdminToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+
+  const res = await fetch(url + (token ? '' : '?key=' + fbKey), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({
       structuredQuery: {
         from: [{ collectionId: 'users' }],
@@ -86,8 +134,11 @@ async function getUidFromCustomer(customerId) {
 // ── Lecture Firestore REST ──
 async function fsGet(path) {
   const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
-  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}?key=${fbKey}`;
-  const res = await fetch(url);
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}`;
+  const token = await getAdminToken();
+  const headers = {};
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const res = await fetch(url + (token ? '' : '?key=' + fbKey), { headers });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error('Firestore GET: ' + await res.text());
   return res.json();
