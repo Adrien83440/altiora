@@ -38,7 +38,7 @@ module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { priceId, plan, billing, skipTrial, referralCode } = req.body || {};
+  const { priceId, plan, billing, skipTrial, referralCode, promoCode } = req.body || {};
   if (!priceId) return res.status(400).json({ error: 'priceId manquant' });
 
   // ── Vérification whitelist ──
@@ -67,27 +67,46 @@ module.exports = async (req, res) => {
   const baseUrl = process.env.APP_URL || 'https://alteore.com';
 
   try {
+    // ── Si un code promo est fourni, le résoudre en promotion_code ID Stripe ──
+    let promoId = null;
+    if (promoCode) {
+      const promoRes = await fetch(
+        'https://api.stripe.com/v1/promotion_codes?code=' + encodeURIComponent(promoCode.trim().toUpperCase()) + '&active=true&limit=1',
+        { headers: { Authorization: 'Bearer ' + stripeKey } }
+      );
+      const promoData = await promoRes.json();
+      if (promoData.data && promoData.data.length > 0) {
+        promoId = promoData.data[0].id;
+      }
+      // Si code invalide, on continue sans — le client pourra le retaper sur Stripe
+    }
+
+    const params = {
+      mode: 'subscription',
+      'line_items[0][price]': priceId,
+      'line_items[0][quantity]': '1',
+      ...(!skipTrial ? { 'subscription_data[trial_period_days]': '15' } : {}),
+      'payment_method_collection': 'if_required',
+      // Si promo pré-appliqué → discounts, sinon → champ libre sur le checkout
+      ...(promoId
+        ? { 'discounts[0][promotion_code]': promoId }
+        : { 'allow_promotion_codes': 'true' }),
+      success_url: baseUrl + '/dashboard.html?subscription=success&plan=' + plan,
+      cancel_url: baseUrl + '/pricing.html?cancelled=1',
+      'metadata[plan]': plan,
+      'metadata[billing]': billing || 'monthly',
+      ...(uid ? { 'metadata[uid]': uid } : {}),
+      ...(email ? { customer_email: email } : {}),
+      ...(referralCode ? { 'metadata[referralCode]': referralCode.toUpperCase().trim() } : {}),
+    };
+
     const res2 = await fetch('https://api.stripe.com/v1/checkout/sessions', {
       method: 'POST',
       headers: {
         Authorization: 'Bearer ' + stripeKey,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({
-        mode: 'subscription',
-        'line_items[0][price]': priceId,
-        'line_items[0][quantity]': '1',
-        ...(!skipTrial ? { 'subscription_data[trial_period_days]': '15' } : {}),
-        'payment_method_collection': 'if_required',
-        'allow_promotion_codes': 'true',
-        success_url: baseUrl + '/dashboard.html?subscription=success&plan=' + plan,
-        cancel_url: baseUrl + '/pricing.html?cancelled=1',
-        'metadata[plan]': plan,
-        'metadata[billing]': billing || 'monthly',
-        ...(uid ? { 'metadata[uid]': uid } : {}),
-        ...(email ? { customer_email: email } : {}),
-        ...(referralCode ? { 'metadata[referralCode]': referralCode.toUpperCase().trim() } : {}),
-      }).toString()
+      body: new URLSearchParams(params).toString()
     });
 
     const session = await res2.json();
