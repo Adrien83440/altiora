@@ -6,12 +6,12 @@
 
 // ── Whitelist des priceId Stripe autorisés ──
 const VALID_PRICES = [
-  'price_1T3gqlGSYbSgNdWwlr6RX92r',  // Pro mensuel 69€
-  'price_1T3gveGSYbSgNdWwot2e5YpG',  // Pro annuel 55€/mois
-  'price_1T3gtkGSYbSgNdWw81ff10tt',  // Max mensuel 99€
-  'price_1T3gwGGSYbSgNdWw1ptpHTDB',  // Max annuel 79€/mois
-  'price_1T3guhGSYbSgNdWwtKX6EFuy',  // Master mensuel 169€
-  'price_1T3gwsGSYbSgNdWwezlggjJR',  // Master annuel 135€/mois
+  'price_1TGEKdRZYcAavmfvmuICL8yc',  // Pro mensuel 69€
+  'price_1TGEMARZYcAavmfvvRkZnSap',  // Pro annuel 55€/mois
+  'price_1TGENeRZYcAavmfvU4Oxr4cZ',  // Max mensuel 99€
+  'price_1TGENeRZYcAavmfvm5Mao8Yi',  // Max annuel 79€/mois
+  'price_1TGEOERZYcAavmfvY16T0pCS',  // Master mensuel 169€
+  'price_1TGEOcRZYcAavmfvrOqqrjQu',  // Master annuel 135€/mois
 ];
 
 async function verifyFirebaseToken(idToken) {

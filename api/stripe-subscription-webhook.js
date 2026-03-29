@@ -12,12 +12,12 @@ const FIREBASE_PROJECT = 'altiora-70599';
 
 // ── Déterminer le plan depuis le priceId Stripe ──
 const PRICE_TO_PLAN = {
-  'price_1T3gqlGSYbSgNdWwlr6RX92r': 'pro',     // Pro mensuel
-  'price_1T3gveGSYbSgNdWwot2e5YpG': 'pro',     // Pro annuel
-  'price_1T3gtkGSYbSgNdWw81ff10tt': 'max',     // Max mensuel
-  'price_1T3gwGGSYbSgNdWw1ptpHTDB': 'max',     // Max annuel
-  'price_1T3guhGSYbSgNdWwtKX6EFuy': 'master',  // Master mensuel
-  'price_1T3gwsGSYbSgNdWwezlggjJR': 'master',  // Master annuel
+  'price_1TGEKdRZYcAavmfvmuICL8yc': 'pro',     // Pro mensuel
+  'price_1TGEMARZYcAavmfvvRkZnSap': 'pro',     // Pro annuel
+  'price_1TGENeRZYcAavmfvU4Oxr4cZ': 'max',     // Max mensuel
+  'price_1TGENeRZYcAavmfvm5Mao8Yi': 'max',     // Max annuel
+  'price_1TGEOERZYcAavmfvY16T0pCS': 'master',  // Master mensuel
+  'price_1TGEOcRZYcAavmfvrOqqrjQu': 'master',  // Master annuel
 };
 
 function getPlanFromSubscription(subscription) {
