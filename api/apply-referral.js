@@ -145,6 +145,12 @@ module.exports = async (req, res) => {
       ownerUid,
     }, idToken);
 
+    // 5b. Incrémenter totalUses sur le document parrain
+    const currentUses = parseInt(fv(refDoc, 'totalUses')) || 0;
+    await fsSet(`referrals/${code}`, {
+      totalUses: currentUses + 1,
+    }, idToken);
+
     // 6. Marquer sur le filleul quel code il a utilisé
     await fsSet(`users/${filleulUid}`, {
       parrainedBy:   ownerUid,
