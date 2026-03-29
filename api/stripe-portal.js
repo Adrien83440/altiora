@@ -48,10 +48,10 @@ module.exports = async (req, res) => {
   const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
 
   try {
-    // 1. Récupérer le stripeCustomerId depuis Firestore
+    // 1. Récupérer le stripeCustomerId depuis Firestore (avec le token de l'utilisateur)
     const fbRes = await fetch(
       `https://firestore.googleapis.com/v1/projects/${fbProject}/databases/(default)/documents/users/${verifiedUid}`,
-      { headers: { 'x-goog-api-key': fbKey } }
+      { headers: { 'Authorization': 'Bearer ' + token } }
     );
     const fbData = await fbRes.json();
     const customerId = fbData?.fields?.stripeCustomerId?.stringValue;
