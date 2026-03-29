@@ -202,14 +202,14 @@ async function rewardParrain(parrainUid, filleulUid, referralCode, stripeKey) {
       return;
     }
 
-    // 3. Appliquer le coupon sur l'abonnement du parrain (sera déduit à la prochaine facture)
+    // 3. Appliquer le coupon sur l'abonnement du parrain via discounts (compatible billing_mode=flexible)
     const subUpdateRes = await fetch(`https://api.stripe.com/v1/subscriptions/${subscriptionId}`, {
       method: 'POST',
       headers: {
         Authorization: 'Bearer ' + stripeKey,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: new URLSearchParams({ coupon: coupon.id }).toString()
+      body: new URLSearchParams({ 'discounts[0][coupon]': coupon.id }).toString()
     });
     const updatedSub = await subUpdateRes.json();
     if (updatedSub.error) {
