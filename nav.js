@@ -639,8 +639,8 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       const snap = await window._getDoc(window._doc(window._db, 'users', window._uid));
       let plan = snap.exists() ? (snap.data().plan || 'free') : 'free';
 
-      // ── Redirection onboarding si pas complété ──
-      if (snap.exists() && snap.data().isOnboarded === false && PAGE !== 'profil.html' && PAGE !== 'aide.html' && PAGE !== 'tutoriels.html') {
+      // ── Redirection onboarding si pas complété (sauf si déjà payé) ──
+      if (snap.exists() && snap.data().isOnboarded === false && !['pro','max','master'].includes(plan) && PAGE !== 'profil.html' && PAGE !== 'aide.html' && PAGE !== 'tutoriels.html') {
         window.location.href = 'bienvenue.html';
         return;
       }
