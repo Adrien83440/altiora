@@ -199,6 +199,16 @@
     .kpi-card.teal .kpi-icon,.kpi.teal .kpi-icon,.kpi.teal .kpi-ico{background:rgba(13,148,136,0.1) !important;border-color:rgba(13,148,136,0.15) !important}
     .kpi-val,.kpi-lbl,.kpi-value,.kpi-label,.kpi-sub,.kpi-n1,.sum-value,.sum-label,.sum-sub,.kpi-trend,.kpi-progress,.kpi-progress-bar,.kpi-progress-label,.kpi-ico{position:relative;z-index:1}
 
+    /* ACCOUNT SELECT */
+    .acct-select{display:flex;align-items:center;gap:14px;padding:14px 16px;border:2px solid var(--border);border-radius:12px;cursor:pointer;transition:all 0.15s;background:white;}
+    .acct-select:hover{border-color:var(--blue-light);background:var(--blue-ghost);}
+    .acct-select.checked{border-color:var(--blue-main);background:var(--blue-ghost);}
+    .acct-select input[type=checkbox]{width:18px;height:18px;accent-color:var(--blue-main);cursor:pointer;flex-shrink:0;}
+    .acct-select-info{flex:1;min-width:0;}
+    .acct-select-name{font-size:13px;font-weight:700;color:var(--text);}
+    .acct-select-iban{font-size:11px;color:var(--muted);font-family:monospace;margin-top:2px;}
+    .acct-select-balance{font-size:15px;font-weight:800;color:var(--blue-main);flex-shrink:0;}
+
 </style>
 </head>
 <body>
@@ -235,6 +245,7 @@
             <div class="status-dot" id="status-dot"></div>
             <span id="status-title-text">Comptes connectés</span>
           </div>
+          <button class="btn btn-outline btn-sm" onclick="manageAccounts()">⚙️ Gérer mes comptes</button>
           <button class="btn btn-danger btn-sm" onclick="disconnectBank()">🔌 Déconnecter</button>
         </div>
         <div class="accounts-grid" id="accounts-grid">
@@ -297,6 +308,28 @@
         <div class="bank-picker-foot">
           <button class="btn btn-outline" onclick="hideBankPicker()">Annuler</button>
           <button class="btn btn-primary" id="btn-select-bank" onclick="connectSelectedBank()" disabled>Connecter →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SÉLECTION DES COMPTES À SYNCHRONISER -->
+    <div id="account-select-zone" style="display:none">
+      <div class="status-card">
+        <div class="status-head">
+          <div class="status-title">
+            <span style="font-size:16px">🏦</span>
+            <span>Quels comptes souhaitez-vous synchroniser ?</span>
+          </div>
+        </div>
+        <div style="padding:14px 20px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border)">
+          Sélectionnez les comptes professionnels à importer dans Alteore. Vous pourrez modifier cette sélection plus tard.
+        </div>
+        <div id="account-select-list" style="padding:16px 20px;display:flex;flex-direction:column;gap:10px">
+          <div class="loader"><div class="spin"></div><span>Chargement des comptes…</span></div>
+        </div>
+        <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px">
+          <button class="btn btn-outline" onclick="cancelAccountSelect()">Annuler</button>
+          <button class="btn btn-primary" id="btn-confirm-accounts" onclick="confirmAccountSelection()" disabled>Valider la sélection →</button>
         </div>
       </div>
     </div>
@@ -369,6 +402,9 @@
 let _banks = [];
 let _selectedBank = null;
 let _connection = null;
+let _previewAccounts = [];  // comptes disponibles (preview GoCardless)
+let _selectedAccountIds = []; // comptes cochés par l'utilisateur
+let _selectMode = null; // 'finalize' (première connexion) ou 'manage' (modification)
 
 // ── INIT ──
 async function initPage() {
@@ -573,22 +609,181 @@ async function finalizeBankConnection(reqId) {
     return;
   }
 
-  // Afficher overlay
+  // Afficher overlay pendant le preview
   const ov = document.getElementById('syncOverlay');
   const ovT = document.getElementById('syncOverlayText');
   const ovS = document.getElementById('syncOverlaySub');
   if (ov) ov.classList.add('show');
   if (ovT) ovT.textContent = 'Connexion bancaire en cours…';
-  if (ovS) ovS.textContent = 'Récupération de vos transactions';
+  if (ovS) ovS.textContent = 'Récupération de vos comptes';
 
   try {
-    const count = await fetchAndStagePending(realReqId, (document.getElementById('sync-date-from')||{}).value || '');
-    showToast(`✅ ${count} transactions récupérées — ouverture de la validation…`, 'success');
-    setTimeout(() => window.location.href = 'bank-validation.html', 900);
+    // Appel preview : récupère les infos comptes sans les transactions
+    const res = await fetch('/api/bank-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requisition_id: realReqId, preview: true })
+    });
+    let data;
+    try { data = await res.json(); }
+    catch(e) { throw new Error('Réponse API invalide (statut HTTP ' + res.status + ')'); }
+
+    if (!res.ok || !data.success) throw new Error(data.error || 'Preview échoué');
+
+    if (ov) ov.classList.remove('show');
+
+    // Stocker le requisition_id pour la suite
+    _connection = _connection || {};
+    _connection.pending_requisition_id = realReqId;
+
+    // Afficher la sélection des comptes
+    _selectMode = 'finalize';
+    showAccountSelectZone(data.accounts);
+
+  } catch(e) {
+    if (ov) ov.classList.remove('show');
+    showToast('❌ Erreur : ' + e.message, 'error');
+    showNotConnectedZone();
+  }
+}
+
+// ── SÉLECTION DES COMPTES ──
+function showAccountSelectZone(accounts) {
+  _previewAccounts = accounts || [];
+  // Pré-cocher les comptes déjà sélectionnés (si manage), sinon tous cochés
+  if (_selectMode === 'manage' && _connection?.selectedAccounts?.length) {
+    _selectedAccountIds = [..._connection.selectedAccounts];
+  } else {
+    _selectedAccountIds = _previewAccounts.map(a => a.accountId);
+  }
+
+  // Masquer les autres zones
+  document.getElementById('connected-zone').style.display = 'none';
+  document.getElementById('not-connected-zone').style.display = 'none';
+  document.getElementById('bank-picker-zone').style.display = 'none';
+  document.getElementById('account-select-zone').style.display = 'block';
+
+  const list = document.getElementById('account-select-list');
+  if (_previewAccounts.length === 0) {
+    list.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:12px">Aucun compte trouvé.</div>';
+    return;
+  }
+
+  list.innerHTML = _previewAccounts.map(a => {
+    const checked = _selectedAccountIds.includes(a.accountId);
+    const ibanFmt = a.iban ? a.iban.replace(/(.{4})/g, '$1 ').trim() : 'IBAN non disponible';
+    const balColor = (a.balanceNum || 0) >= 0 ? 'var(--blue-main)' : 'var(--red)';
+    return '<label class="acct-select' + (checked ? ' checked' : '') + '" data-id="' + a.accountId + '" onclick="toggleAccount(\'' + a.accountId + '\', this)">'
+      + '<input type="checkbox"' + (checked ? ' checked' : '') + ' />'
+      + '<div class="acct-select-info">'
+      + '<div class="acct-select-name">🏦 ' + (a.name || 'Compte bancaire') + '</div>'
+      + '<div class="acct-select-iban">' + ibanFmt + '</div>'
+      + '</div>'
+      + '<div class="acct-select-balance" style="color:' + balColor + '">' + (a.balance || '—') + '</div>'
+      + '</label>';
+  }).join('');
+
+  updateConfirmBtn();
+}
+
+function toggleAccount(accountId, el) {
+  const idx = _selectedAccountIds.indexOf(accountId);
+  if (idx >= 0) {
+    _selectedAccountIds.splice(idx, 1);
+    el.classList.remove('checked');
+    el.querySelector('input').checked = false;
+  } else {
+    _selectedAccountIds.push(accountId);
+    el.classList.add('checked');
+    el.querySelector('input').checked = true;
+  }
+  updateConfirmBtn();
+}
+
+function updateConfirmBtn() {
+  const btn = document.getElementById('btn-confirm-accounts');
+  btn.disabled = _selectedAccountIds.length === 0;
+  btn.textContent = _selectedAccountIds.length === 0
+    ? 'Sélectionnez au moins un compte'
+    : 'Valider la sélection (' + _selectedAccountIds.length + ' compte' + (_selectedAccountIds.length > 1 ? 's' : '') + ') →';
+}
+
+async function confirmAccountSelection() {
+  const btn = document.getElementById('btn-confirm-accounts');
+  btn.disabled = true;
+  btn.textContent = '⏳ Synchronisation…';
+
+  const reqId = _connection?.requisition_id || _connection?.pending_requisition_id;
+  if (!reqId) {
+    showToast('❌ Aucune connexion bancaire trouvée.', 'error');
+    return;
+  }
+
+  // Sauvegarder la sélection dans bank_connections
+  await window._setDoc(window._doc(window._db, 'bank_connections', window._uid), {
+    selectedAccounts: _selectedAccountIds
+  }, { merge: true });
+
+  // Masquer la sélection, afficher overlay
+  document.getElementById('account-select-zone').style.display = 'none';
+  const ov = document.getElementById('syncOverlay');
+  const ovT = document.getElementById('syncOverlayText');
+  const ovS = document.getElementById('syncOverlaySub');
+  if (ov) ov.classList.add('show');
+  if (ovT) ovT.textContent = 'Synchronisation en cours…';
+  if (ovS) ovS.textContent = 'Récupération des transactions des comptes sélectionnés';
+
+  try {
+    const count = await fetchAndStagePending(reqId, (document.getElementById('sync-date-from') || {}).value || '');
+    showToast('✅ ' + count + ' transactions récupérées — ouverture de la validation…', 'success');
+    setTimeout(function() { window.location.href = 'bank-validation.html'; }, 900);
   } catch(e) {
     if (ov) ov.classList.remove('show');
     showToast('❌ Erreur sync : ' + e.message, 'error');
+    await loadConnectionStatus();
+  }
+}
+
+function cancelAccountSelect() {
+  document.getElementById('account-select-zone').style.display = 'none';
+  if (_selectMode === 'manage' && _connection) {
+    showConnectedZone(_connection);
+  } else {
     showNotConnectedZone();
+  }
+  _selectMode = null;
+}
+
+async function manageAccounts() {
+  const reqId = _connection?.requisition_id || _connection?.pending_requisition_id;
+  if (!reqId) {
+    showToast('❌ Aucune connexion bancaire active.', 'error');
+    return;
+  }
+
+  // Overlay pendant le preview
+  const ov = document.getElementById('syncOverlay');
+  const ovT = document.getElementById('syncOverlayText');
+  const ovS = document.getElementById('syncOverlaySub');
+  if (ov) ov.classList.add('show');
+  if (ovT) ovT.textContent = 'Chargement des comptes…';
+  if (ovS) ovS.textContent = 'Récupération des informations bancaires';
+
+  try {
+    const res = await fetch('/api/bank-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requisition_id: reqId, preview: true })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || 'Erreur preview');
+
+    if (ov) ov.classList.remove('show');
+    _selectMode = 'manage';
+    showAccountSelectZone(data.accounts);
+  } catch(e) {
+    if (ov) ov.classList.remove('show');
+    showToast('❌ ' + e.message, 'error');
   }
 }
 
@@ -598,6 +793,16 @@ async function fetchAndStagePending(requisitionId, dateFrom) {
   console.log('[SYNC] Appel /api/bank-sync, requisition_id:', requisitionId, 'date_from:', dateFrom);
   const body = { requisition_id: requisitionId };
   if (dateFrom) body.date_from = dateFrom;
+
+  // Filtrer par comptes sélectionnés (depuis state ou Firestore)
+  const selAccts = _selectedAccountIds.length > 0
+    ? _selectedAccountIds
+    : (_connection?.selectedAccounts || []);
+  if (selAccts.length > 0) {
+    body.selected_accounts = selAccts;
+    console.log('[SYNC] Comptes filtrés:', selAccts.length);
+  }
+
   const res = await fetch('/api/bank-sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -835,6 +1040,10 @@ window.hideBankPicker = hideBankPicker;
 window.selectBank = selectBank;
 window.connectSelectedBank = connectSelectedBank;
 window.filterBanks = filterBanks;
+window.toggleAccount = toggleAccount;
+window.confirmAccountSelection = confirmAccountSelection;
+window.cancelAccountSelect = cancelAccountSelect;
+window.manageAccounts = manageAccounts;
 
 // ── PURGE lignes bank_sync (nettoyage en cas de doublons parasites) ──
 async function purgeBankLines() {
@@ -943,6 +1152,7 @@ window.showError = showError;
 window.fetchAndStagePending = fetchAndStagePending;
 window.disconnectBank = disconnectBank;
 window.showRecentTx = showRecentTx;
+window.purgeBankLines = purgeBankLines;
 window.handleLogout = handleLogout;
 </script>
 
