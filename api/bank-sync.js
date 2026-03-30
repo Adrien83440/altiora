@@ -50,18 +50,27 @@ function fetchWithTimeout(url, opts = {}, timeoutMs = 20000) {
 }
 
 // Traite un compte : details + balances + transactions en parallèle
-async function processAccount(accountId, gcH, date_from) {
-  let txUrl = GC_BASE + '/accounts/' + accountId + '/transactions/';
-  if (date_from && /^\d{4}-\d{2}-\d{2}$/.test(date_from)) {
-    txUrl += '?date_from=' + date_from;
-  }
-
-  // 3 appels en parallèle
-  const [detResult, balResult, txResult] = await Promise.allSettled([
+// Si preview=true, on ne récupère que details+balances (pas de transactions)
+async function processAccount(accountId, gcH, date_from, preview) {
+  // Préparer les appels
+  const fetches = [
     fetchWithTimeout(GC_BASE + '/accounts/' + accountId + '/details/',  { headers: gcH }).then(r => r.json()),
     fetchWithTimeout(GC_BASE + '/accounts/' + accountId + '/balances/', { headers: gcH }).then(r => r.json()),
-    fetchWithTimeout(txUrl,                                             { headers: gcH }).then(r => r.json()),
-  ]);
+  ];
+
+  // Transactions seulement en mode normal (pas preview)
+  if (!preview) {
+    let txUrl = GC_BASE + '/accounts/' + accountId + '/transactions/';
+    if (date_from && /^\d{4}-\d{2}-\d{2}$/.test(date_from)) {
+      txUrl += '?date_from=' + date_from;
+    }
+    fetches.push(fetchWithTimeout(txUrl, { headers: gcH }).then(r => r.json()));
+  }
+
+  const results = await Promise.allSettled(fetches);
+  const detResult = results[0];
+  const balResult = results[1];
+  const txResult  = results[2]; // undefined en mode preview
 
   // ── Details ──
   let iban = accountId, name = 'Compte bancaire';
@@ -91,14 +100,14 @@ async function processAccount(accountId, gcH, date_from) {
     console.warn('[' + accountId + '] balance err:', balResult.reason?.message);
   }
 
-  // ── Transactions ──
+  // ── Transactions (skip en mode preview) ──
   let rawTxs = [];
-  if (txResult.status === 'fulfilled') {
+  if (!preview && txResult && txResult.status === 'fulfilled') {
     const txData = txResult.value;
     rawTxs = [...(txData.transactions?.booked || []), ...(txData.transactions?.pending || [])];
     console.log('[' + accountId + '] ' + rawTxs.length + ' transactions');
     if (rawTxs[0]) console.log('sample:', JSON.stringify(rawTxs[0]).substring(0, 250));
-  } else {
+  } else if (!preview && txResult) {
     console.warn('[' + accountId + '] tx err:', txResult.reason?.message);
   }
 
@@ -142,7 +151,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { requisition_id, date_from } = req.body || {};
+    const { requisition_id, date_from, selected_accounts, preview } = req.body || {};
     if (!requisition_id) return res.status(400).json({ error: 'requisition_id manquant' });
 
     if (!process.env.GC_BANK_SECRET_ID || !process.env.GC_BANK_SECRET_KEY) {
@@ -165,9 +174,21 @@ export default async function handler(req, res) {
       });
     }
 
-    // ── Traiter TOUS les comptes en parallèle ──
+    // ── Filtrer par comptes sélectionnés si spécifié ──
+    let accountIds = rData.accounts;
+    if (Array.isArray(selected_accounts) && selected_accounts.length > 0) {
+      accountIds = rData.accounts.filter(id => selected_accounts.includes(id));
+      console.log('Filtered accounts:', accountIds.length, '/', rData.accounts.length);
+      if (accountIds.length === 0) {
+        return res.status(400).json({ error: 'Aucun des comptes sélectionnés n\'a été trouvé dans la requisition.' });
+      }
+    }
+
+    // ── Traiter les comptes en parallèle ──
+    const isPreview = !!preview;
+    if (isPreview) console.log('MODE PREVIEW — pas de transactions');
     const results = await Promise.allSettled(
-      rData.accounts.map(accountId => processAccount(accountId, gcH, date_from))
+      accountIds.map(accountId => processAccount(accountId, gcH, date_from, isPreview))
     );
 
     const accounts = [];
@@ -175,11 +196,21 @@ export default async function handler(req, res) {
       if (results[i].status === 'fulfilled') {
         accounts.push(results[i].value);
       } else {
-        console.error('[' + rData.accounts[i] + '] FATAL:', results[i].reason?.message);
+        console.error('[' + accountIds[i] + '] FATAL:', results[i].reason?.message);
       }
     }
 
     if (accounts.length === 0) return res.status(500).json({ error: 'Impossible de récupérer les données bancaires.' });
+
+    if (isPreview) {
+      // Mode preview : retourne juste les infos compte (pas de transactions)
+      const previewAccounts = accounts.map(a => ({
+        accountId: a.accountId, iban: a.iban, name: a.name,
+        balance: a.balance, balanceNum: a.balanceNum
+      }));
+      console.log('PREVIEW OK —', previewAccounts.length, 'comptes');
+      return res.status(200).json({ success: true, preview: true, accounts: previewAccounts });
+    }
 
     const total = accounts.reduce((s, a) => s + a.transactions.length, 0);
     console.log('OK — total tx:', total);
