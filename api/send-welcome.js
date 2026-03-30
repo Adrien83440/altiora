@@ -62,8 +62,8 @@ module.exports = async (req, res) => {
     const data = await r.json();
     if (r.ok) {
       console.log(`[send-welcome] ✅ Email ${isPaid ? plan : 'trial'} envoyé à ${email}`);
-      // Notification Make (fire-and-forget, non-bloquant)
-      notifyMake({ email, name, plan, billing, source }).catch(function() {});
+      // Notification Make (await sinon Vercel tue la lambda avant la fin du fetch)
+      await notifyMake({ email, name, plan, billing, source });
       return res.status(200).json({ ok: true });
     } else {
       console.error('[send-welcome] ❌ Resend error:', data);
