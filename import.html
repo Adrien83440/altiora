@@ -1373,10 +1373,17 @@ function validateMapping(){
 // ── VÉRIFICATION ──
 function buildVerify(){
   const fields=DEST_FIELDS[_dest].filter(f=>_mapping[f.key]&&!_ignored.has(f.key));
+  const now=new Date();
+  const defaultYM=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   document.getElementById('importSummary').innerHTML=`
     <div class="is-box ok"><div class="is-val" style="color:var(--green)">${_rows.length}</div><div class="is-lbl">Lignes à importer</div></div>
     <div class="is-box ok"><div class="is-val" style="color:var(--blue)">${fields.length}</div><div class="is-lbl">Champs mappés</div></div>
-    <div class="is-box ${_ignored.size?'warn':''}"><div class="is-val" style="color:${_ignored.size?'var(--orange)':'var(--muted)'}">${_ignored.size}</div><div class="is-lbl">Champs ignorés</div></div>`;
+    <div class="is-box ${_ignored.size?'warn':''}"><div class="is-val" style="color:${_ignored.size?'var(--orange)':'var(--muted)'}">${_ignored.size}</div><div class="is-lbl">Champs ignorés</div></div>
+    <div class="is-box" style="border-color:#dbeafe">
+      <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px">📅 Mois cible</div>
+      <input type="month" id="importMonthPicker" value="${defaultYM}" style="font-size:13px;font-weight:700;padding:5px 8px;border:1px solid #93c5fd;border-radius:6px;color:#1d4ed8;background:#eff6ff;cursor:pointer">
+      <div style="font-size:10px;color:#94a3b8;margin-top:4px">Utilisé uniquement si vos lignes n'ont pas de date — sinon chaque ligne ira dans son mois</div>
+    </div>`;
   const previewRows=_rows.slice(0,5);
   document.getElementById('verifyTable').innerHTML=`
     <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin-bottom:12px">
@@ -1856,11 +1863,13 @@ async function doPilotageCompletImport() {
 async function doImport(){
   const btn=document.getElementById('importBtn');
   btn.textContent='⏳ Import en cours...';btn.disabled=true;
+  const monthPicker=document.getElementById('importMonthPicker');
+  const forcedMonth=monthPicker?monthPicker.value||null:null;
   try{
     if(_dest==='pilotage_ca'||_dest==='pilotage_chargesFixe'||_dest==='pilotage_chargesVar')
-      await importDataDirect(_dest,_rows,_headers,_mapping,null);
-    else if(_dest==='ca') await importCA();
-    else if(_dest==='charges') await importCharges();
+      await importDataDirect(_dest,_rows,_headers,_mapping,forcedMonth);
+    else if(_dest==='ca') await importCA(forcedMonth);
+    else if(_dest==='charges') await importCharges(forcedMonth);
     else if(_dest==='dettes') await importDettes();
     else if(_dest==='stock') await importStock();
     else if(_dest==='mouvements') await importMouvements();
@@ -1879,12 +1888,12 @@ async function doImport(){
   },400);
 }
 
-async function importCA(){
+async function importCA(forcedMonth){
   if(!window._uid||!window._setDoc) throw new Error('Non connecté');
   const byMonth={};
   _rows.forEach(r=>{
     const dateVal=_mapping['date']?r[_mapping['date']]:'';
-    const ym=parseDateToYYYYMM(dateVal)||`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+    const ym=parseDateToYYYYMM(dateVal)||forcedMonth||`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
     if(!byMonth[ym])byMonth[ym]=[];
     const entry={date:parseDateFull(dateVal)};
     if(_mapping['ht055'])entry.ht055=String(pf(r[_mapping['ht055']]));
@@ -1905,20 +1914,25 @@ async function importCA(){
   }
 }
 
-async function importCharges(){
+async function importCharges(forcedMonth){
   if(!window._uid||!window._setDoc) throw new Error('Non connecté');
-  const ym=`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
-  const ref=window._doc(window._db,'pilotage',window._uid,'months',ym);
-  const snap=await window._getDoc(ref);
-  const existing=snap.exists()?snap.data():{};
-  const chargesFixe=existing.chargesFixe||[];
-  const chargesVar=existing.chargesVar||[];
+  const byMonth={};
   _rows.forEach(r=>{
+    const dateVal=_mapping['date']?r[_mapping['date']]:'';
+    const ym=parseDateToYYYYMM(dateVal)||forcedMonth||`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+    if(!byMonth[ym])byMonth[ym]={fixe:[],var:[]};
     const typeRaw=String(_mapping['type']?r[_mapping['type']]:'fixe').toLowerCase();
     const entry={fournisseur:_mapping['fournisseur']?String(r[_mapping['fournisseur']]||''):'',type:'',montantHT:String(pf(_mapping['montantHT']?r[_mapping['montantHT']]:0)),tvaRate:pf(_mapping['tvaRate']?r[_mapping['tvaRate']]:20)||20,deductible:'Oui',pointe:'Non'};
-    if(typeRaw.includes('var'))chargesVar.push(entry); else chargesFixe.push(entry);
+    if(typeRaw.includes('var'))byMonth[ym].var.push(entry); else byMonth[ym].fixe.push(entry);
   });
-  await window._setDoc(ref,{...existing,chargesFixe,chargesVar},{merge:true});
+  for(const [ym,charges] of Object.entries(byMonth)){
+    const ref=window._doc(window._db,'pilotage',window._uid,'months',ym);
+    const snap=await window._getDoc(ref);
+    const existing=snap.exists()?snap.data():{};
+    const chargesFixe=(existing.chargesFixe||[]).concat(charges.fixe);
+    const chargesVar=(existing.chargesVar||[]).concat(charges.var);
+    await window._setDoc(ref,{...existing,chargesFixe,chargesVar},{merge:true});
+  }
 }
 
 async function importDettes(){
