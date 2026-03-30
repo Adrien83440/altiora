@@ -644,7 +644,11 @@ async function finalizeBankConnection(reqId) {
 
   } catch(e) {
     if (ov) ov.classList.remove('show');
-    showToast('❌ Erreur : ' + e.message, 'error');
+    var msg = e.message || 'Erreur inconnue';
+    if (msg.includes('patienter') || msg.includes('rate') || msg.includes('429')) {
+      msg = 'Votre banque limite temporairement les connexions. Veuillez patienter 5 à 10 minutes avant de réessayer. Ce n\'est pas un problème Alteore.';
+    }
+    showError(msg);
     showNotConnectedZone();
   }
 }
@@ -873,7 +877,11 @@ async function manageAccounts() {
     showAccountSelectZone(data.accounts);
   } catch(e) {
     if (ov) ov.classList.remove('show');
-    showToast('❌ ' + e.message, 'error');
+    var msg = e.message || 'Erreur inconnue';
+    if (msg.includes('patienter') || msg.includes('rate') || msg.includes('429')) {
+      msg = 'Votre banque limite temporairement les connexions. Veuillez patienter 5 à 10 minutes avant de réessayer. Ce n\'est pas un problème Alteore.';
+    }
+    showError(msg);
   }
 }
 
@@ -1012,6 +1020,9 @@ async function syncNow() {
     if (msg.includes('EXPIRED') || msg.includes('expirée')) {
       msg = '⌛ Connexion bancaire expirée. Déconnectez et reconnectez votre banque.';
     }
+    if (msg.includes('patienter') || msg.includes('rate') || msg.includes('429')) {
+      msg = '⏳ Votre banque limite temporairement les connexions. Veuillez patienter 5 à 10 minutes avant de réessayer. Ce n\'est pas un problème Alteore.';
+    }
     console.error('[SYNC] Erreur:', msg);
 
     // Afficher l'erreur de façon persistante (pas un toast qui disparaît)
@@ -1025,8 +1036,14 @@ function showError(msg) {
   if (old) old.remove();
   const div = document.createElement('div');
   div.id = 'sync-error-banner';
-  div.style.cssText = 'background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:14px 18px;color:#b91c1c;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:12px;';
-  div.innerHTML = `<span>❌ ${msg}</span><button onclick="this.parentElement.remove()" style="background:none;border:none;color:#b91c1c;cursor:pointer;font-size:16px">✕</button>`;
+  const isRateLimit = msg.includes('patienter') || msg.includes('temporairement');
+  if (isRateLimit) {
+    div.style.cssText = 'background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;padding:14px 18px;color:#92400e;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:12px;';
+    div.innerHTML = '<span>⏳ ' + msg.replace(/^[⏳❌]\s*/, '') + '</span><button onclick="this.parentElement.remove()" style="background:none;border:none;color:#92400e;cursor:pointer;font-size:16px">✕</button>';
+  } else {
+    div.style.cssText = 'background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:14px 18px;color:#b91c1c;font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;gap:12px;';
+    div.innerHTML = '<span>❌ ' + msg.replace(/^[⏳❌]\s*/, '') + '</span><button onclick="this.parentElement.remove()" style="background:none;border:none;color:#b91c1c;cursor:pointer;font-size:16px">✕</button>';
+  }
   const content = document.querySelector('.content');
   if (content) content.insertBefore(div, content.firstChild);
 }
