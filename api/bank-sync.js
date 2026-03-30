@@ -56,6 +56,10 @@ export default async function handler(req, res) {
 
     // Requisition
     const rRes  = await fetch(`${GC_BASE}/requisitions/${requisition_id}/`, { headers: gcH });
+    if (rRes.status === 429) {
+      console.warn('RATE LIMITED by GoCardless on requisition');
+      return res.status(429).json({ error: 'Votre banque limite temporairement les connexions. Veuillez patienter quelques minutes avant de réessayer.', rate_limited: true });
+    }
     const rData = await rRes.json();
     console.log('Req status:', rData.status, '| nb accounts:', rData.accounts?.length);
 
@@ -81,6 +85,7 @@ export default async function handler(req, res) {
       try {
         // Détails
         const detRes  = await fetch(`${GC_BASE}/accounts/${accountId}/details/`, { headers: gcH });
+        if (detRes.status === 429) { console.warn(`[${accountId}] RATE LIMITED on details`); throw { rateLimited: true }; }
         const detData = await detRes.json();
         const acc     = detData.account || detData || {};
         const iban    = acc.iban || acc.bban || acc.resourceId || accountId;
@@ -91,6 +96,7 @@ export default async function handler(req, res) {
         let balanceNum = 0, balanceStr = null;
         try {
           const bRes  = await fetch(`${GC_BASE}/accounts/${accountId}/balances/`, { headers: gcH });
+          if (bRes.status === 429) { console.warn(`[${accountId}] RATE LIMITED on balances`); throw { rateLimited: true }; }
           const bData = await bRes.json();
           const b     = bData.balances?.find(x => x.balanceType === 'interimAvailable')
                      || bData.balances?.find(x => x.balanceType === 'closingBooked')
@@ -111,6 +117,7 @@ export default async function handler(req, res) {
             txUrl += `?date_from=${date_from}`;
           }
           const txRes  = await fetch(txUrl, { headers: gcH });
+          if (txRes.status === 429) { console.warn(`[${accountId}] RATE LIMITED on transactions`); throw { rateLimited: true }; }
           const txData = await txRes.json();
           rawTxs = [...(txData.transactions?.booked || []), ...(txData.transactions?.pending || [])];
           console.log(`[${accountId}] ${rawTxs.length} transactions`);
@@ -148,7 +155,12 @@ export default async function handler(req, res) {
           transactions
         });
 
-      } catch(e) { console.error(`[${accountId}] FATAL:`, e.message); }
+      } catch(e) {
+        if (e && e.rateLimited) {
+          return res.status(429).json({ error: 'Votre banque limite temporairement les connexions. Veuillez patienter quelques minutes avant de réessayer.', rate_limited: true });
+        }
+        console.error(`[${accountId}] FATAL:`, e.message);
+      }
     }
 
     if (accounts.length === 0) return res.status(500).json({ error: 'Impossible de récupérer les données bancaires.' });
