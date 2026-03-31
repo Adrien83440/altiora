@@ -274,10 +274,12 @@ export default async function handler(req, res) {
           const fCol = secHeaderNames.find((_, i) => low[i] === 'fournisseur');
           const tCol = secHeaderNames.find((_, i) => low[i] === 'type');
           const hCol = secHeaderNames.find((_, i) => low[i] === 'montant ht');
+          const vCol = secHeaderNames.find((_, i) => low[i] === 'tva');
           const dCol = secHeaderNames.find((_, i) => low[i] === 'deductible');
           if (fCol) mapping.fournisseur = fCol;
           if (tCol) mapping.type = tCol;
           if (hCol) mapping.montantHT = hCol;
+          if (vCol) mapping.tvaRate = vCol;
           if (dCol) mapping.deductible = dCol;
         }
 
