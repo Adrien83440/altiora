@@ -422,7 +422,12 @@
       <div class="sum-card" :class="t.resultat >= 0 ? 'green' : 'red'">
         <div class="sum-label">Résultat HT</div>
         <div class="sum-value" :class="t.resultat >= 0 ? 'positive' : 'negative'" x-text="fmtSigned(t.resultat)" id="s-res"></div>
-        <div class="sum-sub">CA − Dépenses</div>
+        <div class="sum-sub" x-show="t.prelevementPriveHT <= 0">CA − Dépenses</div>
+        <div class="sum-sub" x-show="t.prelevementPriveHT > 0" style="font-size:10px;line-height:1.4">
+          <span>CA − Dépenses (hors prélèv. privé)</span><br>
+          <span style="opacity:.7">Prélèv. dirigeant :</span> <span x-text="fmtE(t.prelevementPriveHT)" style="font-weight:600"></span>
+          <span style="opacity:.5">→ Après prélèv. :</span> <span :style="'font-weight:700;color:' + ((t.resultat - t.prelevementPriveHT) >= 0 ? '#10b981' : '#ef4444')" x-text="fmtSigned(t.resultat - t.prelevementPriveHT)"></span>
+        </div>
       </div>
       <div class="sum-card purple">
         <div class="sum-label">TVA collectée</div>
@@ -778,7 +783,7 @@ function pilotageApp() {
   return {
     // État réactif des KPIs
     t: {
-      caHT: 0, caHT_j: 0, caFP_HT: 0, chargesHT: 0, fixesHT: 0, varHT: 0, masseSalHT: 0,
+      caHT: 0, caHT_j: 0, caFP_HT: 0, chargesHT: 0, fixesHT: 0, varHT: 0, masseSalHT: 0, prelevementPriveHT: 0,
       resultat: 0, tvaCollectee: 0, tvaDue: 0, tvaDed: 0,
       creditsPrincipal: 0, creditsInteret: 0, cashflow: 0, delta: 0, prevCA: 0
     },
@@ -1682,7 +1687,7 @@ function renderPrevCA(rows, caReelTotal) {
 }
 
 /* ─── MASSE SALARIALE ─── */
-var TAUX_DEFAUT = {CDI:42, CDD:52, Apprenti:5, Alternant:20, Stage:0, TNS:45, 'Assimilé salarié':75};
+var TAUX_DEFAUT = {CDI:42, CDD:52, Apprenti:5, Alternant:20, Stage:0, TNS:45, 'Assimilé salarié':75, prelevement:0};
 
 function getMSTaux(emp) {
   if (emp.tauxCharges !== undefined && emp.tauxCharges !== '' && emp.tauxCharges !== null) return parseFloat(emp.tauxCharges) || 42;
@@ -1736,12 +1741,21 @@ function calcMasseSalariale(ms) {
   // Dirigeant (toujours manuel)
   var dir = ms.dirigeant || {};
   var remDir = pf(dir.remuneration);
-  var tauxDir = parseFloat(dir.tauxCharges) || 45;
-  totalDir += remDir * (1 + tauxDir / 100);
+  var tauxDir = parseFloat(dir.tauxCharges);
+  if (isNaN(tauxDir)) tauxDir = 45;
+  var isPrelevement = dir.type === 'prelevement';
+  var coutDirRem = remDir * (1 + tauxDir / 100);
   var divid = pf(dir.dividendes);
-  var tauxDiv = parseFloat(dir.tauxDividendes) || 30;
-  totalDir += divid * (1 + tauxDiv / 100);
-  return { salaries: totalSal, dirigeant: totalDir, primes: totalPrimes, total: totalSal + totalDir + totalPrimes };
+  var tauxDiv = parseFloat(dir.tauxDividendes);
+  if (isNaN(tauxDiv)) tauxDiv = 30;
+  var coutDirDiv = divid * (1 + tauxDiv / 100);
+  var prelevementPriveHT = 0;
+  if (isPrelevement) {
+    prelevementPriveHT = coutDirRem + coutDirDiv;
+  } else {
+    totalDir += coutDirRem + coutDirDiv;
+  }
+  return { salaries: totalSal, dirigeant: totalDir, primes: totalPrimes, prelevementPriveHT: prelevementPriveHT, total: totalSal + totalDir + totalPrimes };
 }
 
 function _calcObjAvancement(obj) {
@@ -1824,29 +1838,35 @@ function renderMasseSalariale(data, t) {
   // Section Dirigeant
   var dir = ms.dirigeant || {};
   var remDir = pf(dir.remuneration);
-  var tauxDir = parseFloat(dir.tauxCharges) || 45;
+  var tauxDir = parseFloat(dir.tauxCharges);
+  if (isNaN(tauxDir)) tauxDir = 45;
   var coutDir = remDir * (1 + tauxDir / 100);
   var divid = pf(dir.dividendes);
-  var tauxDiv = parseFloat(dir.tauxDividendes) || 30;
+  var tauxDiv = parseFloat(dir.tauxDividendes);
+  if (isNaN(tauxDiv)) tauxDiv = 30;
   var coutDiv = divid * (1 + tauxDiv / 100);
+  var isPrelevement = dir.type === 'prelevement';
 
   html += '<div style="border-top:2px solid var(--border);padding:14px 0 0">' +
     '<div style="font-size:12px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px">👔 Rémunération dirigeant' +
     '<select class="cell-input" style="width:auto;font-size:11px;padding:3px 8px" onchange="onDirTypeChange(this.value)">' +
     '<option value="tns"' + (dir.type === 'tns' ? ' selected' : '') + '>TNS (SARL/EURL) ~45%</option>' +
     '<option value="Assimilé salarié"' + (dir.type === 'Assimilé salarié' ? ' selected' : '') + '>Assimilé salarié (SAS/SASU) ~75%</option>' +
+    '<option value="prelevement"' + (dir.type === 'prelevement' ? ' selected' : '') + '>Prélèvement privé (EARL, GAEC, BNC…)</option>' +
     '</select></div>' +
     '<table class="data-table"><thead><tr><th>Type</th><th>Montant mensuel (€)</th><th>Taux charges (%)</th><th>Coût total (€)</th></tr></thead><tbody>' +
     '<tr><td style="font-weight:600">💰 Rémunération</td>' +
     '<td><input class="cell-input" style="width:90px;text-align:right" type="text" inputmode="decimal" value="' + (dir.remuneration || '') + '" placeholder="0.00" oninput="_data.masseSalariale.dirigeant.remuneration=this.value;refreshTotals();scheduleDirURSSAF()"/></td>' +
-    '<td style="text-align:center"><input class="cell-input" id="ms-dir-taux" style="width:55px;text-align:center" type="number" value="' + tauxDir + '" min="0" max="100" step="1" oninput="_data.masseSalariale.dirigeant.tauxCharges=parseFloat(this.value)||45;refreshTotals()"/></td>' +
+    '<td style="text-align:center"><input class="cell-input" id="ms-dir-taux" style="width:55px;text-align:center" type="number" value="' + tauxDir + '" min="0" max="100" step="1" oninput="var v=parseFloat(this.value);_data.masseSalariale.dirigeant.tauxCharges=isNaN(v)?45:v;refreshTotals()"/></td>' +
     '<td style="text-align:right;font-weight:700;color:#f59e0b"><span id="ms-dir-cout">' + fmtN(coutDir) + '</span> €</td></tr>' +
     '<tr><td style="font-weight:600">💸 Dividendes /mois</td>' +
     '<td><input class="cell-input" style="width:90px;text-align:right" type="text" inputmode="decimal" value="' + (dir.dividendes || '') + '" placeholder="0.00" oninput="_data.masseSalariale.dirigeant.dividendes=this.value;refreshTotals()"/></td>' +
-    '<td style="text-align:center"><input class="cell-input" style="width:55px;text-align:center" type="number" value="' + (dir.tauxDividendes || 30) + '" min="0" max="100" step="1" oninput="_data.masseSalariale.dirigeant.tauxDividendes=parseFloat(this.value)||30;refreshTotals()"/></td>' +
+    '<td style="text-align:center"><input class="cell-input" style="width:55px;text-align:center" type="number" value="' + tauxDiv + '" min="0" max="100" step="1" oninput="var v=parseFloat(this.value);_data.masseSalariale.dirigeant.tauxDividendes=isNaN(v)?30:v;refreshTotals()"/></td>' +
     '<td style="text-align:right;font-weight:700;color:#f59e0b"><span id="ms-dir-divCout">' + fmtN(coutDiv) + '</span> €</td></tr>' +
     '<tr style="border-top:2px solid var(--border);font-weight:800"><td>TOTAL DIRIGEANT</td><td></td><td></td><td style="text-align:right;color:#f59e0b"><span id="tot-msDir">' + fmtN(msCalc.dirigeant) + '</span> €</td></tr>' +
-    '</tbody></table></div>';
+    '</tbody></table>' +
+    (isPrelevement ? '<div style="margin-top:8px;padding:8px 12px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:8px;font-size:11px;color:#6366f1;display:flex;align-items:center;gap:6px">ℹ️ <b>Prélèvement privé</b> — Ce montant est affiché à titre informatif et <b>exclu du calcul des charges et du résultat</b>. Votre résultat reflète le bénéfice fiscal avant prélèvement.</div>' : '') +
+    '</div>';
 
   // Section Primes & Objectifs
   if (window._rhObjectifs && window._rhObjectifs.length > 0 && msCalc.primes > 0) {
@@ -1900,6 +1920,13 @@ function renderMasseSalariale(data, t) {
     '<span style="font-size:16px;font-weight:800;color:#f59e0b"><span id="tot-msTotal">' + fmtN(msCalc.total) + '</span> €</span>' +
     '</div>';
 
+  if (msCalc.prelevementPriveHT > 0) {
+    html += '<div style="padding:4px 0;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#6366f1">' +
+      '<span>ℹ️ Dont prélèvement privé dirigeant (hors charges)</span>' +
+      '<span style="font-weight:700">' + fmtN(msCalc.prelevementPriveHT) + ' €</span>' +
+      '</div>';
+  }
+
   // Info
   if (msCalc.total > 0 && t.caHT > 0) {
     var ratio = msCalc.total / t.caHT * 100;
@@ -1947,12 +1974,13 @@ function updateMSTaux(empId, val) {
 
 function onDirTypeChange(val) {
   _data.masseSalariale.dirigeant.type = val;
-  var d = TAUX_DEFAUT[val] || 45;
+  var d = TAUX_DEFAUT[val];
+  if (d === undefined) d = 45;
   _data.masseSalariale.dirigeant.tauxCharges = d;
   var el = document.getElementById('ms-dir-taux');
   if (el) el.value = d;
   refreshTotals();
-  scheduleDirURSSAF();
+  if (val !== 'prelevement') scheduleDirURSSAF();
 }
 
 async function fetchAllURSSAF() {
@@ -2003,10 +2031,10 @@ async function fetchAllURSSAF() {
     } catch(e) { errors++; }
   }
 
-  // Fetch pour dirigeant rémunération
+  // Fetch pour dirigeant rémunération (sauf prélèvement privé)
   var dir = ms.dirigeant || {};
   var remDir = pf(dir.remuneration);
-  if (remDir > 0) {
+  if (remDir > 0 && dir.type !== 'prelevement') {
     try {
       var modeDir = dir.type === 'Assimilé salarié' ? 'assimile' : 'tns';
       var respD = await fetch('/api/urssaf-cost', {
@@ -2052,6 +2080,7 @@ function scheduleDirURSSAF() {
   clearTimeout(_dirUrssafTimer);
   _dirUrssafTimer = setTimeout(async function(){
     var dir = _data.masseSalariale.dirigeant || {};
+    if (dir.type === 'prelevement') return;
     var rem = pf(dir.remuneration);
     if (rem <= 0) return;
     try {
@@ -2817,13 +2846,14 @@ function calcTotals(data) {
   // Masse salariale
   var msCalc = calcMasseSalariale(data.masseSalariale || {});
   var masseSalHT = msCalc.total;
+  var prelevementPriveHT = msCalc.prelevementPriveHT || 0;
   chargesHT += masseSalHT;
   var tvaDed = fixesTVA+varTVA+leasingTVA;
   var tvaDue = tvaCollectee-tvaDed;
   var resultat = caHT+rentreesSupp-chargesHT;
   var cashflow = caHT+rentreesSupp-(fixesTTC+varTTC+creditsPrincipal+creditsInteret+leasingTTC+masseSalHT);
   var delta = resultat-(prevCA-chargesHT);
-  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caTTC,caTTC_j,caTTC_fp,tvaCollectee,tvaC_j,tvaC_fp,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,varHT_excep,varTTC_excep,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta,caFP055,caFP10,caFP20,masseSalHT};
+  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caTTC,caTTC_j,caTTC_fp,tvaCollectee,tvaC_j,tvaC_fp,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,varHT_excep,varTTC_excep,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta,caFP055,caFP10,caFP20,masseSalHT,prelevementPriveHT};
 }
 
 function refreshTotals() {
@@ -2899,12 +2929,15 @@ function refreshTotals() {
   s('tot-credP',t.creditsPrincipal);s('tot-credMens',t.creditsPrincipal+t.creditsInteret);s('tot-credInt',t.creditsInteret);
   // Masse salariale
   var msC = calcMasseSalariale(_data.masseSalariale || {});
-  s('tot-msSal',msC.salaries);s('tot-msDir',msC.dirigeant);s('tot-msTotal',msC.total);
+  s('tot-msSal',msC.salaries);
+  // Afficher le montant dirigeant même en mode prélèvement (informatif)
+  s('tot-msDir', msC.dirigeant + (msC.prelevementPriveHT || 0));
+  s('tot-msTotal',msC.total);
   var dirR=pf((_data.masseSalariale||{}).dirigeant&&_data.masseSalariale.dirigeant.remuneration);
-  var dirT=parseFloat(((_data.masseSalariale||{}).dirigeant||{}).tauxCharges)||45;
+  var dirT=parseFloat(((_data.masseSalariale||{}).dirigeant||{}).tauxCharges);if(isNaN(dirT))dirT=45;
   s('ms-dir-cout',dirR*(1+dirT/100));
   var divR=pf(((_data.masseSalariale||{}).dirigeant||{}).dividendes);
-  var divT=parseFloat(((_data.masseSalariale||{}).dirigeant||{}).tauxDividendes)||30;
+  var divT=parseFloat(((_data.masseSalariale||{}).dirigeant||{}).tauxDividendes);if(isNaN(divT))divT=30;
   s('ms-dir-divCout',divR*(1+divT/100));
   s('tva-c',fmtN(t.tvaCollectee)+' €');s('tva-d',fmtN(t.tvaDed)+' €');s('tva-due',fmtN(Math.abs(t.tvaDue))+' €');
   s('cf-val',fmt(t.cashflow),t.cashflow>=0?'positive':'negative');
