@@ -733,7 +733,7 @@ function detectMonthFromTabName(name) {
     'avril':'04','apr':'04','april':'04',
     'mai':'05','may':'05',
     'juin':'06','jun':'06','june':'06',
-    'juillet':'07','jul':'07','july':'07',
+    'juillet':'07','juill':'07','jul':'07','july':'07',
     'août':'08','aout':'08','aug':'08','august':'08',
     'septembre':'09','sep':'09','sept':'09','september':'09',
     'octobre':'10','oct':'10','october':'10',
@@ -741,11 +741,12 @@ function detectMonthFromTabName(name) {
     'décembre':'12','decembre':'12','dec':'12','december':'12',
   };
 
-  // Format "Mois AAAA" ou "Mois AAAA - ..."
-  const mMatch = s.match(/([a-zéûôàèùâê]+)\s+(\d{4})/i);
+  // Format "Mois AAAA" ou "Mois AA" ou "Mois AAAA - ..."
+  const mMatch = s.match(/([a-zéûôàèùâê]+)\s+(\d{2,4})/i);
   if (mMatch) {
     const key = mMatch[1].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-    const year = mMatch[2];
+    let year = mMatch[2];
+    if (year.length === 2) year = (parseInt(year) > 50 ? '19' : '20') + year;
     // Chercher dans MOIS avec/sans accents
     const monthNum = MOIS[mMatch[1].toLowerCase()] || MOIS[key];
     if (monthNum) return `${year}-${monthNum}`;
@@ -916,16 +917,20 @@ async function loadSelectedTab() {
     stock:'📦 Stock', mouvements:'🔄 Mouvements stock', fidelite:'❤️ Fidélité clients', marges:'📊 Marges produits'
   };
 
-  // Analyser tous les onglets en parallèle
+  // Analyser les onglets par batchs de 3 (évite surcharge Vercel)
   const analysisData = {};
   let done = 0;
-  await Promise.all(gids.map(async gid => {
+  const headerRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
+
+  async function analyzeOne(gid) {
     const tab = _gsTabsData[gid];
     try {
       const r = await fetch('/api/fetch-sheet', {
         method:'POST', headers: await _authHeaders(),
-        body: JSON.stringify({url, gid, analyze:true})
+        body: JSON.stringify({url, gid, analyze:true, headerRow})
       });
+      const contentType = r.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) throw new Error(`Erreur serveur (${r.status})`);
       const data = await r.json();
       if(!r.ok || !data.success) throw new Error(data.error||'Erreur');
       const ai = data.aiAnalysis;
@@ -942,9 +947,15 @@ async function loadSelectedTab() {
       analysisData[gid] = {tab, data:null, destKey:null, detectedMonth:null, mapping:{}, enabled:false, error:e.message};
     }
     done++;
-    document.getElementById('review-analysis-status').textContent = `Analyse de "${tab.name}"… (${done}/${total})`;
-    document.getElementById('review-analysis-bar').style.width = (done/total*100)+'%';
-  }));
+    const statusEl = document.getElementById('review-analysis-status');
+    const barEl = document.getElementById('review-analysis-bar');
+    if(statusEl) statusEl.textContent = `Analyse de "${tab.name}"… (${done}/${total})`;
+    if(barEl) barEl.style.width = (done/total*100)+'%';
+  }
+
+  for (let i = 0; i < gids.length; i += 3) {
+    await Promise.all(gids.slice(i, i + 3).map(gid => analyzeOne(gid)));
+  }
 
   // Afficher l'écran de review
   showReviewScreen(gids, analysisData, MODULE_LABELS, url);
