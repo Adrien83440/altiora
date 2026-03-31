@@ -304,6 +304,10 @@ input[type=file]{display:none}
             <div id="gs-step-tabs" style="display:none;margin-top:14px">
               <div id="gs-tabs-grid" style="margin-bottom:14px"></div>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:rgba(248,250,255,0.6);border:1px solid var(--border);border-radius:8px">
+                  <span style="font-size:12px;font-weight:600;color:var(--muted)">&#9881;&#65039; Ligne d'en-t&#234;te :</span>
+                  <input type="number" id="gsHeaderRowInput" value="1" min="1" max="20" style="width:46px;padding:4px 6px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-weight:700;text-align:center" title="Ligne contenant les noms de colonnes (1=premi&#232;re ligne)"/>
+                </div>
                 <button class="btn btn-p" id="gs-load-btn" onclick="loadSelectedTab()" style="display:none">&#128229; Charger les onglets</button>
                 <button class="btn btn-o btn-xs" onclick="resetGsSteps()">&#8592; Changer de lien</button>
               </div>
@@ -549,6 +553,7 @@ async function _authHeaders(){var h={'Content-Type':'application/json'};try{if(w
 function showToast(msg,type){var t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');setTimeout(()=>t.className='toast',3000)}
 function pf(v){return parseFloat(String(v||0).replace(',','.'))||0}
 function uid(){return Date.now()+'_'+Math.random().toString(36).slice(2,8)}
+function _getHeaderRow(){var gs=document.getElementById('gsHeaderRowInput'),xl=document.getElementById('headerRowInput');var el=(gs&&gs.offsetParent!==null)?gs:xl;return Math.max(1,parseInt(el?.value)||1)}
 
 // ── ÉTAPES ──
 function goStep(n){
@@ -642,7 +647,7 @@ async function applyHeaderRow(){
       parseSheet(idx, '');
     } else if(_gsLastUrl) {
       // Google Sheets : re-fetch avec headerRow
-      const headerRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
+      const headerRow = _getHeaderRow();
       const r = await fetch('/api/fetch-sheet', {
         method:'POST',
         headers: await _authHeaders(),
@@ -656,7 +661,7 @@ async function applyHeaderRow(){
       showPreview('Google Sheets — ' + (_gsLastName||''));
     } else if(_allRawRows && _allRawRows.length) {
       // Fallback : utiliser les lignes brutes déjà en mémoire
-      const headerRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
+      const headerRow = _getHeaderRow();
       const headerIdx = headerRow - 1;
       const rawH = _allRawRows[headerIdx] || _allRawRows[0];
       const allHeaders = rawH.map(h=>String(h||'').trim());
@@ -683,7 +688,7 @@ function parseSheet(idx,filename){
   const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
   if(!data.length){showToast('Feuille vide','err');return}
   // Ligne d'en-tête configurable (1-based)
-  const headerRowNum = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
+  const headerRowNum = _getHeaderRow();
   const headerRowIdx = headerRowNum - 1;
   // Construire les headers en combinant plusieurs lignes si besoin (ignore lignes vides avant)
   const rawHeaders = data[headerRowIdx] || data[0];
@@ -860,12 +865,12 @@ async function loadSelectedTab() {
       const r = await fetch('/api/fetch-sheet', {
         method: 'POST',
         headers: await _authHeaders(),
-        body: JSON.stringify({ url, gid, analyze: true, headerRow: Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1) })
+        body: JSON.stringify({ url, gid, analyze: true, headerRow: _getHeaderRow() })
       });
       const data = await r.json();
       if (!r.ok || !data.success) throw new Error(data.error || 'Erreur serveur');
       // Appliquer la ligne d'en-tête configurée
-      const gsHeaderRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1) - 1;
+      const gsHeaderRow = _getHeaderRow() - 1;
       if(gsHeaderRow > 0 && data.allRows) {
         // Si l'API renvoie allRows, recalculer depuis la bonne ligne
         const rawH = data.allRows[gsHeaderRow] || data.allRows[0];
@@ -920,7 +925,7 @@ async function loadSelectedTab() {
   // Analyser les onglets par batchs de 3 (évite surcharge Vercel)
   const analysisData = {};
   let done = 0;
-  const headerRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
+  const headerRow = _getHeaderRow();
 
   async function analyzeOne(gid) {
     const tab = _gsTabsData[gid];
