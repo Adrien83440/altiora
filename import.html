@@ -969,7 +969,8 @@ async function loadSelectedTab() {
             if(v && data.headers.includes(v)) localMapping[k]=v;
           });
         }
-        analysisData[gid] = {tab, data, destKey, detectedMonth, mapping:localMapping, enabled:true, error:null};
+        const isKnown = destKey && DEST_FIELDS[destKey];
+        analysisData[gid] = {tab, data, destKey: isKnown ? destKey : null, detectedMonth, mapping:localMapping, enabled:!!isKnown, error:null};
       }
     } catch(e) {
       analysisData[gid] = {tab, data:null, destKey:null, detectedMonth:null, mapping:{}, enabled:false, error:e.message};
@@ -2057,7 +2058,8 @@ async function importMarges(){
 // ── Écran de review multi-onglets ──
 function showReviewScreen(gids, analysisData, MODULE_LABELS, url) {
   const area = document.getElementById('gsArea');
-  const ALL_MODULES = Object.keys(DEST_FIELDS);
+  // Seuls les modules utiles pour l'import Google Sheets
+  const REVIEW_MODULES = ['pilotage_ca','pilotage_chargesFixe','pilotage_chargesVar','dettes','marges'];
 
   function buildTabRow(gid) {
     const d = analysisData[gid];
@@ -2066,7 +2068,7 @@ function showReviewScreen(gids, analysisData, MODULE_LABELS, url) {
     const fields = destKey && DEST_FIELDS[destKey] ? DEST_FIELDS[destKey] : [];
     const monthVal = detectedMonth || '';
 
-    const moduleOpts = ALL_MODULES.map(m =>
+    const moduleOpts = REVIEW_MODULES.map(m =>
       `<option value="${m}" ${destKey===m?'selected':''}>${MODULE_LABELS[m]||m}</option>`
     ).join('');
 
@@ -2090,7 +2092,7 @@ function showReviewScreen(gids, analysisData, MODULE_LABELS, url) {
       ? `<span class="review-badge warn">⚠️ ${error}</span>`
       : destKey && DEST_FIELDS[destKey]
         ? `<span class="review-badge mod">${MODULE_LABELS[destKey]||destKey}</span>`
-        : `<span class="review-badge warn">❓ Module inconnu</span>`;
+        : `<span class="review-badge warn" style="opacity:.6">⏭️ Ignoré</span>`;
 
     return `
       <div class="review-tab-row ${enabled?'':'disabled'}" id="review-row-${gid}">
