@@ -170,17 +170,110 @@ export default async function handler(req, res) {
     .filter(r => Object.values(r).some(v => String(v).trim()));
 
   // Nettoyer les valeurs monétaires françaises (20 000,00 € → 20000.00)
-  rows.forEach(r => {
-    headers.forEach(h => {
-      const v = String(r[h] || '');
-      const cleaned = v.replace(/\s/g, '').replace('€', '').replace(',', '.');
-      if (!isNaN(parseFloat(cleaned)) && cleaned !== '') r[h] = cleaned;
+  function cleanMonetary(rows2, headers2) {
+    rows2.forEach(r => {
+      headers2.forEach(h => {
+        const v = String(r[h] || '');
+        const cleaned = v.replace(/\s/g, '').replace('€', '').replace(',', '.');
+        if (!isNaN(parseFloat(cleaned)) && cleaned !== '') r[h] = cleaned;
+      });
     });
-  });
+  }
+  cleanMonetary(rows, headers);
 
-  // ── Analyse IA optionnelle ──
+  // ── Détection automatique des sections (multi-blocs dans un même onglet) ──
+  let sections = null;
+  if (headerIdx === 1 && lines.length >= 3) {
+    const titleCells = splitCsvLine(lines[0], sep);
+    const sectionDefs = [];
+
+    titleCells.forEach((cell, colIdx) => {
+      const t = String(cell || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+      if (!t || t.length < 4) return;
+      // Ignorer les lignes de total / TVA déductible
+      if (t.includes('TOTAL') && !t.includes('PREVISIONNEL') && !t.includes('PREVISION')) return;
+      if (t.includes('TVA DEDUCTIBLE') || t.includes('TVA DUE')) return;
+
+      if (t.includes('CHARGES FIXES') || t.includes('CHARGE FIXE')) {
+        sectionDefs.push({ startCol: colIdx, module: 'pilotage_charges_fixe', name: 'Charges fixes' });
+      } else if (t.includes('CHARGES VARIABLES') || t.includes('CHARGE VARIABLE')) {
+        sectionDefs.push({ startCol: colIdx, module: 'pilotage_charges_var', name: 'Charges variables' });
+      } else if (t.includes('CA JOURNALIER') || t.includes('CA JOUR')) {
+        sectionDefs.push({ startCol: colIdx, module: 'pilotage_ca', name: 'CA Journalier' });
+      } else if ((t.includes('CREDIT') || t.includes('EMPRUNT')) && !t.includes('RESULTAT')) {
+        sectionDefs.push({ startCol: colIdx, module: 'dettes', name: 'Crédits & Emprunts' });
+      } else if (t.includes('LEASING') || t.includes('LOA') || t.includes('LLD')) {
+        sectionDefs.push({ startCol: colIdx, module: 'leasing', name: 'Leasing / LOA' });
+      }
+    });
+
+    if (sectionDefs.length >= 2) {
+      sectionDefs.sort((a, b) => a.startCol - b.startCol);
+      for (let i = 0; i < sectionDefs.length; i++) {
+        sectionDefs[i].endCol = (i + 1 < sectionDefs.length) ? sectionDefs[i + 1].startCol : rawHeaders.length;
+      }
+
+      sections = sectionDefs.map(sec => {
+        // Headers de cette section (sans suffixe de déduplication)
+        const secHeaders = headerMap
+          .filter(h => h.idx >= sec.startCol && h.idx < sec.endCol)
+          .map(h => ({ name: h.name.replace(/ \(\d+\)$/, ''), idx: h.idx }));
+        const secHeaderNames = secHeaders.map(h => h.name);
+
+        // Extraire les lignes de cette section
+        const secRows = lines.slice(headerIdx + 1)
+          .map(l => {
+            const vals = splitCsvLine(l, sep);
+            const obj = {};
+            secHeaders.forEach(h => { obj[h.name] = vals[h.idx] !== undefined ? vals[h.idx] : ''; });
+            return obj;
+          })
+          .filter(r => {
+            return Object.values(r).some(v => {
+              const s = String(v).replace(/\s/g, '').replace('€', '').replace(',', '.').trim();
+              return s && s !== '0' && s !== '0.00' && s !== '0,00' && s !== '-' && s !== 'POINTE';
+            });
+          });
+
+        cleanMonetary(secRows, secHeaderNames);
+
+        // Mapping déterministe selon le type de section
+        const mapping = {};
+        const lower = secHeaderNames.map(n => n.toLowerCase());
+
+        if (sec.module === 'pilotage_ca') {
+          const dateCol = secHeaderNames.find((_, i) => lower[i].includes('date'));
+          const htCol = secHeaderNames.find((_, i) => lower[i] === 'montant ht' || lower[i] === 'montantht');
+          if (dateCol) mapping.date = dateCol;
+          if (htCol) mapping.montantHT = htCol;
+        } else {
+          const fournCol = secHeaderNames.find((_, i) => lower[i].includes('fournisseur'));
+          const typeCol = secHeaderNames.find((_, i) => lower[i] === 'type');
+          const htCol = secHeaderNames.find((_, i) => (lower[i].includes('montant ht') || lower[i] === 'montant') && !lower[i].includes('total'));
+          const deducCol = secHeaderNames.find((_, i) => lower[i].includes('deductible'));
+          if (fournCol) mapping.fournisseur = fournCol;
+          if (typeCol) mapping.type = typeCol;
+          if (htCol) mapping.montantHT = htCol;
+          if (deducCol) mapping.deductible = deducCol;
+        }
+
+        return {
+          name: sec.name,
+          module: sec.module,
+          headers: secHeaderNames,
+          totalRows: secRows.length,
+          rows: secRows,
+          mapping,
+        };
+      }).filter(s => s.totalRows > 0);
+
+      if (sections.length < 2) sections = null; // Pas assez de sections valides → fallback normal
+    }
+  }
+
+  // ── Analyse IA optionnelle (seulement si pas de sections détectées) ──
   let aiAnalysis = null;
-  if (analyze) {
+  if (analyze && !sections) {
     const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
     if (ANTHROPIC_KEY) {
       const sample = rows.slice(0, 8).map(r =>
@@ -252,5 +345,6 @@ RÈGLES IMPORTANTES :
     preview: rows.slice(0, 10),
     rows,
     aiAnalysis,
+    sections: sections || null,
   });
 }
