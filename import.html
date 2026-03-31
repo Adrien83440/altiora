@@ -304,10 +304,6 @@ input[type=file]{display:none}
             <div id="gs-step-tabs" style="display:none;margin-top:14px">
               <div id="gs-tabs-grid" style="margin-bottom:14px"></div>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:rgba(248,250,255,0.6);border:1px solid var(--border);border-radius:8px">
-                  <span style="font-size:12px;font-weight:600;color:var(--muted)">&#9881;&#65039; Ligne d'en-t&#234;te :</span>
-                  <input type="number" id="gsHeaderRowInput" value="1" min="1" max="20" style="width:46px;padding:4px 6px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-weight:700;text-align:center" title="Ligne contenant les noms de colonnes (1=premi&#232;re ligne)"/>
-                </div>
                 <button class="btn btn-p" id="gs-load-btn" onclick="loadSelectedTab()" style="display:none">&#128229; Charger les onglets</button>
                 <button class="btn btn-o btn-xs" onclick="resetGsSteps()">&#8592; Changer de lien</button>
               </div>
@@ -553,7 +549,7 @@ async function _authHeaders(){var h={'Content-Type':'application/json'};try{if(w
 function showToast(msg,type){var t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');setTimeout(()=>t.className='toast',3000)}
 function pf(v){return parseFloat(String(v||0).replace(',','.'))||0}
 function uid(){return Date.now()+'_'+Math.random().toString(36).slice(2,8)}
-function _getHeaderRow(){var gs=document.getElementById('gsHeaderRowInput'),xl=document.getElementById('headerRowInput');var el=(gs&&gs.offsetParent!==null)?gs:xl;return Math.max(1,parseInt(el?.value)||1)}
+function _getHeaderRow(){return Math.max(1,parseInt(document.getElementById('headerRowInput')?.value)||1)}
 
 // ── ÉTAPES ──
 function goStep(n){
@@ -1060,6 +1056,9 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
   const localPf = v => parseFloat(String(v || 0).replace(',', '.')) || 0;
   const get = (r, key) => mapping[key] ? String(r[mapping[key]] || '') : '';
   const getN = (r, key) => localPf(mapping[key] ? r[mapping[key]] : 0);
+  // Convertir coefficient TVA (1.2, 1.1, 1.055) en taux (20, 10, 5.5)
+  const toTvaRate = (n) => { if (n > 1 && n < 2) { if (n >= 1.2) return 20; if (n >= 1.1) return 10; return 5.5; } return n; };
+  const getTvaRate = (r, key) => { const raw = getN(r, key); return raw > 0 ? toTvaRate(raw) : 20; };
 
   // ── Pilotage — CA journalier ──
   if (destKey === 'pilotage_ca') {
@@ -1103,7 +1102,7 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
         fournisseur: get(r, 'fournisseur') || '',
         type:        get(r, 'type') || '',
         montantHT:   String(getN(r, 'montantHT') || ''),
-        tvaRate:     getN(r, 'tvaRate') || 20,
+        tvaRate:     getTvaRate(r, 'tvaRate'),
         deductible:  get(r, 'deductible') || 'Oui',
         pointe:      'Non',
       }))
@@ -1123,7 +1122,7 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
         fournisseur: get(r, 'fournisseur') || '',
         type:        get(r, 'type') || '',
         montantHT:   String(getN(r, 'montantHT') || ''),
-        tvaRate:     getN(r, 'tvaRate') || 20,
+        tvaRate:     getTvaRate(r, 'tvaRate'),
         deductible:  get(r, 'deductible') || 'Oui',
         pointe:      'Non',
         exceptionnel: false,
@@ -1176,7 +1175,7 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
         fournisseur: get(r, 'fournisseur'),
         type: '',
         montantHT: String(getN(r, 'montantHT')),
-        tvaRate: getN(r, 'tvaRate') || 20,
+        tvaRate: getTvaRate(r, 'tvaRate'),
         deductible: 'Oui', pointe: 'Non'
       };
       if (isVar) chargesVar.push(entry); else chargesFixe.push(entry);
@@ -1224,7 +1223,7 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
     for (const r of rows) {
       const nom = (get(r, 'nom') || '').trim();
       if (!nom) continue; // ignorer les lignes sans nom
-      const item = { id: uid(), nom, prixVente: getN(r, 'prixVente'), coutMP: getN(r, 'coutMP'), coutMain: getN(r, 'coutMain'), coutIndirect: getN(r, 'coutIndirect'), tvaRate: getN(r, 'tvaRate') || 20, updatedAt: new Date().toISOString() };
+      const item = { id: uid(), nom, prixVente: getN(r, 'prixVente'), coutMP: getN(r, 'coutMP'), coutMain: getN(r, 'coutMain'), coutIndirect: getN(r, 'coutIndirect'), tvaRate: getTvaRate(r, 'tvaRate'), updatedAt: new Date().toISOString() };
       await window._setDoc(window._doc(window._db, 'marges', window._uid, 'produits', item.id), item);
     }
   }
@@ -2058,89 +2057,130 @@ async function importMarges(){
 // ── Écran de review multi-onglets ──
 function showReviewScreen(gids, analysisData, MODULE_LABELS, url) {
   const area = document.getElementById('gsArea');
-  // Seuls les modules utiles pour l'import Google Sheets
   const REVIEW_MODULES = ['pilotage_ca','pilotage_chargesFixe','pilotage_chargesVar','dettes','marges'];
 
-  function buildTabRow(gid) {
+  // Séparer les sections template (avec mois) des onglets classiques
+  const monthGroups = {}; // { '2026-01': [{gid, ...}] }
+  const standaloneGids = [];
+
+  gids.forEach(gid => {
     const d = analysisData[gid];
-    const {tab, data, destKey, detectedMonth, mapping, enabled, error} = d;
-    const headers = data ? data.headers : [];
-    const fields = destKey && DEST_FIELDS[destKey] ? DEST_FIELDS[destKey] : [];
-    const monthVal = detectedMonth || '';
+    if (!d || d._sectioned) return;
+    if (d.detectedMonth && d.destKey) {
+      if (!monthGroups[d.detectedMonth]) monthGroups[d.detectedMonth] = [];
+      monthGroups[d.detectedMonth].push(gid);
+    } else {
+      standaloneGids.push(gid);
+    }
+  });
 
-    const moduleOpts = REVIEW_MODULES.map(m =>
-      `<option value="${m}" ${destKey===m?'selected':''}>${MODULE_LABELS[m]||m}</option>`
-    ).join('');
+  const MOIS_LABELS = {'01':'Janvier','02':'Février','03':'Mars','04':'Avril','05':'Mai','06':'Juin',
+    '07':'Juillet','08':'Août','09':'Septembre','10':'Octobre','11':'Novembre','12':'Décembre'};
+  const SEC_ICONS = {pilotage_chargesFixe:'📋',pilotage_chargesVar:'📦',pilotage_ca:'📈',dettes:'🏦',marges:'📊'};
 
-    const mappingGrid = fields.length ? `
-      <div class="review-mapping-grid" id="mapping-grid-${gid}">
-        ${fields.map(f => {
-          const cur = mapping[f.key]||'';
-          const opts = `<option value="">— Ne pas importer —</option>` +
-            headers.map(h=>`<option value="${h}" ${cur===h?'selected':''}>${h}</option>`).join('');
-          return `<div class="review-field-row">
-            <div class="review-field-label">${f.label} ${f.required?'<span class="req">*</span>':''}</div>
-            <select class="review-field-sel ${cur?'mapped':''}" 
-              onchange="reviewUpdateMapping('${gid}','${f.key}',this.value)">
-              ${opts}
-            </select>
-          </div>`;
-        }).join('')}
-      </div>` : `<div style="font-size:12px;color:#94a3b8;padding:4px 0">Sélectionnez un module pour voir le mapping</div>`;
+  const hasMonthGroups = Object.keys(monthGroups).length > 0;
 
-    const statusBadge = error
-      ? `<span class="review-badge warn">⚠️ ${error}</span>`
-      : destKey && DEST_FIELDS[destKey]
-        ? `<span class="review-badge mod">${MODULE_LABELS[destKey]||destKey}</span>`
-        : `<span class="review-badge warn" style="opacity:.6">⏭️ Ignoré</span>`;
+  // ── Build month cards ──
+  const sortedMonths = Object.keys(monthGroups).sort();
+  let monthsHtml = '';
+  if (hasMonthGroups) {
+    monthsHtml = sortedMonths.map(ym => {
+      const secs = monthGroups[ym];
+      const [year, mm] = ym.split('-');
+      const label = (MOIS_LABELS[mm] || mm) + ' ' + year;
+      const allEnabled = secs.every(g => analysisData[g].enabled);
 
-    return `
-      <div class="review-tab-row ${enabled?'':'disabled'}" id="review-row-${gid}">
-        <div class="review-tab-header">
-          <button class="review-tab-toggle ${enabled?'on':'off'}" 
-            title="${enabled?'Désactiver':'Activer'} cet onglet"
-            onclick="reviewToggleTab('${gid}')"></button>
-          <div class="review-tab-name">📋 ${tab.name}</div>
-          ${statusBadge}
-          ${detectedMonth?`<span class="review-badge month">📅 ${detectedMonth}</span>`:''}
-          ${data?`<span style="font-size:11px;color:#94a3b8">${data.rows.length} ligne${data.rows.length>1?'s':''}</span>`:''}
-        </div>
-        <div class="review-tab-meta" style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
-          <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b">
-            <span>Module :</span>
-            <select class="review-module-sel" onchange="reviewUpdateModule('${gid}',this.value)">
-              <option value="">— Sélectionner —</option>
-              ${moduleOpts}
-            </select>
+      const badges = secs.map(gid => {
+        const d = analysisData[gid];
+        const modLabel = (MODULE_LABELS[d.destKey]||d.destKey).replace('Pilotage — ','');
+        const icon = SEC_ICONS[d.destKey] || '📄';
+        const rows = d.data ? d.data.totalRows || d.data.rows?.length || 0 : 0;
+        const mapped = Object.keys(d.mapping||{}).length;
+        return `<div class="rv-sec-badge" id="rv-badge-${gid}" style="opacity:${d.enabled?1:0.4}">
+          <span>${icon}</span>
+          <span class="rv-sec-name">${modLabel}</span>
+          <span class="rv-sec-count">${rows} lig.</span>
+          <span class="rv-sec-mapped" title="${mapped} colonnes mappées">✓ ${mapped}</span>
+        </div>`;
+      }).join('');
+
+      return `
+        <div class="rv-month-card ${allEnabled?'':'rv-disabled'}" id="rv-month-${ym}">
+          <div class="rv-month-header">
+            <button class="review-tab-toggle ${allEnabled?'on':'off'}" 
+              onclick="reviewToggleMonth('${ym}')"
+              title="${allEnabled?'Désactiver':'Activer'} ce mois"></button>
+            <div class="rv-month-label">📅 ${label}</div>
+            <span class="rv-month-ym">${ym}</span>
+            <button class="rv-detail-btn" onclick="reviewToggleDetail('${ym}')" title="Voir le détail">⚙️</button>
           </div>
-          <div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#64748b">
-            <span>Mois :</span>
-            <input class="review-month-inp" type="text" placeholder="AAAA-MM" value="${monthVal}"
-              oninput="reviewUpdateMonth('${gid}',this.value)">
+          <div class="rv-sec-row">${badges}</div>
+          <div class="rv-detail-panel" id="rv-detail-${ym}" style="display:none">
+            ${secs.map(gid => buildCompactMapping(gid, analysisData[gid], MODULE_LABELS, REVIEW_MODULES)).join('')}
           </div>
-        </div>
-        <div id="mapping-container-${gid}">${mappingGrid}</div>
-      </div>`;
+        </div>`;
+    }).join('');
   }
 
-  const rowsHtml = gids.map(g => buildTabRow(g)).join('');
-  const enabledCount = gids.filter(g => analysisData[g].enabled).length;
+  // ── Build standalone rows (ignored tabs) ──
+  let standaloneHtml = '';
+  if (standaloneGids.length) {
+    standaloneHtml = `<div class="rv-ignored-section">
+      <div style="font-size:11px;color:#94a3b8;padding:6px 0;font-weight:600">Onglets non importés</div>
+      ${standaloneGids.map(gid => {
+        const d = analysisData[gid];
+        return `<div class="rv-ignored-row ${d.enabled?'':'rv-disabled'}" id="review-row-${gid}">
+          <button class="review-tab-toggle ${d.enabled?'on':'off'}" onclick="reviewToggleTab('${gid}')"></button>
+          <span style="font-size:12px">${d.tab?.name||gid}</span>
+          <span class="rv-ignored-badge">⏭️ Ignoré</span>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  const enabledCount = gids.filter(g => analysisData[g]?.enabled).length;
 
   area.innerHTML = `
+    <style>
+      .rv-month-card{border:1.5px solid var(--border);border-radius:12px;margin-bottom:10px;overflow:hidden;background:#fff;transition:.15s}
+      .rv-month-card.rv-disabled{opacity:.5}
+      .rv-month-header{display:flex;align-items:center;gap:10px;padding:12px 16px;background:rgba(248,250,255,0.6)}
+      .rv-month-label{font-size:15px;font-weight:700;flex:1;color:#1e293b}
+      .rv-month-ym{font-size:11px;font-weight:700;color:#3b82f6;background:#dbeafe;padding:2px 8px;border-radius:99px}
+      .rv-detail-btn{background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;cursor:pointer;font-size:12px;transition:.15s}
+      .rv-detail-btn:hover{background:#f1f5f9}
+      .rv-sec-row{display:flex;gap:8px;padding:10px 16px;flex-wrap:wrap}
+      .rv-sec-badge{display:flex;align-items:center;gap:5px;padding:6px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;transition:.15s}
+      .rv-sec-name{font-weight:600;color:#334155}
+      .rv-sec-count{color:#94a3b8;font-size:11px}
+      .rv-sec-mapped{color:#059669;font-size:11px;font-weight:600}
+      .rv-detail-panel{padding:0 16px 12px;border-top:1px solid var(--border)}
+      .rv-detail-item{padding:10px 0;border-bottom:1px solid #f1f5f9}
+      .rv-detail-item:last-child{border:none}
+      .rv-detail-title{font-size:12px;font-weight:700;color:#475569;margin-bottom:6px}
+      .rv-ignored-section{padding:8px 0}
+      .rv-ignored-row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;margin-bottom:4px;background:#fafafa;border:1px solid #f1f5f9}
+      .rv-ignored-row.rv-disabled{opacity:.4}
+      .rv-ignored-badge{font-size:11px;color:#94a3b8;margin-left:auto}
+    </style>
     <div class="review-panel">
       <div class="review-panel-header">
         <div>
           <div class="review-panel-title">🔍 Vérification avant import</div>
           <div style="font-size:12px;color:#64748b;margin-top:2px">
-            Vérifiez le module et le mapping de chaque onglet. Désactivez ceux à ignorer.
+            ${hasMonthGroups ? 'Modules détectés automatiquement. Cliquez ⚙️ pour ajuster le mapping.' : 'Vérifiez le module et le mapping de chaque onglet.'}
           </div>
         </div>
-        <button class="btn btn-outline btn-sm" onclick="reviewSelectAll()">Tout activer</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-outline btn-sm" onclick="reviewSelectAll()">Tout activer</button>
+          <button class="btn btn-outline btn-sm" onclick="reviewDeselectAll()">Tout désactiver</button>
+        </div>
       </div>
-      ${rowsHtml}
+      ${monthsHtml}
+      ${standaloneHtml}
       <div class="review-confirm-bar">
         <div style="font-size:13px;color:#64748b" id="review-count-label">
-          <b id="review-enabled-count">${enabledCount}</b> onglet(s) à importer
+          <b id="review-enabled-count">${enabledCount}</b> section(s) à importer
         </div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-outline btn-sm" onclick="resetGsSteps()">← Retour</button>
@@ -2151,68 +2191,135 @@ function showReviewScreen(gids, analysisData, MODULE_LABELS, url) {
       </div>
     </div>`;
 
-  // Stocker les données d'analyse pour confirmMultiImport
   window._reviewAnalysisData = analysisData;
   window._reviewGids = gids;
   window._reviewUrl = url;
+  window._monthGroups = monthGroups;
+}
+
+// Build compact mapping for detail panel
+function buildCompactMapping(gid, d, MODULE_LABELS, REVIEW_MODULES) {
+  const {destKey, mapping, data} = d;
+  const headers = data ? data.headers : [];
+  const fields = destKey && DEST_FIELDS[destKey] ? DEST_FIELDS[destKey] : [];
+  const modLabel = MODULE_LABELS[destKey] || destKey;
+
+  const mappingCells = fields.map(f => {
+    const cur = mapping[f.key]||'';
+    const opts = `<option value="">—</option>` +
+      headers.map(h=>`<option value="${h}" ${cur===h?'selected':''}>${h}</option>`).join('');
+    return `<div style="display:flex;align-items:center;gap:4px;font-size:11px">
+      <span style="color:#64748b;min-width:80px">${f.label}${f.required?' *':''}</span>
+      <select class="review-field-sel ${cur?'mapped':''}" style="font-size:11px;padding:2px 4px" 
+        onchange="reviewUpdateMapping('${gid}','${f.key}',this.value)">${opts}</select>
+    </div>`;
+  }).join('');
+
+  const moduleOpts = REVIEW_MODULES.map(m =>
+    `<option value="${m}" ${destKey===m?'selected':''}>${MODULE_LABELS[m]||m}</option>`).join('');
+
+  return `<div class="rv-detail-item">
+    <div class="rv-detail-title">
+      <select class="review-module-sel" style="font-size:11px;font-weight:700;border:1px solid var(--border);border-radius:4px;padding:2px" onchange="reviewUpdateModule('${gid}',this.value)">
+        <option value="">— Sélectionner —</option>${moduleOpts}
+      </select>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px 16px">${mappingCells}</div>
+  </div>`;
+}
+
+// Toggle all sections in a month
+function reviewToggleMonth(ym) {
+  const secs = window._monthGroups[ym];
+  if (!secs) return;
+  const allEnabled = secs.every(g => window._reviewAnalysisData[g].enabled);
+  secs.forEach(gid => {
+    window._reviewAnalysisData[gid].enabled = !allEnabled;
+    const badge = document.getElementById('rv-badge-' + gid);
+    if (badge) badge.style.opacity = !allEnabled ? 1 : 0.4;
+  });
+  const card = document.getElementById('rv-month-' + ym);
+  if (card) card.classList.toggle('rv-disabled', allEnabled);
+  const btn = card?.querySelector('.review-tab-toggle');
+  if (btn) { btn.classList.toggle('on', !allEnabled); btn.classList.toggle('off', allEnabled); }
+  updateReviewCount();
+}
+
+function reviewToggleDetail(ym) {
+  const panel = document.getElementById('rv-detail-' + ym);
+  if (panel) panel.style.display = panel.style.display === 'none' ? '' : 'none';
+}
+
+function reviewDeselectAll() {
+  window._reviewGids.forEach(g => {
+    if (window._reviewAnalysisData[g] && !window._reviewAnalysisData[g]._sectioned) {
+      window._reviewAnalysisData[g].enabled = false;
+    }
+  });
+  // Update UI
+  Object.keys(window._monthGroups||{}).forEach(ym => {
+    const card = document.getElementById('rv-month-'+ym);
+    if(card){card.classList.add('rv-disabled');const b=card.querySelector('.review-tab-toggle');if(b){b.classList.remove('on');b.classList.add('off');}}
+    (window._monthGroups[ym]||[]).forEach(gid=>{const bg=document.getElementById('rv-badge-'+gid);if(bg)bg.style.opacity=0.4;});
+  });
+  updateReviewCount();
+}
+
+function updateReviewCount() {
+  const count = window._reviewGids.filter(g => window._reviewAnalysisData[g]?.enabled).length;
+  const el = document.getElementById('review-enabled-count');
+  if (el) el.textContent = count;
 }
 
 // Callbacks review
 function reviewToggleTab(gid) {
   const d = window._reviewAnalysisData[gid];
+  if (!d) return;
   d.enabled = !d.enabled;
   const row = document.getElementById('review-row-'+gid);
-  row.classList.toggle('disabled', !d.enabled);
-  const btn = row.querySelector('.review-tab-toggle');
-  btn.classList.toggle('on', d.enabled);
-  btn.classList.toggle('off', !d.enabled);
-  btn.title = (d.enabled?'Désactiver':'Activer') + ' cet onglet';
-  // Mettre à jour le compteur
-  const count = window._reviewGids.filter(g=>window._reviewAnalysisData[g].enabled).length;
-  document.getElementById('review-enabled-count').textContent = count;
+  if (row) {
+    row.classList.toggle('disabled', !d.enabled);
+    row.classList.toggle('rv-disabled', !d.enabled);
+    const btn = row.querySelector('.review-tab-toggle');
+    if (btn) { btn.classList.toggle('on', d.enabled); btn.classList.toggle('off', !d.enabled); }
+  }
+  updateReviewCount();
 }
 
 function reviewSelectAll() {
   window._reviewGids.forEach(g => {
     const d = window._reviewAnalysisData[g];
-    if(!d.enabled) reviewToggleTab(g);
+    if (d && !d._sectioned && d.destKey) d.enabled = true;
   });
+  // Update month cards UI
+  Object.keys(window._monthGroups||{}).forEach(ym => {
+    const card = document.getElementById('rv-month-'+ym);
+    if(card){card.classList.remove('rv-disabled');const b=card.querySelector('.review-tab-toggle');if(b){b.classList.add('on');b.classList.remove('off');}}
+    (window._monthGroups[ym]||[]).forEach(gid=>{const bg=document.getElementById('rv-badge-'+gid);if(bg)bg.style.opacity=1;});
+  });
+  updateReviewCount();
 }
 
 function reviewUpdateModule(gid, newModule) {
   const d = window._reviewAnalysisData[gid];
+  if (!d) return;
   d.destKey = newModule;
-  // Rebuild le mapping grid
   const fields = newModule && DEST_FIELDS[newModule] ? DEST_FIELDS[newModule] : [];
   const headers = d.data ? d.data.headers : [];
-  const container = document.getElementById('mapping-container-'+gid);
-  if(!fields.length){ container.innerHTML = '<div style="font-size:12px;color:#94a3b8">Aucun mapping disponible</div>'; return; }
-  
-  // Auto-mapping basique par correspondance
+  // Auto-mapping basique
   const newMapping = {};
   fields.forEach(f => {
     const found = headers.find(h => f.hint && f.hint.some(hint => h.toLowerCase().includes(hint)));
     if(found) newMapping[f.key] = found;
   });
   d.mapping = newMapping;
-
-  container.innerHTML = `<div class="review-mapping-grid">` +
-    fields.map(f => {
-      const cur = newMapping[f.key]||'';
-      const opts = `<option value="">— Ne pas importer —</option>` +
-        headers.map(h=>`<option value="${h}" ${cur===h?'selected':''}>${h}</option>`).join('');
-      return `<div class="review-field-row">
-        <div class="review-field-label">${f.label}${f.required?' <span class="req">*</span>':''}</div>
-        <select class="review-field-sel ${cur?'mapped':''}" 
-          onchange="reviewUpdateMapping('${gid}','${f.key}',this.value)">${opts}</select>
-      </div>`;
-    }).join('') + `</div>`;
+  d.enabled = !!newModule;
+  updateReviewCount();
 }
 
 function reviewUpdateMapping(gid, fieldKey, colName) {
-  window._reviewAnalysisData[gid].mapping[fieldKey] = colName;
-  const sel = document.querySelector(`#mapping-container-${gid} select[onchange*="'${fieldKey}'"]`);
-  if(sel) sel.classList.toggle('mapped', !!colName);
+  const d = window._reviewAnalysisData[gid];
+  if (d) d.mapping[fieldKey] = colName;
 }
 
 function reviewUpdateMonth(gid, val) {
