@@ -914,7 +914,7 @@ async function loadSelectedTab() {
   const MODULE_MAP = {
     'pilotage_ca':'pilotage_ca','pilotage_charges':'pilotage_chargesFixe',
     'pilotage_charges_fixe':'pilotage_chargesFixe','pilotage_charges_var':'pilotage_chargesVar',
-    'ca':'ca','charges':'charges','stock':'stock',
+    'ca':'ca','charges':'charges','stock':'stock','leasing':'pilotage_chargesFixe',
     'dettes':'dettes','fidelite_clients':'fidelite','mouvements_stock':'mouvements','marges':'marges'
   };
   const MODULE_LABELS = {
@@ -926,6 +926,7 @@ async function loadSelectedTab() {
   // Analyser les onglets par batchs de 3 (évite surcharge Vercel)
   const analysisData = {};
   let done = 0;
+  const sectionGids = []; // gids synthétiques pour les sous-sections
 
   async function analyzeOne(gid) {
     const tab = _gsTabsData[gid];
@@ -938,16 +939,37 @@ async function loadSelectedTab() {
       if (!contentType.includes('application/json')) throw new Error(`Erreur serveur (${r.status})`);
       const data = await r.json();
       if(!r.ok || !data.success) throw new Error(data.error||'Erreur');
-      const ai = data.aiAnalysis;
-      const destKey = ai ? (MODULE_MAP[ai.module]||ai.module) : null;
+
       const detectedMonth = detectMonthFromTabName(tab.name);
-      const localMapping = {};
-      if(ai && ai.mapping){
-        Object.entries(ai.mapping).forEach(([k,v])=>{
-          if(v && data.headers.includes(v)) localMapping[k]=v;
+
+      // Si l'API a détecté des sections (charges fixes + charges var + CA dans le même onglet)
+      if (data.sections && data.sections.length >= 2) {
+        data.sections.forEach((sec, i) => {
+          const sgid = gid + '_s' + i;
+          sectionGids.push(sgid);
+          analysisData[sgid] = {
+            tab: { name: tab.name + ' — ' + sec.name, gid: sgid },
+            data: { headers: sec.headers, rows: sec.rows, totalRows: sec.totalRows },
+            destKey: MODULE_MAP[sec.module] || sec.module || null,
+            detectedMonth,
+            mapping: sec.mapping || {},
+            enabled: true,
+            error: null
+          };
         });
+        analysisData[gid] = { _sectioned: true }; // marquer pour suppression
+      } else {
+        // Onglet classique mono-module
+        const ai = data.aiAnalysis;
+        const destKey = ai ? (MODULE_MAP[ai.module]||ai.module) : null;
+        const localMapping = {};
+        if(ai && ai.mapping){
+          Object.entries(ai.mapping).forEach(([k,v])=>{
+            if(v && data.headers.includes(v)) localMapping[k]=v;
+          });
+        }
+        analysisData[gid] = {tab, data, destKey, detectedMonth, mapping:localMapping, enabled:true, error:null};
       }
-      analysisData[gid] = {tab, data, destKey, detectedMonth, mapping:localMapping, enabled:true, error:null};
     } catch(e) {
       analysisData[gid] = {tab, data:null, destKey:null, detectedMonth:null, mapping:{}, enabled:false, error:e.message};
     }
@@ -962,8 +984,16 @@ async function loadSelectedTab() {
     await Promise.all(gids.slice(i, i + 3).map(gid => analyzeOne(gid)));
   }
 
+  // Construire la liste finale : remplacer les onglets sectionnés par leurs sous-sections
+  const finalGids = [];
+  for (const gid of gids) {
+    if (analysisData[gid]?._sectioned) continue; // skip parent
+    finalGids.push(gid);
+  }
+  finalGids.push(...sectionGids);
+
   // Afficher l'écran de review
-  showReviewScreen(gids, analysisData, MODULE_LABELS, url);
+  showReviewScreen(finalGids, analysisData, MODULE_LABELS, url);
   btn.disabled = false;
   btn.textContent = '📥 Charger ' + total + ' onglets';
   gsLoading(null);
