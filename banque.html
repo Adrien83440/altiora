@@ -576,6 +576,7 @@ async function connectSelectedBank() {
       // Écriture PROPRE (pas de merge) pour éviter les données résiduelles d'une ancienne connexion
       await window._setDoc(window._doc(window._db, 'bank_connections', window._uid), {
         pending_requisition_id: data.requisition_id,
+        agreement_id: data.agreement_id || null,
         institution_id: _selectedBank.id,
         institution_name: _selectedBank.name,
         status: 'pending',
@@ -1052,19 +1053,47 @@ function showError(msg) {
 async function disconnectBank() {
   if (!confirm('Déconnecter votre banque et supprimer toutes les données bancaires stockées ?\n\nLes données déjà importées dans Pilotage seront conservées.')) return;
   try {
-    // Supprimer toutes les données bancaires
+    // 1. Lire les IDs GoCardless avant de tout supprimer
+    var reqId = _connection?.requisition_id || _connection?.pending_requisition_id || null;
+    var agrId = _connection?.agreement_id || null;
+
+    // Si pas en mémoire, lire depuis Firestore
+    if (!reqId) {
+      try {
+        var snap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
+        if (snap.exists()) {
+          var d = snap.data();
+          reqId = d.requisition_id || d.pending_requisition_id || null;
+          agrId = d.agreement_id || null;
+        }
+      } catch(e) {}
+    }
+
+    // 2. Supprimer côté GoCardless (requisition + agreement)
+    if (reqId || agrId) {
+      try {
+        await fetch('/api/bank-connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: window._uid, action: 'disconnect', requisition_id: reqId, agreement_id: agrId })
+        });
+        console.log('[DISCONNECT] GoCardless cleanup done');
+      } catch(e) { console.warn('[DISCONNECT] GoCardless cleanup failed:', e.message); }
+    }
+
+    // 3. Supprimer toutes les données Firestore
     await window._deleteDoc(window._doc(window._db, 'bank_connections', window._uid));
     try { await window._deleteDoc(window._doc(window._db, 'bank_pending', window._uid)); } catch(e) {}
     try { await window._deleteDoc(window._doc(window._db, 'cashflow', window._uid, 'config', 'tresorerie')); } catch(e) {}
 
-    // Reset state local
+    // 4. Reset state local
     _connection = null;
     _fullSyncData = null;
     _selectedAccountIds = [];
     _previewAccounts = [];
 
     showNotConnectedZone();
-    showToast('Banque déconnectée — toutes les données bancaires ont été supprimées.', 'success');
+    showToast('Banque déconnectée — toutes les données ont été supprimées (Alteore + GoCardless).', 'success');
   } catch(e) {
     showToast('Erreur : ' + e.message, 'error');
   }
