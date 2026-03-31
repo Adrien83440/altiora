@@ -117,16 +117,54 @@ export default async function handler(req, res) {
   const lines = csvText.split(/\r?\n/).filter(l => l.trim());
   if (lines.length < 2) return res.status(400).json({ error: 'Onglet vide ou sans données' });
 
-  // Ligne d'en-tête configurable (1-based), par défaut ligne 1
-  const headerIdx = Math.max(0, (parseInt(headerRow) || 1) - 1);
-  const firstLine = lines[headerIdx] || lines[0];
+  // Détecter le séparateur depuis la première ligne non-vide
+  const firstLine = lines[0];
   const sep = firstLine.split(';').length > firstLine.split(',').length ? ';' : ',';
-  const headers = splitCsvLine(firstLine, sep).filter(h => h);
+
+  // ── Auto-détection de la ligne d'en-tête ──
+  // Si headerRow=1 (défaut), on vérifie si la ligne 1 est un titre (beaucoup de cellules vides)
+  // et on descend automatiquement à la prochaine ligne avec plus de colonnes remplies
+  let headerIdx = Math.max(0, (parseInt(headerRow) || 1) - 1);
+
+  if (headerIdx === 0 && lines.length >= 3) {
+    const countNonEmpty = (line) => splitCsvLine(line, sep).filter(h => h && h.trim()).length;
+    const countTotal = (line) => splitCsvLine(line, sep).length;
+    const row1filled = countNonEmpty(lines[0]);
+    const row1total = countTotal(lines[0]);
+    const row2filled = countNonEmpty(lines[1]);
+
+    // Si la ligne 1 a < 50% de cellules remplies ET la ligne 2 en a plus → c'est un titre
+    if (row1total > 3 && row1filled < row1total * 0.5 && row2filled > row1filled) {
+      headerIdx = 1; // utiliser la ligne 2 comme en-tête
+    }
+  }
+
+  const headerLine = lines[headerIdx] || lines[0];
+  const rawHeaders = splitCsvLine(headerLine, sep);
+
+  // Construire les headers avec index correct + déduplication
+  // On garde la position réelle de chaque colonne pour aligner avec les données
+  const headerMap = []; // [{name, idx}] — colonnes non-vides avec leur position
+  const seen = {};
+  rawHeaders.forEach((h, idx) => {
+    if (!h || !h.trim()) return; // ignorer les colonnes vides
+    let name = h.trim();
+    // Dédupliquer : FOURNISSEUR, FOURNISSEUR (2), FOURNISSEUR (3)...
+    if (seen[name]) {
+      seen[name]++;
+      name = `${name} (${seen[name]})`;
+    } else {
+      seen[name] = 1;
+    }
+    headerMap.push({ name, idx });
+  });
+
+  const headers = headerMap.map(h => h.name);
   const rows = lines.slice(headerIdx + 1)
     .map(l => {
       const vals = splitCsvLine(l, sep);
       const obj = {};
-      headers.forEach((h, i) => { obj[h] = vals[i] !== undefined ? vals[i] : ''; });
+      headerMap.forEach(h => { obj[h.name] = vals[h.idx] !== undefined ? vals[h.idx] : ''; });
       return obj;
     })
     .filter(r => Object.values(r).some(v => String(v).trim()));
@@ -157,7 +195,7 @@ ${sample}
 
 Réponds UNIQUEMENT en JSON valide, format exact :
 {
-  "module": "stock" | "pilotage_ca" | "pilotage_charges" | "dettes" | "fidelite_clients" | "mouvements_stock" | "marges" | "inconnu",
+  "module": "stock" | "pilotage_ca" | "pilotage_charges_fixe" | "pilotage_charges_var" | "pilotage_charges" | "dettes" | "fidelite_clients" | "mouvements_stock" | "marges" | "inconnu",
   "confidence": 0.0-1.0,
   "reason": "explication courte (<80 chars)",
   "mapping": { "champ_alteore": "nom_colonne_fichier_ou_null" }
@@ -166,14 +204,20 @@ Réponds UNIQUEMENT en JSON valide, format exact :
 Champs disponibles par module :
 - stock: ref, name, cat, fournisseur, pa, pv, stockBase, min, unite, notes
 - pilotage_ca: date, ht055, ht10, ht20, montantHT
+- pilotage_charges_fixe: fournisseur, type, montantHT, tvaRate, deductible
+- pilotage_charges_var: fournisseur, type, montantHT, tvaRate, deductible
 - pilotage_charges: fournisseur, type, montantHT, tvaRate, deductible
 - dettes: nom, montant, taux, duree, debut, type
 - fidelite_clients: prenom, nom, email, telephone, points, dateInscription
 - mouvements_stock: date, type, ref, qty, note
 - marges: nom, prixVente, coutMP, coutMain, coutIndirect, tvaRate
 
-Attention aux colonnes calculées (Coût total, Coût/unité) → NE PAS mapper, ce sont des formules.
-Ne mappe que les colonnes sources. Met null pour les colonnes non trouvées.`;
+RÈGLES IMPORTANTES :
+- Si un onglet contient des colonnes dédupliquées (ex: "FOURNISSEUR" et "FOURNISSEUR (2)"), c'est que le tableur a 2 sections côte à côte (souvent charges fixes + charges variables). Utilise les colonnes SANS suffixe "(2)" pour le mapping et choisis le module "pilotage_charges_fixe".
+- Les colonnes "POINTÉ", "Total TTC" sont des colonnes UI/calculées → ne PAS mapper.
+- Colonne TVA : si les valeurs sont 1.2, 1.1, 1.055 c'est un coefficient, PAS un taux. Ne pas mapper en tvaRate.
+- Attention aux colonnes calculées (Coût total, Coût/unité) → NE PAS mapper, ce sont des formules.
+- Ne mappe que les colonnes sources. Met null pour les colonnes non trouvées.`;
 
       try {
         const aiResp = await fetch('https://api.anthropic.com/v1/messages', {
