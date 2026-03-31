@@ -304,10 +304,6 @@ input[type=file]{display:none}
             <div id="gs-step-tabs" style="display:none;margin-top:14px">
               <div id="gs-tabs-grid" style="margin-bottom:14px"></div>
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;background:rgba(248,250,255,0.6);border:1px solid var(--border);border-radius:8px">
-                  <span style="font-size:12px;font-weight:600;color:var(--muted)">&#9881;&#65039; Ligne d'en-t&#234;te :</span>
-                  <input type="number" id="gsHeaderRowInput" value="1" min="1" max="20" style="width:46px;padding:4px 6px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-weight:700;text-align:center" title="Ligne contenant les noms de colonnes (1=premi&#232;re ligne)"/>
-                </div>
                 <button class="btn btn-p" id="gs-load-btn" onclick="loadSelectedTab()" style="display:none">&#128229; Charger les onglets</button>
                 <button class="btn btn-o btn-xs" onclick="resetGsSteps()">&#8592; Changer de lien</button>
               </div>
@@ -553,7 +549,6 @@ async function _authHeaders(){var h={'Content-Type':'application/json'};try{if(w
 function showToast(msg,type){var t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');setTimeout(()=>t.className='toast',3000)}
 function pf(v){return parseFloat(String(v||0).replace(',','.'))||0}
 function uid(){return Date.now()+'_'+Math.random().toString(36).slice(2,8)}
-function _getHeaderRow(){var gs=document.getElementById('gsHeaderRowInput'),xl=document.getElementById('headerRowInput');var el=(gs&&gs.offsetParent!==null)?gs:xl;return Math.max(1,parseInt(el?.value)||1)}
 
 // ── ÉTAPES ──
 function goStep(n){
@@ -647,7 +642,7 @@ async function applyHeaderRow(){
       parseSheet(idx, '');
     } else if(_gsLastUrl) {
       // Google Sheets : re-fetch avec headerRow
-      const headerRow = _getHeaderRow();
+      const headerRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
       const r = await fetch('/api/fetch-sheet', {
         method:'POST',
         headers: await _authHeaders(),
@@ -661,7 +656,7 @@ async function applyHeaderRow(){
       showPreview('Google Sheets — ' + (_gsLastName||''));
     } else if(_allRawRows && _allRawRows.length) {
       // Fallback : utiliser les lignes brutes déjà en mémoire
-      const headerRow = _getHeaderRow();
+      const headerRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
       const headerIdx = headerRow - 1;
       const rawH = _allRawRows[headerIdx] || _allRawRows[0];
       const allHeaders = rawH.map(h=>String(h||'').trim());
@@ -688,7 +683,7 @@ function parseSheet(idx,filename){
   const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
   if(!data.length){showToast('Feuille vide','err');return}
   // Ligne d'en-tête configurable (1-based)
-  const headerRowNum = _getHeaderRow();
+  const headerRowNum = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1);
   const headerRowIdx = headerRowNum - 1;
   // Construire les headers en combinant plusieurs lignes si besoin (ignore lignes vides avant)
   const rawHeaders = data[headerRowIdx] || data[0];
@@ -738,7 +733,7 @@ function detectMonthFromTabName(name) {
     'avril':'04','apr':'04','april':'04',
     'mai':'05','may':'05',
     'juin':'06','jun':'06','june':'06',
-    'juillet':'07','juill':'07','jul':'07','july':'07',
+    'juillet':'07','jul':'07','july':'07',
     'août':'08','aout':'08','aug':'08','august':'08',
     'septembre':'09','sep':'09','sept':'09','september':'09',
     'octobre':'10','oct':'10','october':'10',
@@ -746,12 +741,11 @@ function detectMonthFromTabName(name) {
     'décembre':'12','decembre':'12','dec':'12','december':'12',
   };
 
-  // Format "Mois AAAA" ou "Mois AA" ou "Mois AAAA - ..."
-  const mMatch = s.match(/([a-zéûôàèùâê]+)\s+(\d{2,4})/i);
+  // Format "Mois AAAA" ou "Mois AAAA - ..."
+  const mMatch = s.match(/([a-zéûôàèùâê]+)\s+(\d{4})/i);
   if (mMatch) {
     const key = mMatch[1].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-    let year = mMatch[2];
-    if (year.length === 2) year = (parseInt(year) > 50 ? '19' : '20') + year;
+    const year = mMatch[2];
     // Chercher dans MOIS avec/sans accents
     const monthNum = MOIS[mMatch[1].toLowerCase()] || MOIS[key];
     if (monthNum) return `${year}-${monthNum}`;
@@ -865,12 +859,12 @@ async function loadSelectedTab() {
       const r = await fetch('/api/fetch-sheet', {
         method: 'POST',
         headers: await _authHeaders(),
-        body: JSON.stringify({ url, gid, analyze: true, headerRow: _getHeaderRow() })
+        body: JSON.stringify({ url, gid, analyze: true, headerRow: Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1) })
       });
       const data = await r.json();
       if (!r.ok || !data.success) throw new Error(data.error || 'Erreur serveur');
       // Appliquer la ligne d'en-tête configurée
-      const gsHeaderRow = _getHeaderRow() - 1;
+      const gsHeaderRow = Math.max(1, parseInt(document.getElementById('headerRowInput')?.value)||1) - 1;
       if(gsHeaderRow > 0 && data.allRows) {
         // Si l'API renvoie allRows, recalculer depuis la bonne ligne
         const rawH = data.allRows[gsHeaderRow] || data.allRows[0];
@@ -898,7 +892,6 @@ async function loadSelectedTab() {
 
   // ── Multi-onglets : analyse IA puis écran de review ──
   const area = document.getElementById('gsArea');
-  const headerRow = _getHeaderRow(); // capturer AVANT de remplacer le DOM
   
   // Panneau d'analyse en cours
   area.innerHTML = `
@@ -914,7 +907,7 @@ async function loadSelectedTab() {
   const MODULE_MAP = {
     'pilotage_ca':'pilotage_ca','pilotage_charges':'pilotage_chargesFixe',
     'pilotage_charges_fixe':'pilotage_chargesFixe','pilotage_charges_var':'pilotage_chargesVar',
-    'ca':'ca','charges':'charges','stock':'stock','leasing':'pilotage_chargesFixe',
+    'ca':'ca','charges':'charges','stock':'stock',
     'dettes':'dettes','fidelite_clients':'fidelite','mouvements_stock':'mouvements','marges':'marges'
   };
   const MODULE_LABELS = {
@@ -923,77 +916,38 @@ async function loadSelectedTab() {
     stock:'📦 Stock', mouvements:'🔄 Mouvements stock', fidelite:'❤️ Fidélité clients', marges:'📊 Marges produits'
   };
 
-  // Analyser les onglets par batchs de 3 (évite surcharge Vercel)
+  // Analyser tous les onglets en parallèle
   const analysisData = {};
   let done = 0;
-  const sectionGids = []; // gids synthétiques pour les sous-sections
-
-  async function analyzeOne(gid) {
+  await Promise.all(gids.map(async gid => {
     const tab = _gsTabsData[gid];
     try {
       const r = await fetch('/api/fetch-sheet', {
         method:'POST', headers: await _authHeaders(),
-        body: JSON.stringify({url, gid, analyze:true, headerRow})
+        body: JSON.stringify({url, gid, analyze:true})
       });
-      const contentType = r.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) throw new Error(`Erreur serveur (${r.status})`);
       const data = await r.json();
       if(!r.ok || !data.success) throw new Error(data.error||'Erreur');
-
+      const ai = data.aiAnalysis;
+      const destKey = ai ? (MODULE_MAP[ai.module]||ai.module) : null;
       const detectedMonth = detectMonthFromTabName(tab.name);
-
-      // Si l'API a détecté des sections (charges fixes + charges var + CA dans le même onglet)
-      if (data.sections && data.sections.length >= 2) {
-        data.sections.forEach((sec, i) => {
-          const sgid = gid + '_s' + i;
-          sectionGids.push(sgid);
-          analysisData[sgid] = {
-            tab: { name: tab.name + ' — ' + sec.name, gid: sgid },
-            data: { headers: sec.headers, rows: sec.rows, totalRows: sec.totalRows },
-            destKey: MODULE_MAP[sec.module] || sec.module || null,
-            detectedMonth,
-            mapping: sec.mapping || {},
-            enabled: true,
-            error: null
-          };
+      const localMapping = {};
+      if(ai && ai.mapping){
+        Object.entries(ai.mapping).forEach(([k,v])=>{
+          if(v && data.headers.includes(v)) localMapping[k]=v;
         });
-        analysisData[gid] = { _sectioned: true }; // marquer pour suppression
-      } else {
-        // Onglet classique mono-module
-        const ai = data.aiAnalysis;
-        const destKey = ai ? (MODULE_MAP[ai.module]||ai.module) : null;
-        const localMapping = {};
-        if(ai && ai.mapping){
-          Object.entries(ai.mapping).forEach(([k,v])=>{
-            if(v && data.headers.includes(v)) localMapping[k]=v;
-          });
-        }
-        analysisData[gid] = {tab, data, destKey, detectedMonth, mapping:localMapping, enabled:true, error:null};
       }
+      analysisData[gid] = {tab, data, destKey, detectedMonth, mapping:localMapping, enabled:true, error:null};
     } catch(e) {
       analysisData[gid] = {tab, data:null, destKey:null, detectedMonth:null, mapping:{}, enabled:false, error:e.message};
     }
     done++;
-    const statusEl = document.getElementById('review-analysis-status');
-    const barEl = document.getElementById('review-analysis-bar');
-    if(statusEl) statusEl.textContent = `Analyse de "${tab.name}"… (${done}/${total})`;
-    if(barEl) barEl.style.width = (done/total*100)+'%';
-  }
-
-  for (let i = 0; i < gids.length; i += 3) {
-    await Promise.all(gids.slice(i, i + 3).map(gid => analyzeOne(gid)));
-  }
-
-  // Construire la liste finale : remplacer les onglets sectionnés par leurs sous-sections
-  const finalGids = [];
-  for (const gid of gids) {
-    if (analysisData[gid]?._sectioned) continue; // skip parent
-    finalGids.push(gid);
-  }
-  finalGids.push(...sectionGids);
+    document.getElementById('review-analysis-status').textContent = `Analyse de "${tab.name}"… (${done}/${total})`;
+    document.getElementById('review-analysis-bar').style.width = (done/total*100)+'%';
+  }));
 
   // Afficher l'écran de review
-  showReviewScreen(finalGids, analysisData, MODULE_LABELS, url);
+  showReviewScreen(gids, analysisData, MODULE_LABELS, url);
   btn.disabled = false;
   btn.textContent = '📥 Charger ' + total + ' onglets';
   gsLoading(null);
@@ -1257,7 +1211,6 @@ function resetGsSteps() {
 function gsLoading(msg){
   const el=document.getElementById('gs-loading');
   const txt=document.getElementById('gs-loading-text');
-  if(!el) return;
   if(msg){el.style.display='';txt.textContent=msg;}
   else{el.style.display='none';}
 }
@@ -1420,17 +1373,10 @@ function validateMapping(){
 // ── VÉRIFICATION ──
 function buildVerify(){
   const fields=DEST_FIELDS[_dest].filter(f=>_mapping[f.key]&&!_ignored.has(f.key));
-  const now=new Date();
-  const defaultYM=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   document.getElementById('importSummary').innerHTML=`
     <div class="is-box ok"><div class="is-val" style="color:var(--green)">${_rows.length}</div><div class="is-lbl">Lignes à importer</div></div>
     <div class="is-box ok"><div class="is-val" style="color:var(--blue)">${fields.length}</div><div class="is-lbl">Champs mappés</div></div>
-    <div class="is-box ${_ignored.size?'warn':''}"><div class="is-val" style="color:${_ignored.size?'var(--orange)':'var(--muted)'}">${_ignored.size}</div><div class="is-lbl">Champs ignorés</div></div>
-    <div class="is-box" style="border-color:#dbeafe">
-      <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px">📅 Mois cible</div>
-      <input type="month" id="importMonthPicker" value="${defaultYM}" style="font-size:13px;font-weight:700;padding:5px 8px;border:1px solid #93c5fd;border-radius:6px;color:#1d4ed8;background:#eff6ff;cursor:pointer">
-      <div style="font-size:10px;color:#94a3b8;margin-top:4px">Utilisé uniquement si vos lignes n'ont pas de date — sinon chaque ligne ira dans son mois</div>
-    </div>`;
+    <div class="is-box ${_ignored.size?'warn':''}"><div class="is-val" style="color:${_ignored.size?'var(--orange)':'var(--muted)'}">${_ignored.size}</div><div class="is-lbl">Champs ignorés</div></div>`;
   const previewRows=_rows.slice(0,5);
   document.getElementById('verifyTable').innerHTML=`
     <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px;margin-bottom:12px">
@@ -1910,13 +1856,11 @@ async function doPilotageCompletImport() {
 async function doImport(){
   const btn=document.getElementById('importBtn');
   btn.textContent='⏳ Import en cours...';btn.disabled=true;
-  const monthPicker=document.getElementById('importMonthPicker');
-  const forcedMonth=monthPicker?monthPicker.value||null:null;
   try{
     if(_dest==='pilotage_ca'||_dest==='pilotage_chargesFixe'||_dest==='pilotage_chargesVar')
-      await importDataDirect(_dest,_rows,_headers,_mapping,forcedMonth);
-    else if(_dest==='ca') await importCA(forcedMonth);
-    else if(_dest==='charges') await importCharges(forcedMonth);
+      await importDataDirect(_dest,_rows,_headers,_mapping,null);
+    else if(_dest==='ca') await importCA();
+    else if(_dest==='charges') await importCharges();
     else if(_dest==='dettes') await importDettes();
     else if(_dest==='stock') await importStock();
     else if(_dest==='mouvements') await importMouvements();
@@ -1935,12 +1879,12 @@ async function doImport(){
   },400);
 }
 
-async function importCA(forcedMonth){
+async function importCA(){
   if(!window._uid||!window._setDoc) throw new Error('Non connecté');
   const byMonth={};
   _rows.forEach(r=>{
     const dateVal=_mapping['date']?r[_mapping['date']]:'';
-    const ym=parseDateToYYYYMM(dateVal)||forcedMonth||`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+    const ym=parseDateToYYYYMM(dateVal)||`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
     if(!byMonth[ym])byMonth[ym]=[];
     const entry={date:parseDateFull(dateVal)};
     if(_mapping['ht055'])entry.ht055=String(pf(r[_mapping['ht055']]));
@@ -1961,25 +1905,20 @@ async function importCA(forcedMonth){
   }
 }
 
-async function importCharges(forcedMonth){
+async function importCharges(){
   if(!window._uid||!window._setDoc) throw new Error('Non connecté');
-  const byMonth={};
+  const ym=`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
+  const ref=window._doc(window._db,'pilotage',window._uid,'months',ym);
+  const snap=await window._getDoc(ref);
+  const existing=snap.exists()?snap.data():{};
+  const chargesFixe=existing.chargesFixe||[];
+  const chargesVar=existing.chargesVar||[];
   _rows.forEach(r=>{
-    const dateVal=_mapping['date']?r[_mapping['date']]:'';
-    const ym=parseDateToYYYYMM(dateVal)||forcedMonth||`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
-    if(!byMonth[ym])byMonth[ym]={fixe:[],var:[]};
     const typeRaw=String(_mapping['type']?r[_mapping['type']]:'fixe').toLowerCase();
     const entry={fournisseur:_mapping['fournisseur']?String(r[_mapping['fournisseur']]||''):'',type:'',montantHT:String(pf(_mapping['montantHT']?r[_mapping['montantHT']]:0)),tvaRate:pf(_mapping['tvaRate']?r[_mapping['tvaRate']]:20)||20,deductible:'Oui',pointe:'Non'};
-    if(typeRaw.includes('var'))byMonth[ym].var.push(entry); else byMonth[ym].fixe.push(entry);
+    if(typeRaw.includes('var'))chargesVar.push(entry); else chargesFixe.push(entry);
   });
-  for(const [ym,charges] of Object.entries(byMonth)){
-    const ref=window._doc(window._db,'pilotage',window._uid,'months',ym);
-    const snap=await window._getDoc(ref);
-    const existing=snap.exists()?snap.data():{};
-    const chargesFixe=(existing.chargesFixe||[]).concat(charges.fixe);
-    const chargesVar=(existing.chargesVar||[]).concat(charges.var);
-    await window._setDoc(ref,{...existing,chargesFixe,chargesVar},{merge:true});
-  }
+  await window._setDoc(ref,{...existing,chargesFixe,chargesVar},{merge:true});
 }
 
 async function importDettes(){
