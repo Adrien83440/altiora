@@ -30,6 +30,38 @@ export default async function handler(req, res) {
 
     const token = await getAccessToken();
 
+    // 0. Déconnecter — supprimer requisition + agreement côté GoCardless
+    if (req.body.action === 'disconnect') {
+      const { requisition_id, agreement_id } = req.body;
+      const results = [];
+
+      // Supprimer la requisition
+      if (requisition_id) {
+        try {
+          const r = await fetch(`${GC_BASE}/requisitions/${requisition_id}/`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
+          });
+          results.push({ requisition: r.status });
+          console.log('[disconnect] requisition', requisition_id, '→', r.status);
+        } catch(e) { results.push({ requisition: e.message }); }
+      }
+
+      // Supprimer l'agreement
+      if (agreement_id) {
+        try {
+          const r = await fetch(`${GC_BASE}/agreements/enduser/${agreement_id}/`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
+          });
+          results.push({ agreement: r.status });
+          console.log('[disconnect] agreement', agreement_id, '→', r.status);
+        } catch(e) { results.push({ agreement: e.message }); }
+      }
+
+      return res.status(200).json({ success: true, results });
+    }
+
     // 1. Lister les banques disponibles pour le pays
     if (req.body.action === 'list_banks') {
       const banksRes = await fetch(`${GC_BASE}/institutions/?country=${country}`, {
