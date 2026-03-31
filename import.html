@@ -2122,20 +2122,69 @@ function showReviewScreen(gids, analysisData, MODULE_LABELS, url) {
     }).join('');
   }
 
-  // ── Build standalone rows (ignored tabs) ──
+  // ── Build standalone rows: split into active (IA-detected module) and ignored ──
   let standaloneHtml = '';
   if (standaloneGids.length) {
-    standaloneHtml = `<div class="rv-ignored-section">
+    const activeStandalone = standaloneGids.filter(g => analysisData[g]?.destKey && analysisData[g]?.enabled);
+    const ignoredStandalone = standaloneGids.filter(g => !analysisData[g]?.destKey || !analysisData[g]?.enabled);
+
+    // Active standalone: full mapping row (for non-template sheets)
+    const activeHtml = activeStandalone.map(gid => {
+      const d = analysisData[gid];
+      const {tab, data, destKey, detectedMonth, mapping, enabled} = d;
+      const headers = data ? data.headers : [];
+      const fields = destKey && DEST_FIELDS[destKey] ? DEST_FIELDS[destKey] : [];
+      const modLabel = MODULE_LABELS[destKey] || destKey;
+      const monthVal = detectedMonth || '';
+
+      const moduleOpts = REVIEW_MODULES.map(m =>
+        `<option value="${m}" ${destKey===m?'selected':''}>${MODULE_LABELS[m]||m}</option>`).join('');
+
+      const mappingCells = fields.map(f => {
+        const cur = mapping[f.key]||'';
+        const opts = `<option value="">—</option>` +
+          headers.map(h=>`<option value="${h}" ${cur===h?'selected':''}>${h}</option>`).join('');
+        return `<div style="display:flex;align-items:center;gap:4px;font-size:12px">
+          <span style="color:#64748b;min-width:100px">${f.label}${f.required?' *':''}</span>
+          <select class="review-field-sel ${cur?'mapped':''}" style="font-size:12px;padding:3px 6px" 
+            onchange="reviewUpdateMapping('${gid}','${f.key}',this.value)">${opts}</select>
+        </div>`;
+      }).join('');
+
+      return `<div class="rv-standalone-card ${enabled?'':'rv-disabled'}" id="review-row-${gid}">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <button class="review-tab-toggle ${enabled?'on':'off'}" onclick="reviewToggleTab('${gid}')"></button>
+          <span style="font-size:14px;font-weight:700">📋 ${tab?.name||gid}</span>
+          <span class="rv-month-ym">${modLabel}</span>
+          ${monthVal?`<span class="rv-month-ym" style="background:#dcfce7;color:#166534">${monthVal}</span>`:''}
+          ${data?`<span style="font-size:11px;color:#94a3b8">${data.rows?.length||data.totalRows||0} lignes</span>`:''}
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span style="font-size:12px;color:#64748b">Module :</span>
+          <select class="review-module-sel" style="font-size:12px" onchange="reviewUpdateModule('${gid}',this.value)">
+            <option value="">— Sélectionner —</option>${moduleOpts}
+          </select>
+          <span style="font-size:12px;color:#64748b;margin-left:8px">Mois :</span>
+          <input type="text" placeholder="AAAA-MM" value="${monthVal}" style="width:80px;font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:6px"
+            oninput="reviewUpdateMonth('${gid}',this.value)">
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px 16px">${mappingCells}</div>
+      </div>`;
+    }).join('');
+
+    // Ignored standalone
+    const ignoredHtml = ignoredStandalone.length ? `
       <div style="font-size:11px;color:#94a3b8;padding:6px 0;font-weight:600">Onglets non importés</div>
-      ${standaloneGids.map(gid => {
+      ${ignoredStandalone.map(gid => {
         const d = analysisData[gid];
         return `<div class="rv-ignored-row ${d.enabled?'':'rv-disabled'}" id="review-row-${gid}">
           <button class="review-tab-toggle ${d.enabled?'on':'off'}" onclick="reviewToggleTab('${gid}')"></button>
           <span style="font-size:12px">${d.tab?.name||gid}</span>
           <span class="rv-ignored-badge">⏭️ Ignoré</span>
         </div>`;
-      }).join('')}
-    </div>`;
+      }).join('')}` : '';
+
+    standaloneHtml = `<div class="rv-ignored-section">${activeHtml}${ignoredHtml}</div>`;
   }
 
   const enabledCount = gids.filter(g => analysisData[g]?.enabled).length;
@@ -2159,6 +2208,8 @@ function showReviewScreen(gids, analysisData, MODULE_LABELS, url) {
       .rv-detail-item:last-child{border:none}
       .rv-detail-title{font-size:12px;font-weight:700;color:#475569;margin-bottom:6px}
       .rv-ignored-section{padding:8px 0}
+      .rv-standalone-card{border:1.5px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px;background:#fff;transition:.15s}
+      .rv-standalone-card.rv-disabled{opacity:.4}
       .rv-ignored-row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;margin-bottom:4px;background:#fafafa;border:1px solid #f1f5f9}
       .rv-ignored-row.rv-disabled{opacity:.4}
       .rv-ignored-badge{font-size:11px;color:#94a3b8;margin-left:auto}
