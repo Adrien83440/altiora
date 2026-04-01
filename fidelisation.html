@@ -767,6 +767,11 @@ html,body{overflow-x:hidden;max-width:100vw}
       <div class="field"><label>Téléphone</label><div class="field-wrap"><input class="field-in" id="fc-tel" type="tel" oninput="fcAutoSave()"/></div></div>
       <div class="field"><label>Email</label><div class="field-wrap"><input class="field-in" id="fc-email" type="email" oninput="fcAutoSave()"/></div></div>
       <div class="field"><label>Date de naissance</label><div class="field-wrap"><input class="field-in" id="fc-bday" type="date" onchange="fcAutoSave()"/></div></div>
+      <div class="field"><label>📍 Adresse</label><div class="field-wrap"><input class="field-in" id="fc-adresse" placeholder="123 rue des Lilas" oninput="fcAutoSave()"/></div></div>
+      <div class="g2">
+        <div class="field"><label>Code postal</label><div class="field-wrap"><input class="field-in" id="fc-cp" placeholder="84200" maxlength="5" oninput="fcAutoSave()"/></div></div>
+        <div class="field"><label>Ville</label><div class="field-wrap"><input class="field-in" id="fc-ville" placeholder="Carpentras" oninput="fcAutoSave()"/></div></div>
+      </div>
       <div class="field"><label>Note interne</label><div class="field-wrap"><input class="field-in" id="fc-note" placeholder="Client régulier du lundi..." oninput="fcAutoSave()"/></div></div>
       <div class="field">
         <label>🏷️ Tags</label>
@@ -1696,8 +1701,11 @@ const IMP_FIELDS = [
   {key:'prenom',     label:'Prénom',           sub:'Prénom du client',     required:false, hint:['prenom','prénom','first','firstname','first name','prénom client']},
   {key:'nom',        label:'Nom',              sub:'Nom de famille',       required:false, hint:['nom','name','last','lastname','last name','famille','nom client','nom de famille']},
   {key:'nom_complet',label:'Nom + Prénom',     sub:'Colonne combinée (NOM PRENOM ou NOM, PRENOM)', required:false, hint:['nom_complet','nom complet','client','nom prenom','nom prénom','full','fullname','full name','identité','identite','contact']},
-  {key:'tel',        label:'Téléphone',        sub:'N° de téléphone',      required:false, hint:['telephone','téléphone','tel','phone','mobile','portable','tél','gsm','num','numero','numéro']},
+  {key:'tel',        label:'Téléphone',        sub:'N° de téléphone',      required:false, hint:['telephone','téléphone','tel','phone','mobile','portable','tél','gsm']},
   {key:'email',      label:'Email',            sub:'Adresse email',        required:false, hint:['email','mail','courriel','e-mail','adresse mail','adresse email']},
+  {key:'adresse',    label:'Adresse',          sub:'N° et rue',            required:false, hint:['adresse','address','rue','street','voie','adr']},
+  {key:'cp',         label:'Code postal',      sub:'Code postal (5 chiffres)',required:false, hint:['cp','code postal','postal','zip','zipcode','code']},
+  {key:'ville',      label:'Ville',            sub:'Commune',              required:false, hint:['ville','city','commune','localité','localite','town']},
   {key:'birthday',   label:'Date de naissance',sub:'Anniversaire',         required:false, hint:['anniversaire','birthday','naissance','bday','date naissance','date de naissance','né','née','ddn']},
   {key:'points',     label:'Points fidélité',  sub:'Solde de points',      required:false, hint:['points','point','solde','score','fidelite','fidélité','pts']},
   {key:'note',       label:'Note interne',     sub:'Commentaire libre',    required:false, hint:['note','notes','commentaire','comment','remarque','obs','observation','info']},
@@ -1917,44 +1925,53 @@ function impGenerateSmartHeaders(firstFields,sampleLines,sep){
 function impGuessColumnName(vals,colIdx,totalCols){
   if(!vals.length) return 'Colonne '+(colIdx+1);
 
-  // Phone: digits starting with 06/07, 10 chars
-  const phoneCount=vals.filter(v=>/^0[67]\d{8}$/.test(v.replace(/[\s\.\-']/g,''))).length;
-  if(phoneCount>=1) return 'Téléphone';
-  // Also catch landlines (01-05, 09)
-  const telCount=vals.filter(v=>/^0[1-9]\d{8}$/.test(v.replace(/[\s\.\-']/g,''))).length;
-  if(telCount>=2) return 'Téléphone';
+  // Skip mostly-empty columns quickly
+  const nonEmpty=vals.filter(v=>v.trim());
+  if(nonEmpty.length<vals.length*0.1) return 'Colonne '+(colIdx+1);
+
+  // Detect sequential IDs (1,2,3... or scattered small ints) — NOT a phone
+  const numVals=nonEmpty.map(v=>parseInt(v)).filter(n=>!isNaN(n)&&n>=0);
+  if(numVals.length>nonEmpty.length*0.7){
+    const maxNum=Math.max(...numVals);
+    const allSmall=numVals.every(n=>n<100000&&String(n).length<6);
+    if(allSmall) return 'Colonne '+(colIdx+1)+' (N°)';
+  }
+
+  // Phone: strictly 10 digits starting with 06/07 (mobile FR)
+  const cleaned=nonEmpty.map(v=>v.replace(/[\s\.\-']/g,''));
+  const mobileCount=cleaned.filter(v=>/^0[67]\d{8}$/.test(v)).length;
+  if(mobileCount>=2) return 'Téléphone';
+  // Also catch landlines (01-05, 09) but need more matches
+  const telCount=cleaned.filter(v=>/^0[1-9]\d{8}$/.test(v)).length;
+  if(telCount>=3) return 'Téléphone';
 
   // Email
-  const emailCount=vals.filter(v=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)).length;
+  const emailCount=nonEmpty.filter(v=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.trim())).length;
   if(emailCount>=1) return 'Email';
 
-  // Code postal (5 digits, starts with 0-9, French range)
-  const cpCount=vals.filter(v=>/^\d{5}$/.test(v)).length;
-  if(cpCount>vals.length*0.2) return 'Code Postal';
+  // Code postal (5 digits, French range 01000-98999)
+  const cpCount=nonEmpty.filter(v=>/^(0[1-9]|[1-9]\d)\d{3}$/.test(v.trim())).length;
+  if(cpCount>nonEmpty.length*0.2) return 'Code Postal';
 
   // Street address (has number + street keyword)
-  const addrCount=vals.filter(v=>/\d+\s*.{0,5}(rue|chemin|avenue|route|place|allée|boulevard|impasse|bd |av |rte|ch |lotissement|résidence|quartier|traverse|cours|passage)/i.test(v)).length;
-  if(addrCount>vals.length*0.15) return 'Adresse';
+  const addrCount=nonEmpty.filter(v=>/\d+\s*.{0,5}(rue|chemin|avenue|route|place|allée|boulevard|impasse|bd |av |rte|ch |lotissement|résidence|quartier|traverse|cours|passage)/i.test(v)).length;
+  if(addrCount>nonEmpty.length*0.15) return 'Adresse';
 
-  // Combined name: UPPERCASE + space or comma (NOM PRENOM or NOM, PRENOM)
-  const nameCount=vals.filter(v=>{
+  // Combined name: letters + space or comma
+  const nameCount=nonEmpty.filter(v=>{
     const s=v.trim();
     if(s.length<3) return false;
     if(!/[a-zA-ZÀ-ÿ]/.test(s)) return false;
     return /[\s,]/.test(s)&&/^[A-ZÀ-ÿa-z\s,\.\-']+$/.test(s);
   }).length;
-  if(nameCount>vals.length*0.4&&colIdx===0) return 'Nom Prénom';
+  if(nameCount>nonEmpty.length*0.4&&colIdx===0) return 'Nom Prénom';
 
-  // City: UPPERCASE words, no digits, no comma (differentiate from name)
-  const cityCount=vals.filter(v=>{
+  // City: UPPERCASE words, no digits, no comma
+  const cityCount=nonEmpty.filter(v=>{
     const s=v.trim();
     return s.length>2&&/^[A-ZÉÈÊËÀÂÙÛÔÎÏÇÆŒ\s\-']+$/.test(s)&&!/\d/.test(s)&&!s.includes(',');
   }).length;
-  if(cityCount>vals.length*0.3&&colIdx>0) return 'Ville';
-
-  // Empty column (most values empty)
-  const emptyCount=vals.filter(v=>!v.trim()).length;
-  if(emptyCount>vals.length*0.8) return 'Colonne '+(colIdx+1);
+  if(cityCount>nonEmpty.length*0.3&&colIdx>0) return 'Ville';
 
   return 'Colonne '+(colIdx+1);
 }
@@ -2240,11 +2257,16 @@ async function impDoImport(){
     // Clean phone: remove quotes, spaces, dots, dashes
     let tel=(_impMapping['tel']?String(r[_impMapping['tel']]||'').trim():'');
     tel=tel.replace(/^'+/,'').replace(/[\s\.\-]/g,'');
-    if(tel&&/^\d{10}$/.test(tel)) tel=tel.replace(/(\d{2})(?=\d)/g,'$1 ').trim();
+    // Validate: must be 10 digits starting with 0 (French), otherwise discard
+    if(tel&&!/^0[1-9]\d{8}$/.test(tel)) tel='';
+    if(tel) tel=tel.replace(/(\d{2})(?=\d)/g,'$1 ').trim();
     const email=(_impMapping['email']?String(r[_impMapping['email']]||'').trim().toLowerCase():'');
     const birthday=_impMapping['birthday']?impParseDate(r[_impMapping['birthday']]):'';
     const points=_impMapping['points']?Math.round(parseFloat(String(r[_impMapping['points']]||'0').replace(',','.'))||0):0;
     const note=_impMapping['note']?String(r[_impMapping['note']]||'').trim():'';
+    const adresse=_impMapping['adresse']?String(r[_impMapping['adresse']]||'').trim():'';
+    const cp=_impMapping['cp']?String(r[_impMapping['cp']]||'').trim().replace(/^'+/,''):'';
+    const ville=_impMapping['ville']?String(r[_impMapping['ville']]||'').trim():'';
 
     // Check duplicate
     const dupIdx=impFindDuplicate(email,tel);
@@ -2275,6 +2297,9 @@ async function impDoImport(){
         if(birthday) existing.birthday=birthday;
         if(points) existing.points=(existing.points||0)+points;
         if(note) existing.note=note;
+        if(adresse) existing.adresse=adresse;
+        if(cp) existing.cp=cp;
+        if(ville) existing.ville=ville;
         try{
           if(window._uid&&window._fbSaveClient) await window._fbSaveClient(window._uid, existing);
           updated++;
@@ -2296,7 +2321,10 @@ async function impDoImport(){
       lastVisit:today(),
       createdAt:today(),
       history:[],
-      note:note
+      note:note,
+      adresse:adresse,
+      cp:cp,
+      ville:ville
     };
     clients.push(client);
     try{
@@ -2780,6 +2808,9 @@ function openFicheClient(id){
   document.getElementById('fc-tel').value=c.tel||'';
   document.getElementById('fc-email').value=c.email||'';
   document.getElementById('fc-bday').value=c.birthday||'';
+  document.getElementById('fc-adresse').value=c.adresse||'';
+  document.getElementById('fc-cp').value=c.cp||'';
+  document.getElementById('fc-ville').value=c.ville||'';
   document.getElementById('fc-note').value=c.note||'';
   // Render tags in fiche
   fcRenderTags(c);
@@ -2901,6 +2932,9 @@ function fcSave(silent){
   c.tel=document.getElementById('fc-tel').value.trim();
   c.email=document.getElementById('fc-email').value.trim();
   c.birthday=document.getElementById('fc-bday').value;
+  c.adresse=document.getElementById('fc-adresse').value.trim();
+  c.cp=document.getElementById('fc-cp').value.trim();
+  c.ville=document.getElementById('fc-ville').value.trim();
   c.note=document.getElementById('fc-note').value.trim();
   // Tags are saved live by fcAddPresetTag/fcAddFreeTag/fcRemoveTag
   save();renderClients();
