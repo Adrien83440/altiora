@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -284,6 +285,36 @@ html,body{overflow-x:hidden;max-width:100vw}
 .sms-pack{display:flex;align-items:center;padding:18px;border:2px solid var(--glass-border);border-radius:16px;cursor:pointer;transition:all .25s;background:var(--glass-bg);backdrop-filter:blur(12px);box-shadow:var(--glass-inset)}
 .sms-pack:hover{border-color:rgba(37,99,235,0.2);background:rgba(239,246,255,0.6);transform:translateY(-2px);box-shadow:0 8px 24px rgba(37,99,235,0.08)}
 .sms-pack.selected{border-color:var(--blue);background:linear-gradient(160deg,rgba(219,234,254,0.5),rgba(191,219,254,0.3));box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+
+/* ── Import clients modal ── */
+.imp-step{display:none}.imp-step.on{display:block}
+.imp-dropzone{border:2px dashed var(--border);border-radius:12px;padding:36px 20px;text-align:center;cursor:pointer;transition:.2s;background:#fafbff}
+.imp-dropzone:hover,.imp-dropzone.drag{border-color:var(--blue);background:#eff6ff}
+.imp-preview-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px;max-height:180px;overflow-y:auto;margin-top:12px}
+.imp-preview-table{width:100%;border-collapse:collapse;font-size:11px}
+.imp-preview-table th{padding:6px 10px;background:rgba(248,250,255,0.6);border-bottom:1px solid var(--border);font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;white-space:nowrap;position:sticky;top:0}
+.imp-preview-table td{padding:6px 10px;border-bottom:1px solid #f8faff;white-space:nowrap}
+.imp-map-row{display:grid;grid-template-columns:1fr 30px 1fr 70px;align-items:center;gap:8px;padding:8px 12px;background:rgba(248,250,255,0.6);border:1px solid var(--border);border-radius:8px;transition:.15s;margin-bottom:6px}
+.imp-map-row:hover{background:#eff6ff;border-color:#c7d2fe}
+.imp-map-row.mapped{background:#f0fdf4;border-color:#86efac}
+.imp-map-row.ignored{opacity:.45}
+.imp-map-sel{width:100%;padding:5px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;color:var(--text);background:#fff;outline:none;cursor:pointer;transition:.15s}
+.imp-map-sel:focus{border-color:var(--blue)}
+.imp-map-sel.has-val{border-color:var(--green);background:#f0fdf4}
+.imp-map-ignore{padding:3px 7px;border:1.5px solid var(--border);border-radius:5px;background:#fff;font-size:10px;font-weight:600;cursor:pointer;color:var(--muted);font-family:'Plus Jakarta Sans',sans-serif;transition:.15s}
+.imp-map-ignore:hover{background:#fef2f2;color:var(--red);border-color:#fecaca}
+.imp-map-ignore.active{background:#fef2f2;color:var(--red);border-color:#fecaca}
+.imp-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.imp-sbox{background:rgba(248,250,255,0.6);border:1.5px solid var(--border);border-radius:10px;padding:12px;text-align:center}
+.imp-sbox.ok{background:#f0fdf4;border-color:#86efac}
+.imp-sbox .val{font-size:18px;font-weight:800;margin-bottom:2px}
+.imp-sbox .lbl{font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase}
+.imp-dup-option{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;border:1.5px solid var(--border);cursor:pointer;transition:.15s;font-size:11px;font-weight:600;margin-right:6px;margin-bottom:6px}
+.imp-dup-option:hover{border-color:#93c5fd;background:#f0f7ff}
+.imp-dup-option.on{border-color:#3b82f6;background:#eff6ff;color:#2563eb}
+.imp-progress-bar{background:#e2e8f0;border-radius:99px;height:6px;overflow:hidden;margin:8px 0}
+.imp-progress-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--blue2));border-radius:99px;transition:width .3s}
+@media(max-width:700px){.imp-summary{grid-template-columns:1fr 1fr}.imp-map-row{grid-template-columns:1fr 24px 1fr 50px;gap:4px;padding:6px 8px}}
 </style>
 </head>
 <body>
@@ -349,6 +380,7 @@ html,body{overflow-x:hidden;max-width:100vw}
         <option value="nouveau">🌱 Nouveau</option>
       </select>
       <button class="btn btn-p btn-xs" onclick="openModal('addClient')">+ Client</button>
+      <button class="btn btn-o btn-xs" onclick="openImportClients()" style="gap:4px">📥 Importer</button>
     </div>
     <div class="card">
       <div class="table-wrap">
@@ -987,6 +1019,113 @@ html,body{overflow-x:hidden;max-width:100vw}
   </div>
 </div>
 
+<!-- ═══ IMPORT CLIENTS MODAL ═══ -->
+<div class="modal-wrap hidden" id="mw-importClients">
+  <div class="modal-backdrop" onclick="closeImportClients()"></div>
+  <div class="modal" style="width:min(660px,95vw);max-height:90vh;overflow-y:auto">
+    <div class="modal-head">
+      <div class="modal-title">📥 Importer des clients</div>
+      <button class="modal-close" onclick="closeImportClients()">✕</button>
+    </div>
+    <div style="padding:18px 22px">
+      <!-- ÉTAPE 1 : Upload -->
+      <div class="imp-step on" id="imp-step1">
+        <div style="font-size:12px;font-weight:700;margin-bottom:10px;color:var(--text)">📁 Chargez votre fichier client</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Formats acceptés : Excel (.xlsx, .xls), CSV, TSV — peu importe la structure, vous mapperez les colonnes ensuite.</div>
+        <div class="imp-dropzone" id="impDropzone"
+          ondragover="event.preventDefault();this.classList.add('drag')"
+          ondragleave="this.classList.remove('drag')"
+          ondrop="event.preventDefault();this.classList.remove('drag');impOnFile(event.dataTransfer.files[0])"
+          onclick="document.getElementById('impFileInput').click()">
+          <div style="font-size:36px;margin-bottom:8px">📂</div>
+          <div style="font-size:13px;font-weight:700">Glissez votre fichier ici</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">ou cliquez pour sélectionner</div>
+          <button style="margin-top:12px;padding:7px 16px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit" onclick="event.stopPropagation();document.getElementById('impFileInput').click()">📎 Choisir un fichier</button>
+        </div>
+        <input type="file" id="impFileInput" accept=".xlsx,.xls,.csv,.tsv" style="display:none" onchange="impOnFile(this.files[0])"/>
+        <!-- Preview après chargement -->
+        <div id="impPreviewCard" style="display:none;margin-top:14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <div style="font-size:12px;font-weight:700" id="impFilename">fichier.xlsx</div>
+            <div style="font-size:11px;color:var(--muted)" id="impFileStats">0 lignes · 0 colonnes</div>
+          </div>
+          <div id="impSheetSel" style="display:none;margin-bottom:8px">
+            <span style="font-size:11px;font-weight:600;color:var(--muted)">Feuille :</span>
+            <select id="impSheetSelect" style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;margin-left:6px" onchange="impSelectSheet()"></select>
+          </div>
+          <div class="imp-preview-wrap"><table class="imp-preview-table" id="impPreviewTable"></table></div>
+          <div style="margin-top:12px;display:flex;justify-content:space-between;align-items:center">
+            <button class="btn btn-o btn-xs" onclick="impReset()">↺ Autre fichier</button>
+            <button class="btn btn-p btn-xs" onclick="impGoStep(2)">Mapper les colonnes →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ÉTAPE 2 : Mapping -->
+      <div class="imp-step" id="imp-step2">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div style="font-size:12px;font-weight:700">🗺️ Mapper les colonnes</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-o btn-xs" onclick="impAutoDetect()">✨ Détection auto</button>
+            <button class="btn btn-o btn-xs" onclick="impGoStep(1)">← Retour</button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 30px 1fr 70px;gap:8px;padding:6px 12px;background:#f1f5f9;border-radius:6px;margin-bottom:8px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase">
+          <div>Champ Alteore</div><div></div><div>Colonne fichier</div><div>Action</div>
+        </div>
+        <div id="impMappingRows"></div>
+        <div style="margin-top:14px;display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-o" onclick="impGoStep(1)">← Retour</button>
+          <button class="btn btn-p" onclick="impGoStep(3)">Vérifier →</button>
+        </div>
+      </div>
+
+      <!-- ÉTAPE 3 : Vérification + Doublons -->
+      <div class="imp-step" id="imp-step3">
+        <div style="font-size:12px;font-weight:700;margin-bottom:10px">✅ Vérification avant import</div>
+        <div class="imp-summary" id="impSummary"></div>
+        <div id="impVerifyTable"></div>
+        <div style="margin:14px 0;padding:10px 14px;background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px">
+          <div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:8px">🔄 Si un client existe déjà (même email ou téléphone) :</div>
+          <div id="impDupOptions">
+            <span class="imp-dup-option on" data-mode="ask" onclick="impSetDupMode('ask')">❓ Me demander</span>
+            <span class="imp-dup-option" data-mode="skip" onclick="impSetDupMode('skip')">⏭️ Ignorer</span>
+            <span class="imp-dup-option" data-mode="overwrite" onclick="impSetDupMode('overwrite')">✏️ Écraser</span>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn btn-o" onclick="impGoStep(2)">← Modifier</button>
+          <button class="btn btn-p" id="impImportBtn" onclick="impDoImport()">🚀 Importer les clients</button>
+        </div>
+      </div>
+
+      <!-- ÉTAPE 4 : Résultat -->
+      <div class="imp-step" id="imp-step4">
+        <div style="text-align:center;padding:20px 0">
+          <div style="font-size:40px;margin-bottom:10px" id="impResultIcon">✅</div>
+          <div style="font-size:16px;font-weight:800;margin-bottom:6px" id="impResultTitle">Import terminé !</div>
+          <div style="font-size:12px;color:var(--muted);margin-bottom:14px" id="impResultSub">0 clients importés</div>
+          <div class="imp-progress-bar" id="impProgressWrap" style="display:none"><div class="imp-progress-fill" id="impProgressFill" style="width:0%"></div></div>
+          <div id="impProgressLabel" style="font-size:11px;color:var(--muted);margin-top:6px;display:none"></div>
+          <div id="impDupResolve" style="display:none;text-align:left;margin-top:14px;padding:12px 14px;background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px">
+            <div style="font-size:12px;font-weight:700;color:#92400e;margin-bottom:8px" id="impDupTitle">⚠️ Doublon détecté</div>
+            <div id="impDupDetail" style="font-size:11px;color:#78350f;margin-bottom:10px"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-xs" style="background:#eff6ff;color:var(--blue);border:1.5px solid #bfdbfe" onclick="impResolveDup('overwrite')">✏️ Écraser</button>
+              <button class="btn btn-xs" style="background:#f0fdf4;color:var(--green);border:1.5px solid #bbf7d0" onclick="impResolveDup('skip')">⏭️ Ignorer</button>
+              <button class="btn btn-xs" style="background:#fef2f2;color:var(--red);border:1.5px solid #fecaca" onclick="impResolveDup('skipAll')">⏭️ Ignorer tous les doublons</button>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:center;gap:8px;margin-top:10px" id="impResultActions" style="display:none">
+          <button class="btn btn-o" onclick="closeImportClients()">Fermer</button>
+          <button class="btn btn-p" onclick="impReset();impGoStep(1)">📥 Nouvel import</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"="toast" id="toast"></div>
 
 <script>
@@ -1285,6 +1424,344 @@ function renderPointsTable(){
     <td>${segBadge(getSeg(c))}</td>
     <td><button class="btn btn-xs btn-o" onclick="openFicheClient('${c.id}');setTimeout(()=>fcTab('points',document.querySelectorAll('.fc-tab')[1]),100)">+ Points</button></td>
   </tr>`).join('');
+}
+
+// ═══ IMPORT CLIENTS ═══
+const IMP_FIELDS = [
+  {key:'prenom',     label:'Prénom',           sub:'Prénom du client',     required:true,  hint:['prenom','prénom','first','firstname','first name','prénom client']},
+  {key:'nom',        label:'Nom',              sub:'Nom de famille',       required:true,  hint:['nom','name','last','lastname','last name','famille','nom client','nom de famille']},
+  {key:'tel',        label:'Téléphone',        sub:'N° de téléphone',      required:false, hint:['telephone','téléphone','tel','phone','mobile','portable','tél','gsm','num','numero','numéro']},
+  {key:'email',      label:'Email',            sub:'Adresse email',        required:false, hint:['email','mail','courriel','e-mail','adresse mail','adresse email']},
+  {key:'birthday',   label:'Date de naissance',sub:'Anniversaire',         required:false, hint:['anniversaire','birthday','naissance','bday','date naissance','date de naissance','né','née','ddn']},
+  {key:'points',     label:'Points fidélité',  sub:'Solde de points',      required:false, hint:['points','point','solde','score','fidelite','fidélité','pts']},
+  {key:'note',       label:'Note interne',     sub:'Commentaire libre',    required:false, hint:['note','notes','commentaire','comment','remarque','obs','observation','info']},
+];
+
+let _impWb=null, _impHeaders=[], _impRows=[], _impMapping={}, _impIgnored=new Set(), _impDupMode='ask';
+let _impDupResolve=null; // promise resolver for ask mode
+
+function openImportClients(){
+  impReset();
+  document.getElementById('mw-importClients').classList.remove('hidden');
+  document.body.style.overflow='hidden';
+}
+function closeImportClients(){
+  document.getElementById('mw-importClients').classList.add('hidden');
+  document.body.style.overflow='';
+}
+
+function impReset(){
+  _impWb=null;_impHeaders=[];_impRows=[];_impMapping={};_impIgnored=new Set();_impDupMode='ask';_impDupResolve=null;
+  document.getElementById('impFileInput').value='';
+  document.getElementById('impDropzone').style.display='';
+  document.getElementById('impPreviewCard').style.display='none';
+  impGoStep(1);
+}
+
+function impGoStep(n){
+  for(let i=1;i<=4;i++) document.getElementById('imp-step'+i).className='imp-step'+(i===n?' on':'');
+  if(n===2){impAutoDetect();impBuildMapping();}
+  if(n===3) impBuildVerify();
+}
+
+// ── Lecture fichier ──
+function impOnFile(file){
+  if(!file) return;
+  const ext=file.name.split('.').pop().toLowerCase();
+  if(ext==='csv'||ext==='tsv') impReadCSV(file);
+  else impReadXLSX(file);
+}
+
+function impReadXLSX(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      _impWb=XLSX.read(e.target.result,{type:'binary'});
+      const sheets=_impWb.SheetNames;
+      const sel=document.getElementById('impSheetSelect');
+      sel.innerHTML=sheets.map((s,i)=>`<option value="${i}">${s}</option>`).join('');
+      document.getElementById('impSheetSel').style.display=sheets.length>1?'block':'none';
+      impParseSheet(0,file.name);
+    }catch(err){toast('Erreur lecture Excel','err')}
+  };
+  reader.readAsBinaryString(file);
+}
+
+function impSelectSheet(){
+  const idx=parseInt(document.getElementById('impSheetSelect').value)||0;
+  impParseSheet(idx,'');
+}
+
+function impParseSheet(idx,filename){
+  const ws=_impWb.Sheets[_impWb.SheetNames[idx]];
+  const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+  if(!data.length){toast('Feuille vide','err');return}
+  const rawH=data[0];
+  _impHeaders=rawH.map(h=>String(h).trim()).filter(h=>h);
+  _impRows=data.slice(1).filter(r=>r.some(c=>c!==''&&c!==0)).map(r=>{
+    const obj={};_impHeaders.forEach((h,i)=>obj[h]=r[i]===undefined?'':r[i]);return obj;
+  });
+  impShowPreview(filename||_impWb.SheetNames[idx]||'');
+}
+
+function impReadCSV(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const text=e.target.result;
+      const sep=text.indexOf(';')>text.indexOf(',')?';':',';
+      const lines=text.trim().split('\n');
+      _impHeaders=lines[0].split(sep).map(h=>h.trim().replace(/^"|"$/g,'')).filter(h=>h);
+      _impRows=lines.slice(1).filter(l=>l.trim()).map(l=>{
+        const vals=l.split(sep).map(v=>v.trim().replace(/^"|"$/g,''));
+        const obj={};_impHeaders.forEach((h,i)=>obj[h]=vals[i]||'');return obj;
+      });
+      impShowPreview(file.name);
+    }catch(err){toast('Erreur lecture CSV','err')}
+  };
+  reader.readAsText(file,'UTF-8');
+}
+
+function impShowPreview(filename){
+  document.getElementById('impDropzone').style.display='none';
+  document.getElementById('impPreviewCard').style.display='block';
+  document.getElementById('impFilename').textContent=filename||'Fichier chargé';
+  document.getElementById('impFileStats').textContent=`${_impRows.length} lignes · ${_impHeaders.length} colonnes`;
+  const t=document.getElementById('impPreviewTable');
+  const max=Math.min(_impRows.length,6);
+  t.innerHTML=`<thead><tr>${_impHeaders.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+    <tbody>${Array.from({length:max},(_,i)=>`<tr>${_impHeaders.map(h=>`<td>${_impRows[i][h]??''}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  toast(`✅ ${_impRows.length} lignes chargées !`,'ok');
+}
+
+// ── Auto-détection ──
+function impAutoDetect(){
+  let matched=0;
+  IMP_FIELDS.forEach(f=>{
+    const col=_impHeaders.find(h=>{
+      const hl=h.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[_\-\.]/g,' ').trim();
+      return f.hint.some(hint=>{
+        const hn=hint.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+        return hl===hn||hl.includes(hn)||hn.includes(hl);
+      });
+    });
+    if(col){_impMapping[f.key]=col;_impIgnored.delete(f.key);matched++}
+  });
+  return matched;
+}
+
+// ── Mapping UI ──
+function impBuildMapping(){
+  const opts=`<option value="">— Ne pas importer —</option>`+_impHeaders.map(h=>`<option value="${h}">${h}</option>`).join('');
+  document.getElementById('impMappingRows').innerHTML=IMP_FIELDS.map(f=>{
+    const isIgnored=_impIgnored.has(f.key);
+    const cur=_impMapping[f.key]||'';
+    const hasMapped=!!cur;
+    const autoTag=hasMapped?`<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:12px;font-size:9px;font-weight:700;background:#d1fae5;color:#065f46;margin-left:4px">✨ Auto</span>`:'';
+    return`<div class="imp-map-row ${hasMapped?'mapped':''} ${isIgnored?'ignored':''}" id="imr-${f.key}">
+      <div>
+        <div style="font-size:12px;font-weight:700">${f.label} ${f.required?'<span style="color:var(--red)">*</span>':''} ${autoTag}</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:1px">${f.sub}</div>
+      </div>
+      <div style="font-size:14px;color:var(--muted);text-align:center">→</div>
+      <select class="imp-map-sel ${hasMapped?'has-val':''}" id="ims-${f.key}" onchange="impOnMapChange('${f.key}',this)">
+        ${opts}
+      </select>
+      <button class="imp-map-ignore ${isIgnored?'active':''}" onclick="impToggleIgnore('${f.key}')">${isIgnored?'↺':'✕'}</button>
+    </div>`;
+  }).join('');
+  IMP_FIELDS.forEach(f=>{const sel=document.getElementById('ims-'+f.key);if(sel&&_impMapping[f.key])sel.value=_impMapping[f.key];});
+}
+
+function impOnMapChange(key,sel){
+  if(sel.value){_impMapping[key]=sel.value;_impIgnored.delete(key)}
+  else delete _impMapping[key];
+  const row=document.getElementById('imr-'+key);
+  row.classList.toggle('mapped',!!sel.value);
+  sel.classList.toggle('has-val',!!sel.value);
+  const auto=row.querySelector('span[style*="d1fae5"]');if(auto)auto.remove();
+}
+
+function impToggleIgnore(key){
+  if(_impIgnored.has(key)){_impIgnored.delete(key)}
+  else{_impIgnored.add(key);delete _impMapping[key];const s=document.getElementById('ims-'+key);if(s)s.value=''}
+  impBuildMapping();
+}
+
+// ── Vérification ──
+function impBuildVerify(){
+  const required=IMP_FIELDS.filter(f=>f.required&&!_impIgnored.has(f.key));
+  const missing=required.filter(f=>!_impMapping[f.key]);
+  if(missing.length){toast(`Mappez d'abord : ${missing.map(f=>f.label).join(', ')}`,'err');impGoStep(2);return}
+  const mapped=IMP_FIELDS.filter(f=>_impMapping[f.key]&&!_impIgnored.has(f.key));
+  // Count valid rows (at least prenom or nom)
+  const prenomCol=_impMapping['prenom'], nomCol=_impMapping['nom'];
+  const validRows=_impRows.filter(r=>{
+    const p=String(prenomCol?r[prenomCol]||'':'').trim();
+    const n=String(nomCol?r[nomCol]||'':'').trim();
+    return p||n;
+  });
+  document.getElementById('impSummary').innerHTML=`
+    <div class="imp-sbox ok"><div class="val" style="color:var(--green)">${validRows.length}</div><div class="lbl">Clients à importer</div></div>
+    <div class="imp-sbox ok"><div class="val" style="color:var(--blue)">${mapped.length}</div><div class="lbl">Champs mappés</div></div>
+    <div class="imp-sbox"><div class="val" style="color:var(--muted)">${clients.length}</div><div class="lbl">Clients existants</div></div>`;
+  // Preview table
+  const preview=validRows.slice(0,5);
+  document.getElementById('impVerifyTable').innerHTML=`
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:8px">
+      <table class="imp-preview-table">
+        <thead><tr>${mapped.map(f=>`<th>${f.label}</th>`).join('')}</tr></thead>
+        <tbody>${preview.map(r=>`<tr>${mapped.map(f=>`<td>${r[_impMapping[f.key]]??'—'}</td>`).join('')}</tr>`).join('')}</tbody>
+      </table>
+    </div>
+    ${validRows.length>5?`<div style="font-size:10px;color:var(--muted)">+ ${validRows.length-5} autres lignes…</div>`:''}`;
+  // Reset dup options UI
+  document.querySelectorAll('.imp-dup-option').forEach(el=>el.classList.toggle('on',el.dataset.mode===_impDupMode));
+}
+
+function impSetDupMode(mode){
+  _impDupMode=mode;
+  document.querySelectorAll('.imp-dup-option').forEach(el=>el.classList.toggle('on',el.dataset.mode===mode));
+}
+
+// ── Parse date helper ──
+function impParseDate(v){
+  if(!v) return '';
+  const s=String(v).trim();
+  // JJ/MM/AAAA or JJ-MM-AAAA
+  const m1=s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if(m1) return `${m1[3]}-${m1[2].padStart(2,'0')}-${m1[1].padStart(2,'0')}`;
+  // AAAA-MM-JJ
+  const m2=s.match(/^(\d{4})[\/\-](\d{2})[\/\-](\d{2})/);
+  if(m2) return `${m2[1]}-${m2[2]}-${m2[3]}`;
+  // Excel serial number
+  if(/^\d{4,5}$/.test(s)){const d=new Date((parseInt(s)-25569)*86400000);if(!isNaN(d))return d.toISOString().slice(0,10)}
+  try{const d=new Date(v);if(!isNaN(d))return d.toISOString().slice(0,10)}catch(e){}
+  return '';
+}
+
+// ── Trouver un doublon ──
+function impFindDuplicate(email,tel){
+  if(email){const idx=clients.findIndex(c=>(c.email||'').toLowerCase()===email);if(idx>=0)return idx}
+  if(tel){const normTel=tel.replace(/[\s\.\-]/g,'');const idx=clients.findIndex(c=>(c.tel||'').replace(/[\s\.\-]/g,'')===normTel);if(idx>=0)return idx}
+  return -1;
+}
+
+// ── Import principal ──
+async function impDoImport(){
+  const btn=document.getElementById('impImportBtn');
+  btn.disabled=true;btn.textContent='⏳ Import en cours…';
+  impGoStep(4);
+
+  // Show progress
+  document.getElementById('impProgressWrap').style.display='block';
+  document.getElementById('impProgressLabel').style.display='block';
+  document.getElementById('impResultIcon').textContent='⏳';
+  document.getElementById('impResultTitle').textContent='Import en cours…';
+  document.getElementById('impResultSub').textContent='';
+  document.getElementById('impResultActions').style.display='none';
+  document.getElementById('impDupResolve').style.display='none';
+
+  const prenomCol=_impMapping['prenom'], nomCol=_impMapping['nom'];
+  const validRows=_impRows.filter(r=>{
+    const p=String(prenomCol?r[prenomCol]||'':'').trim();
+    const n=String(nomCol?r[nomCol]||'':'').trim();
+    return p||n;
+  });
+
+  let imported=0, skipped=0, updated=0, errors=0;
+  let skipAllDups=false;
+
+  for(let i=0;i<validRows.length;i++){
+    const r=validRows[i];
+    const pct=Math.round((i+1)/validRows.length*100);
+    document.getElementById('impProgressFill').style.width=pct+'%';
+    document.getElementById('impProgressLabel').textContent=`${i+1}/${validRows.length} — ${imported} importés, ${updated} mis à jour, ${skipped} ignorés`;
+
+    const prenom=String(prenomCol?r[prenomCol]||'':'').trim();
+    const nom=String(nomCol?r[nomCol]||'':'').trim();
+    const email=(_impMapping['email']?String(r[_impMapping['email']]||'').trim().toLowerCase():'');
+    const tel=(_impMapping['tel']?String(r[_impMapping['tel']]||'').trim():'');
+    const birthday=_impMapping['birthday']?impParseDate(r[_impMapping['birthday']]):'';
+    const points=_impMapping['points']?Math.round(parseFloat(String(r[_impMapping['points']]||'0').replace(',','.'))||0):0;
+    const note=_impMapping['note']?String(r[_impMapping['note']]||'').trim():'';
+
+    // Check duplicate
+    const dupIdx=impFindDuplicate(email,tel);
+
+    if(dupIdx>=0){
+      let action=_impDupMode;
+      if(skipAllDups){action='skip'}
+      else if(action==='ask'){
+        // Show resolve UI and wait
+        const existing=clients[dupIdx];
+        document.getElementById('impDupResolve').style.display='block';
+        document.getElementById('impDupTitle').textContent=`⚠️ Doublon ${i+1}/${validRows.length}`;
+        document.getElementById('impDupDetail').innerHTML=`
+          <strong>Fichier :</strong> ${prenom} ${nom} ${email?'· '+email:''} ${tel?'· '+tel:''}<br>
+          <strong>Existant :</strong> ${existing.prenom||''} ${existing.nom||''} ${existing.email?'· '+existing.email:''} ${existing.tel?'· '+existing.tel:''}`;
+        action=await new Promise(resolve=>{_impDupResolve=resolve});
+        document.getElementById('impDupResolve').style.display='none';
+        if(action==='skipAll'){skipAllDups=true;action='skip'}
+      }
+
+      if(action==='skip'){skipped++;continue}
+      if(action==='overwrite'){
+        const existing=clients[dupIdx];
+        existing.prenom=prenom||existing.prenom;
+        existing.nom=nom||existing.nom;
+        if(email) existing.email=email;
+        if(tel) existing.tel=tel;
+        if(birthday) existing.birthday=birthday;
+        if(points) existing.points=(existing.points||0)+points;
+        if(note) existing.note=note;
+        try{
+          if(window._uid&&window._fbSaveClient) await window._fbSaveClient(window._uid, existing);
+          updated++;
+        }catch(e){console.warn('import update err',e);errors++}
+        continue;
+      }
+    }
+
+    // New client
+    const client={
+      id:uid(),
+      prenom:prenom,
+      nom:nom,
+      tel:tel,
+      email:email,
+      birthday:birthday,
+      points:points,
+      tampons:0,
+      lastVisit:today(),
+      createdAt:today(),
+      history:[],
+      note:note
+    };
+    clients.push(client);
+    try{
+      if(window._uid&&window._fbSaveClient) await window._fbSaveClient(window._uid, client);
+      imported++;
+    }catch(e){console.warn('import err',e);errors++}
+  }
+
+  // Done
+  document.getElementById('impProgressFill').style.width='100%';
+  document.getElementById('impResultIcon').textContent=errors?'⚠️':'✅';
+  document.getElementById('impResultTitle').textContent=errors?'Import terminé avec erreurs':'Import terminé !';
+  document.getElementById('impResultSub').textContent=`${imported} ajouté${imported>1?'s':''}, ${updated} mis à jour, ${skipped} ignoré${skipped>1?'s':''}${errors?`, ${errors} erreur${errors>1?'s':''}`:''}.`;
+  document.getElementById('impProgressLabel').textContent='Terminé';
+  document.getElementById('impResultActions').style.display='flex';
+
+  // Refresh list
+  save();renderClients();renderDashboard();
+  document.getElementById('badge-clients').textContent=clients.length;
+  toast(`✅ ${imported+updated} clients importés !`);
+  btn.disabled=false;btn.textContent='🚀 Importer les clients';
+}
+
+function impResolveDup(action){
+  if(_impDupResolve){_impDupResolve(action);_impDupResolve=null}
 }
 
 // ═══ COUPONS ═══
