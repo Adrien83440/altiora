@@ -315,6 +315,21 @@ html,body{overflow-x:hidden;max-width:100vw}
 .imp-progress-bar{background:#e2e8f0;border-radius:99px;height:6px;overflow:hidden;margin:8px 0}
 .imp-progress-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--blue2));border-radius:99px;transition:width .3s}
 @media(max-width:700px){.imp-summary{grid-template-columns:1fr 1fr}.imp-map-row{grid-template-columns:1fr 24px 1fr 50px;gap:4px;padding:6px 8px}}
+
+/* ── Tags clients ── */
+.tag{display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:700;cursor:default;white-space:nowrap;border:1px solid transparent}
+.tag-preset{background:#eff6ff;color:#2563eb;border-color:#bfdbfe}
+.tag-custom{background:#f5f3ff;color:#7c3aed;border-color:#ddd6fe}
+.tag-remove{cursor:pointer;opacity:.5;font-size:9px;margin-left:2px}.tag-remove:hover{opacity:1}
+.tags-wrap{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.tag-input-wrap{display:flex;gap:6px;align-items:center;margin-top:8px}
+.tag-input{flex:1;padding:5px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;outline:none}
+.tag-input:focus{border-color:var(--blue)}
+.tag-presets-bar{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.tag-preset-btn{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;cursor:pointer;border:1.5px solid #dbeafe;background:#f0f7ff;color:#3b82f6;font-family:inherit;transition:.15s}
+.tag-preset-btn:hover{background:#dbeafe;border-color:#93c5fd}
+.tag-preset-btn.active{background:#2563eb;color:#fff;border-color:#2563eb}
+.inactif-alert{background:linear-gradient(135deg,#fef2f2,#fee2e2);border:1.5px solid #fecaca;border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:10px;margin-bottom:12px}
 </style>
 </head>
 <body>
@@ -362,9 +377,15 @@ html,body{overflow-x:hidden;max-width:100vw}
         <div class="card-body" id="birthdayList" style="display:flex;flex-direction:column;gap:8px"></div>
       </div>
       <div class="card">
-        <div class="card-head"><div class="card-title">😴 Clients inactifs (+60j)</div></div>
+        <div class="card-head"><div class="card-title" id="inactifCardTitle">😴 Clients inactifs</div></div>
         <div class="card-body" id="inactiveList" style="display:flex;flex-direction:column;gap:8px"></div>
       </div>
+    </div>
+    <!-- Alerte inactifs -->
+    <div id="inactifAlertBanner" class="inactif-alert" style="display:none">
+      <span style="font-size:22px">⚠️</span>
+      <div style="flex:1"><div style="font-size:12px;font-weight:700;color:#991b1b" id="inactifAlertText">0 clients sont devenus inactifs</div><div style="font-size:10px;color:#b91c1c;margin-top:2px">Pensez à les relancer pour les fidéliser !</div></div>
+      <button class="btn btn-xs" style="background:#fef2f2;color:#dc2626;border:1.5px solid #fecaca" onclick="switchTab('clients',null);document.getElementById('filterSeg').value='inactif';renderClients()">👀 Voir</button>
     </div>
   </div>
 
@@ -379,16 +400,20 @@ html,body{overflow-x:hidden;max-width:100vw}
         <option value="inactif">😴 Inactif</option>
         <option value="nouveau">🌱 Nouveau</option>
       </select>
+      <select class="ci" id="filterTag" onchange="renderClients()" style="width:140px">
+        <option value="">Tous les tags</option>
+      </select>
       <button class="btn btn-p btn-xs" onclick="openModal('addClient')">+ Client</button>
       <button class="btn btn-o btn-xs" onclick="openImportClients()" style="gap:4px">📥 Importer</button>
+      <button class="btn btn-xs" style="background:#f0fdf4;color:#065f46;border:1.5px solid #bbf7d0" onclick="openModal('smsInscription')">📱 Inviter par SMS</button>
     </div>
     <div class="card">
       <div class="table-wrap">
         <table class="clients-table">
           <thead>
             <tr>
-              <th>Client</th><th>Segment</th><th>Points</th><th>Tampons</th>
-              <th>Dernière visite</th><th>Anniversaire</th><th>Actions</th>
+              <th>Client</th><th>Segment</th><th>Tags</th><th>Points</th><th>Tampons</th>
+              <th>Dernière visite</th><th>Actions</th>
             </tr>
           </thead>
           <tbody id="clientsTbody"></tbody>
@@ -469,6 +494,12 @@ html,body{overflow-x:hidden;max-width:100vw}
           <div class="config-row">
             <div><div class="config-label">Points = VIP</div><div class="config-sub">Seuil pour statut VIP</div></div>
             <div class="config-input"><input class="ci" type="number" id="cfg-vip-pts" value="2000" onchange="saveConfig()"/ "debounceSaveConfig()"><span style="font-size:11px;color:var(--muted)">pts</span></div>
+          </div>
+          <div class="config-row" style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+            <div><div class="config-label">Seuil inactivité</div><div class="config-sub">Jours sans visite = client inactif</div></div>
+            <div class="config-input"><select class="ci" id="cfg-inactif-days" onchange="saveConfig();renderClients();renderDashboard()" style="width:80px">
+              <option value="30">30j</option><option value="45">45j</option><option value="60" selected>60j</option><option value="90">90j</option><option value="120">120j</option>
+            </select></div>
           </div>
         </div>
       </div>
@@ -725,6 +756,15 @@ html,body{overflow-x:hidden;max-width:100vw}
       <div class="field"><label>Email</label><div class="field-wrap"><input class="field-in" id="fc-email" type="email" oninput="fcAutoSave()"/></div></div>
       <div class="field"><label>Date de naissance</label><div class="field-wrap"><input class="field-in" id="fc-bday" type="date" onchange="fcAutoSave()"/></div></div>
       <div class="field"><label>Note interne</label><div class="field-wrap"><input class="field-in" id="fc-note" placeholder="Client régulier du lundi..." oninput="fcAutoSave()"/></div></div>
+      <div class="field">
+        <label>🏷️ Tags</label>
+        <div id="fc-tags-display" class="tags-wrap"></div>
+        <div class="tag-presets-bar" id="fc-tag-presets"></div>
+        <div class="tag-input-wrap">
+          <input class="tag-input" id="fc-tag-input" placeholder="Ajouter un tag libre…" onkeydown="if(event.key==='Enter'){event.preventDefault();fcAddFreeTag()}"/>
+          <button class="btn btn-xs btn-o" onclick="fcAddFreeTag()">+</button>
+        </div>
+      </div>
     </div>
     <!-- Points -->
     <div id="fc-panel-points" class="hidden">
@@ -1019,6 +1059,45 @@ html,body{overflow-x:hidden;max-width:100vw}
   </div>
 </div>
 
+<!-- ═══ SMS INSCRIPTION MODAL ═══ -->
+<div class="modal-wrap hidden" id="mw-smsInscription">
+  <div class="modal-backdrop" onclick="closeModal('smsInscription')"></div>
+  <div class="modal" style="width:min(480px,95vw)">
+    <div class="modal-head"><div class="modal-title">📱 Inviter un client par SMS</div><button class="modal-close" onclick="closeModal('smsInscription')">✕</button></div>
+    <div style="padding:14px 20px">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:14px;line-height:1.5">Le client recevra un SMS avec un lien pour s'inscrire à votre programme fidélité. Il remplit ses infos et apparaît automatiquement dans votre liste.</div>
+      <!-- Mode : saisie manuelle ou client existant -->
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <button class="btn btn-xs" id="sms-inv-mode-manual" style="border:2px solid var(--blue);background:#eff6ff;color:var(--blue);font-weight:700" onclick="setSmsInvMode('manual')">✏️ Numéro manuel</button>
+        <button class="btn btn-xs" id="sms-inv-mode-client" style="border:2px solid var(--border)" onclick="setSmsInvMode('client')">👥 Client existant</button>
+      </div>
+      <!-- Manuel -->
+      <div id="sms-inv-manual">
+        <div class="field"><label>Numéro de téléphone</label><div class="field-wrap"><input class="field-in" id="sms-inv-tel" type="tel" placeholder="06 12 34 56 78"/></div></div>
+        <div class="field"><label>Prénom (optionnel, pour personnaliser)</label><div class="field-wrap"><input class="field-in" id="sms-inv-prenom" placeholder="Marie" oninput="updateSmsInvPreview()"/></div></div>
+      </div>
+      <!-- Client existant -->
+      <div id="sms-inv-client" style="display:none">
+        <div class="field"><label>Sélectionner un client</label><div class="field-wrap">
+          <select class="field-sel" id="sms-inv-client-sel" onchange="smsInvClientChange()">
+            <option value="">— Choisir —</option>
+          </select>
+        </div></div>
+        <div id="sms-inv-client-info" style="display:none;padding:8px 12px;background:#f8faff;border:1px solid var(--border);border-radius:8px;margin-top:6px;font-size:11px;color:var(--muted)"></div>
+      </div>
+      <!-- Aperçu message -->
+      <div style="margin-top:14px;padding:12px;background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px">
+        <div style="font-size:10px;font-weight:700;color:#065f46;margin-bottom:6px">📄 Aperçu du SMS</div>
+        <div style="font-size:12px;color:#14532d;line-height:1.5" id="sms-inv-preview">Bonjour ! Rejoignez notre programme fidélité et cumulez des points à chaque visite 🎁 Inscrivez-vous ici : …</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-o" onclick="closeModal('smsInscription')">Annuler</button>
+      <button class="btn btn-p" id="sms-inv-send-btn" onclick="sendSmsInscription()">📱 Envoyer le SMS</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ IMPORT CLIENTS MODAL ═══ -->
 <div class="modal-wrap hidden" id="mw-importClients">
   <div class="modal-backdrop" onclick="closeImportClients()"></div>
@@ -1173,11 +1252,23 @@ function getSeg(c){
   const pts=c.points||0;
   const days=c.lastVisit?daysSince(c.lastVisit):999;
   const age=daysSince(c.createdAt||today());
+  const inactifDays=parseInt(cfg.inactifDays)||60;
   if(pts>=parseInt(cfg.vipPts||2000))return'vip';
   if(age<30)return'nouveau';
-  if(days>60)return'inactif';
+  if(days>inactifDays)return'inactif';
   return'actif';
 }
+
+const PREDEFINED_TAGS=[
+  {label:'Régulier',icon:'🔁',color:'#2563eb'},
+  {label:'Occasionnel',icon:'🕐',color:'#6b7280'},
+  {label:'Recommandé',icon:'💬',color:'#7c3aed'},
+  {label:'Pro / Entreprise',icon:'🏢',color:'#0891b2'},
+  {label:'Allergies',icon:'⚠️',color:'#dc2626'},
+  {label:'VIP manuel',icon:'⭐',color:'#d97706'},
+  {label:'Famille',icon:'👨‍👩‍👧',color:'#059669'},
+  {label:'Étudiant',icon:'🎓',color:'#6366f1'},
+];
 function segBadge(s){
   const map={vip:['👑 VIP','seg-vip'],actif:['✅ Actif','seg-actif'],inactif:['😴 Inactif','seg-inactif'],nouveau:['🌱 Nouveau','seg-nouveau']};
   const [label,cls]=map[s]||['—',''];
@@ -1203,6 +1294,7 @@ function load(){
   document.getElementById('cfg-bday-pts').value=cfg.bdayPts||200;
   document.getElementById('cfg-ref-pts').value=cfg.refPts||500;
   document.getElementById('cfg-vip-pts').value=cfg.vipPts||2000;
+  document.getElementById('cfg-inactif-days').value=cfg.inactifDays||60;
   document.getElementById('cfg-shop-name').value=cfg.shopName||'';
   if(document.getElementById('cfg-sms-sender'))document.getElementById('cfg-sms-sender').value=cfg.smsSender||'';
   if(document.getElementById('cfg-tablet-pin'))document.getElementById('cfg-tablet-pin').value=cfg.tabletPin||'1234';
@@ -1257,6 +1349,7 @@ function saveConfig(){
     bdayPts:parseInt(document.getElementById('cfg-bday-pts').value)||200,
     refPts:parseInt(document.getElementById('cfg-ref-pts').value)||500,
     vipPts:parseInt(document.getElementById('cfg-vip-pts').value)||2000,
+    inactifDays:parseInt(document.getElementById('cfg-inactif-days').value)||60,
     shopName:document.getElementById('cfg-shop-name').value||'',
     smsSender:document.getElementById('cfg-sms-sender')?document.getElementById('cfg-sms-sender').value.replace(/[^a-zA-Z0-9]/g,'').slice(0,11)||''  :'',
     tabletPin:document.getElementById('cfg-tablet-pin')?document.getElementById('cfg-tablet-pin').value.replace(/[^0-9]/g,'').slice(0,4)||'1234':'1234',
@@ -1330,8 +1423,17 @@ function renderDashboard(){
     :`<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px">Aucun anniversaire ce mois 🎉</div>`;
 
   // Inactifs
+  const inactifDays=parseInt(cfg.inactifDays)||60;
+  document.getElementById('inactifCardTitle').textContent=`😴 Clients inactifs (+${inactifDays}j)`;
   const inactifs=clients.filter(c=>getSeg(c)==='inactif').slice(0,4);
+  const allInactifs=clients.filter(c=>getSeg(c)==='inactif');
   const inactEl=document.getElementById('inactiveList');
+  // Alerte banner
+  const alertBanner=document.getElementById('inactifAlertBanner');
+  if(allInactifs.length>0){
+    alertBanner.style.display='flex';
+    document.getElementById('inactifAlertText').textContent=`${allInactifs.length} client${allInactifs.length>1?'s':''} inactif${allInactifs.length>1?'s':''} depuis +${inactifDays} jours`;
+  } else { alertBanner.style.display='none'; }
   inactEl.innerHTML=inactifs.length
     ?inactifs.map(c=>`<div style="display:flex;align-items:center;gap:10px;padding:8px;background:#f9fafb;border-radius:8px">
       <div class="client-avatar" style="background:${avatarColor(c.prenom)};font-size:11px">${c.prenom[0]}${c.nom[0]}</div>
@@ -1342,13 +1444,35 @@ function renderDashboard(){
 }
 
 // ═══ CLIENTS ═══
+function getAllTags(){
+  const tags=new Set();
+  clients.forEach(c=>(c.tags||[]).forEach(t=>tags.add(t)));
+  return [...tags].sort();
+}
+function refreshTagFilter(){
+  const sel=document.getElementById('filterTag');
+  const cur=sel.value;
+  const tags=getAllTags();
+  sel.innerHTML='<option value="">Tous les tags</option>'+tags.map(t=>`<option value="${t}">${t}</option>`).join('');
+  if(cur&&tags.includes(cur))sel.value=cur;
+}
+function renderTagsInline(tags){
+  if(!tags||!tags.length)return'<span style="font-size:10px;color:var(--muted)">—</span>';
+  return tags.slice(0,3).map(t=>{
+    const isPreset=PREDEFINED_TAGS.some(p=>p.label===t);
+    return`<span class="tag ${isPreset?'tag-preset':'tag-custom'}">${t}</span>`;
+  }).join('')+(tags.length>3?`<span style="font-size:9px;color:var(--muted)">+${tags.length-3}</span>`:'');
+}
 function renderClients(){
+  refreshTagFilter();
   const q=document.getElementById('searchClient').value.toLowerCase();
   const seg=document.getElementById('filterSeg').value;
+  const tagFilter=document.getElementById('filterTag').value;
   let list=clients.filter(c=>{
-    const match=`${c.prenom} ${c.nom} ${c.tel||''} ${c.email||''}`.toLowerCase().includes(q);
+    const match=`${c.prenom} ${c.nom} ${c.tel||''} ${c.email||''} ${(c.tags||[]).join(' ')}`.toLowerCase().includes(q);
     const segMatch=!seg||getSeg(c)===seg;
-    return match&&segMatch;
+    const tagMatch=!tagFilter||(c.tags||[]).includes(tagFilter);
+    return match&&segMatch&&tagMatch;
   });
   const tb=document.getElementById('clientsTbody');
   if(!list.length){const qs=q?(q+'').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';tb.innerHTML=`<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Aucun client${qs?` pour "${qs}"`:''}</td></tr>`;return}
@@ -1356,19 +1480,19 @@ function renderClients(){
   tb.innerHTML=list.map(c=>{
     const seg=getSeg(c);
     const pct=Math.min(100,Math.round(((c.points||0)/(parseInt(cfg.vipPts)||2000))*100));
-    const bday=c.birthday?c.birthday.slice(5).split('-').reverse().join('/'):'-';
     const visit=c.lastVisit?new Date(c.lastVisit).toLocaleDateString('fr-FR'):'-';
     const tampons=c.tampons||0;
+    const inactifWarn=seg==='inactif'?`<div style="font-size:9px;color:#dc2626;font-weight:700;margin-top:1px">⚠️ ${c.lastVisit?daysSince(c.lastVisit)+'j':'?'}</div>`:'';
     return`<tr>
       <td><div style="display:flex;align-items:center;gap:9px">
         <div class="client-avatar" style="background:${avatarColor(c.prenom)}">${c.prenom[0]}${c.nom[0]}</div>
-        <div><div style="font-weight:700">${c.prenom} ${c.nom}</div><div style="font-size:10px;color:var(--muted)">${c.email||c.tel||'—'}</div></div>
+        <div><div style="font-weight:700">${c.prenom} ${c.nom}</div><div style="font-size:10px;color:var(--muted)">${c.email||c.tel||'—'}</div>${inactifWarn}</div>
       </div></td>
       <td>${segBadge(seg)}</td>
+      <td><div style="display:flex;flex-wrap:wrap;gap:3px">${renderTagsInline(c.tags)}</div></td>
       <td><div style="font-weight:700">${fi(c.points||0)}</div><div style="display:flex;align-items:center;gap:5px;margin-top:3px"><div class="points-bar"><div class="points-fill" style="width:${pct}%"></div></div><span style="font-size:10px;color:var(--muted)">${pct}%</span></div></td>
       <td><div style="font-size:12px;font-weight:700">${tampons}/${cfgT}</div><div style="font-size:10px;color:var(--muted)">${tampons>=cfgT?'🎁 Récompense!':''}</div></td>
       <td>${visit}</td>
-      <td>${bday==='01/01'?'—':bday}</td>
       <td><div style="display:flex;gap:5px">
         <button class="btn btn-xs btn-o" onclick="openFicheClient('${c.id}');setTimeout(()=>fcTab('carte',document.querySelectorAll('.fc-tab')[2]),100)">✅</button>
         <button class="btn btn-xs" style="background:#ede9fe;color:var(--purple)" onclick="openFicheClient('${c.id}');setTimeout(()=>fcTab('points',document.querySelectorAll('.fc-tab')[1]),100)">+pts</button>
@@ -2186,6 +2310,8 @@ function openModal(id){
   if(document.getElementById('ca-client-picker'))document.getElementById('ca-client-picker').style.display='none';
   if(document.getElementById('ca-client-selected'))document.getElementById('ca-client-selected').style.display='none';
   if(document.getElementById('ca-client-search'))document.getElementById('ca-client-search').value='';
+  // Init SMS inscription modal
+  if(id==='smsInscription'){setSmsInvMode('manual');document.getElementById('sms-inv-tel').value='';document.getElementById('sms-inv-prenom').value='';updateSmsInvPreview();}
 }
 function closeModal(id){
   if(id){document.getElementById('mw-'+id)?.classList.add('hidden')}
@@ -2224,6 +2350,8 @@ function openFicheClient(id){
   document.getElementById('fc-email').value=c.email||'';
   document.getElementById('fc-bday').value=c.birthday||'';
   document.getElementById('fc-note').value=c.note||'';
+  // Render tags in fiche
+  fcRenderTags(c);
   // Reset tabs
   // Reset tous les panels + activer Infos
   ['infos','points','carte','histo','roue'].forEach(p=>{
@@ -2343,6 +2471,7 @@ function fcSave(silent){
   c.email=document.getElementById('fc-email').value.trim();
   c.birthday=document.getElementById('fc-bday').value;
   c.note=document.getElementById('fc-note').value.trim();
+  // Tags are saved live by fcAddPresetTag/fcAddFreeTag/fcRemoveTag
   save();renderClients();
   // Rafraîchir header fiche
   document.getElementById('fc-name').textContent=`${c.prenom} ${c.nom}`;
@@ -2384,6 +2513,122 @@ function fcDelete(){
   clients=clients.filter(x=>x.id!==_fcClientId);
   save();closeModal('ficheClient');renderClients();
   toast('Client supprimé');
+}
+
+// ═══ TAGS MANAGEMENT ═══
+function fcRenderTags(c){
+  if(!c)c=clients.find(x=>x.id===_fcClientId);
+  if(!c)return;
+  const tags=c.tags||[];
+  // Current tags display
+  const display=document.getElementById('fc-tags-display');
+  display.innerHTML=tags.map(t=>{
+    const isPreset=PREDEFINED_TAGS.some(p=>p.label===t);
+    return`<span class="tag ${isPreset?'tag-preset':'tag-custom'}">${t} <span class="tag-remove" onclick="fcRemoveTag('${t.replace(/'/g,"\\'")}')">✕</span></span>`;
+  }).join('')||(tags.length===0?'<span style="font-size:10px;color:var(--muted)">Aucun tag</span>':'');
+  // Preset buttons
+  const presets=document.getElementById('fc-tag-presets');
+  presets.innerHTML=PREDEFINED_TAGS.map(p=>{
+    const active=tags.includes(p.label);
+    return`<button class="tag-preset-btn ${active?'active':''}" onclick="fcTogglePresetTag('${p.label}')">${p.icon} ${p.label}</button>`;
+  }).join('');
+}
+function fcTogglePresetTag(label){
+  const c=clients.find(x=>x.id===_fcClientId);if(!c)return;
+  c.tags=c.tags||[];
+  const idx=c.tags.indexOf(label);
+  if(idx>=0) c.tags.splice(idx,1); else c.tags.push(label);
+  fcRenderTags(c);saveOne(c);refreshTagFilter();
+}
+function fcAddFreeTag(){
+  const input=document.getElementById('fc-tag-input');
+  const val=input.value.trim();
+  if(!val)return;
+  const c=clients.find(x=>x.id===_fcClientId);if(!c)return;
+  c.tags=c.tags||[];
+  if(!c.tags.includes(val)){c.tags.push(val);fcRenderTags(c);saveOne(c);refreshTagFilter();}
+  input.value='';
+}
+function fcRemoveTag(label){
+  const c=clients.find(x=>x.id===_fcClientId);if(!c)return;
+  c.tags=(c.tags||[]).filter(t=>t!==label);
+  fcRenderTags(c);saveOne(c);refreshTagFilter();
+}
+
+// ═══ SMS INSCRIPTION ═══
+let _smsInvMode='manual';
+function setSmsInvMode(mode){
+  _smsInvMode=mode;
+  document.getElementById('sms-inv-mode-manual').style.cssText=mode==='manual'?'border:2px solid var(--blue);background:#eff6ff;color:var(--blue);font-weight:700':'border:2px solid var(--border)';
+  document.getElementById('sms-inv-mode-client').style.cssText=mode==='client'?'border:2px solid var(--blue);background:#eff6ff;color:var(--blue);font-weight:700':'border:2px solid var(--border)';
+  document.getElementById('sms-inv-manual').style.display=mode==='manual'?'':'none';
+  document.getElementById('sms-inv-client').style.display=mode==='client'?'':'none';
+  // Populate client select
+  if(mode==='client'){
+    const sel=document.getElementById('sms-inv-client-sel');
+    sel.innerHTML='<option value="">— Choisir —</option>'+clients.filter(c=>c.tel).map(c=>`<option value="${c.id}">${c.prenom} ${c.nom} (${c.tel})</option>`).join('');
+  }
+  updateSmsInvPreview();
+}
+function smsInvClientChange(){
+  const id=document.getElementById('sms-inv-client-sel').value;
+  const c=clients.find(x=>x.id===id);
+  const info=document.getElementById('sms-inv-client-info');
+  if(c){
+    info.style.display='block';
+    info.innerHTML=`📱 ${c.tel||'—'} · ✉️ ${c.email||'—'} · ⭐ ${fi(c.points||0)} pts`;
+  } else { info.style.display='none'; }
+  updateSmsInvPreview();
+}
+function updateSmsInvPreview(){
+  let prenom='';
+  if(_smsInvMode==='manual') prenom=document.getElementById('sms-inv-prenom').value.trim();
+  else{const id=document.getElementById('sms-inv-client-sel').value;const c=clients.find(x=>x.id===id);if(c)prenom=c.prenom;}
+  const shopName=cfg.shopName||'notre boutique';
+  const greeting=prenom?`Bonjour ${prenom} ! `:'Bonjour ! ';
+  document.getElementById('sms-inv-preview').textContent=`${greeting}Rejoignez le programme fidélité de ${shopName} et cumulez des points à chaque visite 🎁 Inscrivez-vous ici : ${location.origin}/inscription.html?m=${window._uid||'…'}`;
+}
+async function sendSmsInscription(){
+  let tel='', prenom='';
+  if(_smsInvMode==='manual'){
+    tel=document.getElementById('sms-inv-tel').value.trim();
+    prenom=document.getElementById('sms-inv-prenom').value.trim();
+  } else {
+    const id=document.getElementById('sms-inv-client-sel').value;
+    const c=clients.find(x=>x.id===id);
+    if(!c){toast('Sélectionnez un client','err');return}
+    tel=c.tel||'';prenom=c.prenom||'';
+  }
+  if(!tel){toast('Numéro de téléphone requis','err');return}
+  // Normalise
+  tel=tel.replace(/[\s\.\-]/g,'');
+  if(tel.startsWith('0'))tel='+33'+tel.slice(1);
+  if(!tel.startsWith('+'))tel='+33'+tel;
+
+  const shopName=cfg.shopName||'notre boutique';
+  const greeting=prenom?`Bonjour ${prenom} ! `:'Bonjour ! ';
+  const link=`${location.origin}/inscription.html?m=${window._uid||''}`;
+  const msg=`${greeting}Rejoignez le programme fidélité de ${shopName} et cumulez des points à chaque visite 🎁 Inscrivez-vous ici : ${link}`;
+
+  const btn=document.getElementById('sms-inv-send-btn');
+  btn.disabled=true;btn.textContent='⏳ Envoi...';
+  try{
+    const token=await window._auth.currentUser.getIdToken();
+    const sender=cfg.smsSender||'ALTEORE';
+    const res=await fetch('/api/send-sms',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({to:tel,message:msg,sender:sender,uid:window._uid})
+    });
+    const data=await res.json();
+    if(!res.ok||!data.success) throw new Error(data.error||'Erreur envoi');
+    toast(`✅ SMS envoyé à ${tel} !`);
+    closeModal('smsInscription');
+  }catch(e){
+    toast('❌ Erreur : '+e.message,'err');
+  }finally{
+    btn.disabled=false;btn.textContent='📱 Envoyer le SMS';
+  }
 }
 function fcShowLink(){
   const origin = location.origin;
@@ -2428,6 +2673,7 @@ function applyConfig(){
     document.getElementById('cfg-bday-pts').value=cfg.bdayPts||200;
     document.getElementById('cfg-ref-pts').value=cfg.refPts||500;
     document.getElementById('cfg-vip-pts').value=cfg.vipPts||2000;
+    document.getElementById('cfg-inactif-days').value=cfg.inactifDays||60;
     document.getElementById('cfg-shop-name').value=cfg.shopName||'';
     document.getElementById('cfg-notif-bday').checked=cfg.notifBday!==false;
     document.getElementById('cfg-notif-inactif').checked=cfg.notifInactif!==false;
