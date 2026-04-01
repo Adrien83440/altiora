@@ -698,11 +698,17 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
         <div>
           <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px">Date début *</label>
-          <div class="mfield-wrap" style="padding:9px 13px;border:2px solid var(--border);border-radius:10px;background:#f8faff"><input class="mfield-in" id="aclm-debut" type="month" style="font-size:14px;font-weight:700;border:none;background:transparent;width:100%;outline:none"/></div>
+          <div style="display:flex;gap:6px">
+            <div class="mfield-wrap" style="padding:9px 10px;border:2px solid var(--border);border-radius:10px;background:#f8faff;flex:1"><select class="mfield-in" id="aclm-debut-m" style="font-size:13px;font-weight:700;border:none;background:transparent;width:100%;outline:none;cursor:pointer"><option value="">Mois</option><option value="01">Janvier</option><option value="02">Février</option><option value="03">Mars</option><option value="04">Avril</option><option value="05">Mai</option><option value="06">Juin</option><option value="07">Juillet</option><option value="08">Août</option><option value="09">Septembre</option><option value="10">Octobre</option><option value="11">Novembre</option><option value="12">Décembre</option></select></div>
+            <div class="mfield-wrap" style="padding:9px 10px;border:2px solid var(--border);border-radius:10px;background:#f8faff;width:90px"><select class="mfield-in" id="aclm-debut-y" style="font-size:13px;font-weight:700;border:none;background:transparent;width:100%;outline:none;cursor:pointer"><option value="">Année</option></select></div>
+          </div>
         </div>
         <div>
           <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px">Date fin *</label>
-          <div class="mfield-wrap" style="padding:9px 13px;border:2px solid var(--border);border-radius:10px;background:#f8faff"><input class="mfield-in" id="aclm-fin" type="month" style="font-size:14px;font-weight:700;border:none;background:transparent;width:100%;outline:none"/></div>
+          <div style="display:flex;gap:6px">
+            <div class="mfield-wrap" style="padding:9px 10px;border:2px solid var(--border);border-radius:10px;background:#f8faff;flex:1"><select class="mfield-in" id="aclm-fin-m" style="font-size:13px;font-weight:700;border:none;background:transparent;width:100%;outline:none;cursor:pointer"><option value="">Mois</option><option value="01">Janvier</option><option value="02">Février</option><option value="03">Mars</option><option value="04">Avril</option><option value="05">Mai</option><option value="06">Juin</option><option value="07">Juillet</option><option value="08">Août</option><option value="09">Septembre</option><option value="10">Octobre</option><option value="11">Novembre</option><option value="12">Décembre</option></select></div>
+            <div class="mfield-wrap" style="padding:9px 10px;border:2px solid var(--border);border-radius:10px;background:#f8faff;width:90px"><select class="mfield-in" id="aclm-fin-y" style="font-size:13px;font-weight:700;border:none;background:transparent;width:100%;outline:none;cursor:pointer"><option value="">Année</option></select></div>
+          </div>
         </div>
       </div>
       <div style="background:#eff6ff;border:1.5px solid #c7d2fe;border-radius:10px;padding:10px 14px;font-size:11px;color:#4338ca">
@@ -914,6 +920,23 @@ function fmt(n)  { return (n >= 0 ? '+' : '') + fmtN(n) + ' €'; }
 function fmtE(n) { return fmtN(n) + ' €'; }
 function fmtN(n) { return (parseFloat(n) || 0).toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function pf(v)   { return parseFloat((v||'').toString().replace(',','.')) || 0; }
+
+// Normalise une valeur date vers 'YYYY-MM', tolère les formats Safari dégradés
+function parseYYYYMM(v) {
+  if (!v) return '';
+  var s = String(v).trim();
+  // Déjà au bon format YYYY-MM
+  if (/^\d{4}-\d{2}$/.test(s)) return s;
+  // YYYY-MM-DD (input type=date)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(0,7);
+  // MM/YYYY ou M/YYYY
+  var m1 = s.match(/^(\d{1,2})[\/\-.](\d{4})$/);
+  if (m1) return m1[2] + '-' + String(parseInt(m1[1])).padStart(2,'0');
+  // YYYY/MM
+  var m2 = s.match(/^(\d{4})[\/.](\d{1,2})$/);
+  if (m2) return m2[1] + '-' + String(parseInt(m2[2])).padStart(2,'0');
+  return '';
+}
 function showToast(msg, type) {
   var t = document.getElementById('toast');
   var inner = document.getElementById('toast-inner');
@@ -1159,19 +1182,21 @@ async function syncDettesToMonth(data, monthKey) {
       (md.credits || []).forEach(function(c) {
         if (!c.fournisseur || !c.fournisseur.trim() || !parseFloat(c.montant)) return;
         if (!c.dateDebut || !c.dateFin) return;
-        var deb = c.dateDebut.slice(0,7), fin = c.dateFin.slice(0,7);
+        var deb = parseYYYYMM(c.dateDebut), fin = parseYYYYMM(c.dateFin);
+        if (!deb || !fin) return;
         if (monthKey < deb || monthKey > fin) return;
         // Valider dates
-        if (parseInt(c.dateDebut.slice(0,4)) < 2000) return;
+        if (parseInt(deb.slice(0,4)) < 2000) return;
         var key = c.fournisseur.trim().toLowerCase();
         if (!sourceCreds[key]) sourceCreds[key] = c;
       });
       (md.leasing || []).forEach(function(l) {
         if (!l.fournisseur || !l.fournisseur.trim() || !parseFloat(l.montantHT)) return;
         if (!l.dateDebut || !l.dateFin) return;
-        var deb = l.dateDebut.slice(0,7), fin = l.dateFin.slice(0,7);
+        var deb = parseYYYYMM(l.dateDebut), fin = parseYYYYMM(l.dateFin);
+        if (!deb || !fin) return;
         if (monthKey < deb || monthKey > fin) return;
-        if (parseInt(l.dateDebut.slice(0,4)) < 2000) return;
+        if (parseInt(deb.slice(0,4)) < 2000) return;
         var key = l.fournisseur.trim().toLowerCase();
         if (!sourceLeas[key]) sourceLeas[key] = l;
       });
@@ -1243,13 +1268,12 @@ async function syncCreditsTosDettes() {
     credits.forEach(function(c) {
       var montant = parseFloat(c.montant) || 0;
       var nom     = (c.nom && c.nom.trim()) ? c.nom.trim() : c.fournisseur.trim();
-      var debut   = c.dateDebut || '';
+      var debut   = parseYYYYMM(c.dateDebut);
       var taux    = parseFloat(c.tauxInteret) || 0;
       var duree   = 0;
-      if (c.dateDebut && c.dateFin) {
-        var d1 = new Date(c.dateDebut + '-01'), d2 = new Date(c.dateFin + '-01');
-        duree = Math.round((d2 - d1) / (1000 * 60 * 60 * 24 * 30.44));
-        if (duree < 1) duree = 0;
+      if (debut && c.dateFin) {
+        var _nf1 = parseYYYYMM(c.dateFin);
+        if (_nf1) { var d1 = new Date(debut + '-01'), d2 = new Date(_nf1 + '-01'); duree = Math.round((d2 - d1) / (1000 * 60 * 60 * 24 * 30.44)); if (duree < 1) duree = 0; }
       }
       var existingIdx = dettes.findIndex(function(d) {
         return d._pilotageRef === c.fournisseur.trim();
@@ -1334,13 +1358,12 @@ async function forceSyncDettes() {
     creditsList.forEach(function(c) {
       var montant = parseFloat(c.montant) || 0;
       var nom     = (c.nom && c.nom.trim()) ? c.nom.trim() : c.fournisseur.trim();
-      var debut   = c.dateDebut || '';
+      var debut   = parseYYYYMM(c.dateDebut);
       var taux    = parseFloat(c.tauxInteret) || 0;
       var duree   = 0;
-      if (c.dateDebut && c.dateFin) {
-        var d1 = new Date(c.dateDebut + '-01'), d2 = new Date(c.dateFin + '-01');
-        duree = Math.round((d2 - d1) / (1000 * 60 * 60 * 24 * 30.44));
-        if (duree < 1) duree = 0;
+      if (debut && c.dateFin) {
+        var _nf2 = parseYYYYMM(c.dateFin);
+        if (_nf2) { var d1 = new Date(debut + '-01'), d2 = new Date(_nf2 + '-01'); duree = Math.round((d2 - d1) / (1000 * 60 * 60 * 24 * 30.44)); if (duree < 1) duree = 0; }
       }
       // montant dans pilotage = mensualité, capital = mensualité × durée
       var capital = duree > 0 ? montant * duree : montant;
@@ -2182,8 +2205,8 @@ function renderCredits(rows) {
   return rows.map(function(r, i) {
     // Masquer si hors plage de dates
     if (curKey && r.dateDebut && r.dateFin) {
-      var deb = r.dateDebut.slice(0,7), fin = r.dateFin.slice(0,7);
-      if (curKey < deb || curKey > fin) return '';
+      var deb = parseYYYYMM(r.dateDebut), fin = parseYYYYMM(r.dateFin);
+      if (deb && fin && (curKey < deb || curKey > fin)) return '';
     }
     var principal  = parseFloat((r.montant||'').toString().replace(',','.')) || 0;
     var interet    = calcCreditInteret(r);
@@ -2239,15 +2262,20 @@ function updateCA(i, field, value) {
 async function propagateCredit(i) {
   if (!window._uid) { showToast('Non connecté','warning'); return; }
   var r = _data.credits[i];
-  if (!r.dateDebut || !r.dateFin) { showToast('Renseigne une date de début et de fin','warning'); return; }
+  var normDebut = parseYYYYMM(r.dateDebut);
+  var normFin   = parseYYYYMM(r.dateFin);
+  if (!normDebut || !normFin) { showToast('Renseigne une date de début et de fin','warning'); return; }
+  // Auto-corriger les dates mal formatées en base
+  if (r.dateDebut !== normDebut) { r.dateDebut = normDebut; scheduleSave(); }
+  if (r.dateFin   !== normFin)   { r.dateFin   = normFin;   scheduleSave(); }
   // Spinner sur le bouton
   var row = document.getElementById('cred-row-'+i);
   var btn = row ? row.querySelector('.btn-orange') : null;
   var origText = '';
   if(btn){origText=btn.innerHTML;btn.innerHTML='⏳ Propagation...';btn.disabled=true;}
   var linesToPropagate = [r];
-  var start = r.dateDebut; // 'YYYY-MM'
-  var end   = r.dateFin;
+  var start = normDebut; // 'YYYY-MM'
+  var end   = normFin;
   var count = 0;
   // Générer tous les mois entre start et end (UTC pour éviter décalage)
   var startParts = start.split('-'); var endParts = end.split('-');
@@ -2281,14 +2309,19 @@ async function propagateCredit(i) {
 async function propagateLeasing(i) {
   if (!window._uid) { showToast('Non connecté','warning'); return; }
   var r = _data.leasing[i];
-  if (!r.dateDebut || !r.dateFin) { showToast('Renseigne une date de début et de fin','warning'); return; }
+  var normDebut = parseYYYYMM(r.dateDebut);
+  var normFin   = parseYYYYMM(r.dateFin);
+  if (!normDebut || !normFin) { showToast('Renseigne une date de début et de fin','warning'); return; }
+  // Auto-corriger les dates mal formatées en base
+  if (r.dateDebut !== normDebut) { r.dateDebut = normDebut; scheduleSave(); }
+  if (r.dateFin   !== normFin)   { r.dateFin   = normFin;   scheduleSave(); }
   // Spinner sur le bouton
   var row = document.querySelector('#leas-tbody tr:nth-child(' + (i+1) + ')');
   var btn2 = row ? row.querySelector('.btn-orange') : null;
   var origText2 = '';
   if(btn2){origText2=btn2.innerHTML;btn2.innerHTML='⏳ Propagation...';btn2.disabled=true;}
-  var start = r.dateDebut;
-  var end   = r.dateFin;
+  var start = normDebut;
+  var end   = normFin;
   var count = 0;
   var startParts = start.split('-'); var endParts = end.split('-');
   var curY = parseInt(startParts[0]), curM = parseInt(startParts[1])-1;
@@ -2337,8 +2370,20 @@ function openAddCLModal(type) {
   document.getElementById('aclm-montant').value = '';
   document.getElementById('aclm-taux').value = '';
   document.getElementById('aclm-amort').value = 'constant';
-  document.getElementById('aclm-debut').value = '';
-  document.getElementById('aclm-fin').value = '';
+  // Peupler les selects année (année courante -2 → +10)
+  var cy = window._year || new Date().getFullYear();
+  ['aclm-debut-y','aclm-fin-y'].forEach(function(id) {
+    var sel = document.getElementById(id);
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Année</option>';
+    for (var y = cy - 2; y <= cy + 10; y++) {
+      sel.innerHTML += '<option value="' + y + '">' + y + '</option>';
+    }
+  });
+  document.getElementById('aclm-debut-m').value = '';
+  document.getElementById('aclm-debut-y').value = '';
+  document.getElementById('aclm-fin-m').value = '';
+  document.getElementById('aclm-fin-y').value = '';
   document.getElementById('addCreditLeasModal').classList.add('show');
   setTimeout(function(){ document.getElementById('aclm-nom').focus(); }, 100);
 }
@@ -2364,8 +2409,8 @@ function setACLType(type) {
 async function submitAddCL(propagate) {
   var nom = (document.getElementById('aclm-nom').value || '').trim();
   var montant = parseFloat((document.getElementById('aclm-montant').value || '').replace(',','.')) || 0;
-  var debut = document.getElementById('aclm-debut').value || '';
-  var fin = document.getElementById('aclm-fin').value || '';
+  var debut = (document.getElementById('aclm-debut-y').value && document.getElementById('aclm-debut-m').value) ? document.getElementById('aclm-debut-y').value + '-' + document.getElementById('aclm-debut-m').value : '';
+  var fin = (document.getElementById('aclm-fin-y').value && document.getElementById('aclm-fin-m').value) ? document.getElementById('aclm-fin-y').value + '-' + document.getElementById('aclm-fin-m').value : '';
   if (!nom) { showToast('Renseigne un nom','warning'); return; }
   if (!montant) { showToast('Renseigne un montant','warning'); return; }
   if (propagate && (!debut || !fin)) { showToast('Renseigne les dates pour propager','warning'); return; }
@@ -2446,7 +2491,8 @@ function renderHiddenCredits() {
   var hidden = [];
   _data.credits.forEach(function(r, i) {
     if (!r.dateDebut || !r.dateFin) return;
-    var deb = r.dateDebut.slice(0,7), fin = r.dateFin.slice(0,7);
+    var deb = parseYYYYMM(r.dateDebut), fin = parseYYYYMM(r.dateFin);
+    if (!deb || !fin) return;
     if (curKey < deb || curKey > fin) {
       hidden.push({ idx: i, nom: r.fournisseur || r.nom || '(sans nom)', montant: r.montant || '0', deb: deb, fin: fin });
     }
@@ -2824,7 +2870,8 @@ function calcTotals(data) {
   var curMonthKey = getMonthKey ? getMonthKey() : '';
   data.leasing.forEach(function(r){
     if (r.dateDebut && r.dateFin && curMonthKey) {
-      if (curMonthKey < r.dateDebut || curMonthKey > r.dateFin) return;
+      var _ldeb = parseYYYYMM(r.dateDebut), _lfin = parseYYYYMM(r.dateFin);
+      if (_ldeb && _lfin && (curMonthKey < _ldeb || curMonthKey > _lfin)) return;
     }
     var h=pf(r.montantHT);var rate=(r.tvaRate||0)/100;leasingHT+=h;leasingTTC+=Math.round(h*(1+rate)*100)/100;if(r.deductible==='Oui')leasingTVA+=Math.round(h*rate*100)/100;
   });
@@ -2834,7 +2881,8 @@ function calcTotals(data) {
   creditsToCalc.forEach(function(r){
     // Filtre dynamique : si dates renseignées, ne compter que si le mois est dans la plage
     if (r.dateDebut && r.dateFin && curMonthKey) {
-      if (curMonthKey < r.dateDebut.slice(0,7) || curMonthKey > r.dateFin.slice(0,7)) return;
+      var _deb = parseYYYYMM(r.dateDebut), _fin = parseYYYYMM(r.dateFin);
+      if (_deb && _fin && (curMonthKey < _deb || curMonthKey > _fin)) return;
     }
     var parseVal = function(v){ return parseFloat((v||'').toString().replace(',','.')) || 0; };
     var principal = parseVal(r.montant);
@@ -3365,9 +3413,10 @@ function mpClear(btn) {
 }
 
 function _mpGetVal(rowType, rowIdx, field) {
-  if (rowType === 'credit')  return (_data.credits[rowIdx]  && _data.credits[rowIdx][field])  || '';
-  if (rowType === 'leasing') return (_data.leasing[rowIdx]  && _data.leasing[rowIdx][field])  || '';
-  return '';
+  var raw = '';
+  if (rowType === 'credit')  raw = (_data.credits[rowIdx]  && _data.credits[rowIdx][field])  || '';
+  if (rowType === 'leasing') raw = (_data.leasing[rowIdx]  && _data.leasing[rowIdx][field])  || '';
+  return parseYYYYMM(raw);
 }
 function _mpSetVal(rowType, rowIdx, field, val) {
   if (rowType === 'credit')  { if(_data.credits[rowIdx])  _data.credits[rowIdx][field]  = val; }
@@ -3383,8 +3432,16 @@ document.addEventListener('click', function(e) {
 });
 
 function mpHtml(wrapperId, rowType, rowIdx, field, val) {
-  var label = val ? (MP_MONTHS[parseInt(val.split('-')[1])-1] + ' ' + val.split('-')[0]) : (field==='dateDebut'?'Début':'Fin');
-  var isEmpty = !val;
+  var parsed = parseYYYYMM(val);
+  var label;
+  if (parsed && parsed.indexOf('-') === 4) {
+    var parts = parsed.split('-');
+    label = MP_MONTHS[parseInt(parts[1])-1] + ' ' + parts[0];
+  } else {
+    label = field==='dateDebut' ? 'Début' : 'Fin';
+    parsed = '';
+  }
+  var isEmpty = !parsed;
   return '<div class="mp-wrap" id="' + wrapperId + '">' +
     '<div class="mp-display' + (isEmpty?' empty':'') + '" onclick="mpOpen(\'' + wrapperId + '\',\'' + field + '\',\'' + rowType + '\',' + rowIdx + ')">' +
       '<span class="mp-icon">📅</span>' + label +
