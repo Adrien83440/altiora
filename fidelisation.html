@@ -330,6 +330,15 @@ html,body{overflow-x:hidden;max-width:100vw}
 .tag-preset-btn:hover{background:#dbeafe;border-color:#93c5fd}
 .tag-preset-btn.active{background:#2563eb;color:#fff;border-color:#2563eb}
 .inactif-alert{background:linear-gradient(135deg,#fef2f2,#fee2e2);border:1.5px solid #fecaca;border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:10px;margin-bottom:12px}
+/* ── Segments editor ── */
+.seg-editor-row{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#fafbff;border:1px solid var(--border);border-radius:10px;margin-bottom:6px;flex-wrap:wrap;transition:.15s}
+.seg-editor-row:hover{border-color:#93c5fd;background:#f0f7ff}
+.seg-editor-row .seg-handle{cursor:grab;font-size:14px;color:var(--muted);user-select:none}
+.seg-editor-input{padding:4px 8px;border:1.5px solid var(--border);border-radius:6px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:600;outline:none;background:#fff}
+.seg-editor-input:focus{border-color:var(--blue)}
+.seg-editor-sel{padding:4px 6px;border:1.5px solid var(--border);border-radius:6px;font-size:11px;font-weight:600;background:#fff;font-family:inherit}
+.seg-rule-badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:8px;background:#e0e7ff;color:#4338ca}
+.seg-priority{font-size:10px;color:var(--muted);font-weight:700;width:20px;text-align:center}
 </style>
 </head>
 <body>
@@ -395,10 +404,6 @@ html,body{overflow-x:hidden;max-width:100vw}
       <div class="search-wrap"><span>🔍</span><input class="search-in" id="searchClient" placeholder="Rechercher un client..." oninput="renderClients()"/></div>
       <select class="ci" id="filterSeg" onchange="renderClients()" style="width:140px">
         <option value="">Tous les segments</option>
-        <option value="vip">👑 VIP</option>
-        <option value="actif">✅ Actif</option>
-        <option value="inactif">😴 Inactif</option>
-        <option value="nouveau">🌱 Nouveau</option>
       </select>
       <select class="ci" id="filterTag" onchange="renderClients()" style="width:140px">
         <option value="">Tous les tags</option>
@@ -491,16 +496,6 @@ html,body{overflow-x:hidden;max-width:100vw}
             <div><div class="config-label">Bonus parrainage</div><div class="config-sub">Points offerts si parrainage</div></div>
             <div class="config-input"><input class="ci" type="number" id="cfg-ref-pts" value="500" onchange="saveConfig()"/><span style="font-size:11px;color:var(--muted)">pts</span></div>
           </div>
-          <div class="config-row">
-            <div><div class="config-label">Points = VIP</div><div class="config-sub">Seuil pour statut VIP</div></div>
-            <div class="config-input"><input class="ci" type="number" id="cfg-vip-pts" value="2000" onchange="saveConfig()"/ "debounceSaveConfig()"><span style="font-size:11px;color:var(--muted)">pts</span></div>
-          </div>
-          <div class="config-row" style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
-            <div><div class="config-label">Seuil inactivité</div><div class="config-sub">Jours sans visite = client inactif</div></div>
-            <div class="config-input"><select class="ci" id="cfg-inactif-days" onchange="saveConfig();renderClients();renderDashboard()" style="width:80px">
-              <option value="30">30j</option><option value="45">45j</option><option value="60" selected>60j</option><option value="90">90j</option><option value="120">120j</option>
-            </select></div>
-          </div>
         </div>
       </div>
       <div class="card">
@@ -509,6 +504,23 @@ html,body{overflow-x:hidden;max-width:100vw}
           <button class="btn btn-o btn-xs" onclick="openModal('addPalier')">+ Palier</button>
         </div>
         <div class="card-body" style="display:flex;flex-direction:column;gap:8px" id="paliersList"></div>
+      </div>
+    </div>
+    <!-- ═══ SEGMENTS EDITOR ═══ -->
+    <div class="card">
+      <div class="card-head">
+        <div class="card-title">🎯 Segments clients</div>
+        <button class="btn btn-o btn-xs" onclick="addSegment()">+ Segment</button>
+      </div>
+      <div class="card-body">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.5">Les segments sont évalués de haut en bas — le premier qui correspond est attribué au client. Le dernier sert de segment par défaut.</div>
+        <div style="display:grid;grid-template-columns:24px 40px 1fr 140px 80px 60px;gap:6px;padding:5px 12px;font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;background:#f1f5f9;border-radius:6px;margin-bottom:6px">
+          <div></div><div>Icône</div><div>Nom</div><div>Règle</div><div>Valeur</div><div></div>
+        </div>
+        <div id="segmentsEditorList"></div>
+        <div style="margin-top:10px;padding:8px 12px;background:#f8faff;border:1px dashed var(--border);border-radius:8px;font-size:10px;color:var(--muted)">
+          💡 <strong>Règles :</strong> Points ≥ X → le client a au moins X points · Inactif > X jours → pas de visite depuis X jours · Inscrit < X jours → client récent · Par défaut → tous les autres clients
+        </div>
       </div>
     </div>
     <div class="card">
@@ -899,9 +911,6 @@ html,body{overflow-x:hidden;max-width:100vw}
       <div class="field-wrap">
         <select class="field-sel" id="co-target" onchange="toggleCoClient()">
           <option value="all">Tous les clients</option>
-          <option value="vip">VIP uniquement</option>
-          <option value="inactif">Clients inactifs</option>
-          <option value="nouveau">Nouveaux clients</option>
           <option value="one">Un client spécifique</option>
         </select>
       </div>
@@ -1013,10 +1022,6 @@ html,body{overflow-x:hidden;max-width:100vw}
         <div class="field-wrap">
           <select class="field-sel" id="ca-seg" onchange="toggleClientPicker()">
             <option value="all">👥 Tous les clients</option>
-            <option value="vip">👑 VIP uniquement</option>
-            <option value="actif">✅ Actifs uniquement</option>
-            <option value="inactif">😴 Inactifs uniquement</option>
-            <option value="nouveau">🌱 Nouveaux uniquement</option>
             <option value="one">👤 Un client en particulier</option>
           </select>
         </div>
@@ -1249,15 +1254,30 @@ function today(){return new Date().toISOString().slice(0,10)}
 function daysSince(d){return Math.floor((Date.now()-new Date(d))/(86400000))}
 
 function getSeg(c){
+  const segs=getSegments();
   const pts=c.points||0;
   const days=c.lastVisit?daysSince(c.lastVisit):999;
   const age=daysSince(c.createdAt||today());
-  const inactifDays=parseInt(cfg.inactifDays)||60;
-  if(pts>=parseInt(cfg.vipPts||2000))return'vip';
-  if(age<30)return'nouveau';
-  if(days>inactifDays)return'inactif';
-  return'actif';
+  for(const s of segs){
+    if(s.rule==='minPoints'&&pts>=s.value) return s.id;
+    if(s.rule==='maxAge'&&age<s.value) return s.id;
+    if(s.rule==='minInactif'&&days>s.value) return s.id;
+    if(s.rule==='minVisits'&&(c.history||[]).length>=s.value) return s.id;
+    if(s.rule==='default') return s.id;
+  }
+  return segs.length?segs[segs.length-1].id:'actif';
 }
+
+const DEFAULT_SEGMENTS=[
+  {id:'vip',name:'VIP',icon:'👑',color:'#f59e0b',rule:'minPoints',value:2000},
+  {id:'nouveau',name:'Nouveau',icon:'🌱',color:'#6366f1',rule:'maxAge',value:30},
+  {id:'inactif',name:'Inactif',icon:'😴',color:'#9ca3af',rule:'minInactif',value:60},
+  {id:'actif',name:'Actif',icon:'✅',color:'#10b981',rule:'default',value:0},
+];
+function getSegments(){return(cfg.segments&&cfg.segments.length)?cfg.segments:DEFAULT_SEGMENTS}
+function getSegById(id){return getSegments().find(s=>s.id===id)||{name:id,icon:'❓',color:'#6b7280'}}
+// Detect which segment is "inactif-like" (uses minInactif rule)
+function getInactifSeg(){return getSegments().find(s=>s.rule==='minInactif')}
 
 const PREDEFINED_TAGS=[
   {label:'Régulier',icon:'🔁',color:'#2563eb'},
@@ -1269,13 +1289,131 @@ const PREDEFINED_TAGS=[
   {label:'Famille',icon:'👨‍👩‍👧',color:'#059669'},
   {label:'Étudiant',icon:'🎓',color:'#6366f1'},
 ];
-function segBadge(s){
-  const map={vip:['👑 VIP','seg-vip'],actif:['✅ Actif','seg-actif'],inactif:['😴 Inactif','seg-inactif'],nouveau:['🌱 Nouveau','seg-nouveau']};
-  const [label,cls]=map[s]||['—',''];
-  return`<span class="seg-badge ${cls}">${label}</span>`;
+function segBadge(segId){
+  const s=getSegById(segId);
+  return`<span class="seg-badge" style="background:${s.color}15;color:${s.color};border:1px solid ${s.color}30">${s.icon} ${s.name}</span>`;
 }
 function avatarColor(name){const colors=['#60a5fa','#10b981','#f59e0b','#6366f1','#ec4899','#14b8a6'];return colors[name.charCodeAt(0)%colors.length]}
 function genCode(){return Math.random().toString(36).slice(2,8).toUpperCase()}
+
+// ═══ SEGMENTS MANAGEMENT ═══
+const SEGMENT_RULES=[
+  {id:'minPoints',label:'Points ≥',unit:'pts',desc:'Le client a au moins X points'},
+  {id:'maxAge',label:'Inscrit < ',unit:'jours',desc:'Client inscrit depuis moins de X jours'},
+  {id:'minInactif',label:'Inactif >',unit:'jours',desc:'Pas de visite depuis X jours'},
+  {id:'minVisits',label:'Visites ≥',unit:'visites',desc:'Au moins X passages'},
+  {id:'default',label:'Par défaut',unit:'',desc:'Tous les clients restants'},
+];
+const SEGMENT_ICONS=['👑','⭐','🥇','🥈','🥉','✅','🌱','😴','🔥','💎','🎯','❤️','💪','🏆','🛒','📈'];
+function getTopPointsThreshold(){
+  const segs=getSegments();
+  const ptsSeg=segs.filter(s=>s.rule==='minPoints');
+  return ptsSeg.length?Math.max(...ptsSeg.map(s=>s.value)):2000;
+}
+
+function populateSegmentSelects(){
+  const segs=getSegments();
+  // filterSeg in client list
+  const filterSel=document.getElementById('filterSeg');
+  if(filterSel){
+    const cur=filterSel.value;
+    filterSel.innerHTML='<option value="">Tous les segments</option>'+segs.map(s=>`<option value="${s.id}">${s.icon} ${s.name}</option>`).join('');
+    if(cur)filterSel.value=cur;
+  }
+  // co-target in coupon modal
+  const coSel=document.getElementById('co-target');
+  if(coSel){
+    const cur=coSel.value;
+    const base='<option value="all">Tous les clients</option>';
+    const segOpts=segs.map(s=>`<option value="${s.id}">${s.icon} ${s.name} uniquement</option>`).join('');
+    const end='<option value="one">Un client spécifique</option>';
+    coSel.innerHTML=base+segOpts+end;
+    if(cur)coSel.value=cur;
+  }
+  // ca-seg in campaign modal
+  const caSel=document.getElementById('ca-seg');
+  if(caSel){
+    const cur=caSel.value;
+    const base='<option value="all">👥 Tous les clients</option>';
+    const segOpts=segs.map(s=>`<option value="${s.id}">${s.icon} ${s.name} uniquement</option>`).join('');
+    const end='<option value="one">👤 Un client en particulier</option>';
+    caSel.innerHTML=base+segOpts+end;
+    if(cur)caSel.value=cur;
+  }
+}
+
+function renderSegmentsEditor(){
+  const segs=getSegments();
+  const el=document.getElementById('segmentsEditorList');
+  if(!el)return;
+  el.innerHTML=segs.map((s,i)=>{
+    const ruleOpts=SEGMENT_RULES.map(r=>`<option value="${r.id}" ${s.rule===r.id?'selected':''}>${r.label}</option>`).join('');
+    const iconOpts=SEGMENT_ICONS.map(ic=>`<option value="${ic}" ${s.icon===ic?'selected':''}>${ic}</option>`).join('');
+    const isDefault=s.rule==='default';
+    const isLast=i===segs.length-1;
+    return`<div class="seg-editor-row" id="seg-row-${s.id}">
+      <div class="seg-priority">${i+1}</div>
+      <select class="seg-editor-sel" style="width:48px;font-size:16px;text-align:center" onchange="updateSegField('${s.id}','icon',this.value)">${iconOpts}</select>
+      <input class="seg-editor-input" style="flex:1;min-width:80px" value="${s.name}" onchange="updateSegField('${s.id}','name',this.value)" placeholder="Nom du segment"/>
+      <select class="seg-editor-sel" style="width:120px" onchange="updateSegField('${s.id}','rule',this.value)">${ruleOpts}</select>
+      <input class="seg-editor-input" type="number" style="width:70px;text-align:right" value="${s.value||0}" ${isDefault?'disabled':''} onchange="updateSegField('${s.id}','value',parseInt(this.value)||0)"/>
+      <div style="display:flex;gap:3px">
+        ${i>0?`<button class="btn btn-xs btn-o" style="padding:3px 5px;font-size:10px" onclick="moveSegment('${s.id}',-1)" title="Monter">↑</button>`:'<span style="width:26px"></span>'}
+        ${!isLast?`<button class="btn btn-xs btn-o" style="padding:3px 5px;font-size:10px" onclick="moveSegment('${s.id}',1)" title="Descendre">↓</button>`:'<span style="width:26px"></span>'}
+        ${segs.length>2?`<button class="btn btn-xs" style="background:#fef2f2;color:var(--red);padding:3px 5px;font-size:10px" onclick="deleteSegment('${s.id}')" title="Supprimer">✕</button>`:''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function updateSegField(segId,field,value){
+  const segs=getSegments();
+  const s=segs.find(x=>x.id===segId);
+  if(!s)return;
+  s[field]=value;
+  if(field==='rule'&&value==='default')s.value=0;
+  saveSegments(segs);
+}
+
+function moveSegment(segId,dir){
+  const segs=[...getSegments()];
+  const idx=segs.findIndex(x=>x.id===segId);
+  if(idx<0)return;
+  const newIdx=idx+dir;
+  if(newIdx<0||newIdx>=segs.length)return;
+  [segs[idx],segs[newIdx]]=[segs[newIdx],segs[idx]];
+  saveSegments(segs);
+}
+
+function addSegment(){
+  const segs=[...getSegments()];
+  const newId='seg_'+Date.now();
+  // Insert before the last (default) segment
+  const insertIdx=Math.max(0,segs.length-1);
+  segs.splice(insertIdx,0,{id:newId,name:'Nouveau segment',icon:'⭐',color:'#6366f1',rule:'minPoints',value:500});
+  saveSegments(segs);
+  toast('Segment ajouté — modifiez-le dans la liste');
+}
+
+function deleteSegment(segId){
+  if(!confirm('Supprimer ce segment ?'))return;
+  const segs=getSegments().filter(x=>x.id!==segId);
+  if(segs.length<1){toast('Il faut au moins 1 segment','err');return}
+  saveSegments(segs);
+  toast('Segment supprimé');
+}
+
+function saveSegments(segs){
+  // Assign colors from a palette based on position
+  const palette=['#f59e0b','#6366f1','#9ca3af','#10b981','#ec4899','#0891b2','#dc2626','#8b5cf6','#14b8a6','#f97316'];
+  segs.forEach((s,i)=>{if(!s.color||s.color==='#6366f1')s.color=palette[i%palette.length]});
+  cfg.segments=segs;
+  saveConfig();
+  renderSegmentsEditor();
+  populateSegmentSelects();
+  renderClients();
+  renderDashboard();
+}
 
 // ═══ LOAD / SAVE ═══
 function load(){
@@ -1293,8 +1431,6 @@ function load(){
   document.getElementById('cfg-pts-per-euro').value=cfg.ptsPerEuro||10;
   document.getElementById('cfg-bday-pts').value=cfg.bdayPts||200;
   document.getElementById('cfg-ref-pts').value=cfg.refPts||500;
-  document.getElementById('cfg-vip-pts').value=cfg.vipPts||2000;
-  document.getElementById('cfg-inactif-days').value=cfg.inactifDays||60;
   document.getElementById('cfg-shop-name').value=cfg.shopName||'';
   if(document.getElementById('cfg-sms-sender'))document.getElementById('cfg-sms-sender').value=cfg.smsSender||'';
   if(document.getElementById('cfg-tablet-pin'))document.getElementById('cfg-tablet-pin').value=cfg.tabletPin||'1234';
@@ -1348,8 +1484,6 @@ function saveConfig(){
     ptsPerEuro:parseInt(document.getElementById('cfg-pts-per-euro').value)||10,
     bdayPts:parseInt(document.getElementById('cfg-bday-pts').value)||200,
     refPts:parseInt(document.getElementById('cfg-ref-pts').value)||500,
-    vipPts:parseInt(document.getElementById('cfg-vip-pts').value)||2000,
-    inactifDays:parseInt(document.getElementById('cfg-inactif-days').value)||60,
     shopName:document.getElementById('cfg-shop-name').value||'',
     smsSender:document.getElementById('cfg-sms-sender')?document.getElementById('cfg-sms-sender').value.replace(/[^a-zA-Z0-9]/g,'').slice(0,11)||''  :'',
     tabletPin:document.getElementById('cfg-tablet-pin')?document.getElementById('cfg-tablet-pin').value.replace(/[^0-9]/g,'').slice(0,4)||'1234':'1234',
@@ -1400,13 +1534,14 @@ function renderDashboard(){
     options:{responsive:true,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,grid:{color:'#f1f5f9'}}}}
   });
 
-  // Chart segments
-  const segs={vip:0,actif:0,inactif:0,nouveau:0};
-  clients.forEach(c=>segs[getSeg(c)]++);
+  // Chart segments — dynamic from configured segments
+  const allSegs=getSegments();
+  const segCounts={};allSegs.forEach(s=>segCounts[s.id]=0);
+  clients.forEach(c=>{const sid=getSeg(c);segCounts[sid]=(segCounts[sid]||0)+1;});
   if(chartS)chartS.destroy();
   chartS=new Chart(document.getElementById('chartSegments'),{
     type:'doughnut',
-    data:{labels:['VIP 👑','Actif ✅','Inactif 😴','Nouveau 🌱'],datasets:[{data:[segs.vip,segs.actif,segs.inactif,segs.nouveau],backgroundColor:['#f59e0b','#10b981','#9ca3af','#6366f1'],borderWidth:0}]},
+    data:{labels:allSegs.map(s=>`${s.icon} ${s.name}`),datasets:[{data:allSegs.map(s=>segCounts[s.id]||0),backgroundColor:allSegs.map(s=>s.color),borderWidth:0}]},
     options:{responsive:true,plugins:{legend:{position:'bottom',labels:{font:{size:11}}}},cutout:'65%'}
   });
 
@@ -1422,17 +1557,18 @@ function renderDashboard(){
     </div>`).join('')
     :`<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px">Aucun anniversaire ce mois 🎉</div>`;
 
-  // Inactifs
-  const inactifDays=parseInt(cfg.inactifDays)||60;
-  document.getElementById('inactifCardTitle').textContent=`😴 Clients inactifs (+${inactifDays}j)`;
-  const inactifs=clients.filter(c=>getSeg(c)==='inactif').slice(0,4);
-  const allInactifs=clients.filter(c=>getSeg(c)==='inactif');
+  // Inactifs — find whichever segment uses minInactif rule
+  const inactifSegDef=getInactifSeg();
+  const inactifSegId=inactifSegDef?inactifSegDef.id:null;
+  const inactifDaysVal=inactifSegDef?inactifSegDef.value:60;
+  document.getElementById('inactifCardTitle').textContent=inactifSegDef?`${inactifSegDef.icon} ${inactifSegDef.name} (+${inactifDaysVal}j)`:'😴 Clients inactifs';
+  const allInactifs=inactifSegId?clients.filter(c=>getSeg(c)===inactifSegId):[];
+  const inactifs=allInactifs.slice(0,4);
   const inactEl=document.getElementById('inactiveList');
-  // Alerte banner
   const alertBanner=document.getElementById('inactifAlertBanner');
   if(allInactifs.length>0){
     alertBanner.style.display='flex';
-    document.getElementById('inactifAlertText').textContent=`${allInactifs.length} client${allInactifs.length>1?'s':''} inactif${allInactifs.length>1?'s':''} depuis +${inactifDays} jours`;
+    document.getElementById('inactifAlertText').textContent=`${allInactifs.length} client${allInactifs.length>1?'s':''} inactif${allInactifs.length>1?'s':''} depuis +${inactifDaysVal} jours`;
   } else { alertBanner.style.display='none'; }
   inactEl.innerHTML=inactifs.length
     ?inactifs.map(c=>`<div style="display:flex;align-items:center;gap:10px;padding:8px;background:#f9fafb;border-radius:8px">
@@ -1465,6 +1601,7 @@ function renderTagsInline(tags){
 }
 function renderClients(){
   refreshTagFilter();
+  populateSegmentSelects();
   const q=document.getElementById('searchClient').value.toLowerCase();
   const seg=document.getElementById('filterSeg').value;
   const tagFilter=document.getElementById('filterTag').value;
@@ -1477,12 +1614,16 @@ function renderClients(){
   const tb=document.getElementById('clientsTbody');
   if(!list.length){const qs=q?(q+'').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';tb.innerHTML=`<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Aucun client${qs?` pour "${qs}"`:''}</td></tr>`;return}
   const cfgT=parseInt(cfg.tampons)||10;
+  const topSegPts=getTopPointsThreshold();
+  const inactifSegDef=getInactifSeg();
+  const inactifSegId=inactifSegDef?inactifSegDef.id:null;
   tb.innerHTML=list.map(c=>{
     const seg=getSeg(c);
-    const pct=Math.min(100,Math.round(((c.points||0)/(parseInt(cfg.vipPts)||2000))*100));
+    const pct=topSegPts?Math.min(100,Math.round(((c.points||0)/topSegPts)*100)):0;
     const visit=c.lastVisit?new Date(c.lastVisit).toLocaleDateString('fr-FR'):'-';
     const tampons=c.tampons||0;
-    const inactifWarn=seg==='inactif'?`<div style="font-size:9px;color:#dc2626;font-weight:700;margin-top:1px">⚠️ ${c.lastVisit?daysSince(c.lastVisit)+'j':'?'}</div>`:'';
+    const isInactif=inactifSegId&&seg===inactifSegId;
+    const inactifWarn=isInactif?`<div style="font-size:9px;color:#dc2626;font-weight:700;margin-top:1px">⚠️ ${c.lastVisit?daysSince(c.lastVisit)+'j':'?'}</div>`:'';
     return`<tr>
       <td><div style="display:flex;align-items:center;gap:9px">
         <div class="client-avatar" style="background:${avatarColor(c.prenom)}">${c.prenom[0]}${c.nom[0]}</div>
@@ -1653,16 +1794,48 @@ function impReadTNEF(file){
 // ── Nettoyage de valeur : enlève les ' parasites ──
 function impCleanVal(v){
   let s=String(v||'').trim();
-  // Remove leading/trailing quotes and apostrophes
   s=s.replace(/^'+/,'').replace(/'+$/,'').trim();
+  // Remove BOM and zero-width chars
+  s=s.replace(/[\uFEFF\u200B\u200C\u200D]/g,'');
   return s;
+}
+
+// ── Parse CSV text → lines + detect separator ──
+function impParseText(text){
+  // Normalize line endings
+  text=text.replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  const lines=text.trim().split('\n').filter(l=>l.trim());
+  if(!lines.length) return {lines:[],sep:';'};
+  // Auto-detect separator: try ; then , then \t — pick the one that gives most consistent columns
+  const candidates=[';',',','\t','|'];
+  let bestSep=';', bestScore=0;
+  const sample=lines.slice(0,Math.min(20,lines.length));
+  for(const sep of candidates){
+    const counts=sample.map(l=>l.split(sep).length);
+    const median=counts.sort((a,b)=>a-b)[Math.floor(counts.length/2)];
+    if(median<=1) continue; // This separator doesn't split anything
+    const consistent=counts.filter(c=>c===median).length;
+    const score=median*100+consistent*10; // Prefer more columns AND consistency
+    if(score>bestScore){bestScore=score;bestSep=sep}
+  }
+  return {lines,sep:bestSep};
 }
 
 // ── Parse CSV lines (shared by readCSV and readTNEF) ──
 function impParseCsvLines(lines,sep,filename){
+  // Sanity check: if splitting gives ≤2 cols, the separator is wrong
+  const testCols=lines[0].split(sep).length;
+  if(testCols<=2&&lines.length>5){
+    // Try all separators to find the right one
+    const alt=impParseText(lines.join('\n'));
+    if(alt.lines[0]&&alt.lines[0].split(alt.sep).length>testCols){
+      sep=alt.sep;
+    }
+  }
+
   // Detect if first line is a header or data
   const firstFields=lines[0].split(sep).map(f=>impCleanVal(f));
-  const isHeader=impDetectHeader(firstFields);
+  const isHeader=impDetectHeader(firstFields,lines,sep);
 
   let headers, dataLines;
   if(isHeader){
@@ -1670,72 +1843,120 @@ function impParseCsvLines(lines,sep,filename){
     dataLines=lines.slice(1);
   } else {
     // No header: generate column names from content analysis
-    headers=impGenerateSmartHeaders(firstFields,lines.slice(0,20),sep);
+    headers=impGenerateSmartHeaders(firstFields,lines.slice(0,Math.min(30,lines.length)),sep);
     dataLines=lines;
   }
+
+  // Ensure unique headers
+  const seen={};
+  headers=headers.map(h=>{
+    if(seen[h]){seen[h]++;return h+' ('+seen[h]+')';}
+    seen[h]=1;return h;
+  });
 
   _impHeaders=headers;
   _impRows=dataLines.filter(l=>l.trim()).map(l=>{
     const vals=l.split(sep).map(v=>impCleanVal(v));
     const obj={};headers.forEach((h,i)=>obj[h]=vals[i]||'');return obj;
   });
+
+  // Final sanity check: if ≤2 headers or 0 rows, warn
+  if(_impHeaders.length<=1&&_impRows.length>5){
+    toast('⚠️ Problème de format — essayez de réenregistrer le fichier en CSV UTF-8 depuis Excel','err');
+  }
   impShowPreview(filename||'Fichier chargé');
 }
 
 // ── Detect if a row looks like a header (vs data) ──
-function impDetectHeader(fields){
-  // If any field looks like a column name keyword, it's probably a header
-  const keywords=['nom','prenom','prénom','email','mail','tel','telephone','téléphone','phone','adresse','ville','cp','code','date','point','client','note'];
+function impDetectHeader(fields,allLines,sep){
+  if(!fields.length||fields.length<=1) return false;
+  // If ALL fields are short and look like column names → header
+  const keywords=['nom','prenom','prénom','email','mail','tel','telephone','téléphone','phone','adresse','ville','cp','code postal','date','point','client','note','mobile','portable','naissance','anniversaire'];
   const lowerFields=fields.map(f=>f.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''));
   const kwMatches=lowerFields.filter(f=>keywords.some(k=>f.includes(k))).length;
   if(kwMatches>=2) return true;
-  // If first field contains a number or looks like a name (UPPERCASE words), it's data
+  // If first field starts with digit → data
   if(/^\d/.test(fields[0])) return false;
-  if(/^[A-ZÉÈÊËÀÂÙÛÔÎÏÇ\s,]{4,}$/.test(fields[0])) return false; // ALL CAPS = data (name)
-  // If any field contains @ sign, probably data
+  // If first field is ALL UPPERCASE with spaces/commas → likely a name → data
+  if(/^[A-ZÉÈÊËÀÂÙÛÔÎÏÇÆŒ\s,\.\-]{4,}$/.test(fields[0])) return false;
+  // If any field contains @ → data (email address)
   if(fields.some(f=>f.includes('@'))) return false;
-  // Default: assume it's a header if fields are short
-  const avgLen=fields.reduce((s,f)=>s+f.length,0)/fields.length;
-  return avgLen<20;
+  // If any field looks like a phone number → data
+  if(fields.some(f=>/^0[1-9]\d{8}$/.test(f.replace(/[\s\.\-']/g,'')))) return false;
+  // If any field is a 5-digit code postal → data
+  if(fields.some(f=>/^\d{5}$/.test(f))) return false;
+  // If any field looks like a street address → data
+  if(fields.some(f=>/\d+\s*(rue|chemin|avenue|route|place|allée|boulevard|impasse)/i.test(f))) return false;
+  // Compare row 1 vs row 2: if row 1 is shorter text on average → probably header
+  if(allLines&&allLines.length>1){
+    const row2=allLines[1].split(sep).map(f=>impCleanVal(f));
+    const avg1=fields.reduce((s,f)=>s+f.length,0)/fields.length;
+    const avg2=row2.reduce((s,f)=>s+f.length,0)/Math.max(row2.length,1);
+    if(avg1<avg2*0.5&&avg1<15) return true; // Row 1 is significantly shorter → header
+  }
+  return false;
 }
 
 // ── Generate smart column names for headerless CSV ──
 function impGenerateSmartHeaders(firstFields,sampleLines,sep){
   const nCols=firstFields.length;
   const headers=[];
-  // Analyze each column across sample lines
   const samples=sampleLines.map(l=>l.split(sep).map(v=>impCleanVal(v)));
+  const usedNames=new Set();
   for(let col=0;col<nCols;col++){
-    const vals=samples.map(r=>r[col]||'').filter(v=>v);
-    const name=impGuessColumnName(vals,col);
+    const vals=samples.map(r=>(r[col]||'')).filter(v=>v);
+    let name=impGuessColumnName(vals,col,nCols);
+    // Avoid duplicate names
+    if(usedNames.has(name)) name=name+' '+(col+1);
+    usedNames.add(name);
     headers.push(name);
   }
   return headers;
 }
 
-function impGuessColumnName(vals,colIdx){
-  if(!vals.length) return `Colonne ${colIdx+1}`;
-  // Check patterns in values
-  const phoneCount=vals.filter(v=>/^0[67]\d{8}$/.test(v.replace(/[\s\.\-]/g,''))).length;
-  if(phoneCount>=2||phoneCount>vals.length*0.1) return 'Téléphone';
+function impGuessColumnName(vals,colIdx,totalCols){
+  if(!vals.length) return 'Colonne '+(colIdx+1);
+
+  // Phone: digits starting with 06/07, 10 chars
+  const phoneCount=vals.filter(v=>/^0[67]\d{8}$/.test(v.replace(/[\s\.\-']/g,''))).length;
+  if(phoneCount>=1) return 'Téléphone';
+  // Also catch landlines (01-05, 09)
+  const telCount=vals.filter(v=>/^0[1-9]\d{8}$/.test(v.replace(/[\s\.\-']/g,''))).length;
+  if(telCount>=2) return 'Téléphone';
+
+  // Email
   const emailCount=vals.filter(v=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)).length;
   if(emailCount>=1) return 'Email';
+
+  // Code postal (5 digits, starts with 0-9, French range)
   const cpCount=vals.filter(v=>/^\d{5}$/.test(v)).length;
-  if(cpCount>vals.length*0.3) return 'Code Postal';
-  // Check if values look like names (UPPERCASE, with comma or space)
-  const nameCount=vals.filter(v=>/^[A-ZÉÈÊËÀÂÙÛÔÎÏÇÆŒ\s,\-]{3,}$/i.test(v)&&v.length>3&&/\s/.test(v)).length;
-  if(nameCount>vals.length*0.5&&colIdx===0) return 'Nom Prénom';
-  // Check if values look like addresses
-  const addrCount=vals.filter(v=>/\d.*(?:rue|chemin|avenue|route|place|allée|boulevard|impasse|bd|av|rte|ch)/i.test(v)).length;
-  if(addrCount>vals.length*0.2) return 'Adresse';
-  // Check if UPPERCASE city names
-  const cityCount=vals.filter(v=>/^[A-ZÉÈÊËÀÂÙÛÔÎÏÇÆŒ\s\-]{3,}$/.test(v)&&!/\d/.test(v)&&v.length>2).length;
-  if(cityCount>vals.length*0.4){
-    // Distinguish ville from nom: cities have no comma, are shorter
-    const avgLen=vals.reduce((s,v)=>s+v.length,0)/vals.length;
-    if(avgLen<25) return 'Ville';
-  }
-  return `Colonne ${colIdx+1}`;
+  if(cpCount>vals.length*0.2) return 'Code Postal';
+
+  // Street address (has number + street keyword)
+  const addrCount=vals.filter(v=>/\d+\s*.{0,5}(rue|chemin|avenue|route|place|allée|boulevard|impasse|bd |av |rte|ch |lotissement|résidence|quartier|traverse|cours|passage)/i.test(v)).length;
+  if(addrCount>vals.length*0.15) return 'Adresse';
+
+  // Combined name: UPPERCASE + space or comma (NOM PRENOM or NOM, PRENOM)
+  const nameCount=vals.filter(v=>{
+    const s=v.trim();
+    if(s.length<3) return false;
+    if(!/[a-zA-ZÀ-ÿ]/.test(s)) return false;
+    return /[\s,]/.test(s)&&/^[A-ZÀ-ÿa-z\s,\.\-']+$/.test(s);
+  }).length;
+  if(nameCount>vals.length*0.4&&colIdx===0) return 'Nom Prénom';
+
+  // City: UPPERCASE words, no digits, no comma (differentiate from name)
+  const cityCount=vals.filter(v=>{
+    const s=v.trim();
+    return s.length>2&&/^[A-ZÉÈÊËÀÂÙÛÔÎÏÇÆŒ\s\-']+$/.test(s)&&!/\d/.test(s)&&!s.includes(',');
+  }).length;
+  if(cityCount>vals.length*0.3&&colIdx>0) return 'Ville';
+
+  // Empty column (most values empty)
+  const emptyCount=vals.filter(v=>!v.trim()).length;
+  if(emptyCount>vals.length*0.8) return 'Colonne '+(colIdx+1);
+
+  return 'Colonne '+(colIdx+1);
 }
 
 function impReadXLSX(file){
@@ -1770,17 +1991,41 @@ function impParseSheet(idx,filename){
   impShowPreview(filename||_impWb.SheetNames[idx]||'');
 }
 
+// ── CSV with encoding fallback ──
 function impReadCSV(file){
-  const reader=new FileReader();
-  reader.onload=e=>{
+  // Try UTF-8 first, then fallback to Windows-1252 if result looks wrong
+  const reader1=new FileReader();
+  reader1.onload=e=>{
     try{
       const text=e.target.result;
-      const sep=text.indexOf(';')>text.indexOf(',')?';':',';
-      const lines=text.trim().split('\n').filter(l=>l.trim());
-      impParseCsvLines(lines,sep,file.name);
+      const parsed=impParseText(text);
+      const testCols=parsed.lines.length>0?parsed.lines[0].split(parsed.sep).length:0;
+
+      // If ≤2 columns and file is >500 bytes → encoding is probably wrong, retry with latin1
+      if(testCols<=2&&file.size>500){
+        const reader2=new FileReader();
+        reader2.onload=e2=>{
+          try{
+            const text2=e2.target.result;
+            const parsed2=impParseText(text2);
+            const testCols2=parsed2.lines.length>0?parsed2.lines[0].split(parsed2.sep).length:0;
+            if(testCols2>testCols){
+              // Latin-1 gives more columns → use it
+              impParseCsvLines(parsed2.lines,parsed2.sep,file.name);
+            } else {
+              // Both give same result, use UTF-8 version
+              impParseCsvLines(parsed.lines,parsed.sep,file.name);
+            }
+          }catch(err){impParseCsvLines(parsed.lines,parsed.sep,file.name)}
+        };
+        reader2.onerror=()=>impParseCsvLines(parsed.lines,parsed.sep,file.name);
+        reader2.readAsText(file,'windows-1252');
+      } else {
+        impParseCsvLines(parsed.lines,parsed.sep,file.name);
+      }
     }catch(err){toast('Erreur lecture CSV','err')}
   };
-  reader.readAsText(file,'UTF-8');
+  reader1.readAsText(file,'UTF-8');
 }
 
 function impShowPreview(filename){
@@ -2098,7 +2343,7 @@ function renderCoupons(){
     const isExp=c.expDate&&new Date(c.expDate)<new Date();
     const status=isExp?'expired':c.status;
     const statusBadge={active:'<span style="background:#d1fae5;color:#065f46;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px">✅ Actif</span>',expired:'<span style="background:#f3f4f6;color:#6b7280;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px">⏰ Expiré</span>',used:'<span style="background:#ede9fe;color:#5b21b6;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px">✅ Utilisé</span>'}[status]||'';
-    const targetLabel={all:'Tous les clients',vip:'VIP',inactif:'Inactifs',nouveau:'Nouveaux',one:c.targetName||'Client spécifique'}[c.target]||c.target;
+    const targetLabel=c.target==='all'?'Tous les clients':c.target==='one'?(c.targetName||'Client spécifique'):getSegById(c.target).icon+' '+getSegById(c.target).name;
     return`<div class="coupon ${status}">
       <div class="coupon-val">${typeLabel}</div>
       <div class="coupon-info">
@@ -2133,7 +2378,7 @@ function renderCampagnes(){
       <div style="flex:1;min-width:180px">
         <div class="camp-title">${c.name}</div>
         <div style="margin-top:3px">${statutBadge}</div>
-        <div class="camp-meta" style="margin-top:4px">${c.canal.toUpperCase()} · ${c.segment==='all'?'Tous':c.segment} · ${new Date(c.date||Date.now()).toLocaleDateString('fr-FR')} ${c.heure||''}</div>
+        <div class="camp-meta" style="margin-top:4px">${c.canal.toUpperCase()} · ${c.segment==='all'?'Tous':getSegById(c.segment).icon+' '+getSegById(c.segment).name} · ${new Date(c.date||Date.now()).toLocaleDateString('fr-FR')} ${c.heure||''}</div>
         <div style="margin-top:5px;font-size:12px;color:var(--muted);font-style:italic">"${c.msg.slice(0,60)}${c.msg.length>60?'…':''}"</div>
       </div>
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
@@ -2296,14 +2541,9 @@ async function pushCouponToClients(coupon){
     else console.warn('pushCoupon: client non trouvé',coupon.targetClientId, coupon.targetName);
   } else if(target==='all'){
     targets=clients;
-  } else if(target==='vip'){
-    targets=clients.filter(c=>c.points>=(cfg.vipPts||2000));
-  } else if(target==='inactif'){
-    const cutoff=new Date();cutoff.setMonth(cutoff.getMonth()-3);
-    targets=clients.filter(c=>!c.lastVisit||new Date(c.lastVisit)<cutoff);
-  } else if(target==='nouveau'){
-    const cutoff=new Date();cutoff.setMonth(cutoff.getMonth()-1);
-    targets=clients.filter(c=>c.createdAt&&new Date(c.createdAt)>=cutoff);
+  } else {
+    // Dynamic segment targeting
+    targets=clients.filter(c=>getSeg(c)===target);
   }
   console.log('pushCoupon: cibles=',targets.map(x=>x.id));
   for(const c of targets){
@@ -2523,11 +2763,11 @@ function openFicheClient(id){
   const c=clients.find(x=>x.id===id);
   if(!c)return;
   const seg=getSeg(c);
-  const segLabels={vip:'👑 VIP',actif:'✅ Actif',inactif:'😴 Inactif',nouveau:'🌱 Nouveau'};
+  const segDef=getSegById(seg);
   document.getElementById('fc-avatar').textContent=(c.prenom[0]||'')+(c.nom[0]||'');
   document.getElementById('fc-avatar').style.background=avatarColor(c.prenom);
   document.getElementById('fc-name').textContent=`${c.prenom} ${c.nom}`;
-  document.getElementById('fc-seg').textContent=segLabels[seg]||'';
+  document.getElementById('fc-seg').textContent=`${segDef.icon} ${segDef.name}`;
   document.getElementById('fc-pts-display').textContent=fi(c.points||0)+' pts';
   // Pré-remplir les données de TOUS les panels (pas seulement l'onglet actif)
   document.getElementById('fc-pts-val').textContent=fi(c.points||0);
@@ -2863,20 +3103,22 @@ function applyConfig(){
     document.getElementById('cfg-pts-per-euro').value=cfg.ptsPerEuro||10;
     document.getElementById('cfg-bday-pts').value=cfg.bdayPts||200;
     document.getElementById('cfg-ref-pts').value=cfg.refPts||500;
-    document.getElementById('cfg-vip-pts').value=cfg.vipPts||2000;
-    document.getElementById('cfg-inactif-days').value=cfg.inactifDays||60;
     document.getElementById('cfg-shop-name').value=cfg.shopName||'';
     document.getElementById('cfg-notif-bday').checked=cfg.notifBday!==false;
     document.getElementById('cfg-notif-inactif').checked=cfg.notifInactif!==false;
     document.getElementById('cfg-notif-palier').checked=cfg.notifPalier!==false;
     document.getElementById('cfg-notif-coupon').checked=!!cfg.notifCoupon;
     renderFidCard();
+    renderSegmentsEditor();
+    populateSegmentSelects();
   }catch(e){}
 }
 
 // ═══ INIT ═══
 load();
 renderFidCard();
+renderSegmentsEditor();
+populateSegmentSelects();
 // Dashboard sera rendu après chargement Firebase (pas de seedDemo ni render prématuré)
 // Afficher un état de chargement en attendant
 (function(){
@@ -3070,7 +3312,7 @@ async function fbSaveConfig(uid, cfg){
   await setDoc(doc(db,'fidelite_public_cfg',uid), {
     tampons:cfg.tampons||10, reward:cfg.reward||'1 produit offert',
     emoji:cfg.emoji||'☕', shopName:cfg.shopName||'',
-    cardColor:cfg.cardColor||'blue', vipPts:cfg.vipPts||2000,
+    cardColor:cfg.cardColor||'blue', vipPts:(cfg.segments||[]).reduce((m,s)=>s.rule==='minPoints'?Math.max(m,s.value):m,2000),
     paliers:[] // rempli séparément
   }, {merge:true});
 }
@@ -3289,7 +3531,7 @@ let _wheelCfg = {
   segments: []
 };
 
-const DEFAULT_SEGMENTS = [
+const DEFAULT_WHEEL_SEGMENTS = [
   {id:'s1', emoji:'☕', label:'Café offert',       type:'code',   weight:2},
   {id:'s2', emoji:'⭐', label:'+50 points',        type:'points', pts:50,  weight:3},
   {id:'s3', emoji:'🎫', label:'-10% sur votre achat', type:'code', weight:2},
@@ -3308,7 +3550,7 @@ async function loadWheelConfig(){
     if(snap.exists() && snap.data().wheelCfg){
       _wheelCfg = {..._wheelCfg, ...snap.data().wheelCfg};
     } else {
-      _wheelCfg.segments = DEFAULT_SEGMENTS.map(s=>({...s}));
+      _wheelCfg.segments = DEFAULT_WHEEL_SEGMENTS.map(s=>({...s}));
     }
     applyWheelConfigToUI();
   }catch(e){ console.warn('loadWheelConfig:',e); }
