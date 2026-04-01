@@ -1851,7 +1851,7 @@ function impParseCsvLines(lines,sep,filename){
     dataLines=lines.slice(1);
   } else {
     // No header: generate column names from content analysis
-    headers=impGenerateSmartHeaders(firstFields,lines.slice(0,Math.min(30,lines.length)),sep);
+    headers=impGenerateSmartHeaders(firstFields,lines,sep);
     dataLines=lines;
   }
 
@@ -1906,15 +1906,19 @@ function impDetectHeader(fields,allLines,sep){
 }
 
 // ── Generate smart column names for headerless CSV ──
-function impGenerateSmartHeaders(firstFields,sampleLines,sep){
+function impGenerateSmartHeaders(firstFields,allLines,sep){
   const nCols=firstFields.length;
   const headers=[];
-  const samples=sampleLines.map(l=>l.split(sep).map(v=>impCleanVal(v)));
+  // Use distributed sampling: take ~200 lines evenly spread across the file
+  const maxSamples=Math.min(200,allLines.length);
+  const step=Math.max(1,Math.floor(allLines.length/maxSamples));
+  const sampleIdxs=[];
+  for(let i=0;i<allLines.length&&sampleIdxs.length<maxSamples;i+=step) sampleIdxs.push(i);
+  const samples=sampleIdxs.map(i=>allLines[i].split(sep).map(v=>impCleanVal(v)));
   const usedNames=new Set();
   for(let col=0;col<nCols;col++){
     const vals=samples.map(r=>(r[col]||'')).filter(v=>v);
     let name=impGuessColumnName(vals,col,nCols);
-    // Avoid duplicate names
     if(usedNames.has(name)) name=name+' '+(col+1);
     usedNames.add(name);
     headers.push(name);
@@ -1972,6 +1976,11 @@ function impGuessColumnName(vals,colIdx,totalCols){
     return s.length>2&&/^[A-ZÉÈÊËÀÂÙÛÔÎÏÇÆŒ\s\-']+$/.test(s)&&!/\d/.test(s)&&!s.includes(',');
   }).length;
   if(cityCount>nonEmpty.length*0.3&&colIdx>0) return 'Ville';
+
+  // Date column (DD/MM/YYYY or YYYY-MM-DD patterns) — label as generic "Date"
+  // NOT "Date de naissance" to avoid false auto-mapping
+  const dateCount=nonEmpty.filter(v=>/^(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{2}[\/\-]\d{2})$/.test(v.trim())).length;
+  if(dateCount>nonEmpty.length*0.3) return 'Date';
 
   return 'Colonne '+(colIdx+1);
 }
@@ -2065,7 +2074,7 @@ function impAutoDetect(){
       const hl=h.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[_\-\.]/g,' ').trim();
       return f.hint.some(hint=>{
         const hn=hint.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-        return hl===hn||hl.includes(hn)||hn.includes(hl);
+        return hl===hn||hl.includes(hn)||(hn.includes(hl)&&hl.length>4&&hl.length>=hn.length*0.6);
       });
     });
     if(col){_impMapping[f.key]=col;_impIgnored.delete(f.key);matched++}
