@@ -396,6 +396,14 @@ html,body{overflow-x:hidden;max-width:100vw}
       <div style="flex:1"><div style="font-size:12px;font-weight:700;color:#991b1b" id="inactifAlertText">0 clients sont devenus inactifs</div><div style="font-size:10px;color:#b91c1c;margin-top:2px">Pensez à les relancer pour les fidéliser !</div></div>
       <button class="btn btn-xs" style="background:#fef2f2;color:#dc2626;border:1.5px solid #fecaca" onclick="switchTab('clients',null);document.getElementById('filterSeg').value='inactif';renderClients()">👀 Voir</button>
     </div>
+    <!-- Avis Google stats -->
+    <div class="card" id="reviewDashCard" style="display:none">
+      <div class="card-head"><div class="card-title">⭐ Avis Google</div></div>
+      <div class="card-body">
+        <div class="g4" id="reviewDashStats"></div>
+        <div id="reviewDashEligible" style="display:flex;flex-direction:column;gap:6px;margin-top:10px"></div>
+      </div>
+    </div>
   </div>
 
   <!-- ═══ CLIENTS ═══ -->
@@ -625,6 +633,32 @@ html,body{overflow-x:hidden;max-width:100vw}
         </div>
       </div>
     </div>
+    <!-- ═══ AVIS GOOGLE CONFIG ═══ -->
+    <div class="card" style="border-color:#bbf7d0">
+      <div class="card-head" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7)">
+        <div class="card-title" style="color:#065f46">⭐ Demandes d'avis Google</div>
+      </div>
+      <div class="card-body">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6">Envoyez un SMS à vos clients pour leur demander un avis Google. Le système retient qui a déjà été sollicité et bloque les relances trop rapprochées.</div>
+        <div class="field">
+          <label>🔗 Lien avis Google <span style="font-size:10px;color:#94a3b8">— obligatoire pour envoyer</span></label>
+          <div class="field-wrap"><input class="field-in" id="cfg-google-review-url" placeholder="https://g.page/r/..." oninput="debounceSaveConfig()"/></div>
+          <div style="font-size:10px;color:#94a3b8;margin-top:4px">Google My Business → Demander des avis → Copier le lien</div>
+        </div>
+        <div class="config-row" style="margin-top:10px">
+          <div><div class="config-label">Délai entre demandes</div><div class="config-sub">Ne pas relancer un client avant ce délai</div></div>
+          <div class="config-input">
+            <select class="ci" id="cfg-review-cooldown" onchange="saveConfig()" style="width:100px">
+              <option value="1">1 mois</option><option value="3">3 mois</option><option value="6" selected>6 mois</option><option value="9">9 mois</option><option value="12">12 mois</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:12px;padding:10px 14px;background:#f8faff;border:1px solid var(--border);border-radius:8px">
+          <div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">📊 Statistiques</div>
+          <div id="reviewStatsConfig" style="font-size:11px;color:var(--muted)">—</div>
+        </div>
+      </div>
+    </div>
     <!-- ═══ ROUE CADEAUX CONFIG ═══ -->
     <div class="card" style="border-color:#fde68a" id="wheelConfigCard">
       <div class="card-head" style="background:linear-gradient(135deg,#fffbeb,#fef3c7)">
@@ -780,6 +814,16 @@ html,body{overflow-x:hidden;max-width:100vw}
         <div class="tag-input-wrap">
           <input class="tag-input" id="fc-tag-input" placeholder="Ajouter un tag libre…" onkeydown="if(event.key==='Enter'){event.preventDefault();fcAddFreeTag()}"/>
           <button class="btn btn-xs btn-o" onclick="fcAddFreeTag()">+</button>
+        </div>
+      </div>
+      <!-- Avis Google -->
+      <div id="fc-review-section" style="display:none;margin-top:4px;padding:10px 14px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="flex:1;min-width:140px">
+            <div style="font-size:11px;font-weight:700;color:#065f46">⭐ Avis Google</div>
+            <div style="font-size:10px;color:#16a34a;margin-top:2px" id="fc-review-status">Jamais sollicité</div>
+          </div>
+          <button class="btn btn-xs" id="fc-review-btn" style="background:#f0fdf4;color:#065f46;border:1.5px solid #bbf7d0" onclick="askReviewFromFiche()">⭐ Demander un avis</button>
         </div>
       </div>
     </div>
@@ -1448,6 +1492,9 @@ function load(){
   document.getElementById('cfg-notif-inactif').checked=cfg.notifInactif!==false;
   document.getElementById('cfg-notif-palier').checked=cfg.notifPalier!==false;
   document.getElementById('cfg-notif-coupon').checked=!!cfg.notifCoupon;
+  // Review config
+  if(document.getElementById('cfg-google-review-url'))document.getElementById('cfg-google-review-url').value=cfg.googleReviewUrl||'';
+  if(document.getElementById('cfg-review-cooldown'))document.getElementById('cfg-review-cooldown').value=cfg.reviewCooldownMonths||6;
   // Badges
   document.getElementById('badge-clients').textContent=clients.length;
   document.getElementById('badge-coupons').textContent=coupons.filter(c=>c.status==='active').length;
@@ -1496,6 +1543,8 @@ function saveConfig(){
     notifInactif:document.getElementById('cfg-notif-inactif').checked,
     notifPalier:document.getElementById('cfg-notif-palier').checked,
     notifCoupon:document.getElementById('cfg-notif-coupon').checked,
+    googleReviewUrl:(document.getElementById('cfg-google-review-url')?document.getElementById('cfg-google-review-url').value.trim():''),
+    reviewCooldownMonths:parseInt(document.getElementById('cfg-review-cooldown')?.value)||6,
   };
   // Firebase uniquement (source de vérité)
   // Sync Firebase config
@@ -1582,6 +1631,7 @@ function renderDashboard(){
       <button class="btn btn-xs btn-o" style="margin-left:auto" onclick="sendReactivation('${c.id}')">📣 Relancer</button>
     </div>`).join('')
     :`<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px">Aucun client inactif 🎉</div>`;
+  renderReviewDashboard();
 }
 
 // ═══ CLIENTS ═══
@@ -1643,6 +1693,7 @@ function renderClients(){
         <button class="btn btn-xs btn-o" onclick="openFicheClient('${c.id}');setTimeout(()=>fcTab('carte',document.querySelectorAll('.fc-tab')[2]),100)">✅</button>
         <button class="btn btn-xs" style="background:#ede9fe;color:var(--purple)" onclick="openFicheClient('${c.id}');setTimeout(()=>fcTab('points',document.querySelectorAll('.fc-tab')[1]),100)">+pts</button>
         ${_wheelCfg?.enabled?`<button class="btn btn-xs" style="background:#fffbeb;color:#92400e;border:1px solid #fde68a" title="Envoyer la roue par SMS" onclick="sendWheelSms('${c.id}','${c.prenom}','${c.tel||''}')">🎡</button>`:''}
+        ${cfg.googleReviewUrl?reviewBtn(c):''}
         <button class="btn btn-xs btn-o" onclick="openFicheClient('${c.id}')">✏️</button><button class="btn btn-xs" style="background:#fef2f2;color:var(--red)" onclick="deleteClient('${c.id}')">✕</button>
       </div></td>
     </tr>`;
@@ -2524,6 +2575,121 @@ function sendReactivation(id){
   toast(`📣 Relance simulée envoyée à ${c.prenom} ${c.nom}`,'info');
 }
 
+// ═══ AVIS GOOGLE ═══
+function canAskReview(c){
+  if(!c.lastReviewAsked) return {eligible:true,daysLeft:0};
+  const cooldownMonths=parseInt(cfg.reviewCooldownMonths)||6;
+  const lastDate=new Date(c.lastReviewAsked);
+  const nextDate=new Date(lastDate);
+  nextDate.setMonth(nextDate.getMonth()+cooldownMonths);
+  const now=new Date();
+  if(now>=nextDate) return {eligible:true,daysLeft:0};
+  const daysLeft=Math.ceil((nextDate-now)/(86400000));
+  return {eligible:false,daysLeft};
+}
+function reviewBtn(c){
+  if(!c.tel&&!c.email) return '';
+  const {eligible,daysLeft}=canAskReview(c);
+  if(eligible){
+    return`<button class="btn btn-xs" style="background:#f0fdf4;color:#065f46;border:1px solid #bbf7d0" title="Demander un avis Google" onclick="event.stopPropagation();askReview('${c.id}')">⭐</button>`;
+  }
+  return`<button class="btn btn-xs" style="background:#f3f4f6;color:#9ca3af;border:1px solid #e5e7eb;cursor:default" title="Avis demandé — relance dans ${daysLeft}j" disabled>⭐</button>`;
+}
+async function askReview(clientId){
+  const c=clients.find(x=>x.id===clientId);
+  if(!c){toast('Client non trouvé','err');return}
+  if(!cfg.googleReviewUrl){toast('Configurez d\'abord le lien Google dans Config → Avis Google','err');return}
+  if(!c.tel){toast(`${c.prenom} n'a pas de numéro de téléphone`,'err');return}
+  const {eligible,daysLeft}=canAskReview(c);
+  if(!eligible){toast(`Avis déjà demandé — relance possible dans ${daysLeft} jours`,'info');return}
+  // Normalize phone
+  let tel=c.tel.replace(/[\s\.\-]/g,'');
+  if(tel.startsWith('0'))tel='+33'+tel.slice(1);
+  if(!tel.startsWith('+'))tel='+33'+tel;
+  const shopName=cfg.shopName||'notre boutique';
+  const msg=`Bonjour ${c.prenom} ! Votre avis compte beaucoup pour ${shopName} ⭐ Pouvez-vous nous laisser un avis ? Ça prend 30 secondes : ${cfg.googleReviewUrl} Merci !`;
+  try{
+    const token=await window._auth.currentUser.getIdToken();
+    const res=await fetch('/api/send-sms',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
+      body:JSON.stringify({to:tel,message:msg,sender:cfg.smsSender||'ALTEORE',uid:window._uid})
+    });
+    const data=await res.json();
+    if(!res.ok||!data.success) throw new Error(data.error||'Erreur envoi');
+    // Log in client
+    c.lastReviewAsked=today();
+    c.reviewHistory=c.reviewHistory||[];
+    c.reviewHistory.unshift({date:today(),method:'sms',tel:c.tel});
+    c.history=c.history||[];
+    c.history.unshift({date:today(),type:'review_asked',pts:0});
+    saveOne(c);
+    renderClients();
+    toast(`⭐ Demande d'avis envoyée à ${c.prenom} !`);
+  }catch(e){
+    toast('❌ Erreur SMS : '+e.message,'err');
+  }
+}
+function askReviewFromFiche(){
+  if(!_fcClientId)return;
+  askReview(_fcClientId).then(()=>{
+    // Refresh fiche
+    const c=clients.find(x=>x.id===_fcClientId);
+    if(c) fcPopulateReview(c);
+  });
+}
+function fcPopulateReview(c){
+  const section=document.getElementById('fc-review-section');
+  if(!section)return;
+  section.style.display=cfg.googleReviewUrl?'block':'none';
+  const status=document.getElementById('fc-review-status');
+  const btn=document.getElementById('fc-review-btn');
+  if(!c.lastReviewAsked){
+    status.textContent='Jamais sollicité';
+    btn.disabled=false;btn.style.opacity='1';
+  } else {
+    const {eligible,daysLeft}=canAskReview(c);
+    const lastDate=new Date(c.lastReviewAsked).toLocaleDateString('fr-FR');
+    if(eligible){
+      status.textContent=`Dernier : ${lastDate} — éligible`;
+      status.style.color='#16a34a';
+      btn.disabled=false;btn.style.opacity='1';
+    } else {
+      status.textContent=`Dernier : ${lastDate} — relance dans ${daysLeft}j`;
+      status.style.color='#d97706';
+      btn.disabled=true;btn.style.opacity='.5';
+    }
+  }
+  if(!c.tel){btn.disabled=true;btn.style.opacity='.5';btn.title='Pas de téléphone';}
+}
+function renderReviewDashboard(){
+  const card=document.getElementById('reviewDashCard');
+  if(!card)return;
+  if(!cfg.googleReviewUrl){card.style.display='none';return}
+  card.style.display='';
+  const withTel=clients.filter(c=>c.tel);
+  const asked=clients.filter(c=>c.lastReviewAsked);
+  const eligible=withTel.filter(c=>canAskReview(c).eligible);
+  const inCooldown=asked.filter(c=>!canAskReview(c).eligible);
+  document.getElementById('reviewDashStats').innerHTML=`
+    <div class="kpi green"><div class="kpi-ico">✅</div><div class="kpi-lbl">Éligibles</div><div class="kpi-val">${eligible.length}</div><div class="kpi-sub">prêts à solliciter</div></div>
+    <div class="kpi orange"><div class="kpi-ico">⏳</div><div class="kpi-lbl">En cooldown</div><div class="kpi-val">${inCooldown.length}</div><div class="kpi-sub">déjà sollicités</div></div>
+    <div class="kpi blue"><div class="kpi-ico">📊</div><div class="kpi-lbl">Total demandés</div><div class="kpi-val">${asked.length}</div><div class="kpi-sub">sur ${withTel.length} avec tél</div></div>
+    <div class="kpi purple"><div class="kpi-ico">⭐</div><div class="kpi-lbl">Taux sollicitation</div><div class="kpi-val">${withTel.length?Math.round(asked.length/withTel.length*100):0}%</div><div class="kpi-sub">clients contactés</div></div>`;
+  // Top 4 eligible
+  const top=eligible.slice(0,4);
+  document.getElementById('reviewDashEligible').innerHTML=top.length
+    ?`<div style="font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px">Prochains à solliciter :</div>`+top.map(c=>`<div style="display:flex;align-items:center;gap:10px;padding:6px 8px;background:#f0fdf4;border-radius:8px">
+      <div class="client-avatar" style="background:${avatarColor(c.prenom)};width:26px;height:26px;font-size:10px">${c.prenom[0]}${c.nom[0]}</div>
+      <div style="flex:1;font-size:11px;font-weight:600">${c.prenom} ${c.nom}</div>
+      <button class="btn btn-xs" style="background:#f0fdf4;color:#065f46;border:1px solid #bbf7d0" onclick="askReview('${c.id}')">⭐ Envoyer</button>
+    </div>`).join('')
+    :`<div style="font-size:11px;color:var(--muted);text-align:center;padding:8px">Tous les clients ont été sollicités récemment</div>`;
+  // Config stats
+  const configStats=document.getElementById('reviewStatsConfig');
+  if(configStats) configStats.textContent=`${asked.length} demandes envoyées · ${eligible.length} éligibles · ${inCooldown.length} en attente`;
+}
+
 // ═══ PALIERS ═══
 function addPalier(){
   const pts=parseInt(document.getElementById('np-pts').value);
@@ -2823,6 +2989,7 @@ function openFicheClient(id){
   document.getElementById('fc-note').value=c.note||'';
   // Render tags in fiche
   fcRenderTags(c);
+  fcPopulateReview(c);
   // Reset tabs
   // Reset tous les panels + activer Infos
   ['infos','points','carte','histo','roue'].forEach(p=>{
@@ -3151,6 +3318,8 @@ function applyConfig(){
     document.getElementById('cfg-notif-inactif').checked=cfg.notifInactif!==false;
     document.getElementById('cfg-notif-palier').checked=cfg.notifPalier!==false;
     document.getElementById('cfg-notif-coupon').checked=!!cfg.notifCoupon;
+    if(document.getElementById('cfg-google-review-url'))document.getElementById('cfg-google-review-url').value=cfg.googleReviewUrl||'';
+    if(document.getElementById('cfg-review-cooldown'))document.getElementById('cfg-review-cooldown').value=cfg.reviewCooldownMonths||6;
     renderFidCard();
     renderSegmentsEditor();
     populateSegmentSelects();
