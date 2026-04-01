@@ -1110,7 +1110,7 @@ html,body{overflow-x:hidden;max-width:100vw}
       <!-- ÉTAPE 1 : Upload -->
       <div class="imp-step on" id="imp-step1">
         <div style="font-size:12px;font-weight:700;margin-bottom:10px;color:var(--text)">📁 Chargez votre fichier client</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Formats acceptés : Excel (.xlsx, .xls), CSV, TSV — peu importe la structure, vous mapperez les colonnes ensuite.</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Formats acceptés : Excel (.xlsx, .xls), CSV, TSV, winmail.dat (Outlook) — peu importe la structure, vous mapperez les colonnes ensuite.</div>
         <div class="imp-dropzone" id="impDropzone"
           ondragover="event.preventDefault();this.classList.add('drag')"
           ondragleave="this.classList.remove('drag')"
@@ -1121,7 +1121,7 @@ html,body{overflow-x:hidden;max-width:100vw}
           <div style="font-size:11px;color:var(--muted);margin-top:4px">ou cliquez pour sélectionner</div>
           <button style="margin-top:12px;padding:7px 16px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit" onclick="event.stopPropagation();document.getElementById('impFileInput').click()">📎 Choisir un fichier</button>
         </div>
-        <input type="file" id="impFileInput" accept=".xlsx,.xls,.csv,.tsv" style="display:none" onchange="impOnFile(this.files[0])"/>
+        <input type="file" id="impFileInput" accept=".xlsx,.xls,.csv,.tsv,.dat" style="display:none" onchange="impOnFile(this.files[0])"/>
         <!-- Preview après chargement -->
         <div id="impPreviewCard" style="display:none;margin-top:14px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
@@ -1552,8 +1552,9 @@ function renderPointsTable(){
 
 // ═══ IMPORT CLIENTS ═══
 const IMP_FIELDS = [
-  {key:'prenom',     label:'Prénom',           sub:'Prénom du client',     required:true,  hint:['prenom','prénom','first','firstname','first name','prénom client']},
-  {key:'nom',        label:'Nom',              sub:'Nom de famille',       required:true,  hint:['nom','name','last','lastname','last name','famille','nom client','nom de famille']},
+  {key:'prenom',     label:'Prénom',           sub:'Prénom du client',     required:false, hint:['prenom','prénom','first','firstname','first name','prénom client']},
+  {key:'nom',        label:'Nom',              sub:'Nom de famille',       required:false, hint:['nom','name','last','lastname','last name','famille','nom client','nom de famille']},
+  {key:'nom_complet',label:'Nom + Prénom',     sub:'Colonne combinée (NOM PRENOM ou NOM, PRENOM)', required:false, hint:['nom_complet','nom complet','client','nom prenom','nom prénom','full','fullname','full name','identité','identite','contact']},
   {key:'tel',        label:'Téléphone',        sub:'N° de téléphone',      required:false, hint:['telephone','téléphone','tel','phone','mobile','portable','tél','gsm','num','numero','numéro']},
   {key:'email',      label:'Email',            sub:'Adresse email',        required:false, hint:['email','mail','courriel','e-mail','adresse mail','adresse email']},
   {key:'birthday',   label:'Date de naissance',sub:'Anniversaire',         required:false, hint:['anniversaire','birthday','naissance','bday','date naissance','date de naissance','né','née','ddn']},
@@ -1592,8 +1593,149 @@ function impGoStep(n){
 function impOnFile(file){
   if(!file) return;
   const ext=file.name.split('.').pop().toLowerCase();
-  if(ext==='csv'||ext==='tsv') impReadCSV(file);
-  else impReadXLSX(file);
+  if(ext==='dat'){
+    // Could be winmail.dat (TNEF) — read as binary and check signature
+    impReadTNEF(file);
+  } else if(ext==='csv'||ext==='tsv') {
+    impReadCSV(file);
+  } else {
+    impReadXLSX(file);
+  }
+}
+
+// ── TNEF (winmail.dat) extraction ──
+function impReadTNEF(file){
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const buf=new Uint8Array(e.target.result);
+      // Check TNEF signature: 0x223E9F78 (little-endian: 78 9F 3E 22)
+      if(buf[0]!==0x78||buf[1]!==0x9F||buf[2]!==0x3E||buf[3]!==0x22){
+        toast('Ce fichier .dat n\'est pas un winmail.dat Outlook','err');return;
+      }
+      // Scan for text data — find first long run of printable ASCII + accented chars
+      let textStart=-1, textEnd=-1;
+      for(let i=6;i<buf.length-20;i++){
+        // Look for a pattern like "WORD WORD;ADDR" (uppercase letter + space + uppercase + ;)
+        if(buf[i]>=65&&buf[i]<=90&&buf[i+1]>=65&&buf[i+1]<=90){
+          // Check if there's a semicolon nearby
+          let hasSemicolon=false;
+          for(let j=i;j<Math.min(i+100,buf.length);j++){if(buf[j]===0x3B){hasSemicolon=true;break}}
+          if(hasSemicolon){textStart=i;break}
+        }
+      }
+      if(textStart<0){toast('Impossible d\'extraire les données du winmail.dat','err');return}
+      // Find where text ends: look for long null run or non-text bytes
+      const decoder=new TextDecoder('windows-1252');
+      const rawText=decoder.decode(buf.slice(textStart));
+      // Split into lines, keep only valid semicolon-separated lines
+      const allLines=rawText.split('\n');
+      const csvLines=[];
+      for(const line of allLines){
+        const stripped=line.trim();
+        if(!stripped||stripped.length<3)continue;
+        const printable=[...stripped].filter(c=>c.charCodeAt(0)>=32).length;
+        if(printable/stripped.length>0.85&&stripped.includes(';')){
+          csvLines.push(stripped);
+        } else if(csvLines.length>10){
+          break; // End of data, noise after
+        }
+      }
+      if(!csvLines.length){toast('Aucune donnée trouvée dans le winmail.dat','err');return}
+      // Parse as CSV with ; separator
+      impParseCsvLines(csvLines,';',file.name+' (extrait)');
+      toast(`📨 winmail.dat : ${csvLines.length} lignes extraites !`,'info');
+    }catch(err){toast('Erreur lecture winmail.dat : '+err.message,'err')}
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// ── Nettoyage de valeur : enlève les ' parasites ──
+function impCleanVal(v){
+  let s=String(v||'').trim();
+  // Remove leading/trailing quotes and apostrophes
+  s=s.replace(/^'+/,'').replace(/'+$/,'').trim();
+  return s;
+}
+
+// ── Parse CSV lines (shared by readCSV and readTNEF) ──
+function impParseCsvLines(lines,sep,filename){
+  // Detect if first line is a header or data
+  const firstFields=lines[0].split(sep).map(f=>impCleanVal(f));
+  const isHeader=impDetectHeader(firstFields);
+
+  let headers, dataLines;
+  if(isHeader){
+    headers=firstFields.filter(h=>h);
+    dataLines=lines.slice(1);
+  } else {
+    // No header: generate column names from content analysis
+    headers=impGenerateSmartHeaders(firstFields,lines.slice(0,20),sep);
+    dataLines=lines;
+  }
+
+  _impHeaders=headers;
+  _impRows=dataLines.filter(l=>l.trim()).map(l=>{
+    const vals=l.split(sep).map(v=>impCleanVal(v));
+    const obj={};headers.forEach((h,i)=>obj[h]=vals[i]||'');return obj;
+  });
+  impShowPreview(filename||'Fichier chargé');
+}
+
+// ── Detect if a row looks like a header (vs data) ──
+function impDetectHeader(fields){
+  // If any field looks like a column name keyword, it's probably a header
+  const keywords=['nom','prenom','prénom','email','mail','tel','telephone','téléphone','phone','adresse','ville','cp','code','date','point','client','note'];
+  const lowerFields=fields.map(f=>f.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,''));
+  const kwMatches=lowerFields.filter(f=>keywords.some(k=>f.includes(k))).length;
+  if(kwMatches>=2) return true;
+  // If first field contains a number or looks like a name (UPPERCASE words), it's data
+  if(/^\d/.test(fields[0])) return false;
+  if(/^[A-ZÉÈÊËÀÂÙÛÔÎÏÇ\s,]{4,}$/.test(fields[0])) return false; // ALL CAPS = data (name)
+  // If any field contains @ sign, probably data
+  if(fields.some(f=>f.includes('@'))) return false;
+  // Default: assume it's a header if fields are short
+  const avgLen=fields.reduce((s,f)=>s+f.length,0)/fields.length;
+  return avgLen<20;
+}
+
+// ── Generate smart column names for headerless CSV ──
+function impGenerateSmartHeaders(firstFields,sampleLines,sep){
+  const nCols=firstFields.length;
+  const headers=[];
+  // Analyze each column across sample lines
+  const samples=sampleLines.map(l=>l.split(sep).map(v=>impCleanVal(v)));
+  for(let col=0;col<nCols;col++){
+    const vals=samples.map(r=>r[col]||'').filter(v=>v);
+    const name=impGuessColumnName(vals,col);
+    headers.push(name);
+  }
+  return headers;
+}
+
+function impGuessColumnName(vals,colIdx){
+  if(!vals.length) return `Colonne ${colIdx+1}`;
+  // Check patterns in values
+  const phoneCount=vals.filter(v=>/^0[67]\d{8}$/.test(v.replace(/[\s\.\-]/g,''))).length;
+  if(phoneCount>=2||phoneCount>vals.length*0.1) return 'Téléphone';
+  const emailCount=vals.filter(v=>/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)).length;
+  if(emailCount>=1) return 'Email';
+  const cpCount=vals.filter(v=>/^\d{5}$/.test(v)).length;
+  if(cpCount>vals.length*0.3) return 'Code Postal';
+  // Check if values look like names (UPPERCASE, with comma or space)
+  const nameCount=vals.filter(v=>/^[A-ZÉÈÊËÀÂÙÛÔÎÏÇÆŒ\s,\-]{3,}$/i.test(v)&&v.length>3&&/\s/.test(v)).length;
+  if(nameCount>vals.length*0.5&&colIdx===0) return 'Nom Prénom';
+  // Check if values look like addresses
+  const addrCount=vals.filter(v=>/\d.*(?:rue|chemin|avenue|route|place|allée|boulevard|impasse|bd|av|rte|ch)/i.test(v)).length;
+  if(addrCount>vals.length*0.2) return 'Adresse';
+  // Check if UPPERCASE city names
+  const cityCount=vals.filter(v=>/^[A-ZÉÈÊËÀÂÙÛÔÎÏÇÆŒ\s\-]{3,}$/.test(v)&&!/\d/.test(v)&&v.length>2).length;
+  if(cityCount>vals.length*0.4){
+    // Distinguish ville from nom: cities have no comma, are shorter
+    const avgLen=vals.reduce((s,v)=>s+v.length,0)/vals.length;
+    if(avgLen<25) return 'Ville';
+  }
+  return `Colonne ${colIdx+1}`;
 }
 
 function impReadXLSX(file){
@@ -1634,13 +1776,8 @@ function impReadCSV(file){
     try{
       const text=e.target.result;
       const sep=text.indexOf(';')>text.indexOf(',')?';':',';
-      const lines=text.trim().split('\n');
-      _impHeaders=lines[0].split(sep).map(h=>h.trim().replace(/^"|"$/g,'')).filter(h=>h);
-      _impRows=lines.slice(1).filter(l=>l.trim()).map(l=>{
-        const vals=l.split(sep).map(v=>v.trim().replace(/^"|"$/g,''));
-        const obj={};_impHeaders.forEach((h,i)=>obj[h]=vals[i]||'');return obj;
-      });
-      impShowPreview(file.name);
+      const lines=text.trim().split('\n').filter(l=>l.trim());
+      impParseCsvLines(lines,sep,file.name);
     }catch(err){toast('Erreur lecture CSV','err')}
   };
   reader.readAsText(file,'UTF-8');
@@ -1671,6 +1808,18 @@ function impAutoDetect(){
     });
     if(col){_impMapping[f.key]=col;_impIgnored.delete(f.key);matched++}
   });
+  // If "Nom Prénom" column detected and no separate nom/prenom mapped → map to nom_complet
+  if(_impMapping['nom_complet']&&!_impMapping['nom']&&!_impMapping['prenom']){
+    // Good — nom_complet will handle both
+  } else if(!_impMapping['nom_complet']&&!_impMapping['nom']&&!_impMapping['prenom']){
+    // Try to find a column that looks like combined names
+    const candidate=_impHeaders.find(h=>{
+      const vals=_impRows.slice(0,15).map(r=>String(r[h]||'').trim()).filter(v=>v);
+      const nameCount=vals.filter(v=>/^[A-ZÉÈÊËÀÂÙÛÔÎÏÇÆŒ\s,\.\-']{3,}$/i.test(v)&&/\s/.test(v)).length;
+      return nameCount>vals.length*0.5;
+    });
+    if(candidate){_impMapping['nom_complet']=candidate;matched++}
+  }
   return matched;
 }
 
@@ -1714,13 +1863,18 @@ function impToggleIgnore(key){
 
 // ── Vérification ──
 function impBuildVerify(){
-  const required=IMP_FIELDS.filter(f=>f.required&&!_impIgnored.has(f.key));
-  const missing=required.filter(f=>!_impMapping[f.key]);
-  if(missing.length){toast(`Mappez d'abord : ${missing.map(f=>f.label).join(', ')}`,'err');impGoStep(2);return}
+  // Validate: need at least (nom+prenom) OR nom_complet
+  const hasNom=!!_impMapping['nom']&&!_impIgnored.has('nom');
+  const hasPrenom=!!_impMapping['prenom']&&!_impIgnored.has('prenom');
+  const hasNomComplet=!!_impMapping['nom_complet']&&!_impIgnored.has('nom_complet');
+  if(!hasNomComplet&&!hasNom&&!hasPrenom){
+    toast('Mappez au moins Nom + Prénom ou "Nom + Prénom (combiné)"','err');impGoStep(2);return;
+  }
   const mapped=IMP_FIELDS.filter(f=>_impMapping[f.key]&&!_impIgnored.has(f.key));
-  // Count valid rows (at least prenom or nom)
-  const prenomCol=_impMapping['prenom'], nomCol=_impMapping['nom'];
+  // Count valid rows (at least some name data)
+  const prenomCol=_impMapping['prenom'], nomCol=_impMapping['nom'], nomCompletCol=_impMapping['nom_complet'];
   const validRows=_impRows.filter(r=>{
+    if(nomCompletCol){const nc=String(r[nomCompletCol]||'').trim();if(nc)return true}
     const p=String(prenomCol?r[prenomCol]||'':'').trim();
     const n=String(nomCol?r[nomCol]||'':'').trim();
     return p||n;
@@ -1771,6 +1925,29 @@ function impFindDuplicate(email,tel){
   return -1;
 }
 
+// ── Split "NOM PRENOM" or "NOM, PRENOM" ──
+function impSplitNomPrenom(raw){
+  if(!raw) return {nom:'',prenom:''};
+  let s=raw.trim();
+  let nom='',prenom='';
+  if(s.includes(',')){
+    // "NOM, PRENOM" format
+    const parts=s.split(',',2);
+    nom=parts[0].trim();
+    prenom=parts[1].trim();
+  } else if(s.includes(' ')){
+    // "NOM PRENOM" format — first word is nom, rest is prenom
+    const parts=s.split(/\s+/);
+    nom=parts[0];
+    prenom=parts.slice(1).join(' ');
+  } else {
+    nom=s;
+  }
+  // Title-case prenom
+  if(prenom) prenom=prenom.split(/\s+/).map(w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()).join(' ');
+  return {nom,prenom};
+}
+
 // ── Import principal ──
 async function impDoImport(){
   const btn=document.getElementById('impImportBtn');
@@ -1786,8 +1963,9 @@ async function impDoImport(){
   document.getElementById('impResultActions').style.display='none';
   document.getElementById('impDupResolve').style.display='none';
 
-  const prenomCol=_impMapping['prenom'], nomCol=_impMapping['nom'];
+  const prenomCol=_impMapping['prenom'], nomCol=_impMapping['nom'], nomCompletCol=_impMapping['nom_complet'];
   const validRows=_impRows.filter(r=>{
+    if(nomCompletCol){const nc=String(r[nomCompletCol]||'').trim();if(nc)return true}
     const p=String(prenomCol?r[prenomCol]||'':'').trim();
     const n=String(nomCol?r[nomCol]||'':'').trim();
     return p||n;
@@ -1802,10 +1980,23 @@ async function impDoImport(){
     document.getElementById('impProgressFill').style.width=pct+'%';
     document.getElementById('impProgressLabel').textContent=`${i+1}/${validRows.length} — ${imported} importés, ${updated} mis à jour, ${skipped} ignorés`;
 
-    const prenom=String(prenomCol?r[prenomCol]||'':'').trim();
-    const nom=String(nomCol?r[nomCol]||'':'').trim();
+    // Extract nom/prenom — from separate columns or from combined column
+    let prenom='', nom='';
+    if(nomCompletCol&&!prenomCol&&!nomCol){
+      const raw=String(r[nomCompletCol]||'').trim();
+      const split=impSplitNomPrenom(raw);
+      nom=split.nom; prenom=split.prenom;
+    } else {
+      prenom=String(prenomCol?r[prenomCol]||'':'').trim();
+      nom=String(nomCol?r[nomCol]||'':'').trim();
+    }
+    // Title-case prenom if all-uppercase
+    if(prenom&&prenom===prenom.toUpperCase()) prenom=prenom.charAt(0).toUpperCase()+prenom.slice(1).toLowerCase();
+    // Clean phone: remove quotes, spaces, dots, dashes
+    let tel=(_impMapping['tel']?String(r[_impMapping['tel']]||'').trim():'');
+    tel=tel.replace(/^'+/,'').replace(/[\s\.\-]/g,'');
+    if(tel&&/^\d{10}$/.test(tel)) tel=tel.replace(/(\d{2})(?=\d)/g,'$1 ').trim();
     const email=(_impMapping['email']?String(r[_impMapping['email']]||'').trim().toLowerCase():'');
-    const tel=(_impMapping['tel']?String(r[_impMapping['tel']]||'').trim():'');
     const birthday=_impMapping['birthday']?impParseDate(r[_impMapping['birthday']]):'';
     const points=_impMapping['points']?Math.round(parseFloat(String(r[_impMapping['points']]||'0').replace(',','.'))||0):0;
     const note=_impMapping['note']?String(r[_impMapping['note']]||'').trim():'';
