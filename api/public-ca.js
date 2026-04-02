@@ -157,26 +157,34 @@ function parseDate(raw) {
 
 // ── NORMALISATION CA ─────────────────────────────────────────────────────────
 
-// Convertit n'importe quel format d'entrée en { ht055, ht10, ht20 } (nombres)
+// Convertit n'importe quel format d'entrée en { ht055, ht10, ht20, ht0?, ht21?, ht85? } (nombres)
 function normaliseCa(raw) {
   const p = v => Math.max(0, parseFloat((v || '').toString().replace(',', '.')) || 0);
+  // Custom TVA fields (pass-through)
+  const custFields = {};
+  if (raw.ht0  !== undefined) custFields.ht0  = p(raw.ht0);
+  if (raw.ht21 !== undefined) custFields.ht21 = p(raw.ht21);
+  if (raw.ht85 !== undefined) custFields.ht85 = p(raw.ht85);
 
   // Format multi-TVA direct
   if (raw.ht055 !== undefined || raw.ht10 !== undefined || raw.ht20 !== undefined) {
-    return { ht055: p(raw.ht055), ht10: p(raw.ht10), ht20: p(raw.ht20) };
+    return { ht055: p(raw.ht055), ht10: p(raw.ht10), ht20: p(raw.ht20), ...custFields };
   }
 
   // Format mono-montant + taux
   if (raw.montantHT !== undefined) {
     const rate = parseFloat(raw.tvaRate) || 20;
-    if (rate === 5.5)  return { ht055: p(raw.montantHT), ht10: 0, ht20: 0 };
-    if (rate === 10)   return { ht055: 0, ht10: p(raw.montantHT), ht20: 0 };
-    return               { ht055: 0, ht10: 0, ht20: p(raw.montantHT) };
+    if (rate === 0)    return { ht055: 0, ht10: 0, ht20: 0, ht0: p(raw.montantHT), ...custFields };
+    if (rate === 2.1)  return { ht055: 0, ht10: 0, ht20: 0, ht21: p(raw.montantHT), ...custFields };
+    if (rate === 5.5)  return { ht055: p(raw.montantHT), ht10: 0, ht20: 0, ...custFields };
+    if (rate === 8.5)  return { ht055: 0, ht10: 0, ht20: 0, ht85: p(raw.montantHT), ...custFields };
+    if (rate === 10)   return { ht055: 0, ht10: p(raw.montantHT), ht20: 0, ...custFields };
+    return               { ht055: 0, ht10: 0, ht20: p(raw.montantHT), ...custFields };
   }
 
   // Format montant brut sans taux → 20%
   if (raw.montant !== undefined) {
-    return { ht055: 0, ht10: 0, ht20: p(raw.montant) };
+    return { ht055: 0, ht10: 0, ht20: p(raw.montant), ...custFields };
   }
 
   return null;
@@ -242,20 +250,30 @@ async function processLignes(uid, lignes) {
       if (item.mode === 'add') {
         // Additionner au CA existant
         const p = v => parseFloat((v || '').toString().replace(',', '.')) || 0;
-        monthDoc.ca[idx] = {
+        const merged = {
           date:  existing.date || item.alteoreDate,
           ht055: String(Math.round((p(existing.ht055) + item.ca.ht055) * 100) / 100),
           ht10:  String(Math.round((p(existing.ht10)  + item.ca.ht10)  * 100) / 100),
           ht20:  String(Math.round((p(existing.ht20)  + item.ca.ht20)  * 100) / 100),
         };
+        ['ht0','ht21','ht85'].forEach(f => {
+          if (item.ca[f] !== undefined) merged[f] = String(Math.round((p(existing[f]) + item.ca[f]) * 100) / 100);
+          else if (existing[f]) merged[f] = existing[f];
+        });
+        monthDoc.ca[idx] = merged;
       } else {
         // Remplacer (default)
-        monthDoc.ca[idx] = {
+        const replaced = {
           date:  existing.date || item.alteoreDate,
           ht055: item.ca.ht055 > 0 ? String(item.ca.ht055) : (existing.ht055 || ''),
           ht10:  item.ca.ht10  > 0 ? String(item.ca.ht10)  : (existing.ht10  || ''),
           ht20:  item.ca.ht20  > 0 ? String(item.ca.ht20)  : (existing.ht20  || ''),
         };
+        ['ht0','ht21','ht85'].forEach(f => {
+          if (item.ca[f] !== undefined && item.ca[f] > 0) replaced[f] = String(item.ca[f]);
+          else if (existing[f]) replaced[f] = existing[f];
+        });
+        monthDoc.ca[idx] = replaced;
       }
 
       updated.push(item.alteoreDate);
