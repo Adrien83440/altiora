@@ -775,6 +775,7 @@ onAuthStateChanged(auth, async function(user) {
   } catch(e) { console.warn('Load saisieMode error', e); }
   // Déclencher le chargement applicatif
   window._firebaseReady = true;
+  await window.loadCustomTva();
   window.loadMonth();
 });
 </script>
@@ -849,6 +850,38 @@ var _data = {};
 /* ─── MODE SAISIE HT / TTC ─── */
 window._htMode = true;
 var _htCoeffs = { ht055: 1.055, ht10: 1.10, ht20: 1.20 };
+
+/* ─── TVA PERSONNALISÉE (4ème colonne optionnelle) ─── */
+var _customTvaRate = null; // null | 0 | 2.1 | 8.5
+var _customTvaField = null; // null | 'ht0' | 'ht21' | 'ht85'
+function customTvaFieldFromRate(rate) {
+  if (rate === 0) return 'ht0';
+  if (rate === 2.1) return 'ht21';
+  if (rate === 8.5) return 'ht85';
+  return null;
+}
+function customTvaLabel(rate) {
+  if (rate === 0) return '0% Exo';
+  if (rate === 2.1) return '2,1%';
+  if (rate === 8.5) return '8,5%';
+  return '';
+}
+// Helpers : lisent TOUS les champs custom (safe même si config change)
+function htCust(r) { return (parseFloat(r.ht0)||0)+(parseFloat(r.ht21)||0)+(parseFloat(r.ht85)||0); }
+function tvaCust(r) { return Math.round((parseFloat(r.ht21)||0)*0.021*100)/100+Math.round((parseFloat(r.ht85)||0)*0.085*100)/100; }
+function ttcCust(r) { return (parseFloat(r.ht0)||0)+Math.round((parseFloat(r.ht21)||0)*1.021*100)/100+Math.round((parseFloat(r.ht85)||0)*1.085*100)/100; }
+// Charger config TVA depuis profil
+async function loadCustomTva() {
+  if (!window._uid || !window._getDoc || !window._db) return;
+  try {
+    var snap = await window._getDoc(window._doc(window._db, 'profil', window._uid, 'data', 'profil'));
+    if (snap.exists() && snap.data().customTvaRate !== undefined && snap.data().customTvaRate !== null) {
+      _customTvaRate = snap.data().customTvaRate;
+      _customTvaField = customTvaFieldFromRate(_customTvaRate);
+      _htCoeffs[_customTvaField] = 1 + _customTvaRate / 100;
+    }
+  } catch(e) { console.warn('loadCustomTva error:', e); }
+}
 
 // Affichage : convertit la valeur HT stockée vers la valeur à afficher dans l'input
 function caDisplayVal(field, htVal) {
@@ -1033,10 +1066,10 @@ async function loadMonth() {
       if (snapN1.exists()) {
         var sN1 = snapN1.data();
         var caN1 = (sN1.ca || []).reduce(function(s, r) {
-          return s + (parseFloat(r.ht055)||0) + (parseFloat(r.ht10)||0) + (parseFloat(r.ht20)||0);
+          return s + (parseFloat(r.ht055)||0) + (parseFloat(r.ht10)||0) + (parseFloat(r.ht20)||0) + htCust(r);
         }, 0);
         var fpN1 = (sN1.facturesPro || []).reduce(function(s, r) {
-          return s + (parseFloat(r.ht055)||0) + (parseFloat(r.ht10)||0) + (parseFloat(r.ht20)||0);
+          return s + (parseFloat(r.ht055)||0) + (parseFloat(r.ht10)||0) + (parseFloat(r.ht20)||0) + htCust(r);
         }, 0);
         window._lastYearCA = caN1 + fpN1;
       }
@@ -1439,9 +1472,9 @@ function renderPage(data, month) {
       '<div class="section-card">' +
         '<div class="section-head"><div class="section-title">📅 CA Journalier ' + (window._htMode?'HT':'TTC') + ' <span class="section-title-badge badge-blue">' + MONTHS[month] + ' ' + window._year + '</span></div></div>' +
         '<table class="data-table">' +
-          '<thead><tr><th>Date</th><th style="color:#10b981">' + colLabel('5,5%') + '</th><th style="color:#f97316">' + colLabel('10%') + '</th><th style="color:#60a5fa">' + colLabel('20%') + '</th><th>Total HT</th><th>Total TTC</th><th>TVA collectée</th></tr></thead>' +
+          '<thead><tr><th>Date</th><th style="color:#10b981">' + colLabel('5,5%') + '</th><th style="color:#f97316">' + colLabel('10%') + '</th><th style="color:#60a5fa">' + colLabel('20%') + '</th>' + (_customTvaField ? '<th style="color:#8b5cf6">' + colLabel(customTvaLabel(_customTvaRate)) + '</th>' : '') + '<th>Total HT</th><th>Total TTC</th><th>TVA collectée</th></tr></thead>' +
           '<tbody id="ca-tbody">' + renderCARows(data.ca) + '</tbody>' +
-          '<tfoot><tr><td>TOTAL</td><td style="color:#10b981;font-weight:700"><span id="tot-ca055">' + fmtN(colTotal(t.caHT055,'ht055')) + '</span> €</td><td style="color:#f97316;font-weight:700"><span id="tot-ca10">' + fmtN(colTotal(t.caHT10,'ht10')) + '</span> €</td><td style="color:#60a5fa;font-weight:700"><span id="tot-ca20">' + fmtN(colTotal(t.caHT20,'ht20')) + '</span> €</td><td><span id="tot-caHT">' + fmtN(t.caHT_j) + '</span> €</td><td><span id="tot-caTTC">' + fmtN(t.caTTC_j) + '</span> €</td><td><span id="tot-tvaC">' + fmtN(t.tvaC_j) + '</span> €</td></tr></tfoot>' +
+          '<tfoot><tr><td>TOTAL</td><td style="color:#10b981;font-weight:700"><span id="tot-ca055">' + fmtN(colTotal(t.caHT055,'ht055')) + '</span> €</td><td style="color:#f97316;font-weight:700"><span id="tot-ca10">' + fmtN(colTotal(t.caHT10,'ht10')) + '</span> €</td><td style="color:#60a5fa;font-weight:700"><span id="tot-ca20">' + fmtN(colTotal(t.caHT20,'ht20')) + '</span> €</td>' + (_customTvaField ? '<td style="color:#8b5cf6;font-weight:700"><span id="tot-caCust">' + fmtN(colTotal(t.caHTCust,_customTvaField)) + '</span> €</td>' : '') + '<td><span id="tot-caHT">' + fmtN(t.caHT_j) + '</span> €</td><td><span id="tot-caTTC">' + fmtN(t.caTTC_j) + '</span> €</td><td><span id="tot-tvaC">' + fmtN(t.tvaC_j) + '</span> €</td></tr></tfoot>' +
         '</table>' +
       '</div>' +
       '<div style="display:flex;flex-direction:column;gap:16px;">' +
@@ -1468,18 +1501,19 @@ function renderPage(data, month) {
       '</div>' +
       '<div class="info-box">💡 CA hors caisse journalière : factures professionnels, coffrets cadeaux, traiteur… TVA mixte possible sur une même facture.</div>' +
       '<table class="data-table">' +
-        '<thead><tr><th>Client</th><th>Description</th><th style="color:#10b981">' + colLabel('5,5%') + '</th><th style="color:#f97316">' + colLabel('10%') + '</th><th style="color:#60a5fa">' + colLabel('20%') + '</th><th>Total HT</th><th>Total TTC</th><th>TVA</th><th></th></tr></thead>' +
+        '<thead><tr><th>Client</th><th>Description</th><th style="color:#10b981">' + colLabel('5,5%') + '</th><th style="color:#f97316">' + colLabel('10%') + '</th><th style="color:#60a5fa">' + colLabel('20%') + '</th>' + (_customTvaField ? '<th style="color:#8b5cf6">' + colLabel(customTvaLabel(_customTvaRate)) + '</th>' : '') + '<th>Total HT</th><th>Total TTC</th><th>TVA</th><th></th></tr></thead>' +
         '<tbody id="fp-tbody">' + renderFacturesPro(data.facturesPro) + '</tbody>' +
         '<tfoot><tr><td colspan="2">TOTAL</td>' +
           '<td style="color:#10b981;font-weight:700"><span id="tot-fp055">' + fmtN(colTotal(t.caFP055,'ht055')) + '</span> €</td>' +
           '<td style="color:#f97316;font-weight:700"><span id="tot-fp10">' + fmtN(colTotal(t.caFP10,'ht10')) + '</span> €</td>' +
           '<td style="color:#60a5fa;font-weight:700"><span id="tot-fp20">' + fmtN(colTotal(t.caFP20,'ht20')) + '</span> €</td>' +
-          '<td><span id="tot-fpHT">' + fmtN(t.caFP055+t.caFP10+t.caFP20) + '</span> €</td>' +
+          (_customTvaField ? '<td style="color:#8b5cf6;font-weight:700"><span id="tot-fpCust">' + fmtN(colTotal(t.caFPCust,_customTvaField)) + '</span> €</td>' : '') +
+          '<td><span id="tot-fpHT">' + fmtN(t.caFP055+t.caFP10+t.caFP20+t.caFPCust) + '</span> €</td>' +
           '<td><span id="tot-fpTTC">' + fmtN(t.caTTC_fp) + '</span> €</td>' +
           '<td><span id="tot-fpTVA">' + fmtN(t.tvaC_fp) + '</span> €</td>' +
           '<td></td>' +
         '</tr>' +
-        '<tr><td colspan="9" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addFacturePro()">+ Facture</button></td></tr></tfoot>' +
+        '<tr><td colspan="' + (_customTvaField ? '10' : '9') + '" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addFacturePro()">+ Facture</button></td></tr></tfoot>' +
       '</table>' +
     '</div>' +
 
@@ -1562,14 +1596,16 @@ function renderCARows(rows) {
     var h055 = parseFloat(r.ht055) || 0;
     var h10  = parseFloat(r.ht10)  || 0;
     var h20  = parseFloat(r.ht20)  || 0;
-    var totalHT  = h055 + h10 + h20;
-    var totalTTC = Math.round(h055*1.055*100)/100 + Math.round(h10*1.10*100)/100 + Math.round(h20*1.20*100)/100;
-    var totalTVA = Math.round(h055*0.055*100)/100 + Math.round(h10*0.10*100)/100 + Math.round(h20*0.20*100)/100;
+    var hC   = htCust(r);
+    var totalHT  = h055 + h10 + h20 + hC;
+    var totalTTC = Math.round(h055*1.055*100)/100 + Math.round(h10*1.10*100)/100 + Math.round(h20*1.20*100)/100 + ttcCust(r);
+    var totalTVA = Math.round(h055*0.055*100)/100 + Math.round(h10*0.10*100)/100 + Math.round(h20*0.20*100)/100 + tvaCust(r);
     return '<tr>' +
       '<td><span style="font-size:11px;color:var(--muted)">' + r.date + '</span></td>' +
       '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + caDisplayVal('ht055', r.ht055) + '" oninput="updateCA(' + i + ',\'ht055\',this.value)"/></td>' +
       '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + caDisplayVal('ht10', r.ht10) + '" oninput="updateCA(' + i + ',\'ht10\',this.value)"/></td>' +
       '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + caDisplayVal('ht20', r.ht20) + '" oninput="updateCA(' + i + ',\'ht20\',this.value)"/></td>' +
+      (_customTvaField ? '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + caDisplayVal(_customTvaField, r[_customTvaField]) + '" oninput="updateCA(' + i + ',\'' + _customTvaField + '\',this.value)"/></td>' : '') +
       '<td><span class="cell-readonly blue">' + (totalHT  ? fmtN(totalHT)  : '—') + '</span></td>' +
       '<td><span class="cell-readonly blue">' + (totalTTC ? fmtN(totalTTC) : '—') + '</span></td>' +
       '<td><span class="cell-readonly green">' + (totalTVA ? fmtN(totalTVA) : '—') + '</span></td>' +
@@ -1581,15 +1617,17 @@ function renderFacturesPro(rows) {
   if (!rows || rows.length === 0) rows = [{client:'', description:'', ht055:'', ht10:'', ht20:''}];
   return rows.map(function(r, i) {
     var h055 = parseFloat(r.ht055)||0, h10 = parseFloat(r.ht10)||0, h20 = parseFloat(r.ht20)||0;
-    var totalHT  = h055 + h10 + h20;
-    var totalTTC = Math.round(h055*1.055*100)/100 + Math.round(h10*1.10*100)/100 + Math.round(h20*1.20*100)/100;
-    var totalTVA = Math.round(h055*0.055*100)/100 + Math.round(h10*0.10*100)/100 + Math.round(h20*0.20*100)/100;
+    var hC   = htCust(r);
+    var totalHT  = h055 + h10 + h20 + hC;
+    var totalTTC = Math.round(h055*1.055*100)/100 + Math.round(h10*1.10*100)/100 + Math.round(h20*1.20*100)/100 + ttcCust(r);
+    var totalTVA = Math.round(h055*0.055*100)/100 + Math.round(h10*0.10*100)/100 + Math.round(h20*0.20*100)/100 + tvaCust(r);
     return '<tr>' +
       '<td>' + catalogInputHtml('clients', 'fp-cl-'+i, r.client||'', 'width:110px', 'Client / société', 'updateFacturePro('+i+',\'client\',this.value)') + '</td>' +
       '<td>' + catalogInputHtml('descriptions', 'fp-desc-'+i, r.description||'', 'width:140px', 'Description', 'updateFacturePro('+i+',\'description\',this.value)') + '</td>' +
       '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + caDisplayVal('ht055', r.ht055) + '" oninput="updateFacturePro(' + i + ',\'ht055\',this.value)"/></td>' +
       '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + caDisplayVal('ht10', r.ht10) + '" oninput="updateFacturePro(' + i + ',\'ht10\',this.value)"/></td>' +
       '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + caDisplayVal('ht20', r.ht20) + '" oninput="updateFacturePro(' + i + ',\'ht20\',this.value)"/></td>' +
+      (_customTvaField ? '<td><input class="cell-input" style="width:72px" type="number" placeholder="0.00" value="' + caDisplayVal(_customTvaField, r[_customTvaField]) + '" oninput="updateFacturePro(' + i + ',\'' + _customTvaField + '\',this.value)"/></td>' : '') +
       '<td><span class="cell-readonly blue" id="fp-ht-' + i + '">' + (totalHT  ? fmtN(totalHT)  : '—') + '</span></td>' +
       '<td><span class="cell-readonly blue" id="fp-ttc-' + i + '">' + (totalTTC ? fmtN(totalTTC) : '—') + '</span></td>' +
       '<td><span class="cell-readonly green" id="fp-tva-' + i + '">' + (totalTVA ? fmtN(totalTVA) : '—') + '</span></td>' +
@@ -2241,12 +2279,14 @@ function renderCredits(rows) {
 function updateCA(i, field, value) {
   _data.ca[i][field] = caStoreVal(field, value);
   scheduleSave();
-  var h055 = parseFloat(_data.ca[i].ht055) || 0;
-  var h10  = parseFloat(_data.ca[i].ht10)  || 0;
-  var h20  = parseFloat(_data.ca[i].ht20)  || 0;
-  var totalHT  = h055 + h10 + h20;
-  var totalTTC = Math.round(h055*1.055*100)/100 + Math.round(h10*1.10*100)/100 + Math.round(h20*1.20*100)/100;
-  var totalTVA = Math.round(h055*0.055*100)/100 + Math.round(h10*0.10*100)/100 + Math.round(h20*0.20*100)/100;
+  var r = _data.ca[i];
+  var h055 = parseFloat(r.ht055) || 0;
+  var h10  = parseFloat(r.ht10)  || 0;
+  var h20  = parseFloat(r.ht20)  || 0;
+  var hC   = htCust(r);
+  var totalHT  = h055 + h10 + h20 + hC;
+  var totalTTC = Math.round(h055*1.055*100)/100 + Math.round(h10*1.10*100)/100 + Math.round(h20*1.20*100)/100 + ttcCust(r);
+  var totalTVA = Math.round(h055*0.055*100)/100 + Math.round(h10*0.10*100)/100 + Math.round(h20*0.20*100)/100 + tvaCust(r);
   var row = document.querySelector('#ca-tbody tr:nth-child(' + (i+1) + ')');
   if (row) {
     var spans = row.querySelectorAll('.cell-readonly');
@@ -2599,9 +2639,10 @@ function updateFacturePro(i, field, val) {
   // Recalcul en temps réel des spans de la ligne
   var r = _data.facturesPro[i];
   var h055 = parseFloat(r.ht055)||0, h10 = parseFloat(r.ht10)||0, h20 = parseFloat(r.ht20)||0;
-  var ht  = h055 + h10 + h20;
-  var ttc = Math.round(h055*1.055*100)/100 + Math.round(h10*1.10*100)/100 + Math.round(h20*1.20*100)/100;
-  var tva = Math.round(h055*0.055*100)/100 + Math.round(h10*0.10*100)/100 + Math.round(h20*0.20*100)/100;
+  var hC  = htCust(r);
+  var ht  = h055 + h10 + h20 + hC;
+  var ttc = Math.round(h055*1.055*100)/100 + Math.round(h10*1.10*100)/100 + Math.round(h20*1.20*100)/100 + ttcCust(r);
+  var tva = Math.round(h055*0.055*100)/100 + Math.round(h10*0.10*100)/100 + Math.round(h20*0.20*100)/100 + tvaCust(r);
   var elHT  = document.getElementById('fp-ht-'  + i);
   var elTTC = document.getElementById('fp-ttc-' + i);
   var elTVA = document.getElementById('fp-tva-' + i);
@@ -2819,13 +2860,15 @@ function calcTotals(data) {
   var caHT055 = data.ca.reduce(function(s,r){return s+(parseFloat(r.ht055)||0);},0);
   var caHT10  = data.ca.reduce(function(s,r){return s+(parseFloat(r.ht10)||0);},0);
   var caHT20  = data.ca.reduce(function(s,r){return s+(parseFloat(r.ht20)||0);},0);
-  var caHT_j = caHT055 + caHT10 + caHT20;
+  var caHTCust = data.ca.reduce(function(s,r){return s+htCust(r);},0);
+  var caHT_j = caHT055 + caHT10 + caHT20 + caHTCust;
   // Factures Pro
   var fpRows = data.facturesPro || [];
   var caFP055 = fpRows.reduce(function(s,r){return s+(parseFloat(r.ht055)||0);},0);
   var caFP10  = fpRows.reduce(function(s,r){return s+(parseFloat(r.ht10)||0);},0);
   var caFP20  = fpRows.reduce(function(s,r){return s+(parseFloat(r.ht20)||0);},0);
-  var caFP_HT = caFP055 + caFP10 + caFP20;
+  var caFPCust = fpRows.reduce(function(s,r){return s+htCust(r);},0);
+  var caFP_HT = caFP055 + caFP10 + caFP20 + caFPCust;
   // CA total (journalier + factures pro)
   var caHT_total055 = caHT055 + caFP055;
   var caHT_total10  = caHT10  + caFP10;
@@ -2834,20 +2877,20 @@ function calcTotals(data) {
   // TVA collectée : arrondi ligne par ligne pour éviter les écarts comptables
   var tvaC_j = data.ca.reduce(function(s,r){
     var a=parseFloat(r.ht055)||0, b=parseFloat(r.ht10)||0, c=parseFloat(r.ht20)||0;
-    return s + Math.round(a*0.055*100)/100 + Math.round(b*0.10*100)/100 + Math.round(c*0.20*100)/100;
+    return s + Math.round(a*0.055*100)/100 + Math.round(b*0.10*100)/100 + Math.round(c*0.20*100)/100 + tvaCust(r);
   },0);
   var tvaC_fp = (data.facturesPro||[]).reduce(function(s,r){
     var a=parseFloat(r.ht055)||0, b=parseFloat(r.ht10)||0, c=parseFloat(r.ht20)||0;
-    return s + Math.round(a*0.055*100)/100 + Math.round(b*0.10*100)/100 + Math.round(c*0.20*100)/100;
+    return s + Math.round(a*0.055*100)/100 + Math.round(b*0.10*100)/100 + Math.round(c*0.20*100)/100 + tvaCust(r);
   },0);
   var tvaCollectee = Math.round((tvaC_j + tvaC_fp)*100)/100;
   var caTTC_j = data.ca.reduce(function(s,r){
     var a=parseFloat(r.ht055)||0, b=parseFloat(r.ht10)||0, c=parseFloat(r.ht20)||0;
-    return s + Math.round(a*1.055*100)/100 + Math.round(b*1.10*100)/100 + Math.round(c*1.20*100)/100;
+    return s + Math.round(a*1.055*100)/100 + Math.round(b*1.10*100)/100 + Math.round(c*1.20*100)/100 + ttcCust(r);
   },0);
   var caTTC_fp = (data.facturesPro||[]).reduce(function(s,r){
     var a=parseFloat(r.ht055)||0, b=parseFloat(r.ht10)||0, c=parseFloat(r.ht20)||0;
-    return s + Math.round(a*1.055*100)/100 + Math.round(b*1.10*100)/100 + Math.round(c*1.20*100)/100;
+    return s + Math.round(a*1.055*100)/100 + Math.round(b*1.10*100)/100 + Math.round(c*1.20*100)/100 + ttcCust(r);
   },0);
   var caTTC = Math.round((caTTC_j + caTTC_fp)*100)/100;
   var rentreesSupp = data.rentreesSupp.reduce(function(s,r){return s+(parseFloat(r.montant)||0);},0);
@@ -2901,7 +2944,7 @@ function calcTotals(data) {
   var resultat = caHT+rentreesSupp-chargesHT;
   var cashflow = caHT+rentreesSupp-(fixesTTC+varTTC+creditsPrincipal+creditsInteret+leasingTTC+masseSalHT);
   var delta = resultat-(prevCA-chargesHT);
-  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caTTC,caTTC_j,caTTC_fp,tvaCollectee,tvaC_j,tvaC_fp,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,varHT_excep,varTTC_excep,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta,caFP055,caFP10,caFP20,masseSalHT,prelevementPriveHT};
+  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caHTCust,caTTC,caTTC_j,caTTC_fp,tvaCollectee,tvaC_j,tvaC_fp,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,varHT_excep,varTTC_excep,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta,caFP055,caFP10,caFP20,caFPCust,masseSalHT,prelevementPriveHT};
 }
 
 function refreshTotals() {
@@ -2912,6 +2955,7 @@ function refreshTotals() {
 
   function s(id,v,cls){var el=document.getElementById(id);if(!el)return;el.textContent=typeof v==='string'?v:fmtN(v);if(cls){el.className=el.className.replace(/positive|negative/g,'').trim();el.classList.add(cls);}}
   s('tot-ca055',colTotal(t.caHT055,'ht055'));s('tot-ca10',colTotal(t.caHT10,'ht10'));s('tot-ca20',colTotal(t.caHT20,'ht20'));
+  if(_customTvaField) s('tot-caCust',colTotal(t.caHTCust,_customTvaField));
   // Footer tableau CA journalier = journalier SEULEMENT (sans factures pro)
   s('tot-caHT', t.caHT_j);
   s('tot-caTTC', t.caTTC_j);
@@ -2919,11 +2963,13 @@ function refreshTotals() {
   var fp055=(_data.facturesPro||[]).reduce(function(s,r){return s+(parseFloat(r.ht055)||0);},0);
   var fp10=(_data.facturesPro||[]).reduce(function(s,r){return s+(parseFloat(r.ht10)||0);},0);
   var fp20=(_data.facturesPro||[]).reduce(function(s,r){return s+(parseFloat(r.ht20)||0);},0);
+  var fpCust=(_data.facturesPro||[]).reduce(function(s,r){return s+htCust(r);},0);
   s('tot-fp055',colTotal(fp055,'ht055'));s('tot-fp10',colTotal(fp10,'ht10'));s('tot-fp20',colTotal(fp20,'ht20'));
-  s('tot-fpHT',fp055+fp10+fp20);
+  if(_customTvaField) s('tot-fpCust',colTotal(fpCust,_customTvaField));
+  s('tot-fpHT',fp055+fp10+fp20+fpCust);
   // TVA/TTC factures pro : arrondi ligne par ligne
-  var fpTTC_r=(_data.facturesPro||[]).reduce(function(s,r){var a=parseFloat(r.ht055)||0,b=parseFloat(r.ht10)||0,c=parseFloat(r.ht20)||0;return s+Math.round(a*1.055*100)/100+Math.round(b*1.10*100)/100+Math.round(c*1.20*100)/100;},0);
-  var fpTVA_r=(_data.facturesPro||[]).reduce(function(s,r){var a=parseFloat(r.ht055)||0,b=parseFloat(r.ht10)||0,c=parseFloat(r.ht20)||0;return s+Math.round(a*0.055*100)/100+Math.round(b*0.10*100)/100+Math.round(c*0.20*100)/100;},0);
+  var fpTTC_r=(_data.facturesPro||[]).reduce(function(s,r){var a=parseFloat(r.ht055)||0,b=parseFloat(r.ht10)||0,c=parseFloat(r.ht20)||0;return s+Math.round(a*1.055*100)/100+Math.round(b*1.10*100)/100+Math.round(c*1.20*100)/100+ttcCust(r);},0);
+  var fpTVA_r=(_data.facturesPro||[]).reduce(function(s,r){var a=parseFloat(r.ht055)||0,b=parseFloat(r.ht10)||0,c=parseFloat(r.ht20)||0;return s+Math.round(a*0.055*100)/100+Math.round(b*0.10*100)/100+Math.round(c*0.20*100)/100+tvaCust(r);},0);
   s('tot-fpTTC',fpTTC_r);
   s('tot-fpTVA',fpTVA_r);
   s('tot-rsupp',t.rentreesSupp);s('tot-prev',t.prevCA);

@@ -423,6 +423,8 @@ function fmtPP(n,d){
 function fmtPctP(n,abs2){if(n===undefined||n===null||isNaN(n))return'-';var s=abs2?'':(n>=0?'+':'');return s+n.toFixed(1)+'%';}
 function pf(v){return parseFloat((v||'').toString().replace(',','.'))||0;}
 function parseYYYYMM(v){if(!v)return '';var s=String(v).trim();if(/^\d{4}-\d{2}$/.test(s))return s;if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s.slice(0,7);var m1=s.match(/^(\d{1,2})[\/\-.](\d{4})$/);if(m1)return m1[2]+'-'+String(parseInt(m1[1])).padStart(2,'0');var m2=s.match(/^(\d{4})[\/.](\d{1,2})$/);if(m2)return m2[1]+'-'+String(parseInt(m2[2])).padStart(2,'0');return '';}
+function htCust(r){return(parseFloat(r.ht0)||0)+(parseFloat(r.ht21)||0)+(parseFloat(r.ht85)||0);}
+function tvaCust(r){return Math.round((parseFloat(r.ht21)||0)*0.021*100)/100+Math.round((parseFloat(r.ht85)||0)*0.085*100)/100;}
 
 // Init
 window.initRapport=async function(){
@@ -629,22 +631,22 @@ function computeMonth(d,key,isFuture){
     tvaCollectee:0,tvaDed:0,tvaDue:0,caHT055:0,caHT10:0,caHT20:0,
     prevCharges:0,prevCA:0,topCharges:[],hasData:false,isFuture:false};
   // CA journalier multi-TVA
-  var h055=0,h10=0,h20=0;
+  var h055=0,h10=0,h20=0,hCust=0;
   (d.ca||[]).forEach(function(r){
-    var a=parseFloat(r.ht055)||0,b=parseFloat(r.ht10)||0,c=parseFloat(r.ht20)||0;
-    var multi=a+b+c;
-    if(multi>0){h055+=a;h10+=b;h20+=c;}else{h20+=parseFloat(r.montantHT)||0;}
+    var a=parseFloat(r.ht055)||0,b=parseFloat(r.ht10)||0,c=parseFloat(r.ht20)||0,hC=htCust(r);
+    var multi=a+b+c+hC;
+    if(multi>0){h055+=a;h10+=b;h20+=c;hCust+=hC;}else{h20+=parseFloat(r.montantHT)||0;}
   });
-  var caJ=h055+h10+h20;
+  var caJ=h055+h10+h20+hCust;
   // Factures Pro
-  var fp055=0,fp10=0,fp20=0;
-  (d.facturesPro||[]).forEach(function(r){fp055+=parseFloat(r.ht055)||0;fp10+=parseFloat(r.ht10)||0;fp20+=parseFloat(r.ht20)||0;});
-  var caFP=fp055+fp10+fp20;
+  var fp055=0,fp10=0,fp20=0,fpCust=0;
+  (d.facturesPro||[]).forEach(function(r){fp055+=parseFloat(r.ht055)||0;fp10+=parseFloat(r.ht10)||0;fp20+=parseFloat(r.ht20)||0;fpCust+=htCust(r);});
+  var caFP=fp055+fp10+fp20+fpCust;
   var caHT=caJ+caFP;
   var caHT055=h055+fp055,caHT10=h10+fp10,caHT20=h20+fp20;
   // TVA collectée — arrondi ligne par ligne
-  var tvaCollectee=(d.ca||[]).reduce(function(s,r){var a=parseFloat(r.ht055)||0,b=parseFloat(r.ht10)||0,c=parseFloat(r.ht20)||0;return s+Math.round(a*0.055*100)/100+Math.round(b*0.10*100)/100+Math.round(c*0.20*100)/100;},0);
-  (d.facturesPro||[]).forEach(function(r){var a=parseFloat(r.ht055)||0,b=parseFloat(r.ht10)||0,c=parseFloat(r.ht20)||0;tvaCollectee+=Math.round(a*0.055*100)/100+Math.round(b*0.10*100)/100+Math.round(c*0.20*100)/100;});
+  var tvaCollectee=(d.ca||[]).reduce(function(s,r){var a=parseFloat(r.ht055)||0,b=parseFloat(r.ht10)||0,c=parseFloat(r.ht20)||0;return s+Math.round(a*0.055*100)/100+Math.round(b*0.10*100)/100+Math.round(c*0.20*100)/100+tvaCust(r);},0);
+  (d.facturesPro||[]).forEach(function(r){var a=parseFloat(r.ht055)||0,b=parseFloat(r.ht10)||0,c=parseFloat(r.ht20)||0;tvaCollectee+=Math.round(a*0.055*100)/100+Math.round(b*0.10*100)/100+Math.round(c*0.20*100)/100+tvaCust(r);});
   tvaCollectee=Math.round(tvaCollectee*100)/100;
   // Rentrées
   var rentrees=(d.rentreesSupp||[]).reduce(function(s,r){return s+(parseFloat(r.montant)||0);},0);

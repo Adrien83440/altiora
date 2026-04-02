@@ -742,6 +742,28 @@ html, body { overflow-x: hidden; max-width: 100vw; }
         </div>
       </div>
 
+      <!-- TVA personnalisée -->
+      <div class="card" style="margin-bottom:0">
+        <div class="card-head">
+          <div class="card-title">🧾 Taux de TVA personnalisé</div>
+          <span style="font-size:11px;color:var(--muted)">Ajoute une 4ème colonne TVA dans le pilotage CA</span>
+        </div>
+        <div style="padding:20px">
+          <p style="font-size:12px;color:var(--muted);margin-bottom:14px">
+            Par défaut, Alteore propose 3 colonnes de TVA : 5,5% · 10% · 20%. Si vous appliquez un autre taux (exonéré, presse, DOM-TOM…), activez-le ici.
+          </p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn tva-opt-btn" data-rate="" onclick="setCustomTva(null,this)" style="padding:8px 16px;border-radius:8px;border:2px solid var(--border);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;background:#fff;color:var(--text);transition:.15s">❌ Désactivé</button>
+            <button class="btn tva-opt-btn" data-rate="0" onclick="setCustomTva(0,this)" style="padding:8px 16px;border-radius:8px;border:2px solid var(--border);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;background:#fff;color:var(--text);transition:.15s">0% Exonéré</button>
+            <button class="btn tva-opt-btn" data-rate="2.1" onclick="setCustomTva(2.1,this)" style="padding:8px 16px;border-radius:8px;border:2px solid var(--border);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;background:#fff;color:var(--text);transition:.15s">2,1% Presse</button>
+            <button class="btn tva-opt-btn" data-rate="8.5" onclick="setCustomTva(8.5,this)" style="padding:8px 16px;border-radius:8px;border:2px solid var(--border);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;background:#fff;color:var(--text);transition:.15s">8,5% DOM-TOM</button>
+          </div>
+          <div id="tva-custom-preview" style="display:none;margin-top:12px;padding:10px 14px;background:#eff6ff;border:1.5px solid #c7d2fe;border-radius:8px;font-size:12px;color:#4338ca">
+            ✅ Une colonne <b id="tva-custom-label"></b> apparaîtra dans votre saisie CA (Pilotage, Import, Factures).
+          </div>
+        </div>
+      </div>
+
       <!-- ── SAISONNALITÉ ── -->
       <div class="card">
         <div class="card-head">
@@ -1580,10 +1602,37 @@ window.saisonToggle=saisonToggle;
 window.saisonCycleMonth=saisonCycleMonth;
 window.saisonUpdateCoeff=saisonUpdateCoeff;
 
+// ── TVA PERSONNALISÉE ──
+var _customTvaRate = null; // null = désactivé, 0 | 2.1 | 8.5
+
+function setCustomTva(rate, btn) {
+  _customTvaRate = rate;
+  // UI : highlight bouton actif
+  document.querySelectorAll('.tva-opt-btn').forEach(function(b) {
+    var isActive = (rate === null && b.dataset.rate === '') || (rate !== null && b.dataset.rate === String(rate));
+    b.style.borderColor = isActive ? 'var(--blue)' : 'var(--border)';
+    b.style.background = isActive ? '#eff6ff' : '#fff';
+  });
+  var preview = document.getElementById('tva-custom-preview');
+  var label = document.getElementById('tva-custom-label');
+  if (rate !== null && preview && label) {
+    var labels = { 0: '0% (Exonéré)', 2.1: '2,1% (Presse)', 8.5: '8,5% (DOM-TOM)' };
+    label.textContent = labels[rate] || rate + '%';
+    preview.style.display = 'block';
+  } else if (preview) {
+    preview.style.display = 'none';
+  }
+  scheduleAutosave();
+}
+window.setCustomTva = setCustomTva;
+
 function saveProfile() {
   const fields = ['nom','commercial','secteur','forme','siret','tva','desc','adresse','cp','ville','tel','email','web','banque','titulaire','iban','bic'];
   const data = {};
   fields.forEach(f => { const el = document.getElementById('p-'+f); if (el) data[f] = el.value; });
+  // TVA personnalisée
+  if (_customTvaRate !== null) data.customTvaRate = _customTvaRate;
+  else data.customTvaRate = null;
   document.getElementById('lastSaved').textContent = '✅ Enregistré le ' + new Date().toLocaleString('fr-FR');
   updateHero();
   if (window._uid && window._setDoc) {
@@ -1817,8 +1866,15 @@ async function tryFirebase() {
       const data = snap.data();
       Object.keys(data).forEach(f => {
         if (f === 'logo') { applyLogo(data[f]); return; }
+        if (f === 'customTvaRate') return; // handled separately
         const el = document.getElementById('p-'+f); if (el) el.value = data[f]||'';
       });
+      // Restore custom TVA
+      if (data.customTvaRate !== undefined && data.customTvaRate !== null) {
+        setCustomTva(data.customTvaRate, null);
+      } else {
+        setCustomTva(null, null);
+      }
       updateHero();
     }
     // Charger les préférences de gestion depuis users/{uid}

@@ -530,6 +530,9 @@ const DEST_FIELDS = {
     {key:'ht055',     label:'CA HT 5,5%',         sub:'Ventes taux réduit',      required:false, hint:['5.5','5,5','ht055','ht5','taux réduit','alimentaire']},
     {key:'ht10',      label:'CA HT 10%',          sub:'Ventes taux intermédiaire',required:false, hint:['10','ht10','taux intermediaire','restauration']},
     {key:'ht20',      label:'CA HT 20%',          sub:'Ventes taux normal',      required:false, hint:['20','ht20','taux normal','standard','montant','ca','ventes','recettes','total']},
+    {key:'ht0',       label:'CA HT 0% (Exonéré)', sub:'Timbres, formations…',    required:false, hint:['0','exonéré','exonere','exempt','ht0']},
+    {key:'ht21',      label:'CA HT 2,1%',         sub:'Presse, médicaments',     required:false, hint:['2.1','2,1','ht21','presse']},
+    {key:'ht85',      label:'CA HT 8,5%',         sub:'DOM-TOM',                 required:false, hint:['8.5','8,5','ht85','dom','dom-tom']},
     {key:'montantHT', label:'CA HT Total',        sub:'Si pas de multi-TVA',     required:false, hint:['ca ht','total ht','chiffre']},
   ],
   pilotage_chargesFixe: [
@@ -551,6 +554,9 @@ const DEST_FIELDS = {
     {key:'ht055',     label:'CA HT 5,5%',         sub:'Ventes taux réduit',      required:false, hint:['5.5','5,5','ht055','ht5','taux réduit','alimentaire']},
     {key:'ht10',      label:'CA HT 10%',          sub:'Ventes taux intermédiaire',required:false, hint:['10','ht10','taux intermediaire','restauration']},
     {key:'ht20',      label:'CA HT 20%',          sub:'Ventes taux normal',      required:false, hint:['20','ht20','taux normal','standard']},
+    {key:'ht0',       label:'CA HT 0% (Exonéré)', sub:'Timbres, formations…',    required:false, hint:['0','exonéré','exonere','exempt','ht0']},
+    {key:'ht21',      label:'CA HT 2,1%',         sub:'Presse, médicaments',     required:false, hint:['2.1','2,1','ht21','presse']},
+    {key:'ht85',      label:'CA HT 8,5%',         sub:'DOM-TOM',                 required:false, hint:['8.5','8,5','ht85','dom','dom-tom']},
     {key:'montantHT', label:'CA HT Total',        sub:'Si pas de multi-TVA',     required:false, hint:['ca','ca ht','montant','ht','total ht','chiffre','ventes','recettes','revenu','total']},
   ],
   charges: [
@@ -1211,12 +1217,18 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
       const h055 = localPf(mapping['ht055'] ? r[mapping['ht055']] : 0);
       const h10  = localPf(mapping['ht10']  ? r[mapping['ht10']]  : 0);
       const h20  = localPf(mapping['ht20']  ? r[mapping['ht20']]  : 0);
+      const hc0  = localPf(mapping['ht0']   ? r[mapping['ht0']]   : 0);
+      const hc21 = localPf(mapping['ht21']  ? r[mapping['ht21']]  : 0);
+      const hc85 = localPf(mapping['ht85']  ? r[mapping['ht85']]  : 0);
       const total = localPf(mapping['montantHT'] ? r[mapping['montantHT']] : 0);
       if (h055) entry.ht055 = String(h055);
       if (h10)  entry.ht10  = String(h10);
       if (h20)  entry.ht20  = String(h20);
+      if (hc0)  entry.ht0   = String(hc0);
+      if (hc21) entry.ht21  = String(hc21);
+      if (hc85) entry.ht85  = String(hc85);
       // Si seulement montantHT mappé → mettre en ht20
-      if (!h055 && !h10 && !h20 && total) entry.ht20 = String(total);
+      if (!h055 && !h10 && !h20 && !hc0 && !hc21 && !hc85 && total) entry.ht20 = String(total);
       byMonth[ym].push(entry);
     });
     for (const [ym, entries] of Object.entries(byMonth)) {
@@ -1283,8 +1295,11 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
       if (mapping['ht055']) entry.ht055 = String(getN(r, 'ht055'));
       if (mapping['ht10']) entry.ht10 = String(getN(r, 'ht10'));
       if (mapping['ht20']) entry.ht20 = String(getN(r, 'ht20'));
+      if (mapping['ht0'])  entry.ht0  = String(getN(r, 'ht0'));
+      if (mapping['ht21']) entry.ht21 = String(getN(r, 'ht21'));
+      if (mapping['ht85']) entry.ht85 = String(getN(r, 'ht85'));
       if (mapping['montantHT']) entry.montantHT = String(getN(r, 'montantHT'));
-      if (!mapping['ht055'] && !mapping['ht10'] && !mapping['ht20'] && mapping['montantHT']) {
+      if (!mapping['ht055'] && !mapping['ht10'] && !mapping['ht20'] && !mapping['ht0'] && !mapping['ht21'] && !mapping['ht85'] && mapping['montantHT']) {
         entry.ht20 = entry.montantHT; delete entry.montantHT;
       }
       byMonth[ym].push(entry);
@@ -2040,13 +2055,17 @@ async function doPilotageCompletImport() {
           const exists = existingCA.some(e => e.date===r.date);
           if(!exists) {
             const tvaRate = r.tvaRate;
-            existingCA.push({
+            const caEntry = {
               date: r.date,
               ht055: tvaRate === 5.5 ? String(r.montantHT) : '0',
               ht10:  tvaRate === 10  ? String(r.montantHT) : '0',
-              ht20:  tvaRate === 20  ? String(r.montantHT) : '0',
+              ht20:  (tvaRate !== 5.5 && tvaRate !== 10 && tvaRate !== 0 && tvaRate !== 2.1 && tvaRate !== 8.5) ? String(r.montantHT) : '0',
               _imported: true
-            });
+            };
+            if (tvaRate === 0)   caEntry.ht0  = String(r.montantHT);
+            if (tvaRate === 2.1) caEntry.ht21 = String(r.montantHT);
+            if (tvaRate === 8.5) caEntry.ht85 = String(r.montantHT);
+            existingCA.push(caEntry);
             imported++;
           }
         });
@@ -2133,8 +2152,11 @@ async function importCA(forcedMonth){
     if(_mapping['ht055'])entry.ht055=String(pf(r[_mapping['ht055']]));
     if(_mapping['ht10']) entry.ht10 =String(pf(r[_mapping['ht10']]));
     if(_mapping['ht20']) entry.ht20 =String(pf(r[_mapping['ht20']]));
+    if(_mapping['ht0'])  entry.ht0  =String(pf(r[_mapping['ht0']]));
+    if(_mapping['ht21']) entry.ht21 =String(pf(r[_mapping['ht21']]));
+    if(_mapping['ht85']) entry.ht85 =String(pf(r[_mapping['ht85']]));
     if(_mapping['montantHT']) entry.montantHT=String(pf(r[_mapping['montantHT']]));
-    if(!_mapping['ht055']&&!_mapping['ht10']&&!_mapping['ht20']&&_mapping['montantHT']){entry.ht20=entry.montantHT;delete entry.montantHT;}
+    if(!_mapping['ht055']&&!_mapping['ht10']&&!_mapping['ht20']&&!_mapping['ht0']&&!_mapping['ht21']&&!_mapping['ht85']&&_mapping['montantHT']){entry.ht20=entry.montantHT;delete entry.montantHT;}
     byMonth[ym].push(entry);
   });
   for(const [ym,entries] of Object.entries(byMonth)){

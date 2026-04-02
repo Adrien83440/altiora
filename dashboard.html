@@ -646,6 +646,10 @@
 <script>
 const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 const MONTHS_SHORT=['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+// Custom TVA helpers (reads ALL possible custom fields — safe even if config changes)
+function htCust(r){return(parseFloat(r.ht0)||0)+(parseFloat(r.ht21)||0)+(parseFloat(r.ht85)||0);}
+function tvaCust(r){return Math.round((parseFloat(r.ht21)||0)*0.021*100)/100+Math.round((parseFloat(r.ht85)||0)*0.085*100)/100;}
+function ttcCust(r){return(parseFloat(r.ht0)||0)+Math.round((parseFloat(r.ht21)||0)*1.021*100)/100+Math.round((parseFloat(r.ht85)||0)*1.085*100)/100;}
 let _charts=[];
 var _viewMode='civil';
 var _fiscalStart=0;
@@ -844,13 +848,13 @@ function _calcMS(d) {
 /* ─── EXTRACTION DONNÉES MOIS ─── */
 function extractMonthData(d,isFuture){
   if(!d)return{caHT:0,caTTC:0,tvaCollectee:0,rentrees:0,prevCA:0,fixesHT:0,varHT:0,creditsHT:0,leasingHT:0,masseSalHT:0,chargesHT:0,resultat:0,cashflow:0,prevCharges:0,isFuture:false,caJournalier:[]};
-  const caHT_j=d.ca?d.ca.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;const multi=h055+h10+h20;return s+(multi>0?multi:(parseFloat(r.montantHT)||0));},0):0;
-  const caTTC_j=d.ca?d.ca.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;const multi=Math.round(h055*1.055*100)/100+Math.round(h10*1.10*100)/100+Math.round(h20*1.20*100)/100;if(h055+h10+h20>0)return s+multi;const h=parseFloat(r.montantHT)||0;return s+Math.round(h*(1+(r.tvaRate||0)/100)*100)/100;},0):0;
-  const tva_j=d.ca?d.ca.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;const multi=Math.round(h055*0.055*100)/100+Math.round(h10*0.10*100)/100+Math.round(h20*0.20*100)/100;if(h055+h10+h20>0)return s+multi;const h=parseFloat(r.montantHT)||0;return s+Math.round(h*(r.tvaRate||0)/100*100)/100;},0):0;
+  const caHT_j=d.ca?d.ca.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0,hC=htCust(r);const multi=h055+h10+h20+hC;return s+(multi>0?multi:(parseFloat(r.montantHT)||0));},0):0;
+  const caTTC_j=d.ca?d.ca.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0,hC=htCust(r);const multi=Math.round(h055*1.055*100)/100+Math.round(h10*1.10*100)/100+Math.round(h20*1.20*100)/100+ttcCust(r);if(h055+h10+h20+hC>0)return s+multi;const h=parseFloat(r.montantHT)||0;return s+Math.round(h*(1+(r.tvaRate||0)/100)*100)/100;},0):0;
+  const tva_j=d.ca?d.ca.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0,hC=htCust(r);const multi=Math.round(h055*0.055*100)/100+Math.round(h10*0.10*100)/100+Math.round(h20*0.20*100)/100+tvaCust(r);if(h055+h10+h20+hC>0)return s+multi;const h=parseFloat(r.montantHT)||0;return s+Math.round(h*(r.tvaRate||0)/100*100)/100;},0):0;
   const fp=d.facturesPro||[];
-  const caHT_fp=fp.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;return s+h055+h10+h20;},0);
-  const caTTC_fp=fp.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;return s+Math.round(h055*1.055*100)/100+Math.round(h10*1.10*100)/100+Math.round(h20*1.20*100)/100;},0);
-  const tva_fp=fp.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;return s+Math.round(h055*0.055*100)/100+Math.round(h10*0.10*100)/100+Math.round(h20*0.20*100)/100;},0);
+  const caHT_fp=fp.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;return s+h055+h10+h20+htCust(r);},0);
+  const caTTC_fp=fp.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;return s+Math.round(h055*1.055*100)/100+Math.round(h10*1.10*100)/100+Math.round(h20*1.20*100)/100+ttcCust(r);},0);
+  const tva_fp=fp.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;return s+Math.round(h055*0.055*100)/100+Math.round(h10*0.10*100)/100+Math.round(h20*0.20*100)/100+tvaCust(r);},0);
   const caHT=caHT_j+caHT_fp;
   const caTTC=caTTC_j+caTTC_fp;
   const tvaCollectee=tva_j+tva_fp;
@@ -1052,7 +1056,7 @@ async function loadData(_tries){
   _charts=[];
 
   // Construire le HTML des ventes journalières
-  const maxCA=caJour.length>0?Math.max(...caJour.map(r=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;const m=h055+h10+h20;return m>0?m:(parseFloat(r.montantHT)||0);})):0;
+  const maxCA=caJour.length>0?Math.max(...caJour.map(r=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0,hC=htCust(r);const m=h055+h10+h20+hC;return m>0?m:(parseFloat(r.montantHT)||0);})):0;
 
   function buildDailyBars(){
     if(!caJour.length)return '<div style="color:var(--muted);font-size:11px;padding:8px 0;">Aucune vente enregistrée ce mois.</div>';
@@ -1062,8 +1066,8 @@ async function loadData(_tries){
       const parts=r.date?r.date.split('/'):[];
       if(parts.length<1)return;
       const d=parseInt(parts[0]);
-      const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;
-      const m=h055+h10+h20;const val=m>0?m:(parseFloat(r.montantHT)||0);
+      const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0,hC=htCust(r);
+      const m=h055+h10+h20+hC;const val=m>0?m:(parseFloat(r.montantHT)||0);
       byDay[d]=(byDay[d]||0)+val;
     });
     const days=Object.keys(byDay).map(Number).sort((a,b)=>a-b);
