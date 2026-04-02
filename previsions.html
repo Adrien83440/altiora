@@ -137,6 +137,8 @@ main{margin-left:250px;flex:1;display:flex;flex-direction:column}
 .prod-actions{display:flex;gap:4px}
 .prod-del{width:28px;height:28px;border:1px solid #fecaca;border-radius:8px;background:#fef2f2;color:var(--red);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
 .prod-del:hover{background:#fee2e2}
+.prod-edit{width:28px;height:28px;border:1px solid #c7d2fe;border-radius:8px;background:#eff6ff;color:var(--blue-main);font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:.15s}
+.prod-edit:hover{background:#dbeafe}
 
 /* ── IMPORT CARDS ── */
 .import-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
@@ -310,7 +312,7 @@ main{margin-left:250px;flex:1;display:flex;flex-direction:column}
 <div class="modal-bg" id="modalManual">
   <div class="modal">
     <div class="modal-head">
-      <h3>➕ Ajouter un produit manuellement</h3>
+      <h3 id="modalManualTitle">➕ Ajouter un produit manuellement</h3>
       <button class="modal-close" onclick="closeModal('modalManual')">✕</button>
     </div>
     <div class="modal-body">
@@ -358,7 +360,7 @@ main{margin-left:250px;flex:1;display:flex;flex-direction:column}
     </div>
     <div class="modal-foot">
       <button class="btn btn-o" onclick="closeModal('modalManual')">Annuler</button>
-      <button class="btn btn-p" onclick="addManualProduct()">Ajouter →</button>
+      <button class="btn btn-p" id="modalManualSubmit" onclick="submitManualProduct()">Ajouter →</button>
     </div>
   </div>
 </div>
@@ -1024,7 +1026,7 @@ async function renderPage(){
   html+='<div class="import-grid" style="margin-bottom:18px">';
   html+='<div class="import-card" onclick="openImportStock()"><div class="import-icon">📦</div><div class="import-label">Depuis le Stock</div><div class="import-desc">Importer produits + historique sorties</div></div>';
   html+='<div class="import-card" onclick="openImportCR()"><div class="import-icon">🧮</div><div class="import-label">Depuis Coût de revient</div><div class="import-desc">Importer produits + coûts unitaires</div></div>';
-  html+='<div class="import-card" onclick="openModal(\'modalManual\')"><div class="import-icon">✏️</div><div class="import-label">Saisie manuelle</div><div class="import-desc">Ajouter un produit libre</div></div>';
+  html+='<div class="import-card" onclick="openAddProduct()"><div class="import-icon">✏️</div><div class="import-label">Saisie manuelle</div><div class="import-desc">Ajouter un produit libre</div></div>';
   html+='</div>';
 
   // Product list
@@ -1039,7 +1041,7 @@ async function renderPage(){
       html+='<div class="prod-info"><div class="prod-name">'+p.name+'</div>';
       html+='<div class="prod-meta">'+(p.category||'—')+' · '+(p.unit||'pièces')+' · PV: '+fmtE(p.pvHT||0)+' · Coût: '+fmtE(p.coutUnitaire||0)+'</div></div>';
       html+='<span class="prod-source '+srcCls+'">'+srcLabel+'</span>';
-      html+='<div class="prod-actions"><button class="prod-del" onclick="removeProduct('+pi+')" title="Retirer">🗑</button></div>';
+      html+='<div class="prod-actions">'+(p.sourceType==='manual'?'<button class="prod-edit" onclick="editProduct('+pi+')" title="Modifier">✏️</button>':'')+'<button class="prod-del" onclick="removeProduct('+pi+')" title="Retirer">🗑</button></div>';
       html+='</div>';
     }
     html+='</div>';
@@ -1688,28 +1690,71 @@ async function saveConfig(){
   }catch(e){console.error('Save config error:',e)}
 }
 
-function addManualProduct(){
+var _editProductIdx = null; // null = add mode, number = edit mode
+
+function editProduct(idx){
+  var p = _config.products[idx];
+  if(!p || p.sourceType !== 'manual') return;
+  _editProductIdx = idx;
+  document.getElementById('m-nom').value = p.name || '';
+  document.getElementById('m-emoji').value = p.emoji || '';
+  document.getElementById('m-cat').value = p.category || '';
+  document.getElementById('m-unit').value = p.unit || 'pièces';
+  document.getElementById('m-pv').value = p.pvHT || '';
+  document.getElementById('m-cout').value = p.coutUnitaire || '';
+  document.getElementById('modalManualTitle').textContent = '✏️ Modifier : ' + (p.name || 'Produit');
+  document.getElementById('modalManualSubmit').textContent = 'Sauvegarder →';
+  openModal('modalManual');
+}
+
+function submitManualProduct(){
   var nom=document.getElementById('m-nom').value.trim();
   if(!nom){document.getElementById('m-nom').focus();return}
-  _config.products.push({
-    id:'manual_'+Date.now(),
+  var data = {
     name:nom,
     emoji:document.getElementById('m-emoji').value||'📦',
     category:document.getElementById('m-cat').value||'',
     unit:document.getElementById('m-unit').value,
-    sourceType:'manual',
-    stockProductId:null,
-    coutRevientId:null,
     pvHT:pf(document.getElementById('m-pv').value),
     coutUnitaire:pf(document.getElementById('m-cout').value)
-  });
-  closeModal('modalManual');
+  };
+  if(_editProductIdx !== null && _config.products[_editProductIdx]) {
+    // Mode édition
+    Object.assign(_config.products[_editProductIdx], data);
+    closeModal('modalManual');
+    saveConfig();
+    renderPage();
+    showToast('✅ Produit modifié','success');
+  } else {
+    // Mode ajout
+    _config.products.push(Object.assign({
+      id:'manual_'+Date.now(),
+      sourceType:'manual',
+      stockProductId:null,
+      coutRevientId:null
+    }, data));
+    closeModal('modalManual');
+    document.getElementById('btnGenerate').disabled=false;
+    saveConfig();
+    renderPage();
+    showToast('✅ Produit ajouté','success');
+  }
+  _editProductIdx = null;
   // Reset inputs
   ['m-nom','m-emoji','m-cat','m-pv','m-cout'].forEach(function(id){document.getElementById(id).value=''});
-  document.getElementById('btnGenerate').disabled=false;
-  saveConfig();
-  renderPage();
-  showToast('✅ Produit ajouté','success');
+  document.getElementById('modalManualTitle').textContent = '➕ Ajouter un produit manuellement';
+  document.getElementById('modalManualSubmit').textContent = 'Ajouter →';
+}
+
+function addManualProduct(){ submitManualProduct(); }
+
+function openAddProduct(){
+  _editProductIdx = null;
+  ['m-nom','m-emoji','m-cat','m-pv','m-cout'].forEach(function(id){document.getElementById(id).value=''});
+  document.getElementById('m-unit').value = 'pièces';
+  document.getElementById('modalManualTitle').textContent = '➕ Ajouter un produit manuellement';
+  document.getElementById('modalManualSubmit').textContent = 'Ajouter →';
+  openModal('modalManual');
 }
 
 function removeProduct(idx){
@@ -2016,6 +2061,9 @@ window.openImportCR=openImportCR;
 window.confirmImportStock=confirmImportStock;
 window.confirmImportCR=confirmImportCR;
 window.addManualProduct=addManualProduct;
+window.submitManualProduct=submitManualProduct;
+window.editProduct=editProduct;
+window.openAddProduct=openAddProduct;
 window.removeProduct=removeProduct;
 window.openModal=openModal;
 window.closeModal=closeModal;
