@@ -110,6 +110,17 @@
   .badge-green{background:rgba(34,197,94,.1);color:var(--green)}
   .badge-purple{background:rgba(168,85,247,.1);color:var(--purple)}
 
+  /* ── COLLAPSIBLE SECTIONS ── */
+  .section-toggle{cursor:pointer;user-select:none}
+  .section-toggle .chevron{display:inline-block;transition:transform 0.2s ease;font-size:11px;margin-right:4px;color:var(--muted)}
+  .section-card:not(.sec-collapsed) .section-toggle .chevron{transform:rotate(90deg)}
+  .sec-collapsed .section-body{display:none}
+  .sec-collapsed .section-head{margin-bottom:0}
+  .sec-collapsed{padding-bottom:12px}
+  .section-card .section-head .section-actions{position:relative;z-index:2}
+  .sec-collapsed:hover{transform:translateY(-1px)}
+  .sec-badge-count{font-size:10px;font-weight:600;padding:1px 7px;border-radius:10px;background:rgba(37,99,235,.08);color:var(--blue-main);margin-left:6px}
+
   /* ── TABLE ── */
   .data-table{width:100%;border-collapse:collapse;font-size:12px}
   .data-table th{background:#f8f9fd;padding:7px 9px;text-align:left;font-weight:600;color:var(--muted);font-size:11px;border-bottom:1px solid var(--border)}
@@ -847,6 +858,43 @@ document.addEventListener('DOMContentLoaded', function() {
 
 var _data = {};
 
+/* ─── SECTIONS REPLIABLES (lazy render) ─── */
+var _SEC_DEFAULTS = { ca:true, rsupp:true, prev:true, fp:false, cf:false, cv:false, ms:false, cred:false, leas:false, tva:true, cash:true };
+var _lazyRendered = {};
+var _lazyRenderers = {};
+
+function _loadSecState() {
+  try { var s = JSON.parse(localStorage.getItem('pilo_sec_state') || '{}'); return Object.assign({}, _SEC_DEFAULTS, s); } catch(e) { return Object.assign({}, _SEC_DEFAULTS); }
+}
+function _saveSecState(id, open) {
+  try { var s = JSON.parse(localStorage.getItem('pilo_sec_state') || '{}'); s[id] = open; localStorage.setItem('pilo_sec_state', JSON.stringify(s)); } catch(e) {}
+}
+var _secState = _loadSecState();
+
+function toggleSection(id, evt) {
+  if (evt) evt.stopPropagation();
+  var card = document.getElementById('sec-' + id);
+  if (!card) return;
+  var wasCollapsed = card.classList.contains('sec-collapsed');
+  card.classList.toggle('sec-collapsed');
+  // Update state BEFORE lazy render (renderMasseSalariale reads _secState)
+  _secState[id] = wasCollapsed;
+  _saveSecState(id, wasCollapsed);
+  // Lazy render on first expand
+  if (wasCollapsed && !_lazyRendered[id] && _lazyRenderers[id]) {
+    _lazyRenderers[id]();
+    _lazyRendered[id] = true;
+  }
+}
+
+function ensureSectionOpen(id) {
+  var card = document.getElementById('sec-' + id);
+  if (card && card.classList.contains('sec-collapsed')) toggleSection(id);
+}
+
+function secColClass(id) { return _secState[id] ? '' : ' sec-collapsed'; }
+function secTbody(id, content) { return _secState[id] ? content : ''; }
+
 /* ─── MODE SAISIE HT / TTC ─── */
 window._htMode = true;
 var _htCoeffs = { ht055: 1.055, ht10: 1.10, ht20: 1.20 };
@@ -1494,15 +1542,16 @@ function renderPage(data, month) {
       '</div>' +
     '</div>' +
 
-    '<div class="section-card full" style="margin-bottom:16px;">' +
+    '<div class="section-card full' + secColClass('fp') + '" id="sec-fp" style="margin-bottom:16px;">' +
       '<div class="section-head">' +
-        '<div class="section-title">🧾 Autres CA — Factures Pro <span class="section-title-badge badge-green">Coffrets · Traiteur · B2B</span></div>' +
-        '<button class="btn btn-outline btn-sm" onclick="addFacturePro()">+ Facture</button>' +
+        '<div class="section-title section-toggle" onclick="toggleSection(\'fp\')"><span class="chevron">▸</span> 🧾 Autres CA — Factures Pro <span class="section-title-badge badge-green">Coffrets · Traiteur · B2B</span>' + (t.caFP055+t.caFP10+t.caFP20+t.caFPCust > 0 ? ' <span class="sec-badge-count">' + fmtN(t.caFP055+t.caFP10+t.caFP20+t.caFPCust) + ' €</span>' : '') + '</div>' +
+        '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();ensureSectionOpen(\'fp\');addFacturePro()">+ Facture</button>' +
       '</div>' +
+      '<div class="section-body">' +
       '<div class="info-box">💡 CA hors caisse journalière : factures professionnels, coffrets cadeaux, traiteur… TVA mixte possible sur une même facture.</div>' +
       '<table class="data-table">' +
         '<thead><tr><th>Client</th><th>Description</th><th style="color:#10b981">' + colLabel('5,5%') + '</th><th style="color:#f97316">' + colLabel('10%') + '</th><th style="color:#60a5fa">' + colLabel('20%') + '</th>' + (_customTvaField ? '<th style="color:#8b5cf6">' + colLabel(customTvaLabel(_customTvaRate)) + '</th>' : '') + '<th>Total HT</th><th>Total TTC</th><th>TVA</th><th></th></tr></thead>' +
-        '<tbody id="fp-tbody">' + renderFacturesPro(data.facturesPro) + '</tbody>' +
+        '<tbody id="fp-tbody">' + secTbody('fp', renderFacturesPro(data.facturesPro)) + '</tbody>' +
         '<tfoot><tr><td colspan="2">TOTAL</td>' +
           '<td style="color:#10b981;font-weight:700"><span id="tot-fp055">' + fmtN(colTotal(t.caFP055,'ht055')) + '</span> €</td>' +
           '<td style="color:#f97316;font-weight:700"><span id="tot-fp10">' + fmtN(colTotal(t.caFP10,'ht10')) + '</span> €</td>' +
@@ -1515,59 +1564,68 @@ function renderPage(data, month) {
         '</tr>' +
         '<tr><td colspan="' + (_customTvaField ? '10' : '9') + '" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addFacturePro()">+ Facture</button></td></tr></tfoot>' +
       '</table>' +
+      '</div>' +
     '</div>' +
 
-    '<div class="section-card full" style="margin-bottom:16px;">' +
+    '<div class="section-card full' + secColClass('cf') + '" id="sec-cf" style="margin-bottom:16px;">' +
       '<div class="section-head">' +
-        '<div class="section-title">🔒 Charges Fixes <span class="section-title-badge badge-orange">Prévisionnel</span>' + (!window._htMode ? ' <span class="section-title-badge" style="background:#e0f2fe;color:#0369a1;font-size:10px">Saisie TTC</span>' : '') + '</div>' +
-        '<div class="section-actions">' +
-          '<button class="btn btn-outline btn-sm" onclick="addCharge(\'chargesFixe\',\'cf-tbody\')">+ Ligne</button>' +
+        '<div class="section-title section-toggle" onclick="toggleSection(\'cf\')"><span class="chevron">▸</span> 🔒 Charges Fixes <span class="section-title-badge badge-orange">Prévisionnel</span>' + (!window._htMode ? ' <span class="section-title-badge" style="background:#e0f2fe;color:#0369a1;font-size:10px">Saisie TTC</span>' : '') + (t.fixesHT > 0 ? ' <span class="sec-badge-count">' + fmtN(t.fixesHT) + ' €</span>' : '') + '</div>' +
+        '<div class="section-actions" onclick="event.stopPropagation()">' +
+          '<button class="btn btn-outline btn-sm" onclick="ensureSectionOpen(\'cf\');addCharge(\'chargesFixe\',\'cf-tbody\')">+ Ligne</button>' +
           '<button class="btn btn-orange btn-sm" onclick="openFixedModal()">⚡ Appliquer sur l\'année</button>' +
         '</div>' +
       '</div>' +
+      '<div class="section-body">' +
       '<table class="data-table"><thead><tr><th>Pointé</th><th>Fournisseur</th><th>Type</th><th>Montant HT</th><th>TVA %</th><th>Total TTC</th><th>Déductible</th><th></th></tr></thead>' +
-      '<tbody id="cf-tbody">' + renderCharges(data.chargesFixe, 'chargesFixe') + '</tbody>' +
+      '<tbody id="cf-tbody">' + secTbody('cf', renderCharges(data.chargesFixe, 'chargesFixe')) + '</tbody>' +
       '<tfoot><tr><td colspan="3">TOTAL CHARGES FIXES HT</td><td><span id="tot-fixHT">' + fmtN(t.fixesHT) + '</span> €</td><td>—</td><td><span id="tot-fixTTC">' + fmtN(t.fixesTTC) + '</span> €</td><td colspan="2">TVA déd. : <span id="tot-fixTVA">' + fmtN(t.fixesTVA) + '</span> €</td></tr>' +
       '<tr><td colspan="8" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCharge(\'chargesFixe\',\'cf-tbody\')">+ Ligne</button></td></tr></tfoot>' +
       '</table>' +
+      '</div>' +
     '</div>' +
 
-    '<div class="section-card full" style="margin-bottom:16px;">' +
+    '<div class="section-card full' + secColClass('cv') + '" id="sec-cv" style="margin-bottom:16px;">' +
       '<div class="section-head">' +
-        '<div class="section-title">📦 Charges Variables <span class="section-title-badge badge-green">Au fil de l\'eau</span>' + (!window._htMode ? ' <span class="section-title-badge" style="background:#e0f2fe;color:#0369a1;font-size:10px">Saisie TTC</span>' : '') + '</div>' +
-        '<button class="btn btn-outline btn-sm" onclick="addCharge(\'chargesVar\',\'cv-tbody\')">+ Ligne</button>' +
+        '<div class="section-title section-toggle" onclick="toggleSection(\'cv\')"><span class="chevron">▸</span> 📦 Charges Variables <span class="section-title-badge badge-green">Au fil de l\'eau</span>' + (!window._htMode ? ' <span class="section-title-badge" style="background:#e0f2fe;color:#0369a1;font-size:10px">Saisie TTC</span>' : '') + (t.varHT > 0 ? ' <span class="sec-badge-count">' + fmtN(t.varHT) + ' €</span>' : '') + '</div>' +
+        '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();ensureSectionOpen(\'cv\');addCharge(\'chargesVar\',\'cv-tbody\')">+ Ligne</button>' +
       '</div>' +
+      '<div class="section-body">' +
       '<table class="data-table"><thead><tr><th>Pointé</th><th>Fournisseur</th><th>Type</th><th>Montant HT</th><th>TVA %</th><th>Total TTC</th><th>Déductible</th><th title="Exceptionnel : exclut la ligne du total normal">Excep.</th><th></th></tr></thead>' +
-      '<tbody id="cv-tbody">' + renderCharges(data.chargesVar, 'chargesVar') + '</tbody>' +
+      '<tbody id="cv-tbody">' + secTbody('cv', renderCharges(data.chargesVar, 'chargesVar')) + '</tbody>' +
       '<tfoot>' +
         '<tr><td colspan="3">TOTAL CHARGES VARIABLES HT</td><td><span id="tot-varHT">' + fmtN(t.varHT) + '</span> €</td><td>—</td><td><span id="tot-varTTC">' + fmtN(t.varTTC) + '</span> €</td><td colspan="3">TVA déd. : <span id="tot-varTVA">' + fmtN(t.varTVA) + '</span> €</td></tr>' +
         (t.varHT_excep > 0 ? '<tr id="var-excep-row"><td colspan="3" style="color:#f97316;font-size:11px;padding:5px 9px">⚡ Dont exceptionnel (exclu du total)</td><td style="color:#f97316;font-weight:700">' + fmtN(t.varHT_excep) + ' €</td><td>—</td><td style="color:#f97316;font-weight:700">' + fmtN(t.varTTC_excep) + ' €</td><td colspan="3"></td></tr>' : '<tr id="var-excep-row" style="display:none"></tr>') +
         '<tr><td colspan="9" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCharge(\'chargesVar\',\'cv-tbody\')">+ Ligne</button></td></tr>' +
       '</tfoot>' +
       '</table>' +
+      '</div>' +
     '</div>' +
 
     renderMasseSalariale(data, t) +
 
-    '<div class="section-card full" style="margin-bottom:16px">' +
-        '<div class="section-head"><div class="section-title">🏦 Crédits & Emprunts <span class="section-title-badge badge-purple">Mensualité auto</span></div>' +
-          '<div class="section-actions"><button class="btn btn-outline btn-sm" onclick="addCredit()">+ Crédit</button><button class="btn btn-outline btn-sm" style="color:#6366f1;border-color:#6366f1" onclick="forceSyncDettes()">🔗 Sync → Dettes</button></div>' +
+    '<div class="section-card full' + secColClass('cred') + '" id="sec-cred" style="margin-bottom:16px">' +
+        '<div class="section-head"><div class="section-title section-toggle" onclick="toggleSection(\'cred\')"><span class="chevron">▸</span> 🏦 Crédits & Emprunts <span class="section-title-badge badge-purple">Mensualité auto</span>' + (t.creditsPrincipal+t.creditsInteret > 0 ? ' <span class="sec-badge-count">' + fmtN(t.creditsPrincipal+t.creditsInteret) + ' €</span>' : '') + '</div>' +
+          '<div class="section-actions" onclick="event.stopPropagation()"><button class="btn btn-outline btn-sm" onclick="ensureSectionOpen(\'cred\');addCredit()">+ Crédit</button><button class="btn btn-outline btn-sm" style="color:#6366f1;border-color:#6366f1" onclick="forceSyncDettes()">🔗 Sync → Dettes</button></div>' +
         '</div>' +
+        '<div class="section-body">' +
         '<div class="info-box">💡 Renseigne Principal + Taux → mensualité calculée automatiquement · Pas de TVA sur les intérêts d\'emprunt · Renseigne Début/Fin pour la propagation</div>' +
         '<table class="data-table"><thead><tr><th>Pointé</th><th>Nom crédit</th><th>Principal €</th><th>Taux int. %</th><th>Amortissement</th><th>Mensualité HT</th><th>dont Intérêts</th><th>Début / Fin</th><th></th></tr></thead>' +
-        '<tbody id="cred-tbody">' + renderCredits(data.credits) + '</tbody>' +
+        '<tbody id="cred-tbody">' + secTbody('cred', renderCredits(data.credits)) + '</tbody>' +
         '<tfoot><tr><td colspan="2">TOTAL CRÉDITS</td><td><span id="tot-credP">' + fmtN(t.creditsPrincipal) + '</span> €</td><td>—</td><td>—</td><td><span id="tot-credMens">' + fmtN(t.creditsPrincipal+t.creditsInteret) + '</span> €</td><td><span id="tot-credInt">' + fmtN(t.creditsInteret) + '</span> €</td><td colspan="2"></td></tr>' +
         '<tr><td colspan="9" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCredit()">+ Crédit</button></td></tr></tfoot>' +
         '</table>' +
         '<div id="cred-hidden-alert"></div>' +
+        '</div>' +
     '</div>' +
-    '<div class="section-card full" style="margin-bottom:16px">' +
-        '<div class="section-head"><div class="section-title">🚗 LOA / LLD / Leasing <span class="section-title-badge badge-blue">Soumis TVA</span>' + (!window._htMode ? ' <span class="section-title-badge" style="background:#e0f2fe;color:#0369a1;font-size:10px">Saisie TTC</span>' : '') + '</div><button class="btn btn-outline btn-sm" onclick="addCharge(\'leasing\',\'leas-tbody\')">+ Ligne</button></div>' +
+    '<div class="section-card full' + secColClass('leas') + '" id="sec-leas" style="margin-bottom:16px">' +
+        '<div class="section-head"><div class="section-title section-toggle" onclick="toggleSection(\'leas\')"><span class="chevron">▸</span> 🚗 LOA / LLD / Leasing <span class="section-title-badge badge-blue">Soumis TVA</span>' + (!window._htMode ? ' <span class="section-title-badge" style="background:#e0f2fe;color:#0369a1;font-size:10px">Saisie TTC</span>' : '') + (t.leasingHT > 0 ? ' <span class="sec-badge-count">' + fmtN(t.leasingHT) + ' €</span>' : '') + '</div><button class="btn btn-outline btn-sm" onclick="event.stopPropagation();ensureSectionOpen(\'leas\');addCharge(\'leasing\',\'leas-tbody\')">+ Ligne</button></div>' +
+        '<div class="section-body">' +
         '<table class="data-table"><thead><tr><th>Pointé</th><th>Fournisseur</th><th>Type</th><th>Montant HT</th><th>TVA %</th><th>Total TTC</th><th>Déd.</th><th>Début / Fin</th><th></th></tr></thead>' +
-        '<tbody id="leas-tbody">' + renderCharges(data.leasing, 'leasing') + '</tbody>' +
+        '<tbody id="leas-tbody">' + secTbody('leas', renderCharges(data.leasing, 'leasing')) + '</tbody>' +
         '<tfoot><tr><td colspan="3">TOTAL LEASING HT</td><td><span id="tot-leasHT">' + fmtN(t.leasingHT) + '</span> €</td><td>—</td><td><span id="tot-leasTTC">' + fmtN(t.leasingTTC) + '</span> €</td><td colspan="3"></td></tr>' +
         '<tr><td colspan="9" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCharge(\'leasing\',\'leas-tbody\')">+ Ligne</button></td></tr></tfoot>' +
         '</table>' +
+        '</div>' +
     '</div>' +
 
     '<div class="sections-grid">' +
@@ -1588,6 +1646,45 @@ function renderPage(data, month) {
         '</div>' +
       '</div>' +
     '</div>';
+
+  // ── Lazy renderers pour sections collapsed ──
+  _lazyRendered = {};
+  _lazyRenderers = {
+    fp: function() {
+      var tb = document.getElementById('fp-tbody');
+      if (tb) tb.innerHTML = renderFacturesPro(_data.facturesPro);
+    },
+    cf: function() {
+      var tb = document.getElementById('cf-tbody');
+      if (tb) tb.innerHTML = renderCharges(_data.chargesFixe, 'chargesFixe');
+    },
+    cv: function() {
+      var tb = document.getElementById('cv-tbody');
+      if (tb) tb.innerHTML = renderCharges(_data.chargesVar, 'chargesVar');
+    },
+    ms: function() {
+      var body = document.getElementById('ms-body');
+      if (body) {
+        var t2 = calcTotals(_data);
+        var full = renderMasseSalariale(_data, t2, true);
+        var card = document.getElementById('sec-ms');
+        if (card) card.outerHTML = full;
+      }
+    },
+    cred: function() {
+      var tb = document.getElementById('cred-tbody');
+      if (tb) tb.innerHTML = renderCredits(_data.credits);
+      if (typeof renderHiddenCredits === 'function') renderHiddenCredits();
+    },
+    leas: function() {
+      var tb = document.getElementById('leas-tbody');
+      if (tb) tb.innerHTML = renderCharges(_data.leasing, 'leasing');
+    }
+  };
+  // Marquer les sections déjà rendues (ouvertes au chargement)
+  ['fp','cf','cv','ms','cred','leas'].forEach(function(id) {
+    if (_secState[id]) _lazyRendered[id] = true;
+  });
 }
 
 /* ─── RENDERERS ─── */
@@ -1834,21 +1931,28 @@ function _calcObjAvancement(obj) {
   return totalPoids > 0 ? totalAvance / totalPoids : 0;
 }
 
-function renderMasseSalariale(data, t) {
+function renderMasseSalariale(data, t, forceRender) {
   var ms = data.masseSalariale || {};
   var hasRH = window._rhEmployes && window._rhEmployes.length > 0;
   var isAuto = ms.mode === 'auto' && hasRH;
   var msCalc = calcMasseSalariale(ms);
 
-  var html = '<div class="section-card full" style="margin-bottom:16px">' +
+  var html = '<div class="section-card full' + secColClass('ms') + '" id="sec-ms" style="margin-bottom:16px">' +
     '<div class="section-head">' +
-      '<div class="section-title">👥 Masse salariale & Rémunération <span class="section-title-badge" style="background:#fef3c7;color:#b45309">' + (isAuto ? '🔗 Auto RH' : '✏️ Manuel') + '</span></div>' +
-      '<div class="section-actions">' +
+      '<div class="section-title section-toggle" onclick="toggleSection(\'ms\')"><span class="chevron">▸</span> 👥 Masse salariale & Rémunération <span class="section-title-badge" style="background:#fef3c7;color:#b45309">' + (isAuto ? '🔗 Auto RH' : '✏️ Manuel') + '</span>' + (msCalc.total > 0 ? ' <span class="sec-badge-count">' + fmtN(msCalc.total) + ' €</span>' : '') + '</div>' +
+      '<div class="section-actions" onclick="event.stopPropagation()">' +
         (hasRH ? '<button class="btn btn-outline btn-sm" onclick="toggleMSMode()" id="ms-mode-btn">' + (isAuto ? '✏️ Passer en manuel' : '🔗 Mode auto RH') + '</button>' : '') +
         '<button class="btn btn-outline btn-sm" style="color:#059669;border-color:#059669" onclick="fetchAllURSSAF()" id="ms-urssaf-btn">🔄 Taux URSSAF 2026</button>' +
-        (!isAuto ? '<button class="btn btn-outline btn-sm" onclick="addMSLigne()">+ Salarié</button>' : '') +
+        (!isAuto ? '<button class="btn btn-outline btn-sm" onclick="ensureSectionOpen(\'ms\');addMSLigne()">+ Salarié</button>' : '') +
       '</div>' +
-    '</div>';
+    '</div>' +
+    '<div class="section-body" id="ms-body">';
+
+  // Lazy: si collapsed et pas de force, retourner juste le shell
+  if (!_secState['ms'] && !forceRender) {
+    html += '</div></div>';
+    return html;
+  }
 
   // Tableau salariés
   html += '<table class="data-table"><thead><tr>' +
@@ -1998,7 +2102,7 @@ function renderMasseSalariale(data, t) {
   }
 
   html += '<div style="font-size:9px;color:var(--muted);padding:6px 0 2px">💡 Taux chargés depuis <strong>mon-entreprise.urssaf.fr</strong> (RGDU/Fillon inclus). Modifiables à la main si besoin. Rafraîchis automatiquement au chargement.</div>';
-  html += '</div>';
+  html += '</div></div>';
   return html;
 }
 
@@ -2188,7 +2292,7 @@ function renderCharges(rows, key) {
       '</td>' : '') +
       (key==='chargesVar' ? '<td style="text-align:center;padding:4px 6px">' +
         '<label title="Exceptionnel : exclut cette charge du total normal" style="display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer">' +
-        '<input type="checkbox"' + (r.exceptionnel ? ' checked' : '') + ' onchange="var tr=this.closest(\'tr\');_data[\'' + key + '\'][' + i + '].exceptionnel=this.checked;if(tr)tr.style.background=this.checked?\'rgba(249,115,22,0.06)\':\'\';refreshTotals();scheduleSave()" style="width:15px;height:15px;cursor:pointer;accent-color:#f97316">' +
+        '<input type="checkbox"' + (r.exceptionnel ? ' checked' : '') + ' onchange="_data[\'' + key + '\'][' + i + '].exceptionnel=this.checked;refreshTotals()" style="width:15px;height:15px;cursor:pointer;accent-color:#f97316">' +
         '</label>' +
       '</td>' : '') +
       '<td style="white-space:nowrap;display:flex;gap:4px;align-items:center;padding:5px 7px;">' +
