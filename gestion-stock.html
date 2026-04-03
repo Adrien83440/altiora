@@ -533,6 +533,16 @@ canvas{max-width:100%!important}
         <select id="set-perpage"><option value="25">25</option><option value="50" selected>50</option><option value="100">100</option><option value="200">200</option></select>
       </div>
       <div class="mfield" style="margin-top:14px">
+        <label>Affichage du prix d'achat</label>
+        <select id="set-pa-display">
+          <option value="cmup">CMUP — Prix moyen pondéré (mouvements d'entrée)</option>
+          <option value="fiche">PA Fiche — Prix saisi sur la fiche produit</option>
+        </select>
+      </div>
+      <div style="font-size:11px;color:var(--muted);padding:10px;background:rgba(248,250,255,0.6);border-radius:8px;margin-top:8px">
+        💡 <b>CMUP</b> recalcule automatiquement le prix d'achat à chaque réception. <b>PA Fiche</b> affiche le prix que vous avez saisi manuellement sur chaque produit.
+      </div>
+      <div class="mfield" style="margin-top:14px">
         <label>Snapshot mensuel automatique</label>
         <select id="set-snapshot"><option value="1">Oui — Sauvegarde auto le 1er de chaque mois</option><option value="0">Non</option></select>
       </div>
@@ -605,7 +615,7 @@ onAuthStateChanged(auth,user=>{
 var _products = []; // loaded from Firestore subcollection
 var _movements = []; // loaded from Firestore subcollection
 var _families = []; // {id, name, icon, color, desc, parentId, level}
-var _settings = { valoMethod:'cmup', perPage:50, snapshot:true };
+var _settings = { valoMethod:'cmup', perPage:50, snapshot:true, paDisplay:'cmup' };
 var _tab = 'catalogue';
 var _catPath = []; // navigation path [{id,name}]
 var _prodPage = 0;
@@ -890,22 +900,27 @@ function renderTab(){
 // ── KPIs ──
 function renderKPIs(){
   var stk = computeStocks();
+  var useFiche=_settings.paDisplay==='fiche';
   var totalVal=0, totalMarge=0, alerts=0, ruptures=0, refs=_products.length;
   _products.forEach(function(p){
     var ref=(p.ref||'').trim(); if(!ref) return;
     var s=stk[ref]||{qty:0,cmup:0,value:0};
-    totalVal += s.value;
-    var pv=pf(p.pv); if(pv>0 && (p.stockType||'marchandise')!=='matiere') totalMarge += (pv - s.cmup)*Math.max(s.qty,0);
+    var paFiche=pf(p.pa);
+    var paUsed=useFiche?paFiche:s.cmup;
+    var valUsed=useFiche?Math.max(s.qty,0)*paFiche:s.value;
+    totalVal += valUsed;
+    var pv=pf(p.pv); if(pv>0 && (p.stockType||'marchandise')!=='matiere') totalMarge += (pv - paUsed)*Math.max(s.qty,0);
     var st=stockStatus(s.qty, pf(p.min));
     if(st.key==='alerte') alerts++;
     if(st.key==='rupture') ruptures++;
   });
   var rot = computeRotation();
   var margePct = totalVal>0?(totalMarge/(totalVal+totalMarge)*100):0;
+  var valoLabel = useFiche?'au PA fiche':'au CMUP';
 
   document.getElementById('kpi-row').innerHTML = `
     <div class="kpi blue"><div class="kpi-label">Références</div><div class="kpi-val v-blue">${refs}</div><div class="kpi-sub">produits en catalogue</div></div>
-    <div class="kpi ${totalVal>0?'green':''}"><div class="kpi-label">Valeur du stock</div><div class="kpi-val v-green">${fmtK(totalVal)}</div><div class="kpi-sub">au CMUP</div></div>
+    <div class="kpi ${totalVal>0?'green':''}"><div class="kpi-label">Valeur du stock</div><div class="kpi-val v-green">${fmtK(totalVal)}</div><div class="kpi-sub">${valoLabel}</div></div>
     <div class="kpi"><div class="kpi-label">Marge potentielle</div><div class="kpi-val">${fmtK(totalMarge)}</div><div class="kpi-sub">${fmt(margePct,1)}% de marge</div></div>
     <div class="kpi ${ruptures>0?'red':alerts>0?'orange':'green'}"><div class="kpi-label">Alertes</div><div class="kpi-val ${ruptures>0?'v-red':alerts>0?'v-orange':'v-green'}">${alerts+ruptures}</div><div class="kpi-sub">${ruptures} ruptures · ${alerts} seuils</div></div>
     <div class="kpi purple"><div class="kpi-label">Rotation</div><div class="kpi-val v-purple">${rot.rotation>0?fmt(rot.rotation,1)+'×':'—'}</div><div class="kpi-sub">${rot.jours>0?rot.jours+' jours stock':'—'}</div></div>
@@ -965,25 +980,29 @@ function renderProducts(tc){
       <div class="tbl-wrap">
         <table>
           <thead><tr>
-            <th style="text-align:left">Réf / Nom</th><th>Catégorie</th><th>Type</th><th title="Coût Moyen Unitaire Pondéré (mouvements d'entrée)">PA / CMUP</th><th>PV HT</th>
+            <th style="text-align:left">Réf / Nom</th><th>Catégorie</th><th>Type</th><th style="cursor:pointer" onclick="togglePaDisplay()" title="Cliquez pour basculer entre CMUP et PA Fiche">${_settings.paDisplay==='fiche'?'💰 PA Fiche':'📊 CMUP'} <span style="font-size:9px;opacity:.6">⇄</span></th><th>PV HT</th>
             <th>Marge</th><th>Stock</th><th>Valeur</th><th>Statut</th><th>ABC</th><th></th>
           </tr></thead>
           <tbody>${page.length ? page.map(function(p){
             var ref=(p.ref||'').trim();
             var s=stk[ref]||{qty:0,cmup:pf(p.pa),value:0};
             var st=stockStatus(s.qty,pf(p.min));
-            var pv=pf(p.pv); var marge=pv>0?((pv-s.cmup)/pv*100):0;
-            var paFiche=pf(p.pa); var cmupDiff=paFiche>0 && Math.abs(s.cmup-paFiche)>0.01;
+            var paFiche=pf(p.pa);
+            var useFiche=_settings.paDisplay==='fiche';
+            var paAff=useFiche?paFiche:s.cmup;
+            var valAff=useFiche?Math.max(s.qty,0)*paFiche:s.value;
+            var pv=pf(p.pv); var marge=pv>0&&paAff>0?((pv-paAff)/pv*100):0;
+            var cmupDiff=paFiche>0 && Math.abs(s.cmup-paFiche)>0.01;
             var abcItems=computeABC(); var abc=(abcItems.find(function(x){return x.ref===ref})||{}).abc||'';
             return '<tr class="'+(st.key==='rupture'?'row-rupture':st.key==='alerte'?'row-alerte':'')+'" style="cursor:pointer" onclick="openProdModal(\''+p.id+'\')">'+
               '<td style="text-align:left"><div style="font-weight:700">'+esc(p.name||ref)+'</div><div style="font-size:10px;color:var(--muted)">'+esc(ref)+(p.ean?' · '+esc(p.ean):'')+(p.fournisseur?' · '+esc(p.fournisseur):'')+'</div></td>'+
               '<td>'+esc(p.cat||'—')+'</td>'+
               '<td><span class="badge badge-blue">'+({marchandise:'March.',matiere:'MP',fini:'PF'}[p.stockType||'marchandise']||'March.')+'</span></td>'+
-              '<td>'+fmtE(s.cmup)+(cmupDiff?'<div style="font-size:9px;color:var(--muted)" title="PA fiche : '+fmtE(paFiche)+' — Le CMUP est calculé à partir des mouvements d\'entrée">Fiche: '+fmtE(paFiche)+'</div>':'')+'</td>'+
+              '<td>'+(paAff>0?fmtE(paAff):'—')+(cmupDiff?'<div style="font-size:9px;color:var(--muted)">'+(useFiche?'CMUP: '+fmtE(s.cmup):'Fiche: '+fmtE(paFiche))+'</div>':'')+'</td>'+
               '<td>'+(pv>0?fmtE(pv):'—')+'</td>'+
-              '<td style="color:'+(marge>=30?'var(--green)':marge>=10?'var(--orange)':'var(--red)')+'">'+(pv>0?fmt(marge,1)+'%':'—')+'</td>'+
+              '<td style="color:'+(marge>=30?'var(--green)':marge>=10?'var(--orange)':'var(--red)')+'">'+(pv>0&&paAff>0?fmt(marge,1)+'%':'—')+'</td>'+
               '<td style="font-weight:700">'+fmt(s.qty,0)+' '+(p.unite||'u')+'</td>'+
-              '<td style="font-weight:700">'+fmtE(s.value)+'</td>'+
+              '<td style="font-weight:700">'+fmtE(valAff)+'</td>'+
               '<td><span class="badge '+st.cls+'">'+st.label+'</span></td>'+
               '<td>'+(abc?'<span class="badge-abc abc-'+abc.toLowerCase()+'">'+abc+'</span>':'')+'</td>'+
               '<td><button class="btn btn-outline btn-xs" onclick="event.stopPropagation();openProdModal(\''+p.id+'\')">✏️</button></td>'+
@@ -1497,6 +1516,7 @@ async function doImport(newProds, resolved){
 function openSettings(){
   document.getElementById('set-valo').value=_settings.valoMethod||'cmup';
   document.getElementById('set-perpage').value=_settings.perPage||50;
+  document.getElementById('set-pa-display').value=_settings.paDisplay||'cmup';
   document.getElementById('set-snapshot').value=_settings.snapshot?'1':'0';
   document.getElementById('settingsOverlay').classList.add('show');
 }
@@ -1508,6 +1528,7 @@ window.closeSettings=closeSettings;
 async function saveSettings(){
   _settings.valoMethod=document.getElementById('set-valo').value;
   _settings.perPage=parseInt(document.getElementById('set-perpage').value)||50;
+  _settings.paDisplay=document.getElementById('set-pa-display').value||'cmup';
   _settings.snapshot=document.getElementById('set-snapshot').value==='1';
   await saveSettingsToFirestore();
   closeSettings();
@@ -1515,6 +1536,14 @@ async function saveSettings(){
   renderAll();
 }
 window.saveSettings=saveSettings;
+
+function togglePaDisplay(){
+  _settings.paDisplay = _settings.paDisplay==='fiche' ? 'cmup' : 'fiche';
+  saveSettingsToFirestore().catch(function(){});
+  renderProducts(document.getElementById('tab-content'));
+  showToast(_settings.paDisplay==='fiche'?'💰 Affichage PA Fiche':'📊 Affichage CMUP');
+}
+window.togglePaDisplay=togglePaDisplay;
 
 function startInventory(){
   switchTab('inventaire',document.querySelector('[data-tab="inventaire"]'));
