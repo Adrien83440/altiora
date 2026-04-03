@@ -773,20 +773,19 @@ onAuthStateChanged(auth, async function(user) {
   var name = user.displayName || user.email.split('@')[0];
   document.getElementById('uname').textContent  = name;
   document.getElementById('av').textContent = name.charAt(0).toUpperCase();
-  // Charger la préférence HT/TTC
-  try {
-    var userSnap = await getDoc(doc(db, 'users', user.uid));
-    if (userSnap.exists() && userSnap.data().saisieMode === 'ttc') {
-      window._htMode = false;
-      var segHt = document.getElementById('seg-ht');
-      var segTtc = document.getElementById('seg-ttc');
-      if (segHt) segHt.classList.remove('active');
-      if (segTtc) segTtc.classList.add('active');
-    }
-  } catch(e) { console.warn('Load saisieMode error', e); }
-  // Déclencher le chargement applicatif
+  // Charger préférence HT/TTC + TVA custom en parallèle
   window._firebaseReady = true;
-  await window.loadCustomTva();
+  var [userSnap] = await Promise.all([
+    getDoc(doc(db, 'users', user.uid)).catch(function(e){ console.warn('Load saisieMode error', e); return null; }),
+    window.loadCustomTva()
+  ]);
+  if (userSnap && userSnap.exists() && userSnap.data().saisieMode === 'ttc') {
+    window._htMode = false;
+    var segHt = document.getElementById('seg-ht');
+    var segTtc = document.getElementById('seg-ttc');
+    if (segHt) segHt.classList.remove('active');
+    if (segTtc) segTtc.classList.add('active');
+  }
   window.loadMonth();
 });
 </script>
@@ -1070,124 +1069,121 @@ async function loadMonth() {
   if (inner) inner.innerHTML = '<div class="loader"><div class="spin"></div> Chargement...</div>';
 
   if (window._uid && window._getDoc && window._db) {
-    try {
-      var snap = await window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', key));
-      if (snap.exists()) {
-        var s = snap.data();
-        if (s.ca && s.ca.length === data.ca.length) {
-          // Migration: ancienne structure {montantHT, tvaRate} → nouvelle {ht055, ht10, ht20}
-          data.ca = s.ca.map(function(r, i) {
-            if (r.ht055 !== undefined || r.ht10 !== undefined || r.ht20 !== undefined) return r;
-            // Ancienne ligne: ventiler dans la colonne correspondant au taux
-            var migrated = {date: r.date || data.ca[i].date, ht055: '', ht10: '', ht20: ''};
-            if (r.montantHT && parseFloat(r.montantHT) > 0) {
-              var rate = parseFloat(r.tvaRate) || 20;
-              if (rate === 5.5) migrated.ht055 = r.montantHT;
-              else if (rate === 10) migrated.ht10 = r.montantHT;
-              else migrated.ht20 = r.montantHT;
-            }
-            return migrated;
-          });
-        }
-        if (s.rentreesSupp)  data.rentreesSupp = s.rentreesSupp;
-        if (s.previsionCA)   data.previsionCA  = s.previsionCA;
-        if (s.prevBaseN1 !== undefined) data.prevBaseN1 = s.prevBaseN1;
-        if (s.prevAjustN1 !== undefined) data.prevAjustN1 = s.prevAjustN1;
-        if (s.chargesFixe)   data.chargesFixe  = s.chargesFixe;
-        if (s.chargesVar)    data.chargesVar    = s.chargesVar;
-        if (s.credits)       data.credits       = s.credits;
-        if (s.leasing)       data.leasing       = s.leasing;
-        if (s.facturesPro)   data.facturesPro   = s.facturesPro;
-        if (s.masseSalariale) data.masseSalariale = Object.assign({}, data.masseSalariale, s.masseSalariale);
+    // ── PARALLÉLISER tous les appels Firestore ──
+    var keyN1 = (window._year - 1) + '-' + String(m + 1).padStart(2, '0');
+    var promises = {
+      month: window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', key)).catch(function(e){ console.warn('loadMonth error:', e); return null; }),
+      n1: window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', keyN1)).catch(function(e){ return null; }),
+      dettes: window._getDoc(window._doc(window._db, 'dettes', window._uid, 'data', 'all')).catch(function(e){ return null; })
+    };
+    // RH: charger une seule fois
+    if (!window._rhEmployesLoaded && window._getDocs && window._collection) {
+      promises.employes = window._getDocs(window._collection(window._db,'rh',window._uid,'employes')).catch(function(){ return null; });
+      promises.objectifs = window._getDocs(window._collection(window._db,'rh',window._uid,'objectifs')).catch(function(){ return null; });
+    }
+
+    // Attendre TOUT en parallèle
+    var keys = Object.keys(promises);
+    var values = await Promise.all(keys.map(function(k){ return promises[k]; }));
+    var results = {};
+    keys.forEach(function(k, i){ results[k] = values[i]; });
+
+    // ── Traiter le mois courant ──
+    var snap = results.month;
+    if (snap && snap.exists && snap.exists()) {
+      var s = snap.data();
+      if (s.ca && s.ca.length === data.ca.length) {
+        data.ca = s.ca.map(function(r, i) {
+          if (r.ht055 !== undefined || r.ht10 !== undefined || r.ht20 !== undefined) return r;
+          var migrated = {date: r.date || data.ca[i].date, ht055: '', ht10: '', ht20: ''};
+          if (r.montantHT && parseFloat(r.montantHT) > 0) {
+            var rate = parseFloat(r.tvaRate) || 20;
+            if (rate === 5.5) migrated.ht055 = r.montantHT;
+            else if (rate === 10) migrated.ht10 = r.montantHT;
+            else migrated.ht20 = r.montantHT;
+          }
+          return migrated;
+        });
       }
-    } catch(e) { console.warn('loadMonth Firestore error:', e); }
+      if (s.rentreesSupp)  data.rentreesSupp = s.rentreesSupp;
+      if (s.previsionCA)   data.previsionCA  = s.previsionCA;
+      if (s.prevBaseN1 !== undefined) data.prevBaseN1 = s.prevBaseN1;
+      if (s.prevAjustN1 !== undefined) data.prevAjustN1 = s.prevAjustN1;
+      if (s.chargesFixe)   data.chargesFixe  = s.chargesFixe;
+      if (s.chargesVar)    data.chargesVar    = s.chargesVar;
+      if (s.credits)       data.credits       = s.credits;
+      if (s.leasing)       data.leasing       = s.leasing;
+      if (s.facturesPro)   data.facturesPro   = s.facturesPro;
+      if (s.masseSalariale) data.masseSalariale = Object.assign({}, data.masseSalariale, s.masseSalariale);
+    }
+
+    // ── Traiter N-1 ──
+    window._lastYearCA = 0;
+    var snapN1 = results.n1;
+    if (snapN1 && snapN1.exists && snapN1.exists()) {
+      var sN1 = snapN1.data();
+      var caN1 = (sN1.ca || []).reduce(function(s, r) {
+        return s + (parseFloat(r.ht055)||0) + (parseFloat(r.ht10)||0) + (parseFloat(r.ht20)||0) + htCust(r);
+      }, 0);
+      var fpN1 = (sN1.facturesPro || []).reduce(function(s, r) {
+        return s + (parseFloat(r.ht055)||0) + (parseFloat(r.ht10)||0) + (parseFloat(r.ht20)||0) + htCust(r);
+      }, 0);
+      window._lastYearCA = caN1 + fpN1;
+    }
+
+    // Recalculer prévision N-1
+    if (data.prevBaseN1 && window._lastYearCA > 0) {
+      var ajN1 = parseFloat(data.prevAjustN1) || 0;
+      var prevN1Calc = window._lastYearCA * (1 + ajN1 / 100);
+      if (data.previsionCA && data.previsionCA.length > 0) {
+        data.previsionCA[0].montant = prevN1Calc.toFixed(2);
+      }
+    }
+
+    // ── Traiter RH (premier chargement) ──
+    if (!window._rhEmployesLoaded) {
+      window._rhEmployesLoaded = true;
+      window._rhEmployes = [];
+      if (results.employes) {
+        results.employes.forEach(function(d){ var e=d.data(); e.id=d.id; if(e.statut!=='inactif') window._rhEmployes.push(e); });
+      }
+      window._rhObjectifs = [];
+      if (results.objectifs) {
+        results.objectifs.forEach(function(d){ var o=d.data(); o.id=d.id; window._rhObjectifs.push(o); });
+      }
+      if (window._rhEmployes.length > 0 && (!data.masseSalariale.mode || data.masseSalariale.mode === 'manuel')) {
+        var hasManuel = data.masseSalariale.lignes && data.masseSalariale.lignes.some(function(l){ return l.label && l.brut; });
+        if (!hasManuel) data.masseSalariale.mode = 'auto';
+      }
+    }
+
+    // ── Traiter Dettes sync (résultat déjà chargé) ──
+    _syncDettesFromSnap(data, key, results.dettes);
   }
 
   _data = data;
 
-  // ── Charger CA du même mois N-1 pour la prévision ──
-  window._lastYearCA = 0;
-  if (window._uid && window._getDoc && window._db && window._doc) {
-    try {
-      var keyN1 = (window._year - 1) + '-' + String(m + 1).padStart(2, '0');
-      var snapN1 = await window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', keyN1));
-      if (snapN1.exists()) {
-        var sN1 = snapN1.data();
-        var caN1 = (sN1.ca || []).reduce(function(s, r) {
-          return s + (parseFloat(r.ht055)||0) + (parseFloat(r.ht10)||0) + (parseFloat(r.ht20)||0) + htCust(r);
-        }, 0);
-        var fpN1 = (sN1.facturesPro || []).reduce(function(s, r) {
-          return s + (parseFloat(r.ht055)||0) + (parseFloat(r.ht10)||0) + (parseFloat(r.ht20)||0) + htCust(r);
-        }, 0);
-        window._lastYearCA = caN1 + fpN1;
-      }
-    } catch(e) { console.warn('Load N-1 CA error:', e); }
-  }
-
-  // Si la base N-1 était activée, recalculer (le CA N-1 a pu changer)
-  if (_data.prevBaseN1 && window._lastYearCA > 0) {
-    var ajN1 = parseFloat(_data.prevAjustN1) || 0;
-    var prevN1Calc = window._lastYearCA * (1 + ajN1 / 100);
-    if (_data.previsionCA && _data.previsionCA.length > 0) {
-      _data.previsionCA[0].montant = prevN1Calc.toFixed(2);
-    }
-  }
-
-  // Charger employés RH une seule fois (mode auto)
-  if (!window._rhEmployesLoaded) {
-    window._rhEmployesLoaded = true;
-    window._rhEmployes = [];
-    try {
-      if (window._uid && window._getDocs && window._collection) {
-        var empSnap = await window._getDocs(window._collection(window._db,'rh',window._uid,'employes'));
-        empSnap.forEach(function(d){ var e=d.data(); e.id=d.id; if(e.statut!=='inactif') window._rhEmployes.push(e); });
-      }
-    } catch(e) { /* pas de module RH ou pas accès */ }
-    // Charger objectifs & primes RH
-    window._rhObjectifs = [];
-    try {
-      if (window._uid && window._getDocs && window._collection) {
-        var objSnap = await window._getDocs(window._collection(window._db,'rh',window._uid,'objectifs'));
-        objSnap.forEach(function(d){ var o=d.data(); o.id=d.id; window._rhObjectifs.push(o); });
-      }
-    } catch(e) { /* pas de module objectifs ou pas accès */ }
-    // Si mode auto ET des employés trouvés, pré-remplir
-    if (window._rhEmployes.length > 0 && (!data.masseSalariale.mode || data.masseSalariale.mode === 'manuel')) {
-      // Ne forcer auto QUE si aucune ligne manuelle n'a été saisie
-      var hasManuel = data.masseSalariale.lignes && data.masseSalariale.lignes.some(function(l){ return l.label && l.brut; });
-      if (!hasManuel) data.masseSalariale.mode = 'auto';
-    }
-  }
-
-  // Auto-sync : injecter les crédits/leasings depuis Dettes si absents ce mois
-  await syncDettesToMonth(data, key);
-
-  // Auto-correction imports bancaires TTC → HT (migration silencieuse)
-  await autoBankTtcFix(data);
-
   renderPage(data, m);
   renderHiddenCredits();
-  // Auto-fetch URSSAF taux pour tous les salariés + dirigeant
-  setTimeout(function(){ autoFetchMSUrssaf(); }, 500);
+  // Auto-fetch URSSAF taux (différé, ne bloque pas le rendu)
+  setTimeout(function(){ autoFetchMSUrssaf(); }, 800);
 }
 
-// ── SYNC DETTES → PILOTAGE (par mois) ──
-async function syncDettesToMonth(data, monthKey) {
-  if (!window._uid || !window._getDoc || !window._db) return;
+// ── SYNC DETTES → PILOTAGE (version synchrone avec snapshot pré-chargé) ──
+function _syncDettesFromSnap(data, monthKey, detteSnap) {
   try {
-    var snap = await window._getDoc(window._doc(window._db, 'dettes', window._uid, 'data', 'all'));
-    if (!snap.exists() || !snap.data().list) return;
-    var dettes = snap.data().list;
+    if (!detteSnap || !detteSnap.exists || !detteSnap.exists()) return;
+    var dettes = detteSnap.data().list;
+    if (!dettes) return;
     var changed = false;
 
     dettes.forEach(function(d) {
       if (d.active === false) return;
       var montant = parseFloat(d.montant) || 0;
       var duree = parseInt(d.duree) || 0;
-      if (duree > 600) return; // données corrompues
+      if (duree > 600) return;
       if (!montant || !d.debut) return;
 
-      // Vérifier que ce mois est dans la plage de la dette
       var debutDate = new Date(d.debut);
       if (isNaN(debutDate.getTime()) || debutDate.getFullYear() < 2000) return;
       var debutKey = debutDate.getFullYear() + '-' + String(debutDate.getMonth() + 1).padStart(2, '0');
@@ -1199,7 +1195,6 @@ async function syncDettesToMonth(data, monthKey) {
       if (!nom) return;
 
       if (d.type === 'leasing') {
-        // Vérifier si une ligne leasing avec ce nom existe déjà
         var exists = data.leasing.some(function(l) {
           return (l.fournisseur || '').trim().toLowerCase() === nom.toLowerCase()
             && parseFloat(l.montantHT) > 0;
@@ -1209,7 +1204,6 @@ async function syncDettesToMonth(data, monthKey) {
           if (loyer <= 0) return;
           var debutM = debutDate.getFullYear() + '-' + String(debutDate.getMonth() + 1).padStart(2, '0');
           var finM = finDate ? (finDate.getFullYear() + '-' + String(finDate.getMonth() + 1).padStart(2, '0')) : '';
-          // Remplacer la ligne vide si c'est la seule
           if (data.leasing.length === 1 && !data.leasing[0].fournisseur && !parseFloat(data.leasing[0].montantHT)) {
             data.leasing[0] = { fournisseur: nom, type: '', montantHT: String(loyer), tvaRate: 20, deductible: 'Oui', pointe: 'Non', dateDebut: debutM, dateFin: finM };
           } else {
@@ -1243,10 +1237,19 @@ async function syncDettesToMonth(data, monthKey) {
       _data = data;
       scheduleSave();
     }
-  } catch(e) { console.warn('syncDettesToMonth error:', e); }
+  } catch(e) { console.warn('_syncDettesFromSnap error:', e); }
+}
 
-  // Scan complémentaire : pour chaque crédit/leasing visible ce mois
-  // mais absent dans data, aller chercher dans son mois de début dans pilotage
+// ── SYNC DETTES → PILOTAGE (version complète avec scan all months, appelée en arrière-plan) ──
+async function syncDettesToMonth(data, monthKey) {
+  if (!window._uid || !window._getDoc || !window._db) return;
+  // Phase 1 : injection depuis collection dettes (rapide)
+  try {
+    var snap = await window._getDoc(window._doc(window._db, 'dettes', window._uid, 'data', 'all'));
+    _syncDettesFromSnap(data, monthKey, snap);
+  } catch(e) { console.warn('syncDettesToMonth phase1 error:', e); }
+
+  // Phase 2 : scan complémentaire depuis tous les mois pilotage (lourd, différé)
   try {
     var changed2 = false;
 
@@ -2164,57 +2167,58 @@ async function fetchAllURSSAF() {
 
   var updated = 0, errors = 0;
 
-  // Fetch pour chaque salarié
-  for (var i = 0; i < empList.length; i++) {
-    var emp = empList[i];
+  // Fetch TOUS les salariés en parallèle
+  var empPromises = empList.map(function(emp) {
     var brut = parseFloat(emp.salaireBrut) || 0;
-    if (brut <= 0) continue;
-    try {
-      var resp = await fetch('/api/urssaf-cost', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          brutMensuel: brut,
-          cadre: (emp.categoriePoste || '') === 'cadre',
-          apprenti: (emp.typeContrat || '').toLowerCase().indexOf('apprenti') >= 0,
-          cdd: (emp.typeContrat || '') === 'CDD'
-        })
-      });
-      if (!resp.ok) { errors++; continue; }
-      var d = await resp.json();
-      if (d.tauxEffectif !== null && d.tauxEffectif !== undefined) {
-        if (emp._manual) {
-          _data.masseSalariale.lignes[emp._idx].tauxCharges = d.tauxEffectif;
-        } else {
-          emp.tauxCharges = d.tauxEffectif;
-          if (window._uid && window._setDoc) {
-            window._setDoc(window._doc(window._db, 'rh', window._uid, 'employes', emp.id), {tauxCharges: d.tauxEffectif}, {merge:true}).catch(function(){});
-          }
-        }
-        updated++;
-      }
-    } catch(e) { errors++; }
-  }
+    if (brut <= 0) return Promise.resolve(null);
+    return fetch('/api/urssaf-cost', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        brutMensuel: brut,
+        cadre: (emp.categoriePoste || '') === 'cadre',
+        apprenti: (emp.typeContrat || '').toLowerCase().indexOf('apprenti') >= 0,
+        cdd: (emp.typeContrat || '') === 'CDD'
+      })
+    }).then(function(resp){ return resp.ok ? resp.json() : null; })
+      .catch(function(){ return null; });
+  });
 
-  // Fetch pour dirigeant rémunération (sauf prélèvement privé)
+  // Ajouter le dirigeant au batch parallèle
   var dir = ms.dirigeant || {};
   var remDir = pf(dir.remuneration);
-  if (remDir > 0 && dir.type !== 'prelevement') {
-    try {
-      var modeDir = dir.type === 'Assimilé salarié' ? 'assimile' : 'tns';
-      var respD = await fetch('/api/urssaf-cost', {
+  var dirPromise = (remDir > 0 && dir.type !== 'prelevement')
+    ? fetch('/api/urssaf-cost', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ brutMensuel: remDir, dirigeant: modeDir })
-      });
-      if (respD.ok) {
-        var dd = await respD.json();
-        if (dd.tauxEffectif !== null) {
-          _data.masseSalariale.dirigeant.tauxCharges = dd.tauxEffectif;
-          updated++;
-        }
+        body: JSON.stringify({ brutMensuel: remDir, dirigeant: dir.type === 'Assimilé salarié' ? 'assimile' : 'tns' })
+      }).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; })
+    : Promise.resolve(null);
+
+  var allResults = await Promise.all(empPromises.concat([dirPromise]));
+
+  // Appliquer résultats employés
+  empList.forEach(function(emp, i) {
+    var d = allResults[i];
+    if (!d || d.tauxEffectif === null || d.tauxEffectif === undefined) { if (d === null && parseFloat(emp.salaireBrut) > 0) errors++; return; }
+    if (emp._manual) {
+      _data.masseSalariale.lignes[emp._idx].tauxCharges = d.tauxEffectif;
+    } else {
+      emp.tauxCharges = d.tauxEffectif;
+      if (window._uid && window._setDoc) {
+        window._setDoc(window._doc(window._db, 'rh', window._uid, 'employes', emp.id), {tauxCharges: d.tauxEffectif}, {merge:true}).catch(function(){});
       }
-    } catch(e) { errors++; }
+    }
+    updated++;
+  });
+
+  // Appliquer résultat dirigeant
+  var dirResult = allResults[allResults.length - 1];
+  if (dirResult && dirResult.tauxEffectif !== null) {
+    _data.masseSalariale.dirigeant.tauxCharges = dirResult.tauxEffectif;
+    updated++;
+  } else if (remDir > 0 && dir.type !== 'prelevement' && !dirResult) {
+    errors++;
   }
 
   if (btn) { btn.textContent = '🔄 Taux URSSAF ' + new Date().getFullYear(); btn.disabled = false; }
