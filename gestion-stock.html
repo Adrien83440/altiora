@@ -353,7 +353,7 @@ tr.row-alerte{background:#fffbeb}
         <div class="mfield"><label>TVA (%)</label><select id="mp-tva"><option value="20">20%</option><option value="10">10%</option><option value="5.5">5.5%</option><option value="0">0%</option></select></div>
       </div>
       <div class="mrow3">
-        <div class="mfield"><label>Stock initial</label><input id="mp-stock" type="number" step="1" placeholder="0"/></div>
+        <div class="mfield"><label>Stock actuel</label><input id="mp-stock" type="number" step="1" placeholder="0"/><div id="mp-stock-info" style="font-size:10px;color:var(--muted);margin-top:2px"></div></div>
         <div class="mfield"><label>Seuil alerte</label><input id="mp-min" type="number" step="1" placeholder="10"/></div>
         <div class="mfield"><label>Unité</label><select id="mp-unite"><option>unité</option><option>kg</option><option>g</option><option>L</option><option>mL</option><option>m</option><option>cm</option><option>carton</option><option>pièce</option><option>lot</option></select></div>
       </div>
@@ -1225,6 +1225,18 @@ function openProdModal(id){
   // Fill fields
   var fields={ref:'mp-ref',ean:'mp-ean',name:'mp-name',stockType:'mp-type',fournisseur:'mp-fourn',pa:'mp-pa',pv:'mp-pv',tva:'mp-tva',stockBase:'mp-stock',min:'mp-min',unite:'mp-unite',emplacement:'mp-empl',condQte:'mp-cond',dlc:'mp-dlc',lot:'mp-lot',notes:'mp-notes'};
   Object.keys(fields).forEach(function(k){var el=document.getElementById(fields[k]);if(el)el.value=p?(p[k]!=null?p[k]:''):''});
+  // Pour un produit existant, afficher le stock CALCULÉ (pas stockBase)
+  var stockInfo=document.getElementById('mp-stock-info');
+  if(p){
+    var stk=computeStocks();
+    var ref=(p.ref||'').trim();
+    var computed=stk[ref]?stk[ref].qty:pf(p.stockBase);
+    document.getElementById('mp-stock').value=computed;
+    var hasMov=_movements.some(function(m){return (m.ref||'').trim()===ref});
+    if(stockInfo) stockInfo.textContent=hasMov?'Stock calculé (base + mouvements). Modifiez pour ajuster.':'';
+  } else {
+    if(stockInfo) stockInfo.textContent='';
+  }
   if(p) famSel.value=p.familyId||'';
   else { famSel.value=getCurrentParentId()||''; document.getElementById('mp-type').value='marchandise';document.getElementById('mp-tva').value='20';document.getElementById('mp-unite').value='unité' }
   document.getElementById('prodOverlay').classList.add('show');
@@ -1243,6 +1255,16 @@ async function saveProd(){
   if(!_editProdId && _products.some(function(p){return (p.ref||'').trim()===ref})){showToast('Référence déjà existante',true);return}
 
   var p = _editProdId ? _products.find(function(x){return x.id===_editProdId}) : {id:uid()};
+  var newStockVal = pf(document.getElementById('mp-stock').value);
+
+  // Calculer le stock actuel AVANT modification pour détecter un changement
+  var oldComputed = 0;
+  if(_editProdId){
+    var stk = computeStocks();
+    var oldRef = (p.ref||'').trim();
+    oldComputed = stk[oldRef] ? stk[oldRef].qty : pf(p.stockBase);
+  }
+
   var fields={ref:'mp-ref',ean:'mp-ean',name:'mp-name',stockType:'mp-type',fournisseur:'mp-fourn',pa:'mp-pa',pv:'mp-pv',tva:'mp-tva',stockBase:'mp-stock',min:'mp-min',unite:'mp-unite',emplacement:'mp-empl',condQte:'mp-cond',dlc:'mp-dlc',lot:'mp-lot',notes:'mp-notes'};
   Object.keys(fields).forEach(function(k){var el=document.getElementById(fields[k]);if(el)p[k]=el.value});
   // Family assignment
@@ -1254,6 +1276,18 @@ async function saveProd(){
 
   if(!_editProdId) _products.push(p);
   await saveProdToFirestore(p);
+
+  // Si le stock a changé, créer un mouvement ADJUST automatique
+  if(_editProdId && Math.abs(newStockVal - oldComputed) > 0.001){
+    var adj = {
+      id: uid(), date: today(), type: 'ADJUST',
+      ref: ref, qty: newStockVal, pa: pf(p.pa),
+      note: 'Ajustement manuel (' + oldComputed + ' → ' + newStockVal + ')'
+    };
+    _movements.unshift(adj);
+    await saveMovToFirestore(adj);
+  }
+
   closeProdModal();
   showToast(_editProdId?'✅ Produit modifié':'✅ Produit créé');
   renderAll();
