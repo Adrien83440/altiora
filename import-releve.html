@@ -214,7 +214,6 @@ const CAT_CLS={chargesFixe:'d-cf',chargesVar:'d-cv',leasing:'d-leas',ignore:'d-i
 
 let _files=[], _txList=[], _pilData={}, _filter='all', _search='';
 let _sortCol='date', _sortDir='asc';
-let _tiersChoices={}; // {tiers: {cat, tvaRate}} for "apply same"
 
 // ═══════════════════════════════════════════
 // PHASE 1 — FILE UPLOAD
@@ -481,7 +480,7 @@ function renderAll(){
     if(_filter==='ignored') return t.type==='debit'&&t.status==='ignored';
     return true;
   });
-  if(_search){var q=_search.toLowerCase();filtered=filtered.filter(function(t){return t.customLabel.toLowerCase().includes(q)||t.tiers.toLowerCase().includes(q);});}
+  if(_search){var q=_search.toLowerCase();filtered=filtered.filter(function(t){return t.customLabel.toLowerCase().includes(q)||getLabelPrefix(t.customLabel).toLowerCase().includes(q);});}
 
   filtered=sortedTx(filtered);
 
@@ -522,7 +521,7 @@ function renderAll(){
   html+='<div style="overflow-x:auto"><table class="tx-table"><thead><tr>';
   html+='<th class="'+thCls('date')+'" onclick="sortBy(\'date\')">Date<span class="sort-icon"></span></th>';
   html+='<th class="'+thCls('label')+'" onclick="sortBy(\'label\')">Libellé<span class="sort-icon"></span></th>';
-  html+='<th>Tiers</th>';
+  html+='<th>Groupe</th>';
   html+='<th class="'+thCls('montant')+'" style="text-align:right" onclick="sortBy(\'montant\')">Montant TTC<span class="sort-icon"></span></th>';
   html+='<th>TVA</th>';
   html+='<th>→ Pilotage</th>';
@@ -594,12 +593,13 @@ function renderRow(tx){
     destHtml+='</select>';
   }
 
-  // Tiers with "apply same" button
-  var tiersHtml='<span style="font-size:11px;color:var(--muted)">'+escHtml(tx.tiers||'\u2014')+'</span>';
-  if(!isCredit&&tx.tiers&&tx.status==='pending'&&tx.cat&&tx.cat!=='ignore'){
-    var sameCount=_txList.filter(function(t){return t.tiers===tx.tiers&&t.type==='debit'&&t.status==='pending'&&t.id!==tx.id;}).length;
-    if(sameCount>0){
-      tiersHtml+=' <button class="btn-apply-all" onclick="applyToSameTiers('+tx.id+')" title="Appliquer la même catégorie et TVA à toutes les transactions de ce tiers">↻ '+sameCount+' similaires</button>';
+  // Label prefix group with "apply same" button
+  var prefix=getLabelPrefix(tx.customLabel);
+  var tiersHtml='<span style="font-size:10px;color:var(--muted);background:#f1f5f9;padding:2px 6px;border-radius:4px">'+escHtml(prefix||'\u2014')+'</span>';
+  if(!isCredit&&prefix&&tx.status==='pending'&&(tx.cat||tx.tvaRate!==null)){
+    var similars=_txList.filter(function(t){return t.type==='debit'&&t.status==='pending'&&t.id!==tx.id&&getLabelPrefix(t.customLabel)===prefix&&(!t.cat||(t.tvaRate===null||t.tvaRate===undefined));});
+    if(similars.length>0){
+      tiersHtml+=' <button class="btn-apply-all" onclick="applyToSamePrefix('+tx.id+')" title="Appliquer catégorie + TVA aux '+similars.length+' autres \''+escHtml(prefix)+'\'">↻ '+similars.length+' similaires</button>';
     }
   }
 
@@ -634,11 +634,6 @@ function updateTva(id,v){
   if(el) el.innerHTML=tvaChosen?'HT : <strong>'+fmt(ht)+'</strong>':'<span style="color:var(--orange)">⚠ Choisir</span>';
   var sel=document.querySelector('#row-'+id+' .tva-select');
   if(sel){sel.style.borderColor=tvaChosen?'':'var(--orange)';sel.style.background=tvaChosen?'white':'#fef3c7';}
-  // Store tiers choice
-  if(tx.tiers&&tvaChosen){
-    if(!_tiersChoices[tx.tiers])_tiersChoices[tx.tiers]={};
-    _tiersChoices[tx.tiers].tvaRate=tx.tvaRate;
-  }
   updateBtnState(id);
   updateImportCounters();
 }
@@ -647,11 +642,6 @@ function updateCat(id,v){
   _txList[id].cat=v||null;
   var sel=document.getElementById('dest-'+id);
   if(sel) sel.className='dest-select '+(v?CAT_CLS[v]||'':'');
-  var tx=_txList[id];
-  if(tx.tiers&&v){
-    if(!_tiersChoices[tx.tiers])_tiersChoices[tx.tiers]={};
-    _tiersChoices[tx.tiers].cat=v;
-  }
   updateBtnState(id);
   updateImportCounters();
 }
@@ -669,20 +659,21 @@ function updateImportCounters(){
   if(btn){btn.disabled=ready===0;btn.textContent='\u2B07\uFE0F Importer ('+ready+')';}
 }
 
-function applyToSameTiers(id){
+function applyToSamePrefix(id){
   var tx=_txList[id];
-  if(!tx.tiers) return;
+  var prefix=getLabelPrefix(tx.customLabel);
+  if(!prefix) return;
   var cat=tx.cat,tva=tx.tvaRate;
   var count=0;
   for(var i=0;i<_txList.length;i++){
     var t=_txList[i];
-    if(t.tiers===tx.tiers&&t.type==='debit'&&t.status==='pending'&&t.id!==id){
+    if(t.type==='debit'&&t.status==='pending'&&t.id!==id&&getLabelPrefix(t.customLabel)===prefix){
       if(cat) t.cat=cat;
       if(tva!==null&&tva!==undefined) t.tvaRate=tva;
       count++;
     }
   }
-  showToast('✅ Appliqué à '+count+' transaction(s) "'+tx.tiers+'"','success');
+  showToast('✅ Appliqué à '+count+' transaction(s) "'+prefix+'"','success');
   renderAll();
 }
 
@@ -841,6 +832,18 @@ async function importSelected(){
 
 var MOIS_NOMS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 
+function getLabelPrefix(label){
+  var s=(label||'').toUpperCase().trim();
+  // Strip known banking prefixes to reach the tiers name
+  var prefixes=['PRLV SEPA B2B ','PRLV SEPA ','VIR SEPA ','VIR INST ','VIR.PERMANENT ','REMBT PRLV SEPA '];
+  for(var i=0;i<prefixes.length;i++){
+    if(s.startsWith(prefixes[i])){s=s.slice(prefixes[i].length);break;}
+  }
+  var words=s.split(/\s+/).filter(function(w){return w.length>0;});
+  if(words.length===0) return '';
+  return words.slice(0,2).join(' ');
+}
+
 function parseDate(s){
   if(!s) return 0;
   var p=s.split('/');
@@ -856,7 +859,7 @@ function showToast(msg,type){var t=document.getElementById('toast');t.textConten
 window.handleFiles=handleFiles;window.clearFiles=clearFiles;window.removeFile=removeFile;
 window.processAllFiles=processAllFiles;window.showValidationPhase=showValidationPhase;window.renderProgress=renderProgress;
 window.updateLabel=updateLabel;window.updateTva=updateTva;window.updateCat=updateCat;
-window.applyToSameTiers=applyToSameTiers;
+window.applyToSamePrefix=applyToSamePrefix;
 window.ignoreOne=ignoreOne;window.restore=restore;window.unimport=unimport;
 window.setFilter=setFilter;window.setSearch=setSearch;window.sortBy=sortBy;
 window.importOne=importOne;window.importSelected=importSelected;
