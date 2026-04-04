@@ -127,7 +127,7 @@ Réponds UNIQUEMENT en JSON brut (sans markdown, sans backticks) :
 
     var response = await callWithRetry({
       model: model,
-      max_tokens: 12000,
+      max_tokens: 16000,
       messages: [{ role: 'user', content: content }]
     });
 
