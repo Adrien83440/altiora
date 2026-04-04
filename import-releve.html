@@ -169,6 +169,7 @@
         </div>
         <input type="file" id="fileInput" accept=".pdf" multiple style="display:none" onchange="handleFiles(this.files)"/>
         <div class="file-list" id="fileList"></div>
+        <div id="progressZone" style="margin-top:12px"></div>
         <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end" id="uploadActions" style="display:none">
           <button class="btn btn-outline btn-sm" onclick="clearFiles()">🗑 Tout effacer</button>
           <button class="btn btn-primary" id="btnProcess" onclick="processAllFiles()">🚀 Analyser les relevés</button>
@@ -245,7 +246,7 @@ function renderFileList(){
   acts.style.display='flex';
   el.innerHTML=_files.map(function(f,i){
     var statusCls=f.status;
-    var statusTxt=f.status==='pending'?'En attente':f.status==='processing'?'Analyse…':f.status==='done'?f.txCount+' transactions':f.error||'Erreur';
+    var statusTxt=f.status==='pending'?'En attente':f.status==='processing'?(f.progressText||'Analyse…'):f.status==='done'?f.txCount+' transactions':f.error||'Erreur';
     return '<div class="file-item"><span style="font-size:16px">📄</span><span class="name">'+escHtml(f.file.name)+'</span><span style="font-size:11px;color:var(--muted)">'+Math.round(f.file.size/1024)+' Ko</span><span class="status '+statusCls+'">'+statusTxt+'</span>'+(f.status==='pending'?'<button class="remove" onclick="removeFile('+i+')">✕</button>':'')+'</div>';
   }).join('');
 }
@@ -254,25 +255,99 @@ function renderFileList(){
 // PHASE 2 — PDF PROCESSING
 // ═══════════════════════════════════════════
 
+var _globalProgress={totalPages:0,donePages:0,totalTxFound:0,startTime:0,errors:0};
+
+function renderProgress(){
+  var el=document.getElementById('progressZone');
+  if(!el) return;
+  var gp=_globalProgress;
+  if(!gp.totalPages){el.innerHTML='';return;}
+  var pct=gp.totalPages>0?Math.round(gp.donePages/gp.totalPages*100):0;
+  var elapsed=Math.round((Date.now()-gp.startTime)/1000);
+  var speed=elapsed>0?(gp.donePages/elapsed):0;
+  var remaining=speed>0?Math.round((gp.totalPages-gp.donePages)/speed):0;
+  var etaStr=remaining>60?Math.round(remaining/60)+'min '+remaining%60+'s':remaining+'s';
+  el.innerHTML='<div class="glass-card" style="padding:18px 20px">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">'
+    +'<div><span style="font-size:14px;font-weight:700">⏳ Analyse en cours…</span>'
+    +'<span style="font-size:12px;color:var(--muted);margin-left:10px">'+gp.donePages+' / '+gp.totalPages+' pages</span></div>'
+    +'<div style="display:flex;gap:16px;font-size:12px;font-weight:600">'
+    +'<span style="color:var(--green)">✅ '+gp.totalTxFound+' transactions</span>'
+    +(gp.errors>0?'<span style="color:var(--red)">❌ '+gp.errors+' erreurs</span>':'')
+    +'<span style="color:var(--muted)">~'+etaStr+' restant</span>'
+    +'</div></div>'
+    +'<div class="progress-bar"><div class="progress-fill" style="width:'+pct+'%"></div></div>'
+    +'</div>';
+}
+
 async function processAllFiles(){
   if(!_files.length){showToast('Aucun fichier','warning');return;}
   document.getElementById('btnProcess').disabled=true;
-  document.getElementById('btnProcess').textContent='⏳ Analyse en cours…';
+  document.getElementById('btnProcess').textContent='⏳ Extraction du texte…';
 
-  var allTx=[];
+  // First pass: extract text from all PDFs and count total pages
+  var allPdfData=[];
+  var totalPages=0;
   for(var i=0;i<_files.length;i++){
     _files[i].status='processing';
+    _files[i].progressText='Lecture…';
     renderFileList();
     try{
-      var txs=await processOnePdf(_files[i].file);
-      _files[i].status='done';
-      _files[i].txCount=txs.length;
-      allTx=allTx.concat(txs);
+      var pdfData=await extractPdfText(_files[i].file);
+      allPdfData.push({fileIdx:i,pages:pdfData.pages,useImages:pdfData.useImages,fileName:_files[i].file.name,pdf:pdfData.pdf});
+      totalPages+=pdfData.pages.length;
+      _files[i].progressText=pdfData.pages.length+' pages lues';
     }catch(e){
       _files[i].status='error';
-      _files[i].error=e.message||'Erreur';
-      console.error('PDF error:',e);
+      _files[i].error='Lecture: '+e.message;
+      allPdfData.push(null);
     }
+    renderFileList();
+  }
+
+  // Init global progress
+  _globalProgress={totalPages:totalPages,donePages:0,totalTxFound:0,startTime:Date.now(),errors:0};
+  renderProgress();
+  document.getElementById('btnProcess').textContent='⏳ Analyse IA…';
+
+  // Process all PDFs in batches
+  var allTx=[];
+  var BATCH_SIZE=6;
+  for(var fi=0;fi<allPdfData.length;fi++){
+    var pd=allPdfData[fi];
+    if(!pd) continue;
+    _files[pd.fileIdx].status='processing';
+
+    var batches=[];
+    for(var b=0;b<pd.pages.length;b+=BATCH_SIZE){
+      batches.push(pd.pages.slice(b,b+BATCH_SIZE));
+    }
+
+    var fileTxCount=0;
+    for(var bi=0;bi<batches.length;bi++){
+      var batch=batches[bi];
+      _files[pd.fileIdx].progressText='Batch '+(bi+1)+'/'+batches.length+' ('+fileTxCount+' tx)';
+      renderFileList();
+
+      try{
+        var txs=await sendBatchToApi(batch,pd,bi);
+        fileTxCount+=txs.length;
+        _globalProgress.totalTxFound+=txs.length;
+        allTx=allTx.concat(txs);
+      }catch(e){
+        _globalProgress.errors++;
+        console.error('Batch error:',e);
+      }
+
+      _globalProgress.donePages+=batch.length;
+      renderProgress();
+
+      // Delay between batches to avoid rate limits
+      if(bi<batches.length-1) await new Promise(function(r){setTimeout(r,400);});
+    }
+
+    _files[pd.fileIdx].status='done';
+    _files[pd.fileIdx].txCount=fileTxCount;
     renderFileList();
   }
 
@@ -324,39 +399,38 @@ async function processAllFiles(){
   showValidationPhase();
 }
 
-async function processOnePdf(file){
-  // Extract text from PDF using pdf.js
+async function extractPdfText(file){
   var arrayBuf=await file.arrayBuffer();
   var pdf=await pdfjsLib.getDocument({data:new Uint8Array(arrayBuf)}).promise;
-  var allText='';
+  var pages=[];
   for(var p=1;p<=pdf.numPages;p++){
     var page=await pdf.getPage(p);
     var tc=await page.getTextContent();
     var pageText=tc.items.map(function(it){return it.str;}).join(' ');
-    allText+='--- Page '+p+' ---\n'+pageText+'\n\n';
+    pages.push({num:p,text:pageText});
   }
+  var totalLen=pages.reduce(function(s,pt){return s+pt.text.replace(/\s/g,'').length;},0);
+  return{pages:pages,useImages:totalLen<200,pdf:pdf};
+}
 
-  // If text is too short, fallback to image mode
+async function sendBatchToApi(batch,pdfData,batchIdx){
   var payload;
-  if(allText.replace(/\s/g,'').length<200){
-    // Image mode: render pages to canvas
-    var pages=[];
-    var maxPages=Math.min(pdf.numPages,15);
-    for(var pi=1;pi<=maxPages;pi++){
-      var pg=await pdf.getPage(pi);
+  if(pdfData.useImages){
+    var imgs=[];
+    for(var pi=0;pi<batch.length;pi++){
+      var pg=await pdfData.pdf.getPage(batch[pi].num);
       var vp=pg.getViewport({scale:1.5});
       var canvas=document.createElement('canvas');
       canvas.width=vp.width;canvas.height=vp.height;
       await pg.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
-      var b64=canvas.toDataURL('image/jpeg',0.8).split(',')[1];
-      pages.push(b64);
+      imgs.push(canvas.toDataURL('image/jpeg',0.8).split(',')[1]);
     }
-    payload={pages:pages,fileName:file.name};
+    payload={pages:imgs,fileName:pdfData.fileName+' (batch '+(batchIdx+1)+')'};
   }else{
-    payload={pdfText:allText,fileName:file.name};
+    var batchText=batch.map(function(pt){return'--- Page '+pt.num+' ---\n'+pt.text;}).join('\n\n');
+    payload={pdfText:batchText,fileName:pdfData.fileName+' (p.'+batch[0].num+'-'+batch[batch.length-1].num+')'};
   }
 
-  // Call API
   var resp=await fetch('/api/parse-releve',{
     method:'POST',
     headers:{'Content-Type':'application/json','Authorization':'Bearer '+(window._idToken||'')},
@@ -364,8 +438,9 @@ async function processOnePdf(file){
   });
 
   if(!resp.ok){
-    var err=await resp.json().catch(function(){return{error:'Erreur '+resp.status};});
-    throw new Error(err.error||'Erreur serveur');
+    var errBody=await resp.json().catch(function(){return{error:'Erreur '+resp.status};});
+    showToast('⚠️ Pages '+batch[0].num+'-'+batch[batch.length-1].num+' : '+errBody.error,'warning');
+    return[];
   }
 
   var data=await resp.json();
@@ -779,7 +854,7 @@ function showToast(msg,type){var t=document.getElementById('toast');t.textConten
 
 // Expose all functions to window
 window.handleFiles=handleFiles;window.clearFiles=clearFiles;window.removeFile=removeFile;
-window.processAllFiles=processAllFiles;window.showValidationPhase=showValidationPhase;
+window.processAllFiles=processAllFiles;window.showValidationPhase=showValidationPhase;window.renderProgress=renderProgress;
 window.updateLabel=updateLabel;window.updateTva=updateTva;window.updateCat=updateCat;
 window.applyToSameTiers=applyToSameTiers;
 window.ignoreOne=ignoreOne;window.restore=restore;window.unimport=unimport;
