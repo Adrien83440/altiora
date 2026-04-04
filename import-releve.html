@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+  <title>ALTEORE — Import relevés bancaires</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --blue-dark:#0f1f5c;--blue-main:#2563eb;--blue-light:#60a5fa;--blue-ghost:#eff6ff;
+      --text:#0f172a;--muted:#64748b;--border:rgba(0,0,0,0.06);--bg:#f9fafb;--sidebar-w:252px;--radius:18px;
+      --green:#059669;--green-light:#d1fae5;--orange:#d97706;--orange-light:#fef3c7;
+      --red:#dc2626;--red-light:#fee2e2;--purple:#7c3aed;--purple-light:#eef2ff;
+      --glass-bg:rgba(255,255,255,0.6);--glass-bg-heavy:rgba(255,255,255,0.7);
+      --glass-border:rgba(0,0,0,0.06);--glass-border-top:rgba(255,255,255,0.9);
+      --glass-blur:blur(24px) saturate(180%);
+      --glass-shadow:0 2px 8px rgba(0,0,0,0.04),0 8px 32px rgba(0,0,0,0.06);
+      --glass-inset:inset 0 1px 1px rgba(255,255,255,0.6),inset 0 -1px 1px rgba(0,0,0,0.04);
+    }
+    body{font-family:'Plus Jakarta Sans',sans-serif;background:#f9fafb;color:var(--text);display:flex;min-height:100vh;font-size:13px;}
+    body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:-1;background:radial-gradient(ellipse 60% 50% at 15% 10%,rgba(147,197,253,0.1),transparent),radial-gradient(ellipse 50% 40% at 85% 25%,rgba(196,181,253,0.08),transparent),radial-gradient(ellipse 40% 50% at 50% 85%,rgba(167,243,208,0.06),transparent)}
+    .sidebar{width:var(--sidebar-w);min-height:100vh;background:linear-gradient(180deg,#0f1f5c 0%,#162366 100%);display:flex;flex-direction:column;position:fixed;left:0;top:0;z-index:100;padding-bottom:24px;overflow-y:auto;}
+    .main{margin-left:var(--sidebar-w);flex:1;display:flex;flex-direction:column;}
+    .topbar{background:rgba(255,255,255,0.72);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border-bottom:1px solid rgba(0,0,0,0.06);box-shadow:0 1px 0 rgba(255,255,255,0.8) inset,0 4px 16px rgba(0,0,0,0.03);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;}
+    .topbar-left h1{font-size:17px;font-weight:700;}
+    .topbar-left p{font-size:12px;color:var(--muted);}
+    .topbar-right{display:flex;align-items:center;gap:8px;}
+    .btn{padding:8px 16px;border:none;border-radius:12px;font-family:'Plus Jakarta Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:all 0.18s;}
+    .btn-primary{background:linear-gradient(135deg,var(--blue-main),var(--blue-light));color:white;box-shadow:0 3px 10px rgba(37,99,235,0.25);}
+    .btn-primary:hover{opacity:.9;} .btn-primary:disabled{opacity:.45;cursor:not-allowed;}
+    .btn-outline{background:white;color:var(--blue-main);border:1.5px solid var(--border);}
+    .btn-outline:hover{border-color:var(--blue-main);background:var(--blue-ghost);}
+    .btn-success{background:linear-gradient(135deg,#10b981,#34d399);color:white;}
+    .btn-success:disabled{opacity:.45;cursor:not-allowed;}
+    .btn-sm{padding:5px 12px;font-size:12px;} .btn-xs{padding:3px 8px;font-size:11px;}
+    .content{padding:20px 28px;flex:1;display:flex;flex-direction:column;gap:14px;}
+    .glass-card{background:var(--glass-bg-heavy);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:1px solid var(--glass-border);border-top:1px solid var(--glass-border-top);border-radius:var(--radius);box-shadow:var(--glass-shadow),var(--glass-inset);transition:transform 0.25s,box-shadow 0.25s;}
+    .stats-row{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;}
+    .stat-box{background:var(--glass-bg-heavy);backdrop-filter:var(--glass-blur);border:1px solid var(--glass-border);border-top:1px solid var(--glass-border-top);border-radius:14px;box-shadow:var(--glass-shadow),var(--glass-inset);padding:12px 14px;text-align:center;}
+    .stat-val{font-size:18px;font-weight:800;}
+    .stat-val.green{color:var(--green);} .stat-val.red{color:var(--red);}
+    .stat-val.orange{color:var(--orange);} .stat-val.blue{color:var(--blue-main);} .stat-val.muted{color:var(--muted);}
+    /* Upload zone */
+    .upload-zone{border:2.5px dashed var(--border);border-radius:var(--radius);padding:48px 32px;text-align:center;cursor:pointer;transition:all .25s;}
+    .upload-zone:hover,.upload-zone.drag{border-color:var(--blue-main);background:var(--blue-ghost);}
+    .upload-zone .icon{font-size:48px;margin-bottom:12px;}
+    .upload-zone h3{font-size:16px;font-weight:700;margin-bottom:6px;}
+    .upload-zone p{font-size:13px;color:var(--muted);}
+    .file-list{display:flex;flex-direction:column;gap:6px;margin-top:16px;}
+    .file-item{display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(248,250,255,0.6);border-radius:10px;font-size:13px;}
+    .file-item .name{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .file-item .status{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;}
+    .file-item .status.pending{background:#f1f5f9;color:var(--muted);}
+    .file-item .status.processing{background:var(--blue-ghost);color:var(--blue-main);}
+    .file-item .status.done{background:var(--green-light);color:#065f46;}
+    .file-item .status.error{background:var(--red-light);color:#b91c1c;}
+    .file-item .remove{background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;}
+    .file-item .remove:hover{color:var(--red);}
+    .progress-bar{height:4px;background:#e2e8f0;border-radius:2px;overflow:hidden;margin-top:6px;}
+    .progress-fill{height:100%;background:linear-gradient(90deg,var(--blue-main),var(--blue-light));border-radius:2px;transition:width .4s;}
+    /* Table */
+    .filters-bar{background:var(--glass-bg-heavy);backdrop-filter:var(--glass-blur);border:1px solid var(--glass-border);border-top:1px solid var(--glass-border-top);border-radius:var(--radius);box-shadow:var(--glass-shadow),var(--glass-inset);padding:12px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+    .filter-btn{padding:5px 13px;border:1.5px solid var(--border);border-radius:20px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;background:white;color:var(--text);transition:all .15s;}
+    .filter-btn:hover{border-color:var(--blue-light);}
+    .filter-btn.active{background:var(--blue-main);color:white;border-color:var(--blue-main);}
+    .filter-btn.f-debit.active{background:var(--red);border-color:var(--red);}
+    .filter-btn.f-credit.active{background:var(--green);border-color:var(--green);}
+    .filter-sep{width:1px;height:20px;background:var(--border);flex-shrink:0;}
+    .search-input{padding:6px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;outline:none;min-width:180px;}
+    .search-input:focus{border-color:var(--blue-main);}
+    .table-card{background:var(--glass-bg-heavy);backdrop-filter:var(--glass-blur);border:1px solid var(--glass-border);border-top:1px solid var(--glass-border-top);border-radius:var(--radius);box-shadow:var(--glass-shadow),var(--glass-inset);overflow:hidden;}
+    .table-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);gap:8px;flex-wrap:wrap;}
+    .table-title{font-size:13px;font-weight:700;}
+    .tx-table{width:100%;border-collapse:collapse;font-size:12px;}
+    .tx-table th{padding:8px 12px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;background:rgba(248,250,255,0.6);border-bottom:1px solid var(--border);white-space:nowrap;}
+    .tx-table th.sortable{cursor:pointer;user-select:none;}
+    .tx-table th.sortable:hover{color:var(--blue-main);background:#eef2ff;}
+    .sort-icon{margin-left:4px;opacity:.4;font-size:10px;}
+    .tx-table th.sort-asc .sort-icon::after{content:'▲';opacity:1;}
+    .tx-table th.sort-desc .sort-icon::after{content:'▼';opacity:1;}
+    .tx-table th:not(.sort-asc):not(.sort-desc) .sort-icon::after{content:'⇅';}
+    .tx-table td{padding:8px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle;}
+    .tx-table tr:last-child td{border-bottom:none;}
+    .tx-table tr:hover td{background:#fafbff;}
+    .tx-table tr.s-imported td{background:#f0fdf4;}
+    .tx-table tr.s-ignored td{opacity:.4;}
+    .type-debit{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--red-light);color:#b91c1c;}
+    .type-credit{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:var(--green-light);color:#065f46;}
+    .amt-debit{color:var(--red);font-weight:700;white-space:nowrap;}
+    .amt-credit{color:var(--green);font-weight:700;white-space:nowrap;}
+    .dest-select{padding:4px 8px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:600;cursor:pointer;outline:none;background:white;max-width:160px;transition:border-color .15s;}
+    .dest-select:focus{border-color:var(--blue-main);}
+    .dest-select:disabled{opacity:.5;cursor:not-allowed;background:#f9fafb;}
+    .dest-select.d-cf{border-color:#6366f1;background:#eef2ff;color:#4338ca;}
+    .dest-select.d-cv{border-color:#f59e0b;background:#fef3c7;color:#92400e;}
+    .dest-select.d-leas{border-color:#14b8a6;background:#f0fdfa;color:#0f766e;}
+    .dest-select.d-ign{border-color:#d1d5db;background:#f9fafb;color:#9ca3af;}
+    .label-input{border:1.5px solid transparent;border-radius:6px;padding:4px 7px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;color:var(--text);background:transparent;width:100%;min-width:140px;transition:all .15s;}
+    .label-input:hover{border-color:var(--border);background:white;}
+    .label-input:focus{border-color:var(--blue-main);background:white;outline:none;}
+    .label-input:disabled{opacity:.5;pointer-events:none;}
+    .tva-select{padding:3px 6px;border:1.5px solid var(--border);border-radius:6px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;font-weight:600;cursor:pointer;outline:none;background:white;width:64px;transition:border-color .15s;}
+    .tva-select:focus{border-color:var(--blue-main);}
+    .tva-select:disabled{opacity:.5;cursor:not-allowed;}
+    .ht-calc{font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;}
+    .ht-calc strong{color:var(--text);font-weight:700;}
+    .btn-ign{background:#f1f5f9;color:var(--muted);border:none;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;}
+    .btn-ign:hover{background:#e2e8f0;}
+    .btn-import-one{background:linear-gradient(135deg,#10b981,#34d399);color:white;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:700;transition:opacity .15s;}
+    .btn-import-one:hover{opacity:.85;}
+    .btn-import-one:disabled{opacity:.3;cursor:not-allowed;}
+    .btn-apply-all{background:var(--purple-light);color:var(--purple);border:none;border-radius:6px;padding:4px 8px;font-size:10px;cursor:pointer;font-weight:700;white-space:nowrap;}
+    .btn-apply-all:hover{background:#ddd6fe;}
+    .act-row{display:flex;gap:4px;align-items:center;}
+    .import-footer{background:var(--glass-bg-heavy);backdrop-filter:var(--glass-blur);border:1px solid var(--glass-border);border-top:1px solid var(--glass-border-top);border-radius:var(--radius);box-shadow:0 8px 32px rgba(15,31,92,.12);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;position:sticky;bottom:16px;}
+    .footer-info{font-size:13px;color:var(--muted);}
+    .footer-info strong{color:var(--text);}
+    .bank-tva-info{display:flex;align-items:flex-start;gap:10px;padding:12px 16px;background:linear-gradient(135deg,rgba(251,191,36,0.08),rgba(245,158,11,0.04));border:1px solid rgba(245,158,11,0.2);border-radius:12px;font-size:12px;color:#92400e;line-height:1.6;}
+    .bank-tva-info .info-icon{font-size:18px;flex-shrink:0;margin-top:1px;}
+    .bank-tva-info strong{font-weight:700;}
+    .loader{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--muted);gap:12px;font-size:14px;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .spin{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--blue-main);border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0;}
+    .toast{position:fixed;bottom:24px;right:24px;background:#1a1f36;color:white;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;transform:translateY(80px);opacity:0;transition:all .3s;}
+    .toast.show{transform:translateY(0);opacity:1;}
+    .toast.success{background:#10b981;} .toast.error{background:#ef4444;} .toast.warning{background:#f59e0b;color:#1a1f36;}
+    html,body{overflow-x:hidden;}
+    .hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#0f1f5c;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;}
+    .hamburger span{display:block;width:20px;height:2.5px;background:#fff;border-radius:2px;transition:all .25s;}
+    .nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;}
+    .nav-overlay.show{display:block;}
+    @media(max-width:768px){
+      .hamburger{display:flex!important;}
+      .sidebar{position:fixed!important;transform:translateX(-105%)!important;transition:transform .3s!important;z-index:1001!important;}
+      .sidebar.open{transform:translateX(0)!important;}
+      .main{margin-left:0!important;width:100vw!important;}
+      .topbar{padding:10px 10px 10px 62px!important;flex-wrap:wrap;gap:6px;}
+      .content{padding:10px!important;}
+      .stats-row{grid-template-columns:repeat(3,1fr)!important;}
+    }
+  </style>
+</head>
+<body>
+
+<!-- nav.js gère la sidebar -->
+
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>📄 Import relevés bancaires (PDF)</h1>
+      <p id="topbar-sub">Importez vos relevés PDF pour alimenter le pilotage</p>
+    </div>
+    <div class="topbar-right">
+      <button class="btn btn-outline btn-sm" onclick="window.location.href='pilotage.html'">← Pilotage</button>
+      <button class="btn btn-success btn-sm" id="btn-import" onclick="importSelected()" style="display:none" disabled>⬇️ Importer (0)</button>
+    </div>
+  </div>
+
+  <div class="content" id="main-content">
+    <!-- Phase 1: Upload -->
+    <div id="phase-upload">
+      <div class="glass-card" style="padding:24px">
+        <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+          <div class="icon">📄</div>
+          <h3>Déposez vos relevés bancaires PDF</h3>
+          <p>Glissez-déposez ou cliquez pour sélectionner · Plusieurs fichiers possibles</p>
+        </div>
+        <input type="file" id="fileInput" accept=".pdf" multiple style="display:none" onchange="handleFiles(this.files)"/>
+        <div class="file-list" id="fileList"></div>
+        <div style="margin-top:16px;display:flex;gap:10px;justify-content:flex-end" id="uploadActions" style="display:none">
+          <button class="btn btn-outline btn-sm" onclick="clearFiles()">🗑 Tout effacer</button>
+          <button class="btn btn-primary" id="btnProcess" onclick="processAllFiles()">🚀 Analyser les relevés</button>
+        </div>
+      </div>
+    </div>
+    <!-- Phase 2: Validation (injecté dynamiquement) -->
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { initializeFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  const app = initializeApp({
+    apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain:"altiora-70599.firebaseapp.com",projectId:"altiora-70599",
+    storageBucket:"altiora-70599.firebasestorage.app",messagingSenderId:"120905555746",
+    appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+  });
+  const auth=getAuth(app), db=initializeFirestore(app,{experimentalAutoDetectLongPolling:true});
+  window._auth=auth; window._db=db; window._doc=doc; window._setDoc=setDoc;
+  window._getDoc=getDoc; window._signOut=signOut;
+  onAuthStateChanged(auth, user => {
+    if(!user){window.location.href='index.html';return;}
+    window._uid=user.uid;
+    window._idToken=null;
+    user.getIdToken().then(function(t){window._idToken=t;});
+    // Refresh token every 50min
+    setInterval(function(){user.getIdToken(true).then(function(t){window._idToken=t;});},50*60*1000);
+    window._firebaseReady=true;
+  });
+</script>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+const CAT_LABELS={chargesFixe:'🏗 Charge fixe',chargesVar:'📦 Charge variable',leasing:'🚗 Leasing',ignore:'🚫 Ignorer'};
+const CAT_CLS={chargesFixe:'d-cf',chargesVar:'d-cv',leasing:'d-leas',ignore:'d-ign'};
+
+let _files=[], _txList=[], _pilData={}, _filter='all', _search='';
+let _sortCol='date', _sortDir='asc';
+let _tiersChoices={}; // {tiers: {cat, tvaRate}} for "apply same"
+
+// ═══════════════════════════════════════════
+// PHASE 1 — FILE UPLOAD
+// ═══════════════════════════════════════════
+
+var dropZone=document.getElementById('dropZone');
+dropZone.addEventListener('dragover',function(e){e.preventDefault();dropZone.classList.add('drag');});
+dropZone.addEventListener('dragleave',function(){dropZone.classList.remove('drag');});
+dropZone.addEventListener('drop',function(e){e.preventDefault();dropZone.classList.remove('drag');handleFiles(e.dataTransfer.files);});
+
+function handleFiles(fileList){
+  for(var i=0;i<fileList.length;i++){
+    var f=fileList[i];
+    if(f.type!=='application/pdf'){showToast('⚠️ '+f.name+' n\'est pas un PDF','warning');continue;}
+    if(_files.some(function(x){return x.file.name===f.name&&x.file.size===f.size;})) continue;
+    _files.push({file:f,status:'pending',txCount:0,error:null});
+  }
+  renderFileList();
+}
+
+function clearFiles(){_files=[];renderFileList();}
+
+function removeFile(idx){_files.splice(idx,1);renderFileList();}
+
+function renderFileList(){
+  var el=document.getElementById('fileList');
+  var acts=document.getElementById('uploadActions');
+  if(!_files.length){el.innerHTML='';acts.style.display='none';return;}
+  acts.style.display='flex';
+  el.innerHTML=_files.map(function(f,i){
+    var statusCls=f.status;
+    var statusTxt=f.status==='pending'?'En attente':f.status==='processing'?'Analyse…':f.status==='done'?f.txCount+' transactions':f.error||'Erreur';
+    return '<div class="file-item"><span style="font-size:16px">📄</span><span class="name">'+escHtml(f.file.name)+'</span><span style="font-size:11px;color:var(--muted)">'+Math.round(f.file.size/1024)+' Ko</span><span class="status '+statusCls+'">'+statusTxt+'</span>'+(f.status==='pending'?'<button class="remove" onclick="removeFile('+i+')">✕</button>':'')+'</div>';
+  }).join('');
+}
+
+// ═══════════════════════════════════════════
+// PHASE 2 — PDF PROCESSING
+// ═══════════════════════════════════════════
+
+async function processAllFiles(){
+  if(!_files.length){showToast('Aucun fichier','warning');return;}
+  document.getElementById('btnProcess').disabled=true;
+  document.getElementById('btnProcess').textContent='⏳ Analyse en cours…';
+
+  var allTx=[];
+  for(var i=0;i<_files.length;i++){
+    _files[i].status='processing';
+    renderFileList();
+    try{
+      var txs=await processOnePdf(_files[i].file);
+      _files[i].status='done';
+      _files[i].txCount=txs.length;
+      allTx=allTx.concat(txs);
+    }catch(e){
+      _files[i].status='error';
+      _files[i].error=e.message||'Erreur';
+      console.error('PDF error:',e);
+    }
+    renderFileList();
+  }
+
+  if(!allTx.length){
+    showToast('❌ Aucune transaction extraite','error');
+    document.getElementById('btnProcess').disabled=false;
+    document.getElementById('btnProcess').textContent='🚀 Analyser les relevés';
+    return;
+  }
+
+  // Deduplicate by date+label+montant
+  var seen={};
+  var deduped=[];
+  for(var j=0;j<allTx.length;j++){
+    var key=allTx[j].date+'|'+allTx[j].label+'|'+allTx[j].montant+'|'+allTx[j].type;
+    if(!seen[key]){seen[key]=true;deduped.push(allTx[j]);}
+  }
+
+  // Build tx list with IDs
+  _txList=deduped.map(function(tx,idx){
+    return{
+      id:idx, date:tx.date||'', monthKey:tx.monthKey||'',
+      label:tx.label||'', customLabel:tx.label||'',
+      tiers:tx.tiers||'',
+      montant:tx.montant, type:tx.type,
+      cat:null, status:'pending', tvaRate:null,
+      bankTxId:'pdf_'+Date.now()+'_'+idx,
+    };
+  });
+
+  // Sort by date asc
+  _txList.sort(function(a,b){
+    var da=parseDate(a.date),db=parseDate(b.date);
+    return da-db;
+  });
+
+  // Reassign IDs after sort
+  for(var k=0;k<_txList.length;k++) _txList[k].id=k;
+
+  // Load pilotage data for relevant months
+  var months=[...new Set(_txList.map(function(t){return t.monthKey;}).filter(Boolean))];
+  for(var m=0;m<months.length;m++){
+    try{
+      var snap=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',months[m]));
+      _pilData[months[m]]=snap.exists()?snap.data():{};
+    }catch(e){_pilData[months[m]]={};}
+  }
+
+  showValidationPhase();
+}
+
+async function processOnePdf(file){
+  // Extract text from PDF using pdf.js
+  var arrayBuf=await file.arrayBuffer();
+  var pdf=await pdfjsLib.getDocument({data:new Uint8Array(arrayBuf)}).promise;
+  var allText='';
+  for(var p=1;p<=pdf.numPages;p++){
+    var page=await pdf.getPage(p);
+    var tc=await page.getTextContent();
+    var pageText=tc.items.map(function(it){return it.str;}).join(' ');
+    allText+='--- Page '+p+' ---\n'+pageText+'\n\n';
+  }
+
+  // If text is too short, fallback to image mode
+  var payload;
+  if(allText.replace(/\s/g,'').length<200){
+    // Image mode: render pages to canvas
+    var pages=[];
+    var maxPages=Math.min(pdf.numPages,15);
+    for(var pi=1;pi<=maxPages;pi++){
+      var pg=await pdf.getPage(pi);
+      var vp=pg.getViewport({scale:1.5});
+      var canvas=document.createElement('canvas');
+      canvas.width=vp.width;canvas.height=vp.height;
+      await pg.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
+      var b64=canvas.toDataURL('image/jpeg',0.8).split(',')[1];
+      pages.push(b64);
+    }
+    payload={pages:pages,fileName:file.name};
+  }else{
+    payload={pdfText:allText,fileName:file.name};
+  }
+
+  // Call API
+  var resp=await fetch('/api/parse-releve',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+(window._idToken||'')},
+    body:JSON.stringify(payload)
+  });
+
+  if(!resp.ok){
+    var err=await resp.json().catch(function(){return{error:'Erreur '+resp.status};});
+    throw new Error(err.error||'Erreur serveur');
+  }
+
+  var data=await resp.json();
+  return data.transactions||[];
+}
+
+// ═══════════════════════════════════════════
+// PHASE 3 — VALIDATION TABLE
+// ═══════════════════════════════════════════
+
+function showValidationPhase(){
+  document.getElementById('phase-upload').style.display='none';
+  document.getElementById('btn-import').style.display='';
+  document.getElementById('topbar-sub').textContent=_txList.length+' transactions extraites de '+_files.filter(function(f){return f.status==='done';}).length+' fichier(s)';
+  renderAll();
+}
+
+function renderAll(){
+  var content=document.getElementById('main-content');
+  var debits=_txList.filter(function(t){return t.type==='debit';});
+  var credits=_txList.filter(function(t){return t.type==='credit';});
+  var pending=debits.filter(function(t){return t.status==='pending';});
+  var imported=debits.filter(function(t){return t.status==='imported';});
+  var ignored=debits.filter(function(t){return t.status==='ignored';});
+  var readyToImport=debits.filter(function(t){return t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined;});
+
+  var totalDebit=debits.reduce(function(s,t){return s+t.montant;},0);
+  var totalCredit=credits.reduce(function(s,t){return s+t.montant;},0);
+
+  var btn=document.getElementById('btn-import');
+  if(btn){btn.disabled=readyToImport.length===0;btn.textContent='\u2B07\uFE0F Importer ('+readyToImport.length+')';}
+
+  var filtered=_txList.filter(function(t){
+    if(_filter==='debit') return t.type==='debit';
+    if(_filter==='credit') return t.type==='credit';
+    if(_filter==='pending') return t.type==='debit'&&t.status==='pending';
+    if(_filter==='imported') return t.type==='debit'&&t.status==='imported';
+    if(_filter==='ignored') return t.type==='debit'&&t.status==='ignored';
+    return true;
+  });
+  if(_search){var q=_search.toLowerCase();filtered=filtered.filter(function(t){return t.customLabel.toLowerCase().includes(q)||t.tiers.toLowerCase().includes(q);});}
+
+  filtered=sortedTx(filtered);
+
+  var thCls=function(col){var c='sortable';if(_sortCol===col)c+=_sortDir==='asc'?' sort-asc':' sort-desc';return c;};
+
+  // Months covered
+  var monthSet=new Set(_txList.map(function(t){return t.monthKey;}).filter(Boolean));
+  var monthsStr=[...monthSet].sort().map(function(m){var p=m.split('-');return MOIS_NOMS[parseInt(p[1])-1]+' '+p[0];}).join(', ');
+
+  var html='';
+  html+='<div class="stats-row">';
+  html+='<div class="stat-box"><div class="stat-val blue">'+_txList.length+'</div><div class="stat-lbl">Transactions</div></div>';
+  html+='<div class="stat-box"><div class="stat-val red">\u2212'+fmt(totalDebit)+'</div><div class="stat-lbl">Total dépenses</div></div>';
+  html+='<div class="stat-box"><div class="stat-val green">+'+fmt(totalCredit)+'</div><div class="stat-lbl">Total encaissements</div></div>';
+  html+='<div class="stat-box"><div class="stat-val orange">'+pending.length+'</div><div class="stat-lbl">À traiter</div></div>';
+  html+='<div class="stat-box"><div class="stat-val green">'+imported.length+'</div><div class="stat-lbl">Importées</div></div>';
+  html+='<div class="stat-box"><div class="stat-val muted">'+monthSet.size+'</div><div class="stat-lbl">Mois</div></div>';
+  html+='</div>';
+
+  html+='<div class="bank-tva-info"><span class="info-icon">📄</span><div>';
+  html+='<strong>Relevés importés : '+monthsStr+'</strong><br>';
+  html+='Les montants sont en <strong>TTC</strong>. Choisissez la catégorie (fixe/variable) et le taux de TVA pour chaque dépense. Les encaissements (CA) sont grisés — vous les gérez directement dans Pilotage.';
+  html+='</div></div>';
+
+  html+='<div class="filters-bar">';
+  html+='<button class="filter-btn '+(_filter==='all'?'active':'')+'" onclick="setFilter(\'all\')">Tout ('+_txList.length+')</button>';
+  html+='<button class="filter-btn f-debit '+(_filter==='debit'?'active':'')+'" onclick="setFilter(\'debit\')">🔴 Dépenses ('+debits.length+')</button>';
+  html+='<button class="filter-btn f-credit '+(_filter==='credit'?'active':'')+'" onclick="setFilter(\'credit\')">🟢 Encaissements ('+credits.length+')</button>';
+  html+='<div class="filter-sep"></div>';
+  html+='<button class="filter-btn '+(_filter==='pending'?'active':'')+'" onclick="setFilter(\'pending\')">En attente ('+pending.length+')</button>';
+  html+='<button class="filter-btn '+(_filter==='imported'?'active':'')+'" onclick="setFilter(\'imported\')">✅ Importées ('+imported.length+')</button>';
+  html+='<button class="filter-btn '+(_filter==='ignored'?'active':'')+'" onclick="setFilter(\'ignored\')">Ignorées ('+ignored.length+')</button>';
+  html+='<div class="filter-sep"></div>';
+  html+='<input class="search-input" placeholder="🔍 Rechercher…" value="'+escHtml(_search)+'" oninput="setSearch(this.value)"/>';
+  html+='</div>';
+
+  html+='<div class="table-card"><div class="table-head"><div class="table-title">📋 '+filtered.length+' transaction(s)</div></div>';
+  html+='<div style="overflow-x:auto"><table class="tx-table"><thead><tr>';
+  html+='<th class="'+thCls('date')+'" onclick="sortBy(\'date\')">Date<span class="sort-icon"></span></th>';
+  html+='<th class="'+thCls('label')+'" onclick="sortBy(\'label\')">Libellé<span class="sort-icon"></span></th>';
+  html+='<th>Tiers</th>';
+  html+='<th class="'+thCls('montant')+'" style="text-align:right" onclick="sortBy(\'montant\')">Montant TTC<span class="sort-icon"></span></th>';
+  html+='<th>TVA</th>';
+  html+='<th>→ Pilotage</th>';
+  html+='<th>Actions</th>';
+  html+='</tr></thead><tbody>';
+
+  if(!filtered.length){
+    html+='<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--muted)">Aucune transaction dans ce filtre.</td></tr>';
+  }else{
+    for(var i=0;i<filtered.length;i++) html+=renderRow(filtered[i]);
+  }
+
+  html+='</tbody></table></div></div>';
+
+  // Footer
+  html+='<div class="import-footer"><div class="footer-info">';
+  html+='<strong>'+readyToImport.length+'</strong> dépense(s) prête(s) · Total : <strong>\u2212'+fmt(readyToImport.reduce(function(s,t){return s+t.montant;},0))+'</strong>';
+  var noTva=debits.filter(function(t){return t.status==='pending'&&t.cat&&t.cat!=='ignore'&&(t.tvaRate===null||t.tvaRate===undefined);}).length;
+  if(noTva>0) html+='<span style="color:var(--orange);margin-left:8px">⚠ '+noTva+' ligne(s) sans TVA</span>';
+  html+='</div><div style="display:flex;gap:8px">';
+  html+='<button class="btn btn-outline btn-sm" onclick="backToUpload()">← Retour</button>';
+  html+='<button class="btn btn-success" onclick="importSelected()" '+(readyToImport.length===0?'disabled':'')+'>⬇️ Importer '+readyToImport.length+' transaction(s) dans Pilotage</button>';
+  html+='</div></div>';
+
+  // Keep upload phase hidden, inject validation html
+  var valEl=document.getElementById('phase-validation');
+  if(!valEl){valEl=document.createElement('div');valEl.id='phase-validation';content.appendChild(valEl);}
+  valEl.innerHTML=html;
+}
+
+function renderRow(tx){
+  var rowCls=tx.status==='imported'?'s-imported':tx.status==='ignored'?'s-ignored':'';
+  var isCredit=tx.type==='credit';
+  var amtCls=isCredit?'amt-credit':'amt-debit';
+  var amtSign=isCredit?'+':'\u2212';
+  var typeBadge=isCredit?'<span class="type-credit">CA</span>':'<span class="type-debit">Dépense</span>';
+
+  // TVA
+  var tvaChosen=tx.tvaRate!==null&&tx.tvaRate!==undefined;
+  var htCalc=tvaChosen?(tx.tvaRate>0?Math.round(tx.montant/(1+tx.tvaRate/100)*100)/100:tx.montant):null;
+  var tvaHtml='';
+  if(isCredit){
+    tvaHtml='<span style="font-size:11px;color:var(--muted)">\u2014</span>';
+  }else{
+    var dis=tx.status!=='pending'?'disabled':'';
+    tvaHtml='<div><select class="tva-select" style="'+((!tvaChosen)?'border-color:var(--orange);background:#fef3c7':'')+'" onchange="updateTva('+tx.id+',this.value)" '+dis+'>';
+    tvaHtml+='<option value="" '+((!tvaChosen)?'selected':'')+'>TVA ?</option>';
+    tvaHtml+='<option value="0" '+((tvaChosen&&tx.tvaRate===0)?'selected':'')+'>0%</option>';
+    tvaHtml+='<option value="5.5" '+((tvaChosen&&tx.tvaRate===5.5)?'selected':'')+'>5,5%</option>';
+    tvaHtml+='<option value="10" '+((tvaChosen&&tx.tvaRate===10)?'selected':'')+'>10%</option>';
+    tvaHtml+='<option value="20" '+((tvaChosen&&tx.tvaRate===20)?'selected':'')+'>20%</option>';
+    tvaHtml+='</select>';
+    tvaHtml+='<div class="ht-calc" id="ht-'+tx.id+'">'+(tvaChosen?'HT : <strong>'+fmt(htCalc)+'</strong>':'<span style="color:var(--orange)">⚠ Choisir</span>')+'</div></div>';
+  }
+
+  // Destination
+  var destHtml='';
+  if(isCredit){
+    destHtml='<span style="font-size:11px;color:var(--muted);font-style:italic">CA (géré dans Pilotage)</span>';
+  }else{
+    var cls=tx.cat?CAT_CLS[tx.cat]||'':'';
+    var dis2=tx.status!=='pending'?'disabled':'';
+    destHtml='<select class="dest-select '+cls+'" id="dest-'+tx.id+'" onchange="updateCat('+tx.id+',this.value)" '+dis2+'>';
+    destHtml+='<option value="">— Choisir —</option>';
+    destHtml+='<option value="chargesFixe" '+((tx.cat==='chargesFixe')?'selected':'')+'>🏗 Charge fixe</option>';
+    destHtml+='<option value="chargesVar" '+((tx.cat==='chargesVar')?'selected':'')+'>📦 Charge variable</option>';
+    destHtml+='<option value="leasing" '+((tx.cat==='leasing')?'selected':'')+'>🚗 Leasing</option>';
+    destHtml+='<option value="ignore" '+((tx.cat==='ignore')?'selected':'')+'>🚫 Ignorer</option>';
+    destHtml+='</select>';
+  }
+
+  // Tiers with "apply same" button
+  var tiersHtml='<span style="font-size:11px;color:var(--muted)">'+escHtml(tx.tiers||'\u2014')+'</span>';
+  if(!isCredit&&tx.tiers&&tx.status==='pending'&&tx.cat&&tx.cat!=='ignore'){
+    var sameCount=_txList.filter(function(t){return t.tiers===tx.tiers&&t.type==='debit'&&t.status==='pending'&&t.id!==tx.id;}).length;
+    if(sameCount>0){
+      tiersHtml+=' <button class="btn-apply-all" onclick="applyToSameTiers('+tx.id+')" title="Appliquer la même catégorie et TVA à toutes les transactions de ce tiers">↻ '+sameCount+' similaires</button>';
+    }
+  }
+
+  // Actions
+  var canImport=!isCredit&&tx.cat&&tx.cat!=='ignore'&&tvaChosen;
+  var actHtml='';
+  if(isCredit){actHtml='<span style="color:var(--muted)">\u2014</span>';}
+  else if(tx.status==='imported'){actHtml='<button class="btn-ign" onclick="unimport('+tx.id+')">↩</button>';}
+  else if(tx.status==='ignored'){actHtml='<button class="btn-ign" onclick="restore('+tx.id+')">↩ Rétablir</button>';}
+  else{
+    actHtml='<div class="act-row">';
+    actHtml+='<button class="btn-import-one" onclick="importOne('+tx.id+')" title="'+((!canImport)?'Choisissez catégorie + TVA':'Importer')+'" '+((!canImport)?'disabled':'')+'>⬇️</button>';
+    actHtml+='<button class="btn-ign" onclick="ignoreOne('+tx.id+')">🚫</button>';
+    actHtml+='</div>';
+  }
+
+  return '<tr class="'+rowCls+'" id="row-'+tx.id+'"><td style="white-space:nowrap;color:var(--muted);font-size:11px">'+tx.date+'</td><td>'+typeBadge+' <input class="label-input" value="'+escHtml(tx.customLabel)+'" oninput="updateLabel('+tx.id+',this.value)" '+(tx.status!=='pending'||isCredit?'disabled':'')+'/></td><td>'+tiersHtml+'</td><td style="text-align:right" class="'+amtCls+'">'+amtSign+fmt(tx.montant)+'</td><td>'+tvaHtml+'</td><td>'+destHtml+'</td><td>'+actHtml+'</td></tr>';
+}
+
+// ═══════════════════════════════════════════
+// INTERACTIONS
+// ═══════════════════════════════════════════
+
+function updateLabel(id,v){_txList[id].customLabel=v;}
+
+function updateTva(id,v){
+  if(v===''){_txList[id].tvaRate=null;}else{_txList[id].tvaRate=parseFloat(v);}
+  var tx=_txList[id];
+  var tvaChosen=tx.tvaRate!==null&&tx.tvaRate!==undefined;
+  var ht=tvaChosen?(tx.tvaRate>0?Math.round(tx.montant/(1+tx.tvaRate/100)*100)/100:tx.montant):null;
+  var el=document.getElementById('ht-'+id);
+  if(el) el.innerHTML=tvaChosen?'HT : <strong>'+fmt(ht)+'</strong>':'<span style="color:var(--orange)">⚠ Choisir</span>';
+  var sel=document.querySelector('#row-'+id+' .tva-select');
+  if(sel){sel.style.borderColor=tvaChosen?'':'var(--orange)';sel.style.background=tvaChosen?'white':'#fef3c7';}
+  // Store tiers choice
+  if(tx.tiers&&tvaChosen){
+    if(!_tiersChoices[tx.tiers])_tiersChoices[tx.tiers]={};
+    _tiersChoices[tx.tiers].tvaRate=tx.tvaRate;
+  }
+  updateBtnState(id);
+  updateImportCounters();
+}
+
+function updateCat(id,v){
+  _txList[id].cat=v||null;
+  var sel=document.getElementById('dest-'+id);
+  if(sel) sel.className='dest-select '+(v?CAT_CLS[v]||'':'');
+  var tx=_txList[id];
+  if(tx.tiers&&v){
+    if(!_tiersChoices[tx.tiers])_tiersChoices[tx.tiers]={};
+    _tiersChoices[tx.tiers].cat=v;
+  }
+  updateBtnState(id);
+  updateImportCounters();
+}
+
+function updateBtnState(id){
+  var tx=_txList[id];
+  var canImport=tx.cat&&tx.cat!=='ignore'&&tx.tvaRate!==null&&tx.tvaRate!==undefined;
+  var btn=document.querySelector('#row-'+id+' .btn-import-one');
+  if(btn) btn.disabled=!canImport;
+}
+
+function updateImportCounters(){
+  var ready=_txList.filter(function(t){return t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined;}).length;
+  var btn=document.getElementById('btn-import');
+  if(btn){btn.disabled=ready===0;btn.textContent='\u2B07\uFE0F Importer ('+ready+')';}
+}
+
+function applyToSameTiers(id){
+  var tx=_txList[id];
+  if(!tx.tiers) return;
+  var cat=tx.cat,tva=tx.tvaRate;
+  var count=0;
+  for(var i=0;i<_txList.length;i++){
+    var t=_txList[i];
+    if(t.tiers===tx.tiers&&t.type==='debit'&&t.status==='pending'&&t.id!==id){
+      if(cat) t.cat=cat;
+      if(tva!==null&&tva!==undefined) t.tvaRate=tva;
+      count++;
+    }
+  }
+  showToast('✅ Appliqué à '+count+' transaction(s) "'+tx.tiers+'"','success');
+  renderAll();
+}
+
+function ignoreOne(id){_txList[id].status='ignored';renderAll();}
+function restore(id){_txList[id].status='pending';renderAll();}
+function unimport(id){_txList[id].status='pending';renderAll();}
+function setFilter(f){_filter=f;renderAll();}
+function setSearch(q){_search=q;renderAll();}
+function backToUpload(){
+  document.getElementById('phase-upload').style.display='';
+  document.getElementById('btn-import').style.display='none';
+  var valEl=document.getElementById('phase-validation');
+  if(valEl) valEl.remove();
+}
+
+function sortBy(col){
+  if(_sortCol===col) _sortDir=_sortDir==='asc'?'desc':'asc';
+  else{_sortCol=col;_sortDir=col==='date'?'asc':'asc';}
+  renderAll();
+}
+
+function sortedTx(list){
+  return[].concat(list).sort(function(a,b){
+    var va,vb;
+    if(_sortCol==='date'){va=parseDate(a.date);vb=parseDate(b.date);}
+    else if(_sortCol==='montant'){va=a.montant;vb=b.montant;}
+    else if(_sortCol==='label'){
+      va=(a.customLabel||'').toLowerCase();vb=(b.customLabel||'').toLowerCase();
+      return _sortDir==='asc'?va.localeCompare(vb):vb.localeCompare(va);
+    }else{return 0;}
+    return _sortDir==='asc'?va-vb:vb-va;
+  });
+}
+
+// ═══════════════════════════════════════════
+// IMPORT TO PILOTAGE
+// ═══════════════════════════════════════════
+
+async function importOne(id){
+  var tx=_txList[id];
+  if(!tx||tx.type!=='debit'||tx.status!=='pending'||!tx.cat||tx.cat==='ignore') return;
+  if(tx.tvaRate===null||tx.tvaRate===undefined){showToast('⚠️ Choisissez le taux de TVA','warning');return;}
+
+  var btn=document.querySelector('#row-'+id+' .btn-import-one');
+  if(btn){btn.disabled=true;btn.textContent='⏳';}
+
+  try{
+    var mk=tx.monthKey;
+    var docRef=window._doc(window._db,'pilotage',window._uid,'months',mk);
+    var snap=await window._getDoc(docRef);
+    var data=snap.exists()?Object.assign({},snap.data()):{chargesFixe:[],chargesVar:[],leasing:[],credits:[],ca:[]};
+    var sec=tx.cat;
+    if(!data[sec]) data[sec]=[];
+
+    // Remove empty default rows
+    data[sec]=data[sec].filter(function(r){return(r.fournisseur||'').trim()||parseFloat(r.montantHT||0)>0||r.source==='bank_sync'||r.source==='pdf_import';});
+
+    // Dedup by bankTxId
+    if(data[sec].some(function(r){return r.bankTxId===tx.bankTxId;})){
+      showToast('⚠️ Déjà importée','warning');
+      if(btn){btn.disabled=false;btn.textContent='⬇️';}
+      return;
+    }
+
+    var tvaRate=parseFloat(tx.tvaRate)||0;
+    var montantHT=tvaRate>0?Math.round(tx.montant/(1+tvaRate/100)*100)/100:tx.montant;
+
+    data[sec].push({
+      fournisseur:tx.customLabel,
+      date:tx.date||'',
+      type:sec==='chargesFixe'?'Charge fixe':sec==='leasing'?'Leasing / LOA':'Charge variable',
+      montantHT:montantHT.toFixed(2),
+      tvaRate:tvaRate, deductible:'Oui', pointe:'Non',
+      source:'pdf_import', bankTxId:tx.bankTxId,
+      montantTTC_bank:tx.montant.toFixed(2),
+      bankTtcFixed:true,
+      importedAt:new Date().toISOString()
+    });
+
+    await window._setDoc(docRef,data,{merge:true});
+    tx.status='imported';
+    showToast('✅ "'+tx.customLabel+'" importée','success');
+    renderAll();
+  }catch(e){
+    showToast('❌ '+e.message,'error');
+    if(btn){btn.disabled=false;btn.textContent='⬇️';}
+  }
+}
+
+async function importSelected(){
+  var toImport=_txList.filter(function(t){return t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined;});
+  if(!toImport.length){showToast('⚠️ Renseignez catégorie + TVA','warning');return;}
+
+  var btn=document.getElementById('btn-import');
+  btn.disabled=true;btn.textContent='⏳ Import…';
+
+  try{
+    var byMonth={};
+    for(var i=0;i<toImport.length;i++){
+      var mk=toImport[i].monthKey;
+      if(!byMonth[mk]) byMonth[mk]=[];
+      byMonth[mk].push(toImport[i]);
+    }
+
+    var done=0;
+    var monthKeys=Object.keys(byMonth);
+    for(var mi=0;mi<monthKeys.length;mi++){
+      var mk2=monthKeys[mi];
+      var list=byMonth[mk2];
+      var docRef=window._doc(window._db,'pilotage',window._uid,'months',mk2);
+      var snap=await window._getDoc(docRef);
+      var data=snap.exists()?Object.assign({},snap.data()):{chargesFixe:[],chargesVar:[],leasing:[],credits:[],ca:[]};
+
+      for(var j=0;j<list.length;j++){
+        var tx=list[j];
+        var sec=tx.cat;
+        if(!data[sec]) data[sec]=[];
+        data[sec]=data[sec].filter(function(r){return(r.fournisseur||'').trim()||parseFloat(r.montantHT||0)>0||r.source==='bank_sync'||r.source==='pdf_import';});
+        if(data[sec].some(function(r){return r.bankTxId===tx.bankTxId;})) continue;
+
+        var tvaRate=parseFloat(tx.tvaRate)||0;
+        var montantHT=tvaRate>0?Math.round(tx.montant/(1+tvaRate/100)*100)/100:tx.montant;
+
+        var entry={
+          fournisseur:tx.customLabel,
+          date:tx.date||'',
+          type:sec==='chargesFixe'?'Charge fixe':sec==='leasing'?'Leasing / LOA':'Charge variable',
+          montantHT:montantHT.toFixed(2),
+          tvaRate:tvaRate, deductible:'Oui', pointe:'Non',
+          source:'pdf_import', bankTxId:tx.bankTxId,
+          montantTTC_bank:tx.montant.toFixed(2),
+          bankTtcFixed:true,
+          importedAt:new Date().toISOString()
+        };
+        if(sec==='leasing'){entry.dateDebut='';entry.dateFin='';}
+        data[sec].push(entry);
+        tx.status='imported';
+        done++;
+      }
+      await window._setDoc(docRef,data,{merge:true});
+    }
+
+    showToast('✅ '+done+' transaction(s) importées dans Pilotage !','success');
+    renderAll();
+    setTimeout(function(){if(confirm('✅ '+done+' transactions importées.\nOuvrir Pilotage pour vérifier ?')) window.location.href='pilotage.html';},1200);
+  }catch(e){
+    showToast('❌ '+e.message,'error');
+    btn.disabled=false;
+    btn.textContent='\u2B07\uFE0F Importer ('+_txList.filter(function(t){return t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined;}).length+')';
+  }
+}
+
+// ═══════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════
+
+var MOIS_NOMS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+
+function parseDate(s){
+  if(!s) return 0;
+  var p=s.split('/');
+  if(p.length===3) return new Date(p[2]+'-'+p[1]+'-'+p[0]).getTime();
+  return 0;
+}
+
+function fmt(n){return parseFloat(n||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €';}
+function escHtml(s){return(s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function showToast(msg,type){var t=document.getElementById('toast');t.textContent=msg;t.className='toast show '+(type||'');setTimeout(function(){t.className='toast';},3500);}
+
+// Expose all functions to window
+window.handleFiles=handleFiles;window.clearFiles=clearFiles;window.removeFile=removeFile;
+window.processAllFiles=processAllFiles;window.showValidationPhase=showValidationPhase;
+window.updateLabel=updateLabel;window.updateTva=updateTva;window.updateCat=updateCat;
+window.applyToSameTiers=applyToSameTiers;
+window.ignoreOne=ignoreOne;window.restore=restore;window.unimport=unimport;
+window.setFilter=setFilter;window.setSearch=setSearch;window.sortBy=sortBy;
+window.importOne=importOne;window.importSelected=importSelected;
+window.backToUpload=backToUpload;
+async function handleLogout(){await window._signOut(window._auth);window.location.href='index.html';}
+window.handleLogout=handleLogout;
+</script>
+<script src="nav.js"></script>
+</body>
+</html>
