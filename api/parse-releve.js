@@ -116,6 +116,7 @@ Pour chaque transaction, détermine :
 - monthKey: format "AAAA-MM" basé sur la date
 
 IMPORTANT : ne saute AUCUNE transaction. Chaque ligne avec un montant doit être extraite.
+Si les pages ne contiennent AUCUNE transaction (juste des totaux, du texte légal, des en-têtes), renvoie un objet avec un tableau transactions vide.
 
 Réponds UNIQUEMENT en JSON brut (sans markdown, sans backticks) :
 {"transactions":[{"date":"06/02/2026","label":"COMMISSIONS SUR REMISE CB NO 563964","tiers":"LCL Commissions","montant":0.13,"type":"debit","monthKey":"2026-02"}],"bankName":"NOM_BANQUE","accountHolder":"NOM_TITULAIRE","periodStart":"JJ/MM/AAAA","periodEnd":"JJ/MM/AAAA","totalDebit":0,"totalCredit":0}`
@@ -126,7 +127,7 @@ Réponds UNIQUEMENT en JSON brut (sans markdown, sans backticks) :
 
     var response = await callWithRetry({
       model: model,
-      max_tokens: 8000,
+      max_tokens: 12000,
       messages: [{ role: 'user', content: content }]
     });
 
@@ -142,13 +143,15 @@ Réponds UNIQUEMENT en JSON brut (sans markdown, sans backticks) :
     try {
       parsed = JSON.parse(raw);
     } catch (parseErr) {
-      console.error('[parse-releve] JSON parse error:', parseErr.message, 'Raw (first 500):', raw.slice(0, 500));
-      return res.status(500).json({ error: 'Erreur de parsing IA. Réessayez.', raw: raw.slice(0, 200) });
+      console.error('[parse-releve] JSON parse error:', parseErr.message, 'Raw (first 300):', raw.slice(0, 300));
+      // Return empty instead of 500 — other batches may have succeeded
+      return res.status(200).json({ transactions: [], parseError: true });
     }
 
     // Validate
     if (!parsed.transactions || !Array.isArray(parsed.transactions)) {
-      return res.status(500).json({ error: 'Format de réponse IA invalide.' });
+      console.error('[parse-releve] Invalid format, no transactions array');
+      return res.status(200).json({ transactions: [] });
     }
 
     // Clean up and validate each transaction
@@ -181,6 +184,7 @@ Réponds UNIQUEMENT en JSON brut (sans markdown, sans backticks) :
 
   } catch (err) {
     console.error('[parse-releve] Error:', err);
-    return res.status(500).json({ error: 'Erreur serveur: ' + (err.message || 'inconnue') });
+    // Return empty transactions instead of 500 so the frontend batch loop continues
+    return res.status(200).json({ transactions: [], serverError: (err.message || 'inconnue') });
   }
 };
