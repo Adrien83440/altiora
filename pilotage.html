@@ -379,6 +379,13 @@
     .kpi-card.purple .kpi-icon,.kpi.purple .kpi-icon,.kpi.purple .kpi-ico{background:rgba(124,58,237,0.1) !important;border-color:rgba(124,58,237,0.15) !important}
     .kpi-card.teal .kpi-icon,.kpi.teal .kpi-icon,.kpi.teal .kpi-ico{background:rgba(13,148,136,0.1) !important;border-color:rgba(13,148,136,0.15) !important}
     .kpi-val,.kpi-lbl,.kpi-value,.kpi-label,.kpi-sub,.kpi-n1,.sum-value,.sum-label,.sum-sub,.kpi-trend,.kpi-progress,.kpi-progress-bar,.kpi-progress-label,.kpi-ico{position:relative;z-index:1}
+    .split-line{display:grid;grid-template-columns:1fr 100px 70px 36px;gap:8px;align-items:center;margin-bottom:8px}
+    .split-line input,.split-line select{padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;outline:none}
+    .split-line input:focus,.split-line select:focus{border-color:var(--blue)}
+    .split-remaining{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-radius:10px;margin-top:12px;font-size:13px;font-weight:700}
+    .split-remaining.ok{background:#d1fae5;color:#065f46}
+    .split-remaining.warn{background:#fef3c7;color:#92400e}
+    .split-remaining.err{background:#fee2e2;color:#b91c1c}
 
 </style>
 </head>
@@ -730,6 +737,22 @@
       <button class="btn btn-outline" onclick="closeAddCLModal()">Annuler</button>
       <button class="btn btn-primary" onclick="submitAddCL(false)">Ajouter ce mois</button>
       <button class="btn btn-orange" onclick="submitAddCL(true)">⚡ Ajouter & Propager</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL VENTILATION TVA -->
+<div class="modal-overlay" id="splitChargeModal">
+  <div class="modal-box" style="max-width:560px;width:92%;background:#fff;border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,.2);overflow:hidden">
+    <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+      <h3 style="font-size:14px;font-weight:700">✂️ Ventiler la TVA</h3>
+      <button style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)" onclick="closeSplitCharge()">✕</button>
+    </div>
+    <div style="padding:18px 20px;max-height:65vh;overflow-y:auto" id="splitChargeBody"></div>
+    <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-outline btn-sm" onclick="closeSplitCharge()">Annuler</button>
+      <button class="btn btn-primary btn-sm" onclick="addSplitChargeLine()">+ Ligne</button>
+      <button class="btn btn-success btn-sm" id="btnSplitChargeOk" onclick="validateSplitCharge()">✅ Valider</button>
     </div>
   </div>
 </div>
@@ -2303,10 +2326,164 @@ function renderCharges(rows, key) {
         (isFixe ? '<button class="btn btn-orange btn-sm" style="font-size:10px;padding:3px 8px;" onclick="duplicateFixeLine(' + i + ')">⚡ Année</button>' : '') +
         (!isFixe && key==='leasing' ? '<button class="btn btn-orange btn-sm" style="font-size:10px;padding:3px 8px" onclick="propagateLeasing(' + i + ')">⚡ Propager</button>' : '') +
         (key==='leasing'||key==='chargesVar'||key==='chargesFixe' ? '<button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 8px" title="Modifier le prix sur plusieurs mois" onclick="openChargeScopeUpdate(\'' + key + '\',' + i + ')">✏️</button>' : '') +
+        (key==='chargesVar'||key==='chargesFixe' ? '<button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 8px" title="Ventiler la TVA (plusieurs taux)" onclick="openSplitCharge(\'' + key + '\',' + i + ')">✂️</button>' : '') +
         '<button class="btn btn-danger btn-sm" onclick="delRow(\'' + key + '\',' + i + ',\'' + tbId + '\',function(r){return renderCharges(r,\'' + key + '\')})">✕</button>' +
       '</td>' +
     '</tr>';
   }).join('');
+}
+
+// ═══════════════════════════════════════════
+// VENTILATION TVA (split charge en plusieurs lignes)
+// ═══════════════════════════════════════════
+
+var _splitChargeCtx = null;
+
+function openSplitCharge(key, idx) {
+  var row = _data[key][idx];
+  if (!row) return;
+  var ht = pf(row.montantHT);
+  var rate = parseFloat(row.tvaRate) || 0;
+  var ttc = ht > 0 ? Math.round(ht * (1 + rate / 100) * 100) / 100 : 0;
+  _splitChargeCtx = {
+    key: key,
+    idx: idx,
+    originalFournisseur: row.fournisseur || '',
+    originalType: row.type || '',
+    originalDeductible: row.deductible || 'Oui',
+    originalPointe: row.pointe || 'Non',
+    originalExceptionnel: row.exceptionnel || false,
+    originalTTC: ttc,
+    lines: [
+      { label: (row.fournisseur || '') + ' (1)', montant: '', tvaRate: 5.5 },
+      { label: (row.fournisseur || '') + ' (2)', montant: '', tvaRate: 20 }
+    ]
+  };
+  renderSplitChargeBody();
+  document.getElementById('splitChargeModal').classList.add('show');
+}
+
+function closeSplitCharge() {
+  document.getElementById('splitChargeModal').classList.remove('show');
+  _splitChargeCtx = null;
+}
+
+function addSplitChargeLine() {
+  if (!_splitChargeCtx) return;
+  var n = _splitChargeCtx.lines.length + 1;
+  _splitChargeCtx.lines.push({ label: _splitChargeCtx.originalFournisseur + ' (' + n + ')', montant: '', tvaRate: 10 });
+  renderSplitChargeBody();
+}
+
+function removeSplitChargeLine(idx) {
+  if (!_splitChargeCtx || _splitChargeCtx.lines.length <= 2) return;
+  _splitChargeCtx.lines.splice(idx, 1);
+  renderSplitChargeBody();
+}
+
+function updateSplitChargeField(idx, field, val) {
+  if (!_splitChargeCtx) return;
+  if (field === 'montant') _splitChargeCtx.lines[idx].montant = val;
+  else if (field === 'tvaRate') _splitChargeCtx.lines[idx].tvaRate = parseFloat(val) || 0;
+  else if (field === 'label') _splitChargeCtx.lines[idx].label = val;
+  var remaining = calcSplitChargeRemaining();
+  var remEl = document.getElementById('splitChargeRemaining');
+  if (remEl) {
+    var abs = Math.abs(remaining);
+    var cls = abs < 0.02 ? 'color:var(--green)' : remaining > 0 ? 'color:var(--orange)' : 'color:var(--red)';
+    remEl.innerHTML = '<span>Restant à ventiler</span><span style="font-weight:800;' + cls + '">' + fmtE(remaining) + '</span>';
+  }
+  var btnOk = document.getElementById('btnSplitChargeOk');
+  if (btnOk) btnOk.disabled = Math.abs(remaining) >= 0.02;
+}
+
+function calcSplitChargeRemaining() {
+  if (!_splitChargeCtx) return 0;
+  var total = _splitChargeCtx.lines.reduce(function(s, l) { return s + (parseFloat(l.montant) || 0); }, 0);
+  return Math.round((_splitChargeCtx.originalTTC - total) * 100) / 100;
+}
+
+function renderSplitChargeBody() {
+  if (!_splitChargeCtx) return;
+  var el = document.getElementById('splitChargeBody');
+  var remaining = calcSplitChargeRemaining();
+  var html = '<div style="margin-bottom:14px;padding:10px 14px;background:#f8faff;border-radius:10px">';
+  html += '<div style="font-size:12px;color:var(--muted)">Charge originale</div>';
+  html += '<div style="font-size:14px;font-weight:700;margin-top:4px">' + esc(_splitChargeCtx.originalFournisseur) + '</div>';
+  html += '<div style="font-size:16px;font-weight:800;color:var(--red);margin-top:2px">' + fmtE(_splitChargeCtx.originalTTC) + ' TTC</div>';
+  html += '</div>';
+
+  html += '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px;display:grid;grid-template-columns:1fr 100px 70px 36px;gap:8px">';
+  html += '<span>Fournisseur</span><span>Montant TTC</span><span>TVA</span><span></span></div>';
+
+  for (var i = 0; i < _splitChargeCtx.lines.length; i++) {
+    var l = _splitChargeCtx.lines[i];
+    html += '<div style="display:grid;grid-template-columns:1fr 100px 70px 36px;gap:8px;margin-bottom:6px">';
+    html += '<input style="padding:6px 8px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px" value="' + esc(l.label) + '" oninput="updateSplitChargeField(' + i + ',\'label\',this.value)" placeholder="Libellé"/>';
+    html += '<input style="padding:6px 8px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;text-align:right" type="text" inputmode="decimal" value="' + (l.montant || '') + '" oninput="updateSplitChargeField(' + i + ',\'montant\',this.value.replace(\',\',\'.\'))" placeholder="0.00"/>';
+    html += '<select style="padding:6px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px" onchange="updateSplitChargeField(' + i + ',\'tvaRate\',this.value)">';
+    html += '<option value="0"' + (l.tvaRate === 0 ? ' selected' : '') + '>0%</option>';
+    html += '<option value="5.5"' + (l.tvaRate === 5.5 ? ' selected' : '') + '>5,5%</option>';
+    html += '<option value="10"' + (l.tvaRate === 10 ? ' selected' : '') + '>10%</option>';
+    html += '<option value="20"' + (l.tvaRate === 20 ? ' selected' : '') + '>20%</option>';
+    html += '</select>';
+    html += _splitChargeCtx.lines.length > 2 ? '<button style="background:#f1f5f9;border:none;border-radius:6px;cursor:pointer;font-size:14px;color:var(--muted)" onclick="removeSplitChargeLine(' + i + ')">✕</button>' : '<span></span>';
+    html += '</div>';
+  }
+
+  var abs = Math.abs(remaining);
+  var cls = abs < 0.02 ? 'color:var(--green)' : remaining > 0 ? 'color:var(--orange)' : 'color:var(--red)';
+  html += '<div id="splitChargeRemaining" style="display:flex;justify-content:space-between;padding:10px 14px;margin-top:10px;background:#f8faff;border-radius:10px;font-size:13px"><span>Restant à ventiler</span><span style="font-weight:800;' + cls + '">' + fmtE(remaining) + '</span></div>';
+
+  el.innerHTML = html;
+  var btnOk = document.getElementById('btnSplitChargeOk');
+  if (btnOk) btnOk.disabled = abs >= 0.02;
+}
+
+function validateSplitCharge() {
+  if (!_splitChargeCtx) return;
+  var remaining = calcSplitChargeRemaining();
+  if (Math.abs(remaining) >= 0.02) { showToast('⚠️ Le total des lignes doit égaler le montant original', 'warning'); return; }
+
+  var key = _splitChargeCtx.key;
+  var idx = _splitChargeCtx.idx;
+  var original = _data[key][idx];
+
+  // Build new rows from split lines
+  var newRows = [];
+  for (var i = 0; i < _splitChargeCtx.lines.length; i++) {
+    var l = _splitChargeCtx.lines[i];
+    var ttcVal = parseFloat(l.montant) || 0;
+    if (ttcVal <= 0) continue;
+    var htVal = l.tvaRate > 0 ? Math.round(ttcVal / (1 + l.tvaRate / 100) * 100) / 100 : ttcVal;
+    newRows.push({
+      fournisseur: l.label,
+      type: _splitChargeCtx.originalType,
+      montantHT: htVal.toFixed(2),
+      tvaRate: l.tvaRate,
+      deductible: _splitChargeCtx.originalDeductible,
+      pointe: _splitChargeCtx.originalPointe,
+      exceptionnel: _splitChargeCtx.originalExceptionnel,
+      source: original.source || '',
+      bankTxId: original.bankTxId ? original.bankTxId + '_split' + i : '',
+      importedAt: original.importedAt || ''
+    });
+  }
+
+  // Replace original row with new rows
+  _data[key].splice(idx, 1);
+  for (var j = 0; j < newRows.length; j++) {
+    _data[key].splice(idx + j, 0, newRows[j]);
+  }
+
+  closeSplitCharge();
+  // Re-render the table
+  var tbId = key === 'chargesFixe' ? 'cf-tbody' : key === 'chargesVar' ? 'cv-tbody' : 'leas-tbody';
+  var tb = document.getElementById(tbId);
+  if (tb) tb.innerHTML = renderCharges(_data[key], key);
+  refreshTotals();
+  scheduleSave();
+  showToast('✅ Charge ventilée en ' + newRows.length + ' lignes', 'success');
 }
 
 function calcCreditInteret(r) {
