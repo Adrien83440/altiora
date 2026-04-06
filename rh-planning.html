@@ -698,6 +698,32 @@
     }
     .ai-apply-btn:hover{box-shadow:0 6px 24px rgba(5,150,105,0.4);transform:translateY(-1px);}
 
+    /* AI SCHEDULE PER-DAY */
+    .ai-sched{margin-bottom:14px;}
+    .ai-sched-head{font-size:11px;font-weight:800;color:#1a1f36;margin-bottom:6px;display:flex;align-items:center;gap:6px;}
+    .ai-sched-hint{font-size:10px;color:#6b7280;margin-bottom:10px;line-height:1.4;}
+    .ai-day{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:10px;border:1.5px solid rgba(0,0,0,.06);margin-bottom:5px;transition:all .15s;background:white;}
+    .ai-day.closed{background:#f9fafb;opacity:.55;}
+    .ai-day-name{font-size:11px;font-weight:700;min-width:32px;color:#1a1f36;}
+    .ai-day-tog{width:36px;height:20px;border-radius:10px;background:#e2e8f0;border:none;cursor:pointer;position:relative;transition:background .2s;flex-shrink:0;}
+    .ai-day-tog.on{background:#6366f1;}
+    .ai-day-tog::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:white;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.15);}
+    .ai-day-tog.on::after{transform:translateX(16px);}
+    .ai-day-slots{display:flex;flex-wrap:wrap;gap:4px;flex:1;min-height:26px;align-items:center;}
+    .ai-slot{display:inline-flex;align-items:center;gap:2px;background:#f0f4ff;border:1px solid #e0e7ff;border-radius:7px;padding:2px 4px;font-size:11px;}
+    .ai-slot input[type=time]{border:none;background:transparent;font-size:11px;font-family:inherit;padding:2px 3px;width:72px;outline:none;color:#1a1f36;}
+    .ai-slot-sep{color:#6b7280;font-size:10px;}
+    .ai-slot-rm{background:none;border:none;color:#ef4444;cursor:pointer;font-size:12px;padding:0 2px;line-height:1;opacity:.5;transition:opacity .15s;}
+    .ai-slot-rm:hover{opacity:1;}
+    .ai-day-add{background:none;border:1.5px dashed #c7d2fe;border-radius:7px;color:#6366f1;font-size:10px;font-weight:700;cursor:pointer;padding:3px 8px;transition:all .15s;font-family:inherit;white-space:nowrap;}
+    .ai-day-add:hover{background:#eef2ff;border-color:#6366f1;}
+    .ai-day-closed-lbl{font-size:10px;color:#9ca3af;font-style:italic;}
+    .ai-params-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+    .ai-param-card{border:1.5px solid rgba(0,0,0,0.08);border-radius:12px;padding:12px;background:white;transition:all var(--transition-fast);}
+    .ai-param-card:hover{border-color:var(--rh-main);transform:translateY(-1px);box-shadow:var(--shadow-sm);}
+    .ai-param-lbl{font-size:11px;font-weight:700;margin-bottom:2px;}
+    .ai-param-hint{font-size:9px;color:#6b7280;line-height:1.3;margin-bottom:6px;}
+
     /* ═══════════════════════════════════════════════
        TOAST — Floating notification
        ═══════════════════════════════════════════════ */
@@ -919,7 +945,9 @@
       .topbar{padding:12px 12px 12px 62px!important;flex-wrap:wrap;}
       .plan-nav{padding:0 12px;}
       .plan-content{overflow-x:auto;}
-      .mrow,.mrow3,.type-grid,.ai-sections{grid-template-columns:1fr 1fr!important;}
+      .mrow,.mrow3,.type-grid,.ai-sections,.ai-params-row{grid-template-columns:1fr!important;}
+      .ai-day{flex-wrap:wrap;gap:5px;}
+      .ai-day-slots{min-width:100%;margin-top:2px;}
       .poly-grid{grid-template-columns:1fr!important;}
       .stats-bar{padding:8px 12px;gap:8px;}
       .sitem{padding:3px 8px;font-size:10px;}
@@ -1181,12 +1209,28 @@
       <p id="ai-period-label">Analyse vos équipes, compétences et contraintes pour proposer un planning optimal</p>
     </div>
     <div class="modal-body">
-      <div class="ai-sections">
-        <div class="ai-sec"><div class="ai-sec-lbl">Ouverture</div><input class="ai-field" id="ai-op" type="time" value="08:00"/></div>
-        <div class="ai-sec"><div class="ai-sec-lbl">Fermeture</div><input class="ai-field" id="ai-cl" type="time" value="20:00"/></div>
-        <div class="ai-sec"><div class="ai-sec-lbl">Min. personnes / shift</div><input class="ai-field" id="ai-ms" type="number" min="1" value="2"/></div>
-        <div class="ai-sec"><div class="ai-sec-lbl">Jours repos / semaine</div><input class="ai-field" id="ai-rd" type="number" min="1" max="3" value="2"/></div>
+      <!-- HORAIRES PAR JOUR -->
+      <div class="ai-sched">
+        <div class="ai-sched-head">📅 Horaires d'ouverture de la semaine</div>
+        <div class="ai-sched-hint">Configurez les créneaux d'activité pour chaque jour. L'IA adaptera les shifts en conséquence.<br>Pré-rempli depuis vos <b>Paramètres entreprise</b> — ajustez si besoin pour cette semaine.</div>
+        <div id="ai-sched-grid"></div>
       </div>
+
+      <!-- PARAMÈTRES ÉQUIPE -->
+      <div class="ai-params-row">
+        <div class="ai-param-card">
+          <div class="ai-param-lbl">👥 Min. personnes / shift</div>
+          <div class="ai-param-hint">Nombre minimum de personnes qui doivent être présentes sur chaque créneau d'ouverture</div>
+          <input class="ai-field" id="ai-ms" type="number" min="1" value="2"/>
+        </div>
+        <div class="ai-param-card">
+          <div class="ai-param-lbl">🛌 Jours de repos / semaine / employé</div>
+          <div class="ai-param-hint">Chaque employé aura ce nombre de jours de repos <b>en plus</b> des jours où l'entreprise est fermée. Ex : 2 = l'employé ne travaille pas 2 jours parmi les jours ouverts.</div>
+          <input class="ai-field" id="ai-rd" type="number" min="0" max="5" value="2"/>
+        </div>
+      </div>
+
+      <!-- INSTRUCTIONS LIBRES -->
       <div class="mf">
         <label class="ml">Instructions spécifiques</label>
         <textarea class="mi" id="ai-inst" rows="3" placeholder="Ex : Marie ne travaille pas le lundi. Pas d'ouverture le dimanche. Préférer des shifts matin/soir en rotation. Gérer la polyvalence caisse/cuisine…" style="resize:none;font-size:12px"></textarea>
@@ -3259,11 +3303,102 @@ function openAI(){
   document.getElementById('ai-res-wrap').style.display='none';
   document.getElementById('ai-apply-btn').style.display='none';
   _aiResult=null;
+  initAISchedule();
   document.getElementById('modalAI').classList.add('show');
 }
 window.openAI=openAI;
 function closeAI(){document.getElementById('modalAI').classList.remove('show');}
 window.closeAI=closeAI;
+
+// ── AI SCHEDULE PER-DAY ──
+var _aiSchedule=[];
+var _AI_JOURS=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+var _AI_JS_DAYS=[1,2,3,4,5,6,0]; // lun=1,...,dim=0
+
+function initAISchedule(){
+  var defaultPlages=(_joursFermes.plagesOuverture||[{deb:'09:00',fin:'18:00'}]).map(function(p){return{deb:p.deb,fin:p.fin};});
+  var closedDays=_joursFermes.hebdo||[0,6];
+  _aiSchedule=_AI_JOURS.map(function(nom,i){
+    var jsDow=_AI_JS_DAYS[i];
+    var ouvert=closedDays.indexOf(jsDow)===-1;
+    return{nom:nom,jsDow:jsDow,ouvert:ouvert,plages:ouvert?defaultPlages.map(function(p){return{deb:p.deb,fin:p.fin};}):[]};
+  });
+  renderAISchedule();
+}
+
+function renderAISchedule(){
+  var grid=document.getElementById('ai-sched-grid');
+  if(!grid)return;
+  grid.innerHTML=_aiSchedule.map(function(d,di){
+    var togCls='ai-day-tog'+(d.ouvert?' on':'');
+    var rowCls='ai-day'+(d.ouvert?'':' closed');
+    var slotsHtml='';
+    if(d.ouvert){
+      slotsHtml=d.plages.map(function(p,si){
+        return '<span class="ai-slot">'+
+          '<input type="time" value="'+(p.deb||'09:00')+'" onchange="updateAISlot('+di+','+si+',\'deb\',this.value)"/>'+
+          '<span class="ai-slot-sep">→</span>'+
+          '<input type="time" value="'+(p.fin||'18:00')+'" onchange="updateAISlot('+di+','+si+',\'fin\',this.value)"/>'+
+          (d.plages.length>1?'<button class="ai-slot-rm" onclick="removeAISlot('+di+','+si+')" title="Supprimer ce créneau">✕</button>':'')+
+        '</span>';
+      }).join('')+'<button class="ai-day-add" onclick="addAISlot('+di+')" title="Ajouter un créneau (ex: après pause déjeuner)">+ créneau</button>';
+    }else{
+      slotsHtml='<span class="ai-day-closed-lbl">Fermé</span>';
+    }
+    return '<div class="'+rowCls+'">'+
+      '<span class="ai-day-name">'+d.nom+'</span>'+
+      '<button class="'+togCls+'" onclick="toggleAIDay('+di+')" title="'+(d.ouvert?'Marquer fermé':'Marquer ouvert')+'"></button>'+
+      '<div class="ai-day-slots">'+slotsHtml+'</div>'+
+    '</div>';
+  }).join('');
+}
+window.renderAISchedule=renderAISchedule;
+
+function toggleAIDay(di){
+  var d=_aiSchedule[di];
+  d.ouvert=!d.ouvert;
+  if(d.ouvert&&d.plages.length===0){
+    var def=(_joursFermes.plagesOuverture||[{deb:'09:00',fin:'18:00'}]);
+    d.plages=def.map(function(p){return{deb:p.deb,fin:p.fin};});
+  }
+  renderAISchedule();
+}
+window.toggleAIDay=toggleAIDay;
+
+function addAISlot(di){
+  var d=_aiSchedule[di];
+  if(!d.ouvert)return;
+  var last=d.plages[d.plages.length-1];
+  var newDeb=last?last.fin:'14:00';
+  var h=parseInt(newDeb)||14;
+  var newFin=String(Math.min(h+4,23)).padStart(2,'0')+':00';
+  d.plages.push({deb:newDeb,fin:newFin});
+  renderAISchedule();
+}
+window.addAISlot=addAISlot;
+
+function removeAISlot(di,si){
+  var d=_aiSchedule[di];
+  if(d.plages.length<=1)return;
+  d.plages.splice(si,1);
+  renderAISchedule();
+}
+window.removeAISlot=removeAISlot;
+
+function updateAISlot(di,si,field,val){
+  _aiSchedule[di].plages[si][field]=val;
+}
+window.updateAISlot=updateAISlot;
+
+function buildAISchedulePrompt(){
+  var JOURS_FULL=['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+  return _aiSchedule.map(function(d,i){
+    if(!d.ouvert)return '- '+JOURS_FULL[i]+' : FERMÉ';
+    var slots=d.plages.map(function(p){return p.deb+' → '+p.fin;}).join(', puis ');
+    return '- '+JOURS_FULL[i]+' : '+slots;
+  }).join('\n');
+}
+window.buildAISchedulePrompt=buildAISchedulePrompt;
 
 async function genAI(){
   const btn=document.getElementById('ai-gen-btn');
@@ -3280,13 +3415,16 @@ async function genAI(){
 ÉQUIPE :
 ${empStr||'Aucun employé renseigné'}
 
+HORAIRES D'OUVERTURE PAR JOUR :
+${buildAISchedulePrompt()}
+
 CONTRAINTES :
-- Horaires d'activité : ${document.getElementById('ai-op').value} → ${document.getElementById('ai-cl').value}
-- Minimum ${document.getElementById('ai-ms').value} personne(s) par shift
-- ${document.getElementById('ai-rd').value} jour(s) de repos par semaine par employé
-- Respecter les durées contractuelles
+- Minimum ${document.getElementById('ai-ms').value} personne(s) présente(s) sur chaque créneau d'ouverture
+- ${document.getElementById('ai-rd').value} jour(s) de repos par semaine par employé (en plus des jours fermés)
+- Respecter les durées contractuelles (heures hebdo)
 - Respecter les CCN (repos 11h inter-shift, pauses obligatoires)
 - Prendre en compte les compétences pour la polyvalence
+- Si un jour a plusieurs créneaux (ex: 8h-12h puis 14h-18h), créer des shifts adaptés (matin/après-midi ou journée coupée)
 ${document.getElementById('ai-inst').value?'\nINSTRUCTIONS SPÉCIFIQUES :\n'+document.getElementById('ai-inst').value:''}
 
 Réponds UNIQUEMENT en JSON valide sans markdown :
