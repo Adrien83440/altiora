@@ -55,15 +55,41 @@ function parseAmount(val) {
 }
 
 function extractLabel(tx) {
+  // 1) Cas Banque Populaire / Crédit Mutuel / Caisse d'Épargne et autres :
+  //    le vrai libellé est dans remittanceInformationUnstructuredArray (tableau de strings).
+  //    On filtre les lignes qui ne sont QUE numériques (codes parasites type "200326 CB****6273")
+  //    et on concatène les lignes lisibles.
+  if (Array.isArray(tx.remittanceInformationUnstructuredArray) && tx.remittanceInformationUnstructuredArray.length > 0) {
+    const lines = tx.remittanceInformationUnstructuredArray
+      .map(function(s){ return String(s || '').trim().replace(/\s+/g, ' '); })
+      .filter(function(s){
+        if (s.length < 2) return false;
+        // Garder seulement les lignes contenant au moins UN mot de 3 lettres consécutives.
+        // Cela élimine "200326 CB****6273" (CB = 2 lettres), "ID:1234567", etc.
+        // mais garde "EDF FRANCE", "SUPER U 94UNGIS", "CARREFOUR MARKET", etc.
+        return /[A-Za-zÀ-ÿ]{3,}/.test(s);
+      });
+    if (lines.length > 0) {
+      return lines.join(' · ').substring(0, 120);
+    }
+    // Fallback : si toutes les lignes ont été filtrées, on prend la plus longue brute
+    const longest = tx.remittanceInformationUnstructuredArray
+      .map(function(s){ return String(s || '').trim(); })
+      .sort(function(a,b){ return b.length - a.length; })[0];
+    if (longest && longest.length > 1) return longest.substring(0, 120);
+  }
+
+  // 2) Champs scalaires classiques (ordre = priorité)
   const c = [
     tx.creditorName, tx.debtorName,
     tx.remittanceInformationUnstructured,
-    tx.remittanceInformationStructuredArray?.[0]?.reference,
+    tx.remittanceInformationStructuredArray && tx.remittanceInformationStructuredArray[0] && tx.remittanceInformationStructuredArray[0].reference,
     tx.remittanceInformationStructured,
     tx.additionalInformation, tx.merchantName,
+    tx.entryReference,                       // ← AJOUTÉ : utilisé par certaines banques
     tx.proprietaryBankTransactionCode,
   ];
-  const found = c.find(v => v && String(v).trim().length > 1);
+  const found = c.find(function(v){ return v && String(v).trim().length > 1; });
   return found ? String(found).trim().substring(0, 120) : 'Transaction bancaire';
 }
 
