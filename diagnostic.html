@@ -465,7 +465,10 @@ async function startDiagnostic() {
         blankLabelsCount: blankLabels,
         syncedAt: d.syncedAt || null,
         sample: sample,
-        topLabels: Object.entries(labels).sort(function(a,b){return b[1]-a[1];}).slice(0, 10)
+        topLabels: Object.entries(labels)
+                    .sort(function(a,b){return b[1]-a[1];})
+                    .slice(0, 10)
+                    .map(function(p){ return { label: p[0], count: p[1] }; })
       };
       let detail = txs.length + ' tx ; ' + blankLabels + ' libellés vides';
       if (blankLabels === txs.length && txs.length > 0) {
@@ -618,13 +621,13 @@ async function startDiagnostic() {
     if (report.firestore.user) summaryParts.push('Plan : ' + (report.firestore.user.plan || '?'));
     report.summary = summaryParts.join(' · ');
 
-    // Écrire dans Firestore
+    // Écrire dans Firestore (avec sanitizer anti tableau-de-tableaux)
     const reportRef = window._doc(window._db, 'debug_reports', reportId);
-    await window._setDoc(reportRef, {
+    await window._setDoc(reportRef, sanitizeForFirestore({
       uid: window._uid,
       createdAt: report.createdAt,
       report: report
-    });
+    }));
 
     // Notifier l'admin par email (non bloquant)
     try {
@@ -668,6 +671,55 @@ async function startDiagnostic() {
 }
 
 // ── HELPERS ──
+// Sanitizer Firestore : Firestore n'accepte pas les tableaux imbriqués (arrays of arrays).
+// Cette fonction parcourt récursivement et convertit tout tableau imbriqué en string JSON.
+// Elle limite aussi la profondeur et la taille des strings pour rester raisonnable.
+function sanitizeForFirestore(value, depth) {
+  if (depth === undefined) depth = 0;
+  if (depth > 12) {
+    // Trop profond, on stringifie
+    try { return JSON.stringify(value).substring(0, 5000); }
+    catch(e) { return '[depth limit]'; }
+  }
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') return value.length > 10000 ? value.substring(0, 10000) + '…[truncated]' : value;
+  if (typeof value === 'number') {
+    if (!isFinite(value)) return String(value); // NaN, Infinity → string
+    return value;
+  }
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'function') return '[function]';
+  if (Array.isArray(value)) {
+    return value.map(function(item){
+      // Si un élément est lui-même un array → on le sérialise pour éviter le nested array
+      if (Array.isArray(item)) {
+        try { return JSON.stringify(item).substring(0, 5000); }
+        catch(e) { return '[nested array]'; }
+      }
+      return sanitizeForFirestore(item, depth + 1);
+    });
+  }
+  if (typeof value === 'object') {
+    // Objets natifs problématiques
+    if (value instanceof Date) return value.toISOString();
+    if (value instanceof Error) return { name: value.name, message: value.message, stack: (value.stack||'').substring(0,1000) };
+    const out = {};
+    for (const k in value) {
+      if (!Object.prototype.hasOwnProperty.call(value, k)) continue;
+      // Firestore : les clés ne peuvent pas commencer par __
+      const safeKey = k.startsWith('__') ? '_' + k.substring(2) : k;
+      try {
+        out[safeKey] = sanitizeForFirestore(value[k], depth + 1);
+      } catch(e) {
+        out[safeKey] = '[unserializable: ' + (e.message || 'unknown') + ']';
+      }
+    }
+    return out;
+  }
+  // Fallback
+  return String(value);
+}
+
 function maskIban(iban) {
   if (!iban || iban.length < 8) return iban;
   return iban.substring(0, 4) + '…' + iban.substring(iban.length - 4);
