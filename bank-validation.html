@@ -231,26 +231,38 @@
 
 <!-- MODAL RAPPROCHEMENT -->
 <div class="modal-overlay" id="matchModal">
-  <div class="modal" style="max-width:640px">
+  <div class="modal" style="max-width:680px">
     <div class="modal-head">
       <h3>🔗 Rapprochement bancaire — <span id="match-progress" style="color:var(--blue-main)">1 / 1</span></h3>
-      <button class="modal-close" onclick="closeMatchModal()">✕</button>
+      <button class="modal-close" onclick="closeMatchModal()" title="Fermer (vous pourrez relancer plus tard)">✕</button>
     </div>
     <div class="modal-body">
-      <p style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
-        Cette opération bancaire correspond-elle à une charge déjà saisie dans Pilotage&nbsp;? Si oui, sélectionnez-la : la charge sera marquée <strong>pointée</strong> et la transaction bancaire ne créera pas de doublon.
-      </p>
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:12px;color:#1e40af;line-height:1.6">
+        <strong>💡 Pourquoi cette étape&nbsp;?</strong> Nous avons trouvé dans votre Pilotage une charge qui correspond exactement (au centime près) à cette opération bancaire. Pour <strong>éviter de créer un doublon</strong>, dites-nous si c'est bien la même dépense.
+      </div>
       <div class="match-bank" id="match-bank"></div>
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin:14px 0 8px;letter-spacing:.3px">
-        Charges candidates dans Pilotage <span style="color:var(--text)">(montant TTC identique)</span>
+        Charges déjà saisies dans Pilotage avec le même montant TTC&nbsp;:
       </div>
       <div class="match-candidates" id="match-candidates"></div>
     </div>
-    <div class="modal-foot" style="flex-wrap:wrap">
-      <button class="btn btn-outline btn-sm" onclick="matchIgnore()" style="color:#6b7280">🚫 Ignorer la transaction</button>
-      <button class="btn btn-outline btn-sm" onclick="matchNoMatch()">Pas de match, c'est nouveau</button>
-      <button class="btn btn-outline btn-sm" onclick="matchSkipNext()">Passer →</button>
-      <button class="btn btn-primary btn-sm" id="match-link-btn" onclick="linkSelectedMatch()" disabled>🔗 Lier et pointer</button>
+    <div class="modal-foot" style="flex-direction:column;gap:8px;align-items:stretch">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button class="btn btn-primary btn-sm" id="match-link-btn" onclick="linkSelectedMatch()" disabled style="padding:10px" title="Marque la charge sélectionnée comme pointée et n'importe pas la transaction bancaire (aucun doublon créé)">
+          ✅ Oui, c'est cette charge<br><span style="font-weight:500;font-size:10px;opacity:.85">(je sélectionne et je lie)</span>
+        </button>
+        <button class="btn btn-outline btn-sm" onclick="matchNoMatch()" style="padding:10px;border-color:#f59e0b;color:#92400e" title="Aucune des charges proposées ne correspond. La transaction sera importée comme une nouvelle dépense dans le tableau classique">
+          ❌ Non, c'est une nouvelle dépense<br><span style="font-weight:500;font-size:10px;opacity:.7">(je l'importerai normalement)</span>
+        </button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button class="btn btn-outline btn-sm" onclick="matchSkipNext()" style="padding:8px" title="Passer cette transaction et y revenir plus tard. Elle restera affichée avec le badge 🔗 dans le tableau">
+          ⏭ Je verrai plus tard
+        </button>
+        <button class="btn btn-outline btn-sm" onclick="matchIgnore()" style="padding:8px;color:#6b7280" title="Cacher cette transaction sans rien faire (ni import, ni liaison)">
+          🚫 Ignorer cette opération
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -416,6 +428,16 @@ async function loadPending(){
         `Sync du ${d.toLocaleDateString('fr-FR')} à ${d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})} · ${allTx.length} transactions`;
     }
     renderAll();
+
+    // Ouverture automatique de la modale de rapprochement s'il y a au moins un candidat.
+    // C'est l'ÉTAPE CRITIQUE pour que la cliente ne rate pas le rapprochement.
+    const hasAnyMatch = _txList.some(function(t){
+      return t.type==='debit' && t.status==='pending' && Array.isArray(t.matches) && t.matches.length>0;
+    });
+    if (hasAnyMatch) {
+      // Petit délai pour laisser le rendu se faire avant d'ouvrir la modale
+      setTimeout(function(){ startReconciliation(); }, 400);
+    }
   }catch(e){showError('Erreur : '+e.message);}
 }
 
@@ -562,6 +584,17 @@ function renderAll(){
       </div>
     </div>
 
+    ${matchCount>0?`
+    <div style="background:linear-gradient(135deg,#eef2ff,#f0f9ff);border:2px solid #6366f1;border-radius:14px;padding:16px 20px;display:flex;align-items:center;gap:14px;box-shadow:0 4px 16px rgba(99,102,241,0.12)">
+      <div style="font-size:32px;flex-shrink:0">🔗</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14px;font-weight:800;color:#3730a3;margin-bottom:3px">${matchCount} rapprochement${matchCount>1?'s':''} à valider</div>
+        <div style="font-size:12px;color:#4338ca;line-height:1.5">Nous avons trouvé ${matchCount} opération${matchCount>1?'s':''} bancaire${matchCount>1?'s':''} qui correspond${matchCount>1?'ent':''} exactement à des charges déjà saisies dans votre Pilotage. <strong>Validez chacune en 1 clic</strong> pour éviter les doublons.</div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="startReconciliation()" style="background:linear-gradient(135deg,#6366f1,#818cf8);padding:10px 18px;font-size:13px;flex-shrink:0;box-shadow:0 4px 12px rgba(99,102,241,0.3)">▶ Lancer le rapprochement</button>
+    </div>
+    `:''}
+
     <div class="filters-bar">
       <button class="filter-btn ${_filter==='all'?'active':''}" onclick="setFilter('all')">Tout (${_txList.length})</button>
       <button class="filter-btn f-debit ${_filter==='debit'?'active':''}" onclick="setFilter('debit')">🔴 Dépenses (${debits.length})</button>
@@ -680,9 +713,9 @@ function renderRow(tx){
   let statusHtml='';
   if(tx.type==='credit') statusHtml=`<span style="font-size:11px;color:var(--muted)">—</span>`;
   else if(tx.status==='imported') statusHtml=`<span style="font-size:11px;font-weight:700;color:var(--green)">✅ Importée</span>`;
-  else if(tx.status==='linked')   statusHtml=`<span class="linked-badge" title="Liée à une charge déjà saisie dans Pilotage">🔗 Liée à pilotage</span>`;
+  else if(tx.status==='linked')   statusHtml=`<span class="linked-badge" title="Liée à une charge déjà saisie dans Pilotage — aucun doublon créé">🔗 Liée à pilotage</span>`;
   else if(tx.status==='ignored')  statusHtml=`<span style="font-size:11px;color:var(--muted)">🚫 Ignorée</span>`;
-  else if(hasUnresolvedMatches)   statusHtml=`<span class="match-badge" onclick="reconcileOne(${tx.id})">🔗 Rapprochement (${tx.matches.length})</span>`;
+  else if(hasUnresolvedMatches)   statusHtml=`<span class="match-badge" onclick="reconcileOne(${tx.id})" title="Cliquez pour rapprocher cette opération avec une charge déjà saisie dans Pilotage">🔗 À rapprocher (${tx.matches.length})</span>`;
   else statusHtml=`<span class="new-badge">Nouvelle</span>`;
 
   let actHtml='';
@@ -815,6 +848,15 @@ function reconcileOne(id){
 function showCurrentMatch(){
   if(_matchIdx>=_matchQueue.length){
     closeMatchModal();
+    // Récap explicite à la fin
+    const linkedNow = _txList.filter(function(t){return t.status==='linked';}).length;
+    const remaining = _txList.filter(function(t){
+      return t.type==='debit'&&t.status==='pending'&&Array.isArray(t.matches)&&t.matches.length>0&&!t.matchResolved;
+    }).length;
+    let msg = '✅ Rapprochement terminé';
+    if (linkedNow > 0) msg += ' · ' + linkedNow + ' charge(s) liée(s)';
+    if (remaining > 0) msg += ' · ' + remaining + ' restant(s) à traiter';
+    showToast(msg, 'success');
     return;
   }
   const txId=_matchQueue[_matchIdx];
@@ -850,8 +892,13 @@ function showCurrentMatch(){
   }).join('');
   document.getElementById('match-candidates').innerHTML=candHtml;
   document.getElementById('match-link-btn').disabled=true;
-  document.getElementById('match-link-btn').textContent='🔗 Lier et pointer';
+  document.getElementById('match-link-btn').innerHTML='✅ Oui, c\'est cette charge<br><span style="font-weight:500;font-size:10px;opacity:.85">(je sélectionne et je lie)</span>';
   _selectedMatchIdx=null;
+
+  // Pré-sélection automatique si UN SEUL candidat (la cliente n'a plus qu'à valider)
+  if (tx.matches.length === 1) {
+    setTimeout(function(){ selectMatch(0); }, 50);
+  }
 
   document.getElementById('matchModal').classList.add('show');
 }
@@ -979,7 +1026,7 @@ async function linkSelectedMatch(){
   }catch(e){
     showToast('❌ Erreur : '+(e&&e.message?e.message:e),'error');
     linkBtn.disabled=false;
-    linkBtn.textContent='🔗 Lier et pointer';
+    linkBtn.innerHTML='✅ Oui, c\'est cette charge<br><span style="font-weight:500;font-size:10px;opacity:.85">(je sélectionne et je lie)</span>';
   }
 }
 
