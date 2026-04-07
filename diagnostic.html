@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>ALTEORE — Diagnostic</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Plus Jakarta Sans',sans-serif;background:linear-gradient(135deg,#0f1f5c 0%,#2563eb 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;color:#0f172a}
+    .card{background:white;border-radius:18px;max-width:560px;width:100%;box-shadow:0 24px 60px rgba(15,31,92,.3);overflow:hidden}
+    .head{background:linear-gradient(135deg,#0f1f5c,#2563eb);color:white;padding:28px 32px;text-align:center}
+    .head .logo{font-size:11px;font-weight:700;letter-spacing:1.5px;opacity:.7;text-transform:uppercase}
+    .head h1{font-size:22px;font-weight:800;margin-top:6px}
+    .head p{font-size:13px;opacity:.85;margin-top:6px;line-height:1.5}
+    .body{padding:28px 32px}
+    .intro{font-size:13px;color:#475569;line-height:1.6;margin-bottom:20px}
+    .intro strong{color:#0f172a}
+    .progress-wrap{margin:24px 0}
+    .progress-bar{height:8px;background:#e5e7eb;border-radius:20px;overflow:hidden}
+    .progress-fill{height:100%;background:linear-gradient(90deg,#2563eb,#60a5fa);width:0;transition:width .4s ease;border-radius:20px}
+    .progress-text{font-size:12px;color:#64748b;margin-top:8px;text-align:center}
+    .progress-text strong{color:#0f172a;font-weight:700}
+    .steps{margin-top:20px;display:flex;flex-direction:column;gap:8px}
+    .step{display:flex;align-items:center;gap:12px;padding:10px 14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;font-size:13px;color:#475569;transition:all .25s}
+    .step.running{background:#eff6ff;border-color:#bfdbfe;color:#1e40af}
+    .step.done{background:#f0fdf4;border-color:#bbf7d0;color:#166534}
+    .step.error{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+    .step-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;background:#e5e7eb;color:#94a3b8}
+    .step.running .step-icon{background:#bfdbfe;color:#1e40af}
+    .step.done .step-icon{background:#86efac;color:#166534}
+    .step.error .step-icon{background:#fca5a5;color:#991b1b}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:white;border-radius:50%;animation:spin .7s linear infinite}
+    .step.running .step-icon .spin{border-color:rgba(30,64,175,.3);border-top-color:#1e40af}
+    .step-name{flex:1;font-weight:600}
+    .step-detail{font-size:11px;color:#94a3b8;margin-top:2px}
+    .step.done .step-name::after{content:' ✓';color:#16a34a}
+    .step.error .step-name::after{content:' ✕';color:#dc2626}
+
+    .final{display:none;text-align:center;padding:20px 0}
+    .final.show{display:block}
+    .final-icon{font-size:56px;margin-bottom:12px}
+    .final-title{font-size:20px;font-weight:800;color:#0f172a;margin-bottom:8px}
+    .final-msg{font-size:13px;color:#64748b;line-height:1.6}
+    .final-msg strong{color:#0f172a}
+
+    .login-required{display:none;text-align:center;padding:30px 20px}
+    .login-required.show{display:block}
+    .login-required p{font-size:14px;color:#475569;line-height:1.6;margin-bottom:18px}
+    .btn-login{display:inline-block;background:linear-gradient(135deg,#2563eb,#60a5fa);color:white;font-weight:700;font-size:14px;padding:12px 28px;border-radius:10px;text-decoration:none;border:none;cursor:pointer;font-family:inherit}
+
+    .small{font-size:11px;color:#94a3b8;text-align:center;margin-top:18px;line-height:1.5}
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="head">
+    <div class="logo">ALTEORE</div>
+    <h1>🩺 Diagnostic</h1>
+    <p>Cet outil collecte des informations techniques pour aider l'équipe Alteore à diagnostiquer un éventuel problème sur votre compte.</p>
+  </div>
+
+  <div class="body">
+
+    <!-- Zone non connecté -->
+    <div class="login-required" id="login-zone">
+      <p>Vous devez être <strong>connecté à votre compte Alteore</strong> pour lancer un diagnostic.</p>
+      <a href="login.html?then=diagnostic" class="btn-login">Se connecter</a>
+    </div>
+
+    <!-- Zone connecté : intro + bouton lancement -->
+    <div id="ready-zone" style="display:none">
+      <p class="intro">
+        Bonjour <strong id="user-greet">…</strong>, le diagnostic va collecter automatiquement les informations suivantes :
+      </p>
+      <ul style="font-size:12px;color:#64748b;line-height:1.8;margin:0 0 18px 18px">
+        <li>Informations de votre compte (plan, navigateur, écran)</li>
+        <li>État de la connexion Firestore</li>
+        <li>Connexions bancaires actuelles et leur statut</li>
+        <li>Transactions en attente d'import</li>
+        <li>Données brutes de votre banque (si connectée)</li>
+        <li>Erreurs JavaScript récentes</li>
+      </ul>
+      <p class="intro" style="margin-bottom:0">
+        ⏱ Durée : environ <strong>10 à 30 secondes</strong>. Aucune donnée sensible (mot de passe, IBAN complet) n'est collectée.
+      </p>
+      <div style="text-align:center;margin-top:22px">
+        <button class="btn-login" onclick="startDiagnostic()">🚀 Lancer le diagnostic</button>
+      </div>
+    </div>
+
+    <!-- Zone diagnostic en cours -->
+    <div id="running-zone" style="display:none">
+      <div class="progress-wrap">
+        <div class="progress-bar"><div class="progress-fill" id="pfill"></div></div>
+        <div class="progress-text">Étape <strong id="pcur">0</strong> / <strong id="ptot">8</strong> — <span id="plabel">Démarrage…</span></div>
+      </div>
+      <div class="steps" id="steps-list"></div>
+    </div>
+
+    <!-- Zone finale -->
+    <div class="final" id="final-zone">
+      <div class="final-icon" id="final-icon">✅</div>
+      <div class="final-title" id="final-title">Diagnostic terminé</div>
+      <div class="final-msg" id="final-msg">
+        Le rapport a été envoyé à l'équipe Alteore.<br>
+        Vous pouvez maintenant fermer cette page.
+      </div>
+    </div>
+
+    <div class="small">
+      Identifiant rapport : <span id="report-id" style="font-family:monospace">—</span>
+    </div>
+
+  </div>
+</div>
+
+<!-- FIREBASE -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { initializeFirestore, doc, setDoc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const app = initializeApp({
+    apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain:"altiora-70599.firebaseapp.com",
+    projectId:"altiora-70599",
+    storageBucket:"altiora-70599.firebasestorage.app",
+    messagingSenderId:"120905555746",
+    appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+  });
+  const auth = getAuth(app);
+  const db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+  window._auth = auth; window._db = db;
+  window._doc = doc; window._setDoc = setDoc; window._getDoc = getDoc;
+  window._collection = collection; window._getDocs = getDocs;
+
+  onAuthStateChanged(auth, function(user){
+    if (!user) {
+      document.getElementById('login-zone').classList.add('show');
+      document.getElementById('ready-zone').style.display = 'none';
+      return;
+    }
+    window._user = user;
+    window._uid = user.uid;
+    document.getElementById('login-zone').classList.remove('show');
+    document.getElementById('ready-zone').style.display = 'block';
+    const name = user.displayName || (user.email ? user.email.split('@')[0] : 'Cliente');
+    document.getElementById('user-greet').textContent = name;
+  });
+</script>
+
+<script>
+// ── CAPTURE des logs console et erreurs (installée immédiatement) ──
+const _capturedLogs = [];
+const _capturedErrors = [];
+const MAX_LOGS = 200;
+
+function captureLog(level, args) {
+  try {
+    const msg = Array.from(args).map(function(a){
+      try { return typeof a === 'string' ? a : JSON.stringify(a); }
+      catch(e) { return String(a); }
+    }).join(' ').substring(0, 500);
+    _capturedLogs.push({ t: Date.now(), level: level, msg: msg });
+    if (_capturedLogs.length > MAX_LOGS) _capturedLogs.shift();
+  } catch(e) {}
+}
+
+const _origLog   = console.log.bind(console);
+const _origWarn  = console.warn.bind(console);
+const _origError = console.error.bind(console);
+console.log   = function(){ captureLog('log',  arguments); _origLog.apply(null, arguments);   };
+console.warn  = function(){ captureLog('warn', arguments); _origWarn.apply(null, arguments);  };
+console.error = function(){ captureLog('error',arguments); _origError.apply(null, arguments); };
+
+window.addEventListener('error', function(e){
+  _capturedErrors.push({
+    t: Date.now(),
+    type: 'error',
+    message: e.message || '',
+    filename: e.filename || '',
+    line: e.lineno || 0,
+    col: e.colno || 0,
+    stack: (e.error && e.error.stack) ? e.error.stack.substring(0, 1000) : ''
+  });
+});
+window.addEventListener('unhandledrejection', function(e){
+  _capturedErrors.push({
+    t: Date.now(),
+    type: 'unhandledrejection',
+    message: (e.reason && (e.reason.message || String(e.reason))) || 'Promise rejected',
+    stack: (e.reason && e.reason.stack) ? e.reason.stack.substring(0, 1000) : ''
+  });
+});
+
+// ── HELPERS ──
+function generateReportId() {
+  const d = new Date();
+  const ts = d.getFullYear() + String(d.getMonth()+1).padStart(2,'0') + String(d.getDate()).padStart(2,'0')
+           + '_' + String(d.getHours()).padStart(2,'0') + String(d.getMinutes()).padStart(2,'0') + String(d.getSeconds()).padStart(2,'0');
+  return 'rpt_' + ts + '_' + Math.random().toString(36).substring(2, 8);
+}
+
+function setStep(id, label, state, detail) {
+  const el = document.getElementById('step-' + id);
+  if (!el) return;
+  el.className = 'step ' + (state || '');
+  const ic = el.querySelector('.step-icon');
+  if (state === 'running') ic.innerHTML = '<span class="spin"></span>';
+  else if (state === 'done') ic.textContent = '✓';
+  else if (state === 'error') ic.textContent = '✕';
+  else ic.textContent = id;
+  el.querySelector('.step-name').textContent = label;
+  const det = el.querySelector('.step-detail');
+  if (detail) {
+    if (det) det.textContent = detail;
+    else {
+      const d = document.createElement('div');
+      d.className = 'step-detail';
+      d.textContent = detail;
+      el.querySelector('.step-name').parentElement.appendChild(d);
+    }
+  }
+}
+
+function setProgress(cur, total, label) {
+  document.getElementById('pcur').textContent = cur;
+  document.getElementById('ptot').textContent = total;
+  document.getElementById('plabel').textContent = label || '';
+  document.getElementById('pfill').style.width = ((cur / total) * 100) + '%';
+}
+
+const STEPS = [
+  { id: 1, label: 'Informations du compte' },
+  { id: 2, label: 'Connexion Firestore' },
+  { id: 3, label: 'Lecture du profil utilisateur' },
+  { id: 4, label: 'Connexions bancaires' },
+  { id: 5, label: 'Transactions en attente d\'import' },
+  { id: 6, label: 'Données pilotage récentes' },
+  { id: 7, label: 'Données brutes de la banque' },
+  { id: 8, label: 'Envoi du rapport' }
+];
+
+async function startDiagnostic() {
+  document.getElementById('ready-zone').style.display = 'none';
+  document.getElementById('running-zone').style.display = 'block';
+
+  // Render steps
+  const list = document.getElementById('steps-list');
+  list.innerHTML = STEPS.map(function(s){
+    return '<div class="step" id="step-' + s.id + '">'
+      + '<div class="step-icon">' + s.id + '</div>'
+      + '<div style="flex:1;min-width:0">'
+      + '<div class="step-name">' + s.label + '</div>'
+      + '</div></div>';
+  }).join('');
+
+  const reportId = generateReportId();
+  document.getElementById('report-id').textContent = reportId;
+
+  const report = {
+    reportId: reportId,
+    createdAt: new Date().toISOString(),
+    version: 'diag-v1',
+    meta: {},
+    firestore: {},
+    network: {},
+    tests: [],
+    console_logs: [],
+    errors: []
+  };
+
+  let errorCount = 0;
+  let warningCount = 0;
+
+  // ── Étape 1 : meta du compte ──
+  setProgress(1, 8, 'Informations du compte');
+  setStep(1, 'Informations du compte', 'running');
+  try {
+    report.meta = {
+      uid: window._uid,
+      email: window._user ? window._user.email : null,
+      displayName: window._user ? window._user.displayName : null,
+      emailVerified: window._user ? window._user.emailVerified : false,
+      providerId: window._user && window._user.providerData ? window._user.providerData.map(function(p){return p.providerId;}) : [],
+      url: window.location.href,
+      referrer: document.referrer || null,
+      userAgent: navigator.userAgent,
+      language: navigator.language,
+      languages: navigator.languages,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      tzOffset: new Date().getTimezoneOffset(),
+      screen: { w: window.screen.width, h: window.screen.height, dpr: window.devicePixelRatio },
+      viewport: { w: window.innerWidth, h: window.innerHeight },
+      onLine: navigator.onLine,
+      cookieEnabled: navigator.cookieEnabled,
+      platform: navigator.platform,
+      now: new Date().toISOString()
+    };
+    setStep(1, 'Informations du compte', 'done', report.meta.email || '');
+  } catch(e) {
+    setStep(1, 'Informations du compte', 'error', e.message);
+    report.tests.push({ step: 1, status: 'error', error: e.message });
+    errorCount++;
+  }
+  await sleep(300);
+
+  // ── Étape 2 : test connexion Firestore ──
+  setProgress(2, 8, 'Connexion Firestore');
+  setStep(2, 'Connexion Firestore', 'running');
+  try {
+    // Lecture sans danger : on lit le doc users/{uid}
+    const userRef = window._doc(window._db, 'users', window._uid);
+    const snap = await window._getDoc(userRef);
+    if (snap.exists()) {
+      setStep(2, 'Connexion Firestore', 'done', 'Lecture OK');
+    } else {
+      setStep(2, 'Connexion Firestore', 'done', 'Document users/{uid} introuvable');
+      warningCount++;
+    }
+  } catch(e) {
+    setStep(2, 'Connexion Firestore', 'error', e.message);
+    report.tests.push({ step: 2, status: 'error', error: e.message });
+    errorCount++;
+  }
+  await sleep(300);
+
+  // ── Étape 3 : profil utilisateur ──
+  setProgress(3, 8, 'Lecture du profil');
+  setStep(3, 'Lecture du profil utilisateur', 'running');
+  try {
+    const userRef = window._doc(window._db, 'users', window._uid);
+    const snap = await window._getDoc(userRef);
+    if (snap.exists()) {
+      const u = snap.data();
+      // Anonymiser : on garde les champs utiles SAUF stripeCustomerId, stripeSubscriptionId
+      report.firestore.user = {
+        plan: u.plan || null,
+        trialEnd: u.trialEnd || null,
+        promoCode: u.promoCode || null,
+        promoEnd: u.promoEnd || null,
+        promoLabel: u.promoLabel || null,
+        createdAt: u.createdAt || null,
+        email: u.email || null,
+        name: u.name || null,
+        hasStripeCustomer: !!u.stripeCustomerId,
+        hasStripeSubscription: !!u.stripeSubscriptionId
+      };
+      setStep(3, 'Lecture du profil utilisateur', 'done', 'plan : ' + (u.plan || '?'));
+    } else {
+      report.firestore.user = null;
+      setStep(3, 'Lecture du profil utilisateur', 'done', 'Aucun profil');
+      warningCount++;
+    }
+  } catch(e) {
+    setStep(3, 'Lecture du profil utilisateur', 'error', e.message);
+    report.tests.push({ step: 3, status: 'error', error: e.message });
+    errorCount++;
+  }
+  await sleep(300);
+
+  // ── Étape 4 : connexions bancaires (doc racine + sous-collection banks/) ──
+  setProgress(4, 8, 'Connexions bancaires');
+  setStep(4, 'Connexions bancaires', 'running');
+  try {
+    const result = { root: null, subBanks: [] };
+    // Doc racine
+    try {
+      const rootSnap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
+      if (rootSnap.exists()) {
+        const d = rootSnap.data() || {};
+        result.root = {
+          institution_id: d.institution_id || null,
+          institution_name: d.institution_name || null,
+          status: d.status || null,
+          requisition_id: d.requisition_id ? (String(d.requisition_id).substring(0,8) + '…') : null,
+          has_pending_requisition_id: !!d.pending_requisition_id,
+          accountsCount: Array.isArray(d.accounts) ? d.accounts.length : 0,
+          accounts: Array.isArray(d.accounts) ? d.accounts.map(function(a){
+            return {
+              accountId: a.accountId ? (String(a.accountId).substring(0,8)+'…') : null,
+              name: a.name || null,
+              ibanMasked: a.iban ? maskIban(a.iban) : null,
+              balance: a.balance || null,
+              balanceNum: a.balanceNum,
+              transactionsCount: a.transactionsCount,
+              debitsCount: a.debitsCount
+            };
+          }) : [],
+          selectedAccountsCount: Array.isArray(d.selectedAccounts) ? d.selectedAccounts.length : 0,
+          lastSync: d.lastSync || null,
+          createdAt: d.createdAt || null,
+          linkedTransactionsCount: Array.isArray(d.linkedTransactions) ? d.linkedTransactions.length : 0
+        };
+      }
+    } catch(e) { result.root_error = e.message; }
+    // Sous-collection
+    try {
+      const banksColl = window._collection(window._db, 'bank_connections', window._uid, 'banks');
+      const snap = await window._getDocs(banksColl);
+      snap.forEach(function(d){
+        const b = d.data() || {};
+        result.subBanks.push({
+          bankId: d.id,
+          institution_id: b.institution_id || null,
+          institution_name: b.institution_name || null,
+          status: b.status || null,
+          requisition_id: b.requisition_id ? (String(b.requisition_id).substring(0,8) + '…') : null,
+          accountsCount: Array.isArray(b.accounts) ? b.accounts.length : 0,
+          accounts: Array.isArray(b.accounts) ? b.accounts.map(function(a){
+            return {
+              accountId: a.accountId ? (String(a.accountId).substring(0,8)+'…') : null,
+              name: a.name || null,
+              ibanMasked: a.iban ? maskIban(a.iban) : null,
+              balance: a.balance || null,
+              balanceNum: a.balanceNum,
+              transactionsCount: a.transactionsCount,
+              debitsCount: a.debitsCount
+            };
+          }) : [],
+          selectedAccountsCount: Array.isArray(b.selectedAccounts) ? b.selectedAccounts.length : 0,
+          lastSync: b.lastSync || null,
+          createdAt: b.createdAt || null
+        });
+      });
+    } catch(e) { result.subBanks_error = e.message; }
+    report.firestore.bank_connections = result;
+    const totalBanks = (result.root ? 1 : 0) + result.subBanks.length;
+    setStep(4, 'Connexions bancaires', 'done', totalBanks + ' banque(s) trouvée(s)');
+  } catch(e) {
+    setStep(4, 'Connexions bancaires', 'error', e.message);
+    report.tests.push({ step: 4, status: 'error', error: e.message });
+    errorCount++;
+  }
+  await sleep(300);
+
+  // ── Étape 5 : bank_pending ──
+  setProgress(5, 8, 'Transactions en attente');
+  setStep(5, 'Transactions en attente d\'import', 'running');
+  try {
+    const snap = await window._getDoc(window._doc(window._db, 'bank_pending', window._uid));
+    if (snap.exists()) {
+      const d = snap.data() || {};
+      const txs = Array.isArray(d.transactions) ? d.transactions : [];
+      // Statistiques
+      const labels = {};
+      let blankLabels = 0;
+      let debits = 0, credits = 0;
+      const sample = [];
+      txs.forEach(function(t, i){
+        if (i < 5) sample.push(t); // 5 premiers complets
+        if (!t.label || t.label === 'Transaction bancaire') blankLabels++;
+        if (t.type === 'debit') debits++;
+        if (t.type === 'credit') credits++;
+        const lk = (t.label || '').substring(0, 30);
+        labels[lk] = (labels[lk] || 0) + 1;
+      });
+      report.firestore.bank_pending = {
+        transactionsCount: txs.length,
+        debitsCount: debits,
+        creditsCount: credits,
+        blankLabelsCount: blankLabels,
+        syncedAt: d.syncedAt || null,
+        sample: sample,
+        topLabels: Object.entries(labels).sort(function(a,b){return b[1]-a[1];}).slice(0, 10)
+      };
+      let detail = txs.length + ' tx ; ' + blankLabels + ' libellés vides';
+      if (blankLabels === txs.length && txs.length > 0) {
+        detail = '⚠ TOUS les libellés sont vides (' + txs.length + ' tx)';
+        warningCount++;
+      }
+      setStep(5, 'Transactions en attente d\'import', 'done', detail);
+    } else {
+      report.firestore.bank_pending = null;
+      setStep(5, 'Transactions en attente d\'import', 'done', 'Aucune transaction en attente');
+    }
+  } catch(e) {
+    setStep(5, 'Transactions en attente d\'import', 'error', e.message);
+    report.tests.push({ step: 5, status: 'error', error: e.message });
+    errorCount++;
+  }
+  await sleep(300);
+
+  // ── Étape 6 : pilotage récent (3 derniers mois) ──
+  setProgress(6, 8, 'Données pilotage récentes');
+  setStep(6, 'Données pilotage récentes', 'running');
+  try {
+    const months = [];
+    const now = new Date();
+    for (let i = 0; i < 3; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'));
+    }
+    const pilotage = {};
+    for (const m of months) {
+      try {
+        const snap = await window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', m));
+        if (snap.exists()) {
+          const d = snap.data() || {};
+          pilotage[m] = {
+            chargesFixe_count: Array.isArray(d.chargesFixe) ? d.chargesFixe.length : 0,
+            chargesVar_count: Array.isArray(d.chargesVar) ? d.chargesVar.length : 0,
+            leasing_count: Array.isArray(d.leasing) ? d.leasing.length : 0,
+            credits_count: Array.isArray(d.credits) ? d.credits.length : 0,
+            ca_count: Array.isArray(d.ca) ? d.ca.length : 0,
+            bank_sync_lines: countBankSyncLines(d),
+            bank_linked_lines: countBankLinkedLines(d)
+          };
+        } else {
+          pilotage[m] = null;
+        }
+      } catch(e) { pilotage[m] = { error: e.message }; }
+    }
+    report.firestore.pilotage = pilotage;
+    setStep(6, 'Données pilotage récentes', 'done', months.length + ' mois lus');
+  } catch(e) {
+    setStep(6, 'Données pilotage récentes', 'error', e.message);
+    report.tests.push({ step: 6, status: 'error', error: e.message });
+    errorCount++;
+  }
+  await sleep(300);
+
+  // ── Étape 7 : données brutes GoCardless ──
+  setProgress(7, 8, 'Données brutes de la banque');
+  setStep(7, 'Données brutes de la banque', 'running');
+  try {
+    // Récupérer un requisition_id quelque part
+    const banksToProbe = [];
+    if (report.firestore.bank_connections && report.firestore.bank_connections.subBanks) {
+      report.firestore.bank_connections.subBanks.forEach(function(b){
+        if (b.requisition_id) banksToProbe.push({ source: 'sub', bankId: b.bankId, name: b.institution_name });
+      });
+    }
+    // Pour la legacy, il faut lire le doc racine en clair (pas la version masquée)
+    let legacyReqId = null;
+    let legacyName = null;
+    try {
+      const rootSnap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
+      if (rootSnap.exists()) {
+        const d = rootSnap.data() || {};
+        if (d.requisition_id) {
+          legacyReqId = d.requisition_id;
+          legacyName = d.institution_name || 'legacy';
+          banksToProbe.push({ source: 'legacy', requisition_id: legacyReqId, name: legacyName });
+        }
+      }
+    } catch(e){}
+    // Récupérer les sub avec leur vrai requisition_id (non masqué)
+    const subRequisitionIds = {};
+    try {
+      const banksColl = window._collection(window._db, 'bank_connections', window._uid, 'banks');
+      const snap = await window._getDocs(banksColl);
+      snap.forEach(function(d){
+        const b = d.data() || {};
+        if (b.requisition_id) subRequisitionIds[d.id] = b.requisition_id;
+      });
+    } catch(e){}
+
+    if (banksToProbe.length === 0) {
+      report.bank_debug_raw = null;
+      setStep(7, 'Données brutes de la banque', 'done', 'Aucune banque à interroger');
+    } else {
+      report.bank_debug_raw = [];
+      let probed = 0;
+      for (const bp of banksToProbe) {
+        try {
+          const reqIdToUse = bp.requisition_id || subRequisitionIds[bp.bankId];
+          if (!reqIdToUse) continue;
+          const r = await fetch('/api/bank-debug', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requisition_id: reqIdToUse })
+          });
+          const txt = await r.text();
+          let parsed;
+          try { parsed = JSON.parse(txt); } catch(e) { parsed = { _parseError: true, raw: txt.substring(0, 500) }; }
+          report.bank_debug_raw.push({
+            bankName: bp.name,
+            source: bp.source,
+            httpStatus: r.status,
+            data: parsed
+          });
+          probed++;
+        } catch(e) {
+          report.bank_debug_raw.push({ bankName: bp.name, source: bp.source, error: e.message });
+        }
+      }
+      setStep(7, 'Données brutes de la banque', 'done', probed + '/' + banksToProbe.length + ' banque(s) interrogée(s)');
+    }
+  } catch(e) {
+    setStep(7, 'Données brutes de la banque', 'error', e.message);
+    report.tests.push({ step: 7, status: 'error', error: e.message });
+    errorCount++;
+  }
+  await sleep(300);
+
+  // ── Étape 8 : envoi du rapport ──
+  setProgress(8, 8, 'Envoi du rapport');
+  setStep(8, 'Envoi du rapport', 'running');
+  try {
+    // Joindre logs et erreurs capturés
+    report.console_logs = _capturedLogs.slice(-MAX_LOGS);
+    report.errors = _capturedErrors;
+    report.errorCount = errorCount + _capturedErrors.length;
+    report.warningCount = warningCount;
+
+    // Construire un résumé court
+    const summaryParts = [];
+    if (report.firestore.bank_pending && report.firestore.bank_pending.blankLabelsCount > 0
+        && report.firestore.bank_pending.blankLabelsCount === report.firestore.bank_pending.transactionsCount) {
+      summaryParts.push('TOUS les libellés bancaires sont vides (' + report.firestore.bank_pending.transactionsCount + ' tx).');
+    }
+    const totalBanks = (report.firestore.bank_connections.root ? 1 : 0) + report.firestore.bank_connections.subBanks.length;
+    summaryParts.push(totalBanks + ' banque(s) connectée(s)');
+    if (report.firestore.user) summaryParts.push('Plan : ' + (report.firestore.user.plan || '?'));
+    report.summary = summaryParts.join(' · ');
+
+    // Écrire dans Firestore
+    const reportRef = window._doc(window._db, 'debug_reports', reportId);
+    await window._setDoc(reportRef, {
+      uid: window._uid,
+      createdAt: report.createdAt,
+      report: report
+    });
+
+    // Notifier l'admin par email (non bloquant)
+    try {
+      await fetch('/api/send-debug-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reportId: reportId,
+          uid: window._uid,
+          email: report.meta.email || '',
+          name: (report.firestore.user && report.firestore.user.name) || report.meta.displayName || '',
+          summary: report.summary,
+          errorCount: report.errorCount,
+          warningCount: report.warningCount
+        })
+      });
+    } catch(e) { console.warn('Notification email échouée :', e.message); }
+
+    setStep(8, 'Envoi du rapport', 'done', 'Envoyé à l\'équipe Alteore');
+  } catch(e) {
+    setStep(8, 'Envoi du rapport', 'error', e.message);
+    errorCount++;
+    // Affichage erreur finale
+    document.getElementById('final-zone').classList.add('show');
+    document.getElementById('final-icon').textContent = '⚠️';
+    document.getElementById('final-title').textContent = 'Échec de l\'envoi';
+    document.getElementById('final-msg').innerHTML = 'Le rapport n\'a pas pu être envoyé.<br><strong>Erreur :</strong> ' + escapeHtml(e.message);
+    return;
+  }
+
+  // Final OK
+  await sleep(500);
+  document.getElementById('final-zone').classList.add('show');
+  if (errorCount > 0) {
+    document.getElementById('final-icon').textContent = '⚠️';
+    document.getElementById('final-title').textContent = 'Diagnostic envoyé (avec erreurs)';
+  } else {
+    document.getElementById('final-icon').textContent = '✅';
+    document.getElementById('final-title').textContent = 'Diagnostic envoyé';
+  }
+}
+
+// ── HELPERS ──
+function maskIban(iban) {
+  if (!iban || iban.length < 8) return iban;
+  return iban.substring(0, 4) + '…' + iban.substring(iban.length - 4);
+}
+function countBankSyncLines(d) {
+  let n = 0;
+  ['chargesFixe','chargesVar','leasing','credits'].forEach(function(s){
+    (Array.isArray(d[s]) ? d[s] : []).forEach(function(r){
+      if (r && r.source === 'bank_sync') n++;
+    });
+  });
+  return n;
+}
+function countBankLinkedLines(d) {
+  let n = 0;
+  ['chargesFixe','chargesVar','leasing','credits'].forEach(function(s){
+    (Array.isArray(d[s]) ? d[s] : []).forEach(function(r){
+      if (r && r.bankLink && r.bankLink.bankTxId) n++;
+    });
+  });
+  return n;
+}
+function escapeHtml(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function sleep(ms) { return new Promise(function(r){ setTimeout(r, ms); }); }
+
+window.startDiagnostic = startDiagnostic;
+</script>
+</body>
+</html>

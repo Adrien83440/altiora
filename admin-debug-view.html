@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>ALTEORE — Diagnostic admin</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Plus Jakarta Sans',sans-serif;background:#f3f4f6;color:#0f172a;font-size:13px}
+    .topbar{background:linear-gradient(135deg,#0f1f5c,#2563eb);color:white;padding:18px 28px;display:flex;align-items:center;justify-content:space-between}
+    .topbar h1{font-size:18px;font-weight:800}
+    .topbar .small{font-size:11px;opacity:.7;margin-top:2px}
+    .container{max-width:1240px;margin:24px auto;padding:0 24px;display:grid;grid-template-columns:340px 1fr;gap:20px}
+    .sidebar{background:white;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;max-height:calc(100vh - 80px);display:flex;flex-direction:column}
+    .sidebar h3{font-size:12px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.5px;padding:14px 16px;border-bottom:1px solid #e5e7eb}
+    .reports-list{overflow-y:auto;flex:1}
+    .report-item{padding:12px 16px;border-bottom:1px solid #f1f5f9;cursor:pointer;transition:background .15s}
+    .report-item:hover{background:#f9fafb}
+    .report-item.active{background:#eff6ff;border-left:3px solid #2563eb;padding-left:13px}
+    .report-name{font-size:13px;font-weight:700;color:#0f172a}
+    .report-meta{font-size:11px;color:#64748b;margin-top:2px}
+    .report-badges{display:flex;gap:4px;margin-top:6px}
+    .badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px}
+    .badge.err{background:#fee2e2;color:#b91c1c}
+    .badge.warn{background:#fef3c7;color:#92400e}
+    .badge.ok{background:#d1fae5;color:#065f46}
+    .main{background:white;border:1px solid #e5e7eb;border-radius:14px;padding:24px;min-height:600px}
+    .main h2{font-size:16px;font-weight:800;margin-bottom:6px}
+    .main .meta{font-size:12px;color:#64748b;margin-bottom:18px}
+    .section{margin-bottom:22px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden}
+    .section-head{background:#f9fafb;padding:10px 14px;font-size:12px;font-weight:700;color:#0f172a;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none}
+    .section-head:hover{background:#f1f5f9}
+    .section-body{padding:14px;font-size:12px;line-height:1.6;display:none}
+    .section.open .section-body{display:block}
+    .section-head .arrow{font-size:10px;color:#94a3b8;transition:transform .2s}
+    .section.open .arrow{transform:rotate(90deg)}
+    pre{background:#1a1f36;color:#e2e8f0;padding:12px 14px;border-radius:8px;font-size:11px;line-height:1.5;overflow-x:auto;max-height:500px;overflow-y:auto;white-space:pre;font-family:'SF Mono',Consolas,monospace}
+    .kv{display:grid;grid-template-columns:200px 1fr;gap:6px 14px;font-size:12px}
+    .kv .k{color:#64748b;font-weight:600}
+    .kv .v{color:#0f172a;font-family:'SF Mono',Consolas,monospace;font-size:11px;word-break:break-all}
+    .empty{text-align:center;padding:60px 20px;color:#94a3b8;font-size:13px}
+    .error-msg{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:14px 18px;border-radius:10px;font-size:13px;margin:24px}
+    .login-form{max-width:400px;margin:80px auto;background:white;border-radius:14px;padding:32px;box-shadow:0 8px 24px rgba(0,0,0,.06)}
+    .login-form h2{font-size:18px;font-weight:800;margin-bottom:6px}
+    .login-form p{font-size:13px;color:#64748b;margin-bottom:20px}
+    .login-form input{width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-family:inherit;font-size:13px;outline:none;margin-bottom:10px}
+    .login-form input:focus{border-color:#2563eb}
+    .login-form button{width:100%;background:linear-gradient(135deg,#2563eb,#60a5fa);color:white;font-weight:700;padding:12px;border:none;border-radius:10px;cursor:pointer;font-family:inherit;font-size:14px}
+    .summary-box{background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:12px 14px;font-size:12px;color:#1e40af;margin-bottom:18px;line-height:1.6}
+    .summary-box strong{color:#1e3a8a}
+    .insight{background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;font-size:12px;color:#92400e;margin-bottom:12px;line-height:1.6}
+    .insight strong{color:#78350f}
+    .insight.critical{background:#fee2e2;border-color:#fecaca;color:#991b1b}
+    .insight.critical strong{color:#7f1d1d}
+  </style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen" style="display:none">
+  <div class="login-form">
+    <h2>🔒 Accès admin</h2>
+    <p>Connectez-vous avec votre compte admin pour consulter les diagnostics.</p>
+    <input type="email" id="adm-email" placeholder="Email" />
+    <input type="password" id="adm-password" placeholder="Mot de passe" />
+    <button onclick="adminLogin()">Se connecter</button>
+    <div id="login-err" style="color:#dc2626;font-size:12px;margin-top:10px;display:none"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" style="display:none">
+  <div class="topbar">
+    <div>
+      <h1>🩺 Diagnostics Alteore</h1>
+      <div class="small" id="adm-info">—</div>
+    </div>
+    <button onclick="adminLogout()" style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:white;font-weight:600;padding:7px 14px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:12px">Déconnexion</button>
+  </div>
+
+  <div class="container">
+    <aside class="sidebar">
+      <h3>Rapports récents</h3>
+      <div class="reports-list" id="reports-list">
+        <div class="empty">Chargement…</div>
+      </div>
+    </aside>
+
+    <main class="main" id="main-content">
+      <div class="empty">← Sélectionnez un rapport dans la liste pour le consulter</div>
+    </main>
+  </div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+  import { initializeFirestore, doc, getDoc, collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const app = initializeApp({
+    apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain:"altiora-70599.firebaseapp.com",
+    projectId:"altiora-70599",
+    storageBucket:"altiora-70599.firebasestorage.app",
+    messagingSenderId:"120905555746",
+    appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+  });
+  const auth = getAuth(app);
+  const db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+  window._auth = auth; window._db = db;
+  window._doc = doc; window._getDoc = getDoc;
+  window._collection = collection; window._getDocs = getDocs;
+  window._query = query; window._orderBy = orderBy; window._limit = limit;
+  window._signIn = signInWithEmailAndPassword;
+  window._signOut = signOut;
+
+  const ADMIN_EMAIL = 'contact@adrienemily.com';
+
+  onAuthStateChanged(auth, function(user){
+    if (!user) {
+      document.getElementById('login-screen').style.display = 'block';
+      document.getElementById('app').style.display = 'none';
+      return;
+    }
+    if (user.email !== ADMIN_EMAIL) {
+      document.getElementById('login-screen').style.display = 'block';
+      document.getElementById('app').style.display = 'none';
+      const err = document.getElementById('login-err');
+      err.textContent = '⛔ Cet email n\'est pas autorisé (' + user.email + ')';
+      err.style.display = 'block';
+      signOut(auth);
+      return;
+    }
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    document.getElementById('adm-info').textContent = user.email;
+    loadReports();
+    // Si un id est passé en URL, l'ouvrir
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('id');
+    if (id) loadReport(id);
+  });
+</script>
+
+<script>
+async function adminLogin() {
+  const email = document.getElementById('adm-email').value.trim();
+  const pwd = document.getElementById('adm-password').value;
+  const errEl = document.getElementById('login-err');
+  errEl.style.display = 'none';
+  if (!email || !pwd) return;
+  try {
+    await window._signIn(window._auth, email, pwd);
+  } catch(e) {
+    errEl.textContent = '❌ ' + (e.message || 'Erreur de connexion');
+    errEl.style.display = 'block';
+  }
+}
+
+async function adminLogout() {
+  await window._signOut(window._auth);
+  window.location.reload();
+}
+
+async function loadReports() {
+  const list = document.getElementById('reports-list');
+  list.innerHTML = '<div class="empty">Chargement…</div>';
+  try {
+    const coll = window._collection(window._db, 'debug_reports');
+    const q = window._query(coll, window._orderBy('createdAt', 'desc'), window._limit(50));
+    const snap = await window._getDocs(q);
+    if (snap.empty) {
+      list.innerHTML = '<div class="empty">Aucun rapport pour l\'instant.</div>';
+      return;
+    }
+    const items = [];
+    snap.forEach(function(d){
+      const data = d.data() || {};
+      const r = data.report || {};
+      items.push({
+        id: d.id,
+        uid: data.uid || '?',
+        createdAt: data.createdAt || r.createdAt || '',
+        email: (r.meta && r.meta.email) || '?',
+        name: (r.firestore && r.firestore.user && r.firestore.user.name) || (r.meta && r.meta.displayName) || '',
+        plan: (r.firestore && r.firestore.user && r.firestore.user.plan) || '?',
+        errorCount: r.errorCount || 0,
+        warningCount: r.warningCount || 0,
+        summary: r.summary || ''
+      });
+    });
+
+    list.innerHTML = items.map(function(it){
+      const dt = it.createdAt ? new Date(it.createdAt) : null;
+      const dtTxt = dt ? dt.toLocaleString('fr-FR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '?';
+      const badges = [];
+      if (it.errorCount > 0) badges.push('<span class="badge err">' + it.errorCount + ' err</span>');
+      if (it.warningCount > 0) badges.push('<span class="badge warn">' + it.warningCount + ' warn</span>');
+      if (it.errorCount === 0 && it.warningCount === 0) badges.push('<span class="badge ok">OK</span>');
+      return '<div class="report-item" data-id="' + it.id + '" onclick="loadReport(\'' + it.id + '\')">'
+        + '<div class="report-name">' + escapeHtml(it.name || it.email) + '</div>'
+        + '<div class="report-meta">' + escapeHtml(it.email) + ' · ' + it.plan + ' · ' + dtTxt + '</div>'
+        + '<div class="report-badges">' + badges.join('') + '</div>'
+        + '</div>';
+    }).join('');
+  } catch(e) {
+    list.innerHTML = '<div class="error-msg">Erreur : ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function loadReport(reportId) {
+  document.querySelectorAll('.report-item').forEach(function(el){ el.classList.remove('active'); });
+  const sel = document.querySelector('.report-item[data-id="' + reportId + '"]');
+  if (sel) sel.classList.add('active');
+
+  const main = document.getElementById('main-content');
+  main.innerHTML = '<div class="empty">Chargement du rapport…</div>';
+
+  try {
+    const ref = window._doc(window._db, 'debug_reports', reportId);
+    const snap = await window._getDoc(ref);
+    if (!snap.exists()) {
+      main.innerHTML = '<div class="error-msg">Rapport introuvable</div>';
+      return;
+    }
+    const data = snap.data();
+    renderReport(data);
+  } catch(e) {
+    main.innerHTML = '<div class="error-msg">Erreur : ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function renderReport(data) {
+  const r = data.report || {};
+  const meta = r.meta || {};
+  const fs = r.firestore || {};
+  const main = document.getElementById('main-content');
+
+  const dt = data.createdAt ? new Date(data.createdAt) : null;
+  const dtTxt = dt ? dt.toLocaleString('fr-FR') : '?';
+
+  // Insights automatiques
+  const insights = [];
+  if (fs.bank_pending && fs.bank_pending.transactionsCount > 0
+      && fs.bank_pending.blankLabelsCount === fs.bank_pending.transactionsCount) {
+    insights.push('<div class="insight critical"><strong>🚨 Tous les libellés bancaires sont vides</strong> (' + fs.bank_pending.transactionsCount + ' transactions). Probablement un champ libellé non extrait par <code>extractLabel()</code> dans <code>api/bank-sync.js</code>. Vérifie les <code>transactions_raw_keys</code> et <code>transactions_sample_booked</code> dans la section <strong>Données brutes GoCardless</strong> ci-dessous pour identifier le bon champ.</div>');
+  } else if (fs.bank_pending && fs.bank_pending.blankLabelsCount > 0) {
+    const pct = Math.round((fs.bank_pending.blankLabelsCount / fs.bank_pending.transactionsCount) * 100);
+    insights.push('<div class="insight"><strong>⚠ Libellés vides partiels :</strong> ' + fs.bank_pending.blankLabelsCount + ' / ' + fs.bank_pending.transactionsCount + ' (' + pct + '%) transactions sans libellé.</div>');
+  }
+  if (r.errorCount > 0) {
+    insights.push('<div class="insight critical"><strong>🚨 ' + r.errorCount + ' erreur(s) JS détectée(s).</strong> Voir la section <strong>Erreurs JavaScript</strong>.</div>');
+  }
+  const totalBanks = (fs.bank_connections && fs.bank_connections.root ? 1 : 0)
+                   + ((fs.bank_connections && fs.bank_connections.subBanks) ? fs.bank_connections.subBanks.length : 0);
+  if (totalBanks === 0) {
+    insights.push('<div class="insight"><strong>ℹ️ Aucune banque connectée</strong> pour cet utilisateur.</div>');
+  }
+
+  let html = '<h2>' + escapeHtml((fs.user && fs.user.name) || meta.displayName || meta.email || 'Sans nom') + '</h2>';
+  html += '<div class="meta">' + escapeHtml(meta.email || '?') + ' · UID <code>' + escapeHtml(data.uid || '?') + '</code> · ' + dtTxt + '</div>';
+
+  if (r.summary) {
+    html += '<div class="summary-box"><strong>Résumé :</strong> ' + escapeHtml(r.summary) + '</div>';
+  }
+  insights.forEach(function(i){ html += i; });
+
+  // Sections déroulantes
+  html += renderSection('1. Compte & environnement', renderKV({
+    'UID': data.uid,
+    'Email': meta.email,
+    'Nom affiché': meta.displayName,
+    'Email vérifié': meta.emailVerified ? 'oui' : 'non',
+    'Plan': fs.user ? fs.user.plan : '?',
+    'Trial fin': fs.user ? fs.user.trialEnd : '—',
+    'Stripe customer': (fs.user && fs.user.hasStripeCustomer) ? 'oui' : 'non',
+    'Stripe subscription': (fs.user && fs.user.hasStripeSubscription) ? 'oui' : 'non',
+    'URL': meta.url,
+    'User-Agent': meta.userAgent,
+    'Plateforme': meta.platform,
+    'Langue': meta.language,
+    'Timezone': meta.timezone,
+    'Écran': meta.screen ? (meta.screen.w + '×' + meta.screen.h + ' (DPR ' + meta.screen.dpr + ')') : '?',
+    'Viewport': meta.viewport ? (meta.viewport.w + '×' + meta.viewport.h) : '?',
+    'En ligne': meta.onLine ? 'oui' : 'non'
+  }), true);
+
+  // Connexions bancaires
+  let bankHtml = '';
+  if (fs.bank_connections) {
+    const bc = fs.bank_connections;
+    if (bc.root) {
+      bankHtml += '<h4 style="font-size:12px;font-weight:700;margin-bottom:6px;color:#0f172a">Banque legacy (doc racine)</h4>';
+      bankHtml += '<pre>' + escapeHtml(JSON.stringify(bc.root, null, 2)) + '</pre>';
+    }
+    if (bc.subBanks && bc.subBanks.length > 0) {
+      bankHtml += '<h4 style="font-size:12px;font-weight:700;margin:14px 0 6px;color:#0f172a">Sous-collection banks/ (' + bc.subBanks.length + ')</h4>';
+      bankHtml += '<pre>' + escapeHtml(JSON.stringify(bc.subBanks, null, 2)) + '</pre>';
+    }
+    if (!bc.root && (!bc.subBanks || bc.subBanks.length === 0)) {
+      bankHtml = '<div style="color:#94a3b8;font-style:italic">Aucune banque connectée</div>';
+    }
+  } else {
+    bankHtml = '<div style="color:#94a3b8;font-style:italic">Pas de données</div>';
+  }
+  html += renderSection('2. Connexions bancaires (' + totalBanks + ')', bankHtml, true);
+
+  // bank_pending
+  if (fs.bank_pending) {
+    let bpHtml = renderKV({
+      'Total transactions': fs.bank_pending.transactionsCount,
+      'Débits': fs.bank_pending.debitsCount,
+      'Encaissements': fs.bank_pending.creditsCount,
+      'Libellés vides': fs.bank_pending.blankLabelsCount + ' / ' + fs.bank_pending.transactionsCount,
+      'Dernière sync': fs.bank_pending.syncedAt
+    });
+    if (fs.bank_pending.topLabels && fs.bank_pending.topLabels.length > 0) {
+      bpHtml += '<h4 style="font-size:11px;font-weight:700;margin:12px 0 6px;color:#475569">Top libellés :</h4>';
+      bpHtml += '<pre>' + escapeHtml(fs.bank_pending.topLabels.map(function(p){return p[1] + '× "' + p[0] + '"';}).join('\n')) + '</pre>';
+    }
+    if (fs.bank_pending.sample && fs.bank_pending.sample.length > 0) {
+      bpHtml += '<h4 style="font-size:11px;font-weight:700;margin:12px 0 6px;color:#475569">Échantillon (5 premières) :</h4>';
+      bpHtml += '<pre>' + escapeHtml(JSON.stringify(fs.bank_pending.sample, null, 2)) + '</pre>';
+    }
+    html += renderSection('3. Transactions en attente (bank_pending)', bpHtml, true);
+  } else {
+    html += renderSection('3. Transactions en attente (bank_pending)', '<div style="color:#94a3b8;font-style:italic">Aucune</div>');
+  }
+
+  // Pilotage
+  if (fs.pilotage) {
+    let pHtml = '<pre>' + escapeHtml(JSON.stringify(fs.pilotage, null, 2)) + '</pre>';
+    html += renderSection('4. Pilotage récent (3 derniers mois)', pHtml);
+  }
+
+  // Données brutes GoCardless — section CRITIQUE pour le bug de libellés
+  if (r.bank_debug_raw) {
+    if (Array.isArray(r.bank_debug_raw) && r.bank_debug_raw.length > 0) {
+      let dbHtml = '';
+      r.bank_debug_raw.forEach(function(b, i){
+        dbHtml += '<h4 style="font-size:12px;font-weight:700;margin:' + (i===0?'0':'14px') + ' 0 6px;color:#0f172a">' + escapeHtml(b.bankName || 'Banque ' + (i+1)) + ' (' + b.source + ')</h4>';
+        if (b.error) {
+          dbHtml += '<div class="error-msg" style="margin:0 0 8px">Erreur : ' + escapeHtml(b.error) + '</div>';
+        } else {
+          dbHtml += '<pre>' + escapeHtml(JSON.stringify(b.data, null, 2)) + '</pre>';
+        }
+      });
+      html += renderSection('5. 🏦 Données brutes GoCardless', dbHtml, true);
+    } else {
+      html += renderSection('5. 🏦 Données brutes GoCardless', '<div style="color:#94a3b8;font-style:italic">Aucune banque interrogée</div>');
+    }
+  }
+
+  // Logs console
+  if (r.console_logs && r.console_logs.length > 0) {
+    let lHtml = '<pre>' + r.console_logs.map(function(l){
+      const t = new Date(l.t).toLocaleTimeString('fr-FR');
+      const lvlColor = l.level === 'error' ? '#fca5a5' : l.level === 'warn' ? '#fcd34d' : '#cbd5e1';
+      return '<span style="color:' + lvlColor + '">[' + t + '] ' + l.level + '</span> ' + escapeHtml(l.msg);
+    }).join('\n') + '</pre>';
+    html += renderSection('6. Logs console (' + r.console_logs.length + ')', lHtml);
+  }
+
+  // Erreurs JavaScript
+  if (r.errors && r.errors.length > 0) {
+    let eHtml = '<pre>' + escapeHtml(JSON.stringify(r.errors, null, 2)) + '</pre>';
+    html += renderSection('7. ⚠ Erreurs JavaScript (' + r.errors.length + ')', eHtml, true);
+  }
+
+  // Tests / erreurs internes du diagnostic
+  if (r.tests && r.tests.length > 0) {
+    let tHtml = '<pre>' + escapeHtml(JSON.stringify(r.tests, null, 2)) + '</pre>';
+    html += renderSection('8. Erreurs internes du diagnostic', tHtml);
+  }
+
+  // Rapport complet brut
+  html += renderSection('9. Rapport complet (JSON brut)', '<pre>' + escapeHtml(JSON.stringify(r, null, 2)) + '</pre>');
+
+  main.innerHTML = html;
+}
+
+function renderSection(title, content, openByDefault) {
+  const id = 'sec-' + Math.random().toString(36).substring(2, 9);
+  return '<div class="section ' + (openByDefault ? 'open' : '') + '" id="' + id + '">'
+    + '<div class="section-head" onclick="this.parentElement.classList.toggle(\'open\')">'
+    + '<span>' + title + '</span><span class="arrow">▶</span>'
+    + '</div>'
+    + '<div class="section-body">' + content + '</div>'
+    + '</div>';
+}
+
+function renderKV(obj) {
+  let html = '<div class="kv">';
+  Object.entries(obj).forEach(function(p){
+    const v = (p[1] === null || p[1] === undefined || p[1] === '') ? '—' : String(p[1]);
+    html += '<div class="k">' + escapeHtml(p[0]) + '</div><div class="v">' + escapeHtml(v) + '</div>';
+  });
+  html += '</div>';
+  return html;
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+window.adminLogin = adminLogin;
+window.adminLogout = adminLogout;
+window.loadReport = loadReport;
+</script>
+</body>
+</html>
