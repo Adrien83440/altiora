@@ -2292,6 +2292,24 @@ function scheduleDirURSSAF() {
   }, 1000);
 }
 
+// Petit badge 🔗 affiché à côté du fournisseur quand la ligne a été pointée
+// via le rapprochement bancaire (bank-validation.html). Purement visuel.
+function bankLinkBadge(r){
+  if(!r||!r.bankLink||!r.bankLink.bankTxId) return '';
+  var b=r.bankLink;
+  var parts=[];
+  if(b.bankDate)        parts.push(b.bankDate);
+  if(b.bankLabel)       parts.push(b.bankLabel);
+  if(b.bankMontantTTC)  parts.push(b.bankMontantTTC+' € TTC');
+  var line2=parts.join(' · ');
+  var line3=b.accountName?('Compte : '+b.accountName):'';
+  var tip='🔗 Pointée via rapprochement bancaire';
+  if(line2) tip+='\n'+line2;
+  if(line3) tip+='\n'+line3;
+  tip=tip.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return ' <span class="bank-link-icon" title="'+tip+'" style="display:inline-block;font-size:11px;color:#4338ca;margin-left:3px;cursor:help;vertical-align:middle;user-select:none">🔗</span>';
+}
+
 function renderCharges(rows, key) {
   var tbId = key==='chargesFixe' ? 'cf-tbody' : key==='chargesVar' ? 'cv-tbody' : 'leas-tbody';
   var isFixe = key === 'chargesFixe';
@@ -2305,9 +2323,11 @@ function renderCharges(rows, key) {
     var safeNom = nom.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     var ficheBtn = nom ? ' <button class="btn-fiche' + (ficheExists?' has-fiche':'') + '" title="' + (ficheExists?'Voir fiche':'Créer fiche') + '" onclick="event.stopPropagation();openFicheByName(\'' + safeNom + '\')">' + (ficheExists?'🏢':'📋') + '</button>' : '';
     var isExcep = key==='chargesVar' && r.exceptionnel;
-    return '<tr style="' + (isExcep ? 'background:rgba(249,115,22,0.06);' : '') + '">' +
+    var isBankLinked = !!(r.bankLink && r.bankLink.bankTxId);
+    var rowBg = isExcep ? 'background:rgba(249,115,22,0.06);' : (isBankLinked ? 'background:rgba(99,102,241,0.05);' : '');
+    return '<tr style="' + rowBg + '">' +
       '<td><select class="cell-input" style="width:55px" onchange="_data[\'' + key + '\'][' + i + '].pointe=this.value"><option' + (r.pointe==='Oui'?' selected':'') + '>Oui</option><option' + (r.pointe==='Non'?' selected':'') + '>Non</option></select></td>' +
-      '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + supplierInputHtml(key, i, r.fournisseur||'') + ficheBtn + '</div></td>' +
+      '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + supplierInputHtml(key, i, r.fournisseur||'') + ficheBtn + bankLinkBadge(r) + '</div></td>' +
       '<td>' + catalogInputHtml('types', key+'-typ-'+i, r.type||'', 'width:95px', 'Type', '_data[\''+key+'\']['+i+'].type=this.value') + '</td>' +
       '<td><input class="cell-input" style="width:76px' + (!window._htMode?';color:var(--muted)':'') + '" type="text" inputmode="decimal" placeholder="' + (window._htMode?'HT':'auto') + '" value="' + (r.montantHT||'') + '" id="' + key + '-ht-' + i + '" oninput="updateChargeHT(\'' + key + '\',' + i + ',this.value)"/></td>' +
       '<td><select class="cell-input" style="width:55px" onchange="updateChargeTVARate(\'' + key + '\',' + i + ',this.value)">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + (rate==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select></td>' +
@@ -2534,9 +2554,11 @@ function renderCredits(rows) {
     var principal  = parseFloat((r.montant||'').toString().replace(',','.')) || 0;
     var interet    = calcCreditInteret(r);
     var mensualite = principal + interet;
-    return '<tr class="row-principal" id="cred-row-' + i + '">' +
+    var isBankLinkedC = !!(r.bankLink && r.bankLink.bankTxId);
+    var trAttr = ' class="row-principal" id="cred-row-' + i + '"' + (isBankLinkedC ? ' style="background:rgba(99,102,241,0.05)"' : '');
+    return '<tr' + trAttr + '>' +
       '<td><select class="cell-input" style="width:58px" onchange="_data.credits[' + i + '].pointe=this.value"><option' + (r.pointe==='Oui'?' selected':'') + '>Oui</option><option' + (r.pointe==='Non'?' selected':'') + '>Non</option></select></td>' +
-      '<td>' + catalogInputHtml('clients', 'credN-'+i, r.fournisseur||'', 'width:120px', 'Nom crédit', 'updateCreditField('+i+',\'fournisseur\',this.value)') + '</td>' +
+      '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + catalogInputHtml('clients', 'credN-'+i, r.fournisseur||'', 'width:120px', 'Nom crédit', 'updateCreditField('+i+',\'fournisseur\',this.value)') + bankLinkBadge(r) + '</div></td>' +
       '<td><input class="cell-input" style="width:85px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="updateCreditMontant(' + i + ',this.value)"/></td>' +
       '<td><input class="cell-input" style="width:65px" type="text" inputmode="decimal" placeholder="%" value="' + (r.tauxInteret||'') + '" oninput="updateCreditTaux(' + i + ',this.value)"/></td>' +
       '<td><select class="cell-input" style="width:110px" onchange="_data.credits[' + i + '].amort=this.value;scheduleSave()">' +
