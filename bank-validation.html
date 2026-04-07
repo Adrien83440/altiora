@@ -181,6 +181,30 @@
     .kpi-card.teal .kpi-icon,.kpi.teal .kpi-icon,.kpi.teal .kpi-ico{background:rgba(13,148,136,0.1) !important;border-color:rgba(13,148,136,0.15) !important}
     .kpi-val,.kpi-lbl,.kpi-value,.kpi-label,.kpi-sub,.kpi-n1,.sum-value,.sum-label,.sum-sub,.kpi-trend,.kpi-progress,.kpi-progress-bar,.kpi-progress-label,.kpi-ico{position:relative;z-index:1}
 
+    /* === Rapprochement bancaire === */
+    .match-bank{border:2px solid #6366f1;background:#eef2ff;border-radius:10px;padding:12px;}
+    .match-bank-lbl{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:#4338ca;margin-bottom:6px;}
+    .match-bank .field{font-size:12px;margin-bottom:3px;}
+    .match-bank .field strong{font-weight:700;}
+    .match-candidates{display:flex;flex-direction:column;gap:6px;}
+    .match-cand{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;cursor:pointer;transition:all .15s;background:white;}
+    .match-cand:hover{border-color:var(--blue-main);background:var(--blue-ghost);}
+    .match-cand.selected{border-color:var(--blue-main);background:var(--blue-ghost);box-shadow:0 0 0 3px rgba(37,99,235,0.1);}
+    .match-cand input[type=radio]{margin:0;flex-shrink:0;}
+    .match-cand-info{flex:1;font-size:12px;min-width:0;}
+    .match-cand-info strong{font-weight:700;display:block;margin-bottom:2px;}
+    .match-cand-meta{font-size:11px;color:var(--muted);}
+    .match-cand-amt{font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;}
+    .match-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:#eef2ff;color:#4338ca;cursor:pointer;border:1px solid #c7d2fe;}
+    .match-badge:hover{background:#e0e7ff;}
+    .btn-match{background:linear-gradient(135deg,#6366f1,#818cf8);color:white;border:none;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-weight:700;}
+    .btn-match:hover{opacity:.9;}
+    .filter-btn.f-match{border-color:#6366f1;color:#4338ca;}
+    .filter-btn.f-match.active{background:#6366f1;color:white;border-color:#6366f1;}
+    .stat-val.indigo{color:#4338ca;}
+    .tx-table tr.s-linked td{background:#f5f3ff;}
+    .linked-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:#ede9fe;color:#5b21b6;}
+
 </style>
 </head>
 <body>
@@ -205,19 +229,28 @@
   </div>
 </div>
 
-<!-- MODAL DOUBLON -->
-<div class="modal-overlay" id="dblModal">
-  <div class="modal">
-    <div class="modal-head"><h3>⚠️ Entrée similaire dans Pilotage</h3><button class="modal-close" onclick="closeDblModal()">✕</button></div>
-    <div class="modal-body">
-      <p style="font-size:13px;color:var(--muted)">Une entrée proche existe déjà ce mois-ci. Que faire ?</p>
-      <div class="dbl-compare" id="dbl-compare"></div>
+<!-- MODAL RAPPROCHEMENT -->
+<div class="modal-overlay" id="matchModal">
+  <div class="modal" style="max-width:640px">
+    <div class="modal-head">
+      <h3>🔗 Rapprochement bancaire — <span id="match-progress" style="color:var(--blue-main)">1 / 1</span></h3>
+      <button class="modal-close" onclick="closeMatchModal()">✕</button>
     </div>
-    <div class="modal-foot">
-      <button class="btn btn-outline btn-sm" onclick="closeDblModal()">Annuler</button>
-      <button class="btn btn-outline btn-sm" onclick="dblIgnore()" style="color:#6b7280">🚫 Ignorer la transaction</button>
-      <button class="btn btn-outline btn-sm" onclick="dblKeepBoth()">Garder les deux</button>
-      <button class="btn btn-primary btn-sm" onclick="dblReplace()">Remplacer par la banque</button>
+    <div class="modal-body">
+      <p style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.5">
+        Cette opération bancaire correspond-elle à une charge déjà saisie dans Pilotage&nbsp;? Si oui, sélectionnez-la : la charge sera marquée <strong>pointée</strong> et la transaction bancaire ne créera pas de doublon.
+      </p>
+      <div class="match-bank" id="match-bank"></div>
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--muted);margin:14px 0 8px;letter-spacing:.3px">
+        Charges candidates dans Pilotage <span style="color:var(--text)">(montant TTC identique)</span>
+      </div>
+      <div class="match-candidates" id="match-candidates"></div>
+    </div>
+    <div class="modal-foot" style="flex-wrap:wrap">
+      <button class="btn btn-outline btn-sm" onclick="matchIgnore()" style="color:#6b7280">🚫 Ignorer la transaction</button>
+      <button class="btn btn-outline btn-sm" onclick="matchNoMatch()">Pas de match, c'est nouveau</button>
+      <button class="btn btn-outline btn-sm" onclick="matchSkipNext()">Passer →</button>
+      <button class="btn btn-primary btn-sm" id="match-link-btn" onclick="linkSelectedMatch()" disabled>🔗 Lier et pointer</button>
     </div>
   </div>
 </div>
@@ -287,6 +320,7 @@ const CAT_LABELS={chargesFixe:'🏗 Charge fixe',chargesVar:'📦 Charge variabl
 const CAT_CLS={chargesFixe:'d-cf',chargesVar:'d-cv',leasing:'d-leas',ignore:'d-ign'};
 
 let _txList=[], _pilData={}, _rules=[], _filter='all', _search='', _dblCtx=null;
+let _matchQueue=[], _matchIdx=0, _selectedMatchIdx=null;
 let _sortCol='date', _sortDir='desc'; // tri par défaut : date décroissante
 
 function sortBy(col){
@@ -338,11 +372,19 @@ async function loadPending(){
     const allTx=raw.transactions||[];
     const syncedAt=raw.syncedAt;
 
-    // Charger Pilotage existant pour détecter doublons
-    const months=[...new Set(allTx.map(t=>t.monthKey).filter(Boolean))];
-    for(const m of months){
-      const ds=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',m));
-      _pilData[m]=ds.exists()?ds.data():{};
+    // Charger Pilotage existant pour M-1, M, M+1 de chaque mois rencontré
+    const monthsSet=new Set();
+    for(const t of allTx){
+      if(!t.monthKey) continue;
+      monthsSet.add(t.monthKey);
+      monthsSet.add(monthOffset(t.monthKey,-1));
+      monthsSet.add(monthOffset(t.monthKey, 1));
+    }
+    for(const m of monthsSet){
+      try{
+        const ds=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',m));
+        _pilData[m]=ds.exists()?ds.data():{};
+      }catch(e){_pilData[m]={};}
     }
 
     _txList=allTx.map((tx,idx)=>{
@@ -351,7 +393,7 @@ async function loadPending(){
       const isDebit=tx.type==='debit'||raw_amt<0;
       const montant=Math.abs(raw_amt);
       const cat=isDebit?applyCat(tx.label):null;
-      return{
+      const txObj={
         id:idx, date:tx.date||'', monthKey:tx.monthKey||'',
         label:tx.label||'', customLabel:tx.label||'',
         customDate:tx.date||'',
@@ -360,9 +402,12 @@ async function loadPending(){
         bankTxId:tx.bankTxId||('bk_'+idx),
         cat, status:'pending',
         tvaRate:null,
-        doublonInfo:isDebit?detectDbl(tx,montant):null,
+        matches:[],
+        matchResolved:false,
         replaceMode:false,
       };
+      if(isDebit) txObj.matches=detectMatches(txObj,montant);
+      return txObj;
     });
 
     if(syncedAt){
@@ -381,26 +426,85 @@ function applyCat(label){
   return 'chargesVar';
 }
 
-function detectDbl(tx,montant){
-  const m=_pilData[tx.monthKey];
-  if(!m) return null;
-  var txLabel = (tx.label||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
-  if(txLabel.length < 3) return null;
-  for(const sec of ['chargesFixe','chargesVar','leasing']){
-    for(const r of (m[sec]||[])){
-      const exA=parseFloat(r.montantHT||r.montant||0);
-      if(!exA) continue;
-      var fournLabel = (r.fournisseur||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
-      if(!fournLabel) continue;
-      // Match par montant exact (écart < 0.02€) ET nom similaire
-      const sameAmt=Math.abs(exA-montant)<0.02;
-      const sameLbl=fournLabel.length>=3 && txLabel.length>=3 && (txLabel.includes(fournLabel) || fournLabel.includes(txLabel));
-      // OU match par nom très similaire (contenu dans l'autre) avec montant proche (< 20% d'écart)
-      const closeAmt=exA>0 && Math.abs(exA-montant)/exA < 0.2;
-      if((sameAmt && sameLbl) || (sameLbl && closeAmt)) return{existing:r,section:sec};
+// Helper : décale un monthKey de N mois (N peut être négatif)
+function monthOffset(mk, off){
+  if(!mk) return mk;
+  const p=mk.split('-');
+  const y=parseInt(p[0],10), m=parseInt(p[1],10);
+  if(!y || !m) return mk;
+  const d=new Date(y, m-1+off, 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+// Helper : "2026-04" → "Avril 2026"
+function formatMonthLabel(mk){
+  if(!mk) return '';
+  const p=mk.split('-');
+  const y=parseInt(p[0],10), m=parseInt(p[1],10);
+  if(!y || !m) return mk;
+  const names=['Janv.','Févr.','Mars','Avril','Mai','Juin','Juil.','Août','Sept.','Oct.','Nov.','Déc.'];
+  return `${names[m-1]||''} ${y}`;
+}
+
+// Détecte les charges déjà saisies dans Pilotage qui correspondent au TTC bancaire au centime près.
+// Cherche dans M-1, M, M+1 (sur le monthKey de la transaction).
+// Sections inspectées : chargesFixe, chargesVar, leasing, credits.
+// Exclut les charges déjà importées depuis la banque (source==='bank_sync')
+// et les charges déjà liées (bankLink existant).
+function detectMatches(tx, montantTtc){
+  if(!tx || !tx.monthKey) return [];
+  const targetCents=Math.round(montantTtc*100);
+  if(targetCents<=0) return [];
+  const monthsToCheck=[
+    monthOffset(tx.monthKey,-1),
+    tx.monthKey,
+    monthOffset(tx.monthKey, 1)
+  ];
+  const out=[];
+  for(const mk of monthsToCheck){
+    const m=_pilData[mk];
+    if(!m) continue;
+    for(const sec of ['chargesFixe','chargesVar','leasing','credits']){
+      const arr=Array.isArray(m[sec])?m[sec]:[];
+      for(let i=0;i<arr.length;i++){
+        const r=arr[i];
+        if(!r) continue;
+        // Exclure les lignes provenant déjà d'un import bancaire
+        if(r.source==='bank_sync') continue;
+        // Exclure les lignes déjà liées à une transaction bancaire
+        if(r.bankLink && r.bankLink.bankTxId) continue;
+        // Récupérer le montant HT (champ différent pour credits)
+        let ht;
+        if(sec==='credits'){
+          ht=parseFloat(String(r.montant||'').replace(',','.'))||0;
+        } else {
+          ht=parseFloat(String(r.montantHT||'').replace(',','.'))||0;
+        }
+        if(ht<=0) continue;
+        const tvaParsed=parseFloat(r.tvaRate);
+        const tvaRate=isNaN(tvaParsed)?0:tvaParsed;
+        // Calculer le TTC en centimes pour comparaison stricte
+        let ttcCents;
+        if(r.montantTTC_bank){
+          ttcCents=Math.round((parseFloat(String(r.montantTTC_bank).replace(',','.'))||0)*100);
+        } else {
+          ttcCents=Math.round(ht*(1+tvaRate/100)*100);
+        }
+        if(ttcCents!==targetCents) continue;
+        out.push({
+          monthKey:mk,
+          section:sec,
+          index:i,
+          fournisseur:r.fournisseur||r.nom||'(sans nom)',
+          montantHT:ht,
+          tvaRate:tvaRate,
+          montantTTC:ttcCents/100,
+          dateCharge:r.date||r.dateDebut||''
+        });
+      }
     }
   }
-  return null;
+  return out;
 }
 
 function renderAll(){
@@ -410,8 +514,9 @@ function renderAll(){
   const pending=debits.filter(t=>t.status==='pending');
   const imported=debits.filter(t=>t.status==='imported');
   const ignored=debits.filter(t=>t.status==='ignored');
-  const dblCount=debits.filter(t=>t.doublonInfo&&t.status==='pending').length;
-  const readyToImport=debits.filter(t=>t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined);
+  const linked=debits.filter(t=>t.status==='linked');
+  const matchCount=debits.filter(t=>t.status==='pending'&&Array.isArray(t.matches)&&t.matches.length>0&&!t.matchResolved).length;
+  const readyToImport=debits.filter(t=>t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined&&(!Array.isArray(t.matches)||t.matches.length===0||t.matchResolved));
   const totalDebit=debits.reduce((s,t)=>s+t.montant,0);
   const totalCredit=credits.reduce((s,t)=>s+t.montant,0);
 
@@ -424,7 +529,8 @@ function renderAll(){
     if(_filter==='pending')  return t.type==='debit'&&t.status==='pending';
     if(_filter==='imported') return t.type==='debit'&&t.status==='imported';
     if(_filter==='ignored')  return t.type==='debit'&&t.status==='ignored';
-    if(_filter==='doublon')  return t.doublonInfo&&t.status==='pending';
+    if(_filter==='linked')   return t.type==='debit'&&t.status==='linked';
+    if(_filter==='match')    return t.type==='debit'&&t.status==='pending'&&Array.isArray(t.matches)&&t.matches.length>0&&!t.matchResolved;
     return true;
   });
   if(_search){const q=_search.toLowerCase();filtered=filtered.filter(t=>t.customLabel.toLowerCase().includes(q)||(t.accountName||'').toLowerCase().includes(q));}
@@ -444,7 +550,7 @@ function renderAll(){
       <div class="stat-box"><div class="stat-val red">−${fmt(totalDebit)}</div><div class="stat-lbl">Total dépenses</div></div>
       <div class="stat-box"><div class="stat-val green">+${fmt(totalCredit)}</div><div class="stat-lbl">Total encaissements</div></div>
       <div class="stat-box"><div class="stat-val orange">${pending.length}</div><div class="stat-lbl">À traiter</div></div>
-      <div class="stat-box"><div class="stat-val ${dblCount>0?'red':'muted'}">${dblCount}</div><div class="stat-lbl">Doublons</div></div>
+      <div class="stat-box"><div class="stat-val ${matchCount>0?'indigo':'muted'}">${matchCount}</div><div class="stat-lbl">À rapprocher</div></div>
       <div class="stat-box"><div class="stat-val green">${imported.length}</div><div class="stat-lbl">Importées</div></div>
     </div>
 
@@ -463,11 +569,13 @@ function renderAll(){
       <div class="filter-sep"></div>
       <button class="filter-btn ${_filter==='pending'?'active':''}" onclick="setFilter('pending')">En attente (${pending.length})</button>
       <button class="filter-btn ${_filter==='imported'?'active':''}" onclick="setFilter('imported')">✅ Importées (${imported.length})</button>
+      ${linked.length>0?`<button class="filter-btn ${_filter==='linked'?'active':''}" onclick="setFilter('linked')" style="border-color:#6366f1;color:#4338ca">🔗 Liées (${linked.length})</button>`:''}
       <button class="filter-btn ${_filter==='ignored'?'active':''}" onclick="setFilter('ignored')">Ignorées (${ignored.length})</button>
-      ${dblCount>0?`<button class="filter-btn ${_filter==='doublon'?'active':''}" style="border-color:var(--red);color:var(--red)" onclick="setFilter('doublon')">⚠️ Doublons (${dblCount})</button>`:''}
+      ${matchCount>0?`<button class="filter-btn f-match ${_filter==='match'?'active':''}" onclick="setFilter('match')">🔗 À rapprocher (${matchCount})</button>`:''}
       <div class="filter-sep"></div>
       <input class="search-input" placeholder="🔍 Rechercher…" value="${_search}" oninput="setSearch(this.value)"/>
       <div style="margin-left:auto;display:flex;gap:6px">
+        ${matchCount>0?`<button class="btn btn-primary btn-xs" style="background:linear-gradient(135deg,#6366f1,#818cf8)" onclick="startReconciliation()">🔗 Lancer le rapprochement (${matchCount})</button>`:''}
         <button class="btn btn-outline btn-xs" onclick="autoAll()">🤖 Auto-catégoriser</button>
         <button class="btn btn-outline btn-xs" onclick="ignoreAllPending()">🚫 Tout ignorer</button>
       </div>
@@ -517,18 +625,23 @@ function renderAll(){
 }
 
 function renderRow(tx){
-  const rowCls=tx.status==='imported'?'s-imported':tx.status==='ignored'?'s-ignored':'';
+  const rowCls=tx.status==='imported'?'s-imported':tx.status==='ignored'?'s-ignored':tx.status==='linked'?'s-linked':'';
   const amtCls=tx.type==='credit'?'amt-credit':'amt-debit';
   const amtSign=tx.type==='credit'?'+':'−';
   const typeBadge=tx.type==='credit'
     ?`<span class="type-credit">Encaissement</span>`
     :`<span class="type-debit">Dépense</span>`;
 
+  // Une transaction avec des candidats de rapprochement non résolus est bloquée pour l'import.
+  const hasUnresolvedMatches = Array.isArray(tx.matches) && tx.matches.length > 0 && !tx.matchResolved;
+
   // TVA : null = pas encore choisi par l'utilisateur
   const tvaChosen = tx.tvaRate !== null && tx.tvaRate !== undefined;
   const htCalc = tvaChosen ? (tx.tvaRate > 0 ? Math.round(tx.montant / (1 + tx.tvaRate/100) * 100) / 100 : tx.montant) : null;
   let tvaHtml='';
   if(tx.type==='credit'){
+    tvaHtml=`<span style="font-size:11px;color:var(--muted)">—</span>`;
+  } else if(tx.status==='linked'){
     tvaHtml=`<span style="font-size:11px;color:var(--muted)">—</span>`;
   } else {
     const dis=tx.status!=='pending'?'disabled':'';
@@ -544,12 +657,14 @@ function renderRow(tx){
     </div>`;
   }
 
-  // Import bloqué si pas de catégorie OU pas de TVA choisie
-  const canImport = tx.cat && tx.cat!=='ignore' && tvaChosen;
+  // Import bloqué si pas de catégorie OU pas de TVA choisie OU rapprochement non résolu
+  const canImport = tx.cat && tx.cat!=='ignore' && tvaChosen && !hasUnresolvedMatches;
 
   let destHtml='';
   if(tx.type==='credit'){
     destHtml=`<span style="font-size:11px;color:var(--muted);font-style:italic">—</span>`;
+  } else if(tx.status==='linked'){
+    destHtml=`<span style="font-size:11px;color:var(--muted)">—</span>`;
   } else {
     const cls=tx.cat?CAT_CLS[tx.cat]||'':'';
     const dis=tx.status!=='pending'?'disabled':'';
@@ -565,14 +680,20 @@ function renderRow(tx){
   let statusHtml='';
   if(tx.type==='credit') statusHtml=`<span style="font-size:11px;color:var(--muted)">—</span>`;
   else if(tx.status==='imported') statusHtml=`<span style="font-size:11px;font-weight:700;color:var(--green)">✅ Importée</span>`;
+  else if(tx.status==='linked')   statusHtml=`<span class="linked-badge" title="Liée à une charge déjà saisie dans Pilotage">🔗 Liée à pilotage</span>`;
   else if(tx.status==='ignored')  statusHtml=`<span style="font-size:11px;color:var(--muted)">🚫 Ignorée</span>`;
-  else if(tx.doublonInfo) statusHtml=`<span class="dbl-badge" onclick="openDblModal(${tx.id})">⚠️ Doublon</span>`;
+  else if(hasUnresolvedMatches)   statusHtml=`<span class="match-badge" onclick="reconcileOne(${tx.id})">🔗 Rapprochement (${tx.matches.length})</span>`;
   else statusHtml=`<span class="new-badge">Nouvelle</span>`;
 
   let actHtml='';
   if(tx.type==='credit') actHtml=`<span style="color:var(--muted)">—</span>`;
   else if(tx.status==='imported') actHtml=`<button class="btn-ign" onclick="unimport(${tx.id})" title="Annuler l'import">↩</button>`;
+  else if(tx.status==='linked')   actHtml=`<span style="font-size:10px;color:var(--muted)" title="Liée — modifiable depuis Pilotage">${escHtml((tx.linkedTo&&tx.linkedTo.fournisseur)||'—')}</span>`;
   else if(tx.status==='ignored')  actHtml=`<button class="btn-ign" onclick="restore(${tx.id})">↩ Rétablir</button>`;
+  else if(hasUnresolvedMatches) actHtml=`<div class="act-row">
+    <button class="btn-match" onclick="reconcileOne(${tx.id})" title="Lancer le rapprochement pour cette ligne">🔗 Rapprocher</button>
+    <button class="btn-ign" onclick="ignoreOne(${tx.id})" title="Ignorer">🚫</button>
+  </div>`;
   else actHtml=`<div class="act-row">
     <button class="btn-import-one" onclick="importOne(${tx.id})" title="${!canImport?'Renseignez la catégorie et le taux de TVA':'Importer cette ligne dans Pilotage'}" ${!canImport?'disabled':''}>⬇️</button>
     <button class="btn-ign" onclick="ignoreOne(${tx.id})" title="Ignorer">🚫</button>
@@ -605,7 +726,8 @@ function updateTva(id,v){
   const sel=document.querySelector('#row-'+id+' .tva-select');
   if(sel){sel.style.borderColor=tvaChosen?'':'var(--orange)';sel.style.background=tvaChosen?'white':'#fef3c7';}
   // Mettre à jour le bouton import de cette ligne
-  const canImport=tx.cat&&tx.cat!=='ignore'&&tvaChosen;
+  const hasUnresolvedMatches=Array.isArray(tx.matches)&&tx.matches.length>0&&!tx.matchResolved;
+  const canImport=tx.cat&&tx.cat!=='ignore'&&tvaChosen&&!hasUnresolvedMatches;
   const btn=document.querySelector('#row-'+id+' .btn-import-one');
   if(btn){btn.disabled=!canImport;btn.title=canImport?'Importer cette ligne dans Pilotage':'Renseignez la catégorie et le taux de TVA';}
   // Mettre à jour compteurs globaux
@@ -623,7 +745,7 @@ function updateDate(id,v){
   }
 }
 function updateImportCounters(){
-  const ready=_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined).length;
+  const ready=_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined&&(!Array.isArray(t.matches)||t.matches.length===0||t.matchResolved)).length;
   const btn=document.getElementById('btn-import');
   if(btn){btn.disabled=ready===0;btn.textContent=`⬇️ Importer (${ready})`;}
 }
@@ -633,7 +755,8 @@ function updateCat(id,v){
   if(sel) sel.className='dest-select '+(v?CAT_CLS[v]||'':'');
   // Mettre à jour le bouton import de cette ligne
   const tx=_txList[id];
-  const canImport=tx.cat&&tx.cat!=='ignore'&&tx.tvaRate!==null&&tx.tvaRate!==undefined;
+  const hasUnresolvedMatches=Array.isArray(tx.matches)&&tx.matches.length>0&&!tx.matchResolved;
+  const canImport=tx.cat&&tx.cat!=='ignore'&&tx.tvaRate!==null&&tx.tvaRate!==undefined&&!hasUnresolvedMatches;
   const rowBtn=document.querySelector('#row-'+id+' .btn-import-one');
   if(rowBtn){rowBtn.disabled=!canImport;}
   updateImportCounters();
@@ -658,32 +781,245 @@ function learnRule(id){
   renderAll();
 }
 
-function openDblModal(id){
-  _dblCtx=id;
-  const tx=_txList[id],dbl=tx.doublonInfo;
-  document.getElementById('dbl-compare').innerHTML=`
-    <div class="dbl-side bank"><div class="dbl-side-lbl bank">🏦 Transaction bancaire</div>
-      <div class="dbl-field"><strong>Date :</strong> ${tx.date}</div>
-      <div class="dbl-field"><strong>Libellé :</strong> ${tx.customLabel}</div>
-      <div class="dbl-field"><strong>Montant :</strong> −${fmt(tx.montant)}</div>
-      <div class="dbl-field"><strong>Destination :</strong> ${CAT_LABELS[tx.cat]||'—'}</div>
-    </div>
-    <div class="dbl-side exist"><div class="dbl-side-lbl exist">📋 Déjà dans Pilotage</div>
-      <div class="dbl-field"><strong>Fournisseur :</strong> ${dbl.existing.fournisseur||'—'}</div>
-      <div class="dbl-field"><strong>Montant HT :</strong> ${fmt(parseFloat(dbl.existing.montantHT||0))}</div>
-      <div class="dbl-field"><strong>Section :</strong> ${CAT_LABELS[dbl.section]||dbl.section}</div>
-    </div>`;
-  document.getElementById('dblModal').classList.add('show');
+// ═══════════════════════════════════════════════════════════════
+// RAPPROCHEMENT BANCAIRE — séquentiel
+// ═══════════════════════════════════════════════════════════════
+
+function startReconciliation(){
+  _matchQueue=_txList.filter(t=>
+    t.type==='debit'&&
+    t.status==='pending'&&
+    Array.isArray(t.matches)&&t.matches.length>0&&
+    !t.matchResolved
+  ).map(t=>t.id);
+  if(_matchQueue.length===0){
+    showToast('Aucun rapprochement en attente','warning');
+    return;
+  }
+  _matchIdx=0;
+  showCurrentMatch();
 }
-function closeDblModal(){document.getElementById('dblModal').classList.remove('show');_dblCtx=null;}
-function dblIgnore(){if(_dblCtx===null)return;_txList[_dblCtx].status='ignored';_txList[_dblCtx].doublonInfo=null;renderAll();closeDblModal();}
-function dblKeepBoth(){if(_dblCtx===null)return;_txList[_dblCtx].doublonInfo=null;renderAll();closeDblModal();}
-function dblReplace(){if(_dblCtx===null)return;_txList[_dblCtx].replaceMode=true;_txList[_dblCtx].doublonInfo=null;renderAll();closeDblModal();}
+
+// Ouvrir le modal pour une seule transaction
+function reconcileOne(id){
+  const tx=_txList[id];
+  if(!tx||!Array.isArray(tx.matches)||tx.matches.length===0){
+    showToast('Aucun candidat de rapprochement','warning');
+    return;
+  }
+  _matchQueue=[id];
+  _matchIdx=0;
+  showCurrentMatch();
+}
+
+function showCurrentMatch(){
+  if(_matchIdx>=_matchQueue.length){
+    closeMatchModal();
+    return;
+  }
+  const txId=_matchQueue[_matchIdx];
+  const tx=_txList[txId];
+  if(!tx||!Array.isArray(tx.matches)||tx.matches.length===0){
+    _matchIdx++;
+    return showCurrentMatch();
+  }
+
+  document.getElementById('match-progress').textContent=`${_matchIdx+1} / ${_matchQueue.length}`;
+  document.getElementById('match-bank').innerHTML=`
+    <div class="match-bank-lbl">🏦 Transaction bancaire</div>
+    <div class="field"><strong>Date :</strong> ${escHtml(tx.date)}</div>
+    <div class="field"><strong>Libellé :</strong> ${escHtml(tx.label||tx.customLabel||'')}</div>
+    <div class="field"><strong>Montant TTC :</strong> −${fmt(tx.montant)}</div>
+    <div class="field"><strong>Compte :</strong> ${escHtml(tx.accountName||'—')}</div>
+  `;
+
+  const candHtml=tx.matches.map(function(m,i){
+    const monthLabel=formatMonthLabel(m.monthKey);
+    const tvaLabel=m.tvaRate>0?`TVA ${m.tvaRate}%`:'TVA 0%';
+    const dateInfo=m.dateCharge?escHtml(m.dateCharge):'(sans date)';
+    return `
+      <div class="match-cand" id="match-cand-${i}" onclick="selectMatch(${i})">
+        <input type="radio" name="match-pick" value="${i}" onclick="event.stopPropagation();selectMatch(${i})"/>
+        <div class="match-cand-info">
+          <strong>${escHtml(m.fournisseur)}</strong>
+          <div class="match-cand-meta">${CAT_LABELS[m.section]||m.section} · ${monthLabel} · ${dateInfo} · ${tvaLabel}</div>
+        </div>
+        <div class="match-cand-amt">${fmt(m.montantTTC)} TTC</div>
+      </div>
+    `;
+  }).join('');
+  document.getElementById('match-candidates').innerHTML=candHtml;
+  document.getElementById('match-link-btn').disabled=true;
+  document.getElementById('match-link-btn').textContent='🔗 Lier et pointer';
+  _selectedMatchIdx=null;
+
+  document.getElementById('matchModal').classList.add('show');
+}
+
+function selectMatch(i){
+  _selectedMatchIdx=i;
+  document.querySelectorAll('.match-cand').forEach(function(el){el.classList.remove('selected');});
+  const el=document.getElementById('match-cand-'+i);
+  if(el){
+    el.classList.add('selected');
+    const r=el.querySelector('input[type=radio]');
+    if(r) r.checked=true;
+  }
+  document.getElementById('match-link-btn').disabled=false;
+}
+
+async function linkSelectedMatch(){
+  if(_selectedMatchIdx===null) return;
+  const txId=_matchQueue[_matchIdx];
+  const tx=_txList[txId];
+  if(!tx||!tx.matches||!tx.matches[_selectedMatchIdx]) return;
+  const match=tx.matches[_selectedMatchIdx];
+  const linkBtn=document.getElementById('match-link-btn');
+  linkBtn.disabled=true;
+  linkBtn.textContent='⏳';
+
+  try{
+    // 1. Re-lecture du document pilotage pour modification (évite stale data)
+    const docRef=window._doc(window._db,'pilotage',window._uid,'months',match.monthKey);
+    const snap=await window._getDoc(docRef);
+    if(!snap.exists()) throw new Error('Mois pilotage introuvable');
+    const data={...snap.data()};
+    if(!Array.isArray(data[match.section])) throw new Error('Section introuvable');
+    if(!data[match.section][match.index]) throw new Error('Charge introuvable');
+
+    // 2. Vérification anti-stale : le montant TTC doit toujours correspondre
+    const r=data[match.section][match.index];
+    if(r.bankLink&&r.bankLink.bankTxId){
+      throw new Error('Cette charge a déjà été liée à une autre transaction');
+    }
+    let ht;
+    if(match.section==='credits'){
+      ht=parseFloat(String(r.montant||'').replace(',','.'))||0;
+    } else {
+      ht=parseFloat(String(r.montantHT||'').replace(',','.'))||0;
+    }
+    const tvaParsed=parseFloat(r.tvaRate);
+    const tvaR=isNaN(tvaParsed)?0:tvaParsed;
+    let ttcCents;
+    if(r.montantTTC_bank){
+      ttcCents=Math.round((parseFloat(String(r.montantTTC_bank).replace(',','.'))||0)*100);
+    } else {
+      ttcCents=Math.round(ht*(1+tvaR/100)*100);
+    }
+    if(ttcCents!==Math.round(tx.montant*100)){
+      throw new Error('La charge a été modifiée entretemps. Recharge la page.');
+    }
+
+    // 3. Marquer la charge comme pointée + ajouter bankLink
+    data[match.section][match.index]={
+      ...r,
+      pointe:'Oui',
+      bankLink:{
+        bankTxId:tx.bankTxId,
+        linkedAt:new Date().toISOString(),
+        bankLabel:(tx.label||tx.customLabel||'').substring(0,200),
+        bankDate:tx.date||'',
+        bankMontantTTC:tx.montant.toFixed(2),
+        accountIban:tx.accountIban||'',
+        accountName:tx.accountName||''
+      }
+    };
+    await window._setDoc(docRef,data,{merge:true});
+
+    // 4. Archiver la transaction bancaire dans bank_connections.linkedTransactions[]
+    try{
+      const bcRef=window._doc(window._db,'bank_connections',window._uid);
+      const bcSnap=await window._getDoc(bcRef);
+      const bcData=bcSnap.exists()?bcSnap.data():{};
+      const linkedArr=Array.isArray(bcData.linkedTransactions)?bcData.linkedTransactions:[];
+      if(!linkedArr.some(function(l){return l&&l.bankTxId===tx.bankTxId;})){
+        linkedArr.push({
+          bankTxId:tx.bankTxId,
+          date:tx.date,
+          label:(tx.label||'').substring(0,200),
+          montant:tx.montant.toFixed(2),
+          accountIban:tx.accountIban||'',
+          accountName:tx.accountName||'',
+          linkedTo:{
+            monthKey:match.monthKey,
+            section:match.section,
+            index:match.index,
+            fournisseur:match.fournisseur,
+            montantHT:ht.toFixed(2),
+            tvaRate:tvaR
+          },
+          linkedAt:new Date().toISOString()
+        });
+        await window._setDoc(bcRef,{linkedTransactions:linkedArr},{merge:true});
+      }
+    }catch(eBc){
+      console.warn('[match] archive bank_connections échouée (non bloquant) :',eBc&&eBc.message);
+    }
+
+    // 5. Marquer localement
+    tx.status='linked';
+    tx.matchResolved=true;
+    tx.linkedTo={section:match.section,monthKey:match.monthKey,fournisseur:match.fournisseur};
+
+    // 6. Mettre à jour le cache _pilData et retirer cette charge des matches d'autres tx
+    if(_pilData[match.monthKey]&&Array.isArray(_pilData[match.monthKey][match.section])){
+      _pilData[match.monthKey][match.section][match.index]=data[match.section][match.index];
+    }
+    _txList.forEach(function(t){
+      if(t===tx||!Array.isArray(t.matches)) return;
+      t.matches=t.matches.filter(function(mm){
+        return !(mm.monthKey===match.monthKey&&mm.section===match.section&&mm.index===match.index);
+      });
+    });
+
+    showToast(`🔗 Liée à "${match.fournisseur}"`,'success');
+
+    _matchIdx++;
+    showCurrentMatch();
+  }catch(e){
+    showToast('❌ Erreur : '+(e&&e.message?e.message:e),'error');
+    linkBtn.disabled=false;
+    linkBtn.textContent='🔗 Lier et pointer';
+  }
+}
+
+function matchNoMatch(){
+  const txId=_matchQueue[_matchIdx];
+  const tx=_txList[txId];
+  if(tx){tx.matchResolved=true;}
+  _matchIdx++;
+  showCurrentMatch();
+}
+
+function matchIgnore(){
+  const txId=_matchQueue[_matchIdx];
+  const tx=_txList[txId];
+  if(tx){tx.status='ignored';tx.matchResolved=true;}
+  _matchIdx++;
+  showCurrentMatch();
+}
+
+function matchSkipNext(){
+  _matchIdx++;
+  showCurrentMatch();
+}
+
+function closeMatchModal(){
+  document.getElementById('matchModal').classList.remove('show');
+  _matchQueue=[];
+  _matchIdx=0;
+  _selectedMatchIdx=null;
+  renderAll();
+}
 
 async function importOne(id){
   const tx = _txList[id];
   if(!tx || tx.type!=='debit' || tx.status!=='pending' || !tx.cat || tx.cat==='ignore') return;
   if(tx.tvaRate===null||tx.tvaRate===undefined){showToast('⚠️ Choisissez le taux de TVA avant d\'importer','warning');return;}
+  if(Array.isArray(tx.matches)&&tx.matches.length>0&&!tx.matchResolved){
+    showToast('🔗 Lance d\'abord le rapprochement pour cette ligne','warning');
+    return;
+  }
 
   // Désactiver le bouton pendant l'import
   const btn = document.querySelector(`#row-${id} .btn-import-one`);
@@ -705,12 +1041,6 @@ async function importOne(id){
       showToast('⚠️ Déjà importée','warning');
       if(btn){btn.disabled=false;btn.textContent='⬇️';}
       return;
-    }
-
-    // Remplacer doublon si demandé
-    if(tx.replaceMode && tx.doublonInfo){
-      var htCheck = tx.tvaRate > 0 ? Math.round(tx.montant/(1+tx.tvaRate/100)*100)/100 : tx.montant;
-      data[tx.doublonInfo.section]=(data[tx.doublonInfo.section]||[]).filter(r=>{var ex=parseFloat(r.montantHT||0);return Math.abs(ex-tx.montant)>=0.5 && Math.abs(ex-htCheck)>=0.5;});
     }
 
     const tvaRate = (tx.tvaRate !== null && tx.tvaRate !== undefined) ? parseFloat(tx.tvaRate) : 20;
@@ -756,7 +1086,7 @@ async function importOne(id){
 
 
 async function importSelected(){
-  const toImport=_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined);
+  const toImport=_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&t.cat&&t.cat!=='ignore'&&t.tvaRate!==null&&t.tvaRate!==undefined&&(!Array.isArray(t.matches)||t.matches.length===0||t.matchResolved));
   if(!toImport.length){showToast('⚠️ Renseignez la catégorie et le taux de TVA pour chaque ligne','warning');return;}
   const btn=document.getElementById('btn-import');
   btn.disabled=true; btn.textContent='⏳ Import…';
@@ -776,11 +1106,6 @@ async function importSelected(){
         if(!data[sec]) data[sec]=[];
         // Supprimer les lignes vides par défaut
         data[sec] = data[sec].filter(function(r){ return (r.fournisseur||'').trim() || parseFloat(r.montantHT||0) > 0 || r.source==='bank_sync'; });
-        // Supprimer doublon si remplacement
-        if(tx.replaceMode&&tx.doublonInfo){
-          var htChk=tx.tvaRate>0?Math.round(tx.montant/(1+tx.tvaRate/100)*100)/100:tx.montant;
-          data[tx.doublonInfo.section]=(data[tx.doublonInfo.section]||[]).filter(r=>{var ex=parseFloat(r.montantHT||0);return Math.abs(ex-tx.montant)>=0.5&&Math.abs(ex-htChk)>=0.5;});
-        }
         // Dédupliquer par bankTxId
         if((data[sec]||[]).some(r=>r.bankTxId===tx.bankTxId)) continue;
         const entry={
@@ -864,8 +1189,10 @@ window.importOne=importOne;
 window.ignoreOne=ignoreOne;window.restore=restore;window.unimport=unimport;
 window.ignoreAllPending=ignoreAllPending;window.autoAll=autoAll;
 window.learnRule=learnRule;window.importSelected=importSelected;
-window.openDblModal=openDblModal;window.closeDblModal=closeDblModal;
-window.dblKeepBoth=dblKeepBoth;window.dblReplace=dblReplace;window.dblIgnore=dblIgnore;
+window.startReconciliation=startReconciliation;window.reconcileOne=reconcileOne;
+window.selectMatch=selectMatch;window.linkSelectedMatch=linkSelectedMatch;
+window.matchNoMatch=matchNoMatch;window.matchIgnore=matchIgnore;
+window.matchSkipNext=matchSkipNext;window.closeMatchModal=closeMatchModal;
 window.openRulesModal=openRulesModal;window.closeRulesModal=closeRulesModal;
 window.addRule=addRule;window.removeRule=removeRule;window.saveRulesAndClose=saveRulesAndClose;
 window.handleLogout=handleLogout;
