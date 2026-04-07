@@ -245,8 +245,9 @@
             <div class="status-dot" id="status-dot"></div>
             <span id="status-title-text">Comptes connectés</span>
           </div>
+          <button class="btn btn-primary btn-sm" onclick="addAnotherBank()" title="Ajouter une 2e banque">+ Connecter une autre banque</button>
           <button class="btn btn-outline btn-sm" onclick="manageAccounts()">⚙️ Gérer mes comptes</button>
-          <button class="btn btn-danger btn-sm" onclick="disconnectBank()">🔌 Déconnecter</button>
+          <button class="btn btn-danger btn-sm" onclick="disconnectBank()">🔌 Tout déconnecter</button>
         </div>
         <div class="accounts-grid" id="accounts-grid">
           <div class="loader"><div class="spin"></div></div>
@@ -407,6 +408,109 @@ let _selectedAccountIds = []; // comptes cochés par l'utilisateur
 let _selectMode = null; // 'finalize' (première connexion) ou 'manage' (modification)
 let _fullSyncData = null; // données complètes du sync (pour écriture après sélection)
 
+// ── MULTI-BANQUES ──
+// _userBanks contient TOUTES les banques de l'utilisateur sous forme uniforme.
+// Une banque "legacy" (présente uniquement dans le doc racine bank_connections/{uid})
+// est exposée ici comme un objet avec isLegacy=true. Aucune migration auto.
+let _userBanks = [];          // [{bankId, isLegacy, name, accounts, ...}]
+let _addingBank = false;      // true pendant un flow "+ Connecter une autre banque"
+let _connectingBankId = null; // bankId de la nouvelle banque en cours de connexion (sous-doc)
+
+function generateBankId() {
+  return 'bk_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+}
+
+// Charge la sous-collection bank_connections/{uid}/banks/* + le doc racine en fallback.
+// Aucune écriture, aucune migration.
+async function loadAllBanks() {
+  _userBanks = [];
+  if (!window._uid) return;
+
+  // 1. Lire le doc racine (pour wave-1 linkedTransactions, et fallback legacy)
+  let rootData = null;
+  try {
+    const rootSnap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
+    if (rootSnap.exists()) rootData = rootSnap.data();
+  } catch(e) { console.warn('[loadAllBanks] root read failed', e); }
+
+  // 2. Lire la sous-collection banks/
+  let subBanks = [];
+  try {
+    const banksColl = window._collection(window._db, 'bank_connections', window._uid, 'banks');
+    const snap = await window._getDocs(banksColl);
+    snap.forEach(function(d){
+      const b = d.data() || {};
+      subBanks.push({
+        bankId: d.id,
+        isLegacy: false,
+        name: b.institution_name || b.name || 'Banque',
+        institutionId: b.institution_id || null,
+        institutionName: b.institution_name || null,
+        requisition_id: b.requisition_id || null,
+        agreement_id: b.agreement_id || null,
+        pending_requisition_id: b.pending_requisition_id || null,
+        accounts: Array.isArray(b.accounts) ? b.accounts : [],
+        selectedAccounts: Array.isArray(b.selectedAccounts) ? b.selectedAccounts : [],
+        lastSync: b.lastSync || null,
+        status: b.status || 'active',
+        createdAt: b.createdAt || null
+      });
+    });
+  } catch(e) { console.warn('[loadAllBanks] subcoll read failed', e); }
+
+  // 3. Si le doc racine contient une connexion legacy → l'exposer comme banque virtuelle
+  //    (uniquement si on n'a pas déjà migré → pas de bankIds, ou la legacy n'est pas
+  //    déjà présente comme sous-doc)
+  if (rootData && (rootData.requisition_id || rootData.pending_requisition_id)) {
+    // Vérif anti-doublon : si une sous-banque a le même requisition_id, on ne ré-affiche pas la legacy
+    const dupeInSub = subBanks.some(function(sb){
+      return sb.requisition_id && rootData.requisition_id && sb.requisition_id === rootData.requisition_id;
+    });
+    if (!dupeInSub) {
+      _userBanks.push({
+        bankId: 'legacy',
+        isLegacy: true,
+        name: rootData.institution_name || 'Ma banque',
+        institutionId: rootData.institution_id || null,
+        institutionName: rootData.institution_name || null,
+        requisition_id: rootData.requisition_id || null,
+        agreement_id: rootData.agreement_id || null,
+        pending_requisition_id: rootData.pending_requisition_id || null,
+        accounts: Array.isArray(rootData.accounts) ? rootData.accounts : [],
+        selectedAccounts: Array.isArray(rootData.selectedAccounts) ? rootData.selectedAccounts : [],
+        lastSync: rootData.lastSync || null,
+        status: rootData.status || 'active',
+        createdAt: rootData.createdAt || null
+      });
+    }
+  }
+
+  // 4. Ajouter les sous-banques
+  _userBanks = _userBanks.concat(subBanks);
+
+  // Maintenir _connection comme alias de la première banque (compat ancien code)
+  _connection = _userBanks.length > 0 ? _userBanks[0] : null;
+
+  console.log('[loadAllBanks]', _userBanks.length, 'banque(s) :', _userBanks.map(function(b){return b.name+(b.isLegacy?' (legacy)':'')}));
+}
+
+// Helper : retourne la banque par bankId, ou null
+function getBankById(bankId) {
+  for (let i = 0; i < _userBanks.length; i++) {
+    if (_userBanks[i].bankId === bankId) return _userBanks[i];
+  }
+  return null;
+}
+
+// Helper : ref Firestore pour écrire/lire les données d'une banque (legacy ou sous-doc)
+function bankDocRef(bank) {
+  if (!bank) return null;
+  if (bank.isLegacy) {
+    return window._doc(window._db, 'bank_connections', window._uid);
+  }
+  return window._doc(window._db, 'bank_connections', window._uid, 'banks', bank.bankId);
+}
+
 // ── INIT ──
 async function initPage() {
   // Vérifier si retour après connexion bancaire
@@ -429,10 +533,9 @@ async function initPage() {
 async function loadConnectionStatus() {
   if (!window._uid) return;
   try {
-    const snap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
-    if (snap.exists()) {
-      _connection = snap.data();
-      showConnectedZone(_connection);
+    await loadAllBanks();
+    if (_userBanks.length > 0) {
+      showConnectedZone();
     } else {
       showNotConnectedZone();
     }
@@ -443,44 +546,104 @@ async function loadConnectionStatus() {
 }
 
 // ── UI ZONES ──
-function showConnectedZone(conn) {
+function showConnectedZone() {
   document.getElementById('connected-zone').style.display = 'block';
   document.getElementById('not-connected-zone').style.display = 'none';
   document.getElementById('bank-picker-zone').style.display = 'none';
   document.getElementById('btn-sync').style.display = 'inline-flex';
 
-  // Statut
+  // Une seule sync date partagée → la plus ancienne lastSync, ou 1er du mois courant
+  let oldestSync = null;
+  for (let i = 0; i < _userBanks.length; i++) {
+    const b = _userBanks[i];
+    if (b.lastSync) {
+      const t = new Date(b.lastSync).getTime();
+      if (oldestSync === null || t < oldestSync) oldestSync = t;
+    }
+  }
+  const df = document.getElementById('sync-date-from');
+  if (df) {
+    if (oldestSync) {
+      const d = new Date(oldestSync);
+      df.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    } else {
+      const now = new Date();
+      df.value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-01';
+    }
+  }
+
+  // Statut global : actif si au moins une banque active
   const dot = document.getElementById('status-dot');
-  dot.className = 'status-dot ' + (conn.status === 'active' ? '' : 'inactive');
+  const anyActive = _userBanks.some(function(b){return b.status === 'active';});
+  if (dot) dot.className = 'status-dot ' + (anyActive ? '' : 'inactive');
 
-  // Dernière sync
-  if (conn.lastSync) {
-    const d = new Date(conn.lastSync);
-    document.getElementById('last-sync-text').textContent = d.toLocaleDateString('fr-FR') + ' à ' + d.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'});
-    // Pré-remplir le date picker avec la date de dernière sync
-    const df = document.getElementById('sync-date-from');
-    if (df) df.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-  } else {
-    // Pas de sync précédente → 1er du mois en cours
-    const now = new Date();
-    const df = document.getElementById('sync-date-from');
-    if (df) df.value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-01';
+  const titleEl = document.getElementById('status-title-text');
+  if (titleEl) {
+    if (_userBanks.length === 1) titleEl.textContent = _userBanks[0].name;
+    else titleEl.textContent = _userBanks.length + ' banques connectées';
   }
 
-  // Comptes
+  // Dernière sync agrégée
+  const lastSyncEl = document.getElementById('last-sync-text');
+  if (lastSyncEl) {
+    if (oldestSync) {
+      const d = new Date(oldestSync);
+      lastSyncEl.textContent = d.toLocaleDateString('fr-FR') + ' à ' + d.toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'});
+    } else {
+      lastSyncEl.textContent = 'jamais';
+    }
+  }
+
+  // Render des cartes de banques
   const grid = document.getElementById('accounts-grid');
-  if (conn.accounts && conn.accounts.length > 0) {
-    grid.innerHTML = conn.accounts.map(acc => `
-      <div class="account-card">
-        <div class="account-iban">${acc.iban ? acc.iban.replace(/(.{4})/g,'$1 ').trim() : 'IBAN non disponible'}</div>
-        <div class="account-name">🏦 ${acc.name || 'Compte bancaire'}</div>
-        <div class="account-balance" style="color:${(acc.balanceNum||0)>=0?'var(--blue-main)':'var(--red)'}">${acc.balance || '—'}</div>
-        <div class="account-tx">${acc.transactionsCount || 0} transactions · <span style="color:var(--red)">${acc.debitsCount||0} dépenses</span></div>
-      </div>
-    `).join('');
-  } else {
-    grid.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:12px">Aucun compte trouvé.</div>';
+  if (_userBanks.length === 0) {
+    grid.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:12px">Aucune banque connectée.</div>';
+    return;
   }
+
+  grid.innerHTML = _userBanks.map(function(bank){return renderBankCard(bank);}).join('');
+}
+
+function renderBankCard(bank) {
+  const accountsHtml = (bank.accounts && bank.accounts.length > 0)
+    ? bank.accounts.map(function(acc){
+        return '<div class="account-card">'
+          + '<div class="account-iban">' + (acc.iban ? acc.iban.replace(/(.{4})/g,'$1 ').trim() : 'IBAN non disponible') + '</div>'
+          + '<div class="account-name">🏦 ' + (acc.name || 'Compte bancaire') + '</div>'
+          + '<div class="account-balance" style="color:' + ((acc.balanceNum||0)>=0?'var(--blue-main)':'var(--red)') + '">' + (acc.balance || '—') + '</div>'
+          + '<div class="account-tx">' + (acc.transactionsCount || 0) + ' transactions · <span style="color:var(--red)">' + (acc.debitsCount||0) + ' dépenses</span></div>'
+          + '</div>';
+      }).join('')
+    : '<div style="padding:8px;color:var(--muted);font-size:11px;font-style:italic">Aucun compte sélectionné — cliquez sur ⚙️ Comptes</div>';
+
+  const lastSyncTxt = bank.lastSync
+    ? new Date(bank.lastSync).toLocaleDateString('fr-FR') + ' à ' + new Date(bank.lastSync).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})
+    : 'jamais';
+
+  // Échapper le bankId pour les onclick
+  const sid = String(bank.bankId).replace(/'/g,"\\'");
+
+  return '<div class="bank-block" style="border:1.5px solid var(--border);border-radius:14px;padding:14px 16px;background:rgba(255,255,255,0.5);margin-bottom:12px">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
+      + '<div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">'
+        + '<span style="font-size:18px">🏦</span>'
+        + '<div style="min-width:0">'
+          + '<div style="font-size:14px;font-weight:700;color:var(--text)">' + escapeHtml(bank.name) + '</div>'
+          + '<div style="font-size:11px;color:var(--muted)">' + (bank.accounts ? bank.accounts.length : 0) + ' compte(s) · Dernière sync : ' + lastSyncTxt + '</div>'
+        + '</div>'
+      + '</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
+        + '<button class="btn btn-success btn-sm" onclick="syncOneBank(\'' + sid + '\')" title="Synchroniser cette banque">🔄 Sync</button>'
+        + '<button class="btn btn-outline btn-sm" onclick="manageAccountsForBank(\'' + sid + '\')" title="Modifier les comptes synchronisés">⚙️ Comptes</button>'
+        + '<button class="btn btn-danger btn-sm" onclick="disconnectOneBank(\'' + sid + '\')" title="Déconnecter cette banque">🔌</button>'
+      + '</div>'
+    + '</div>'
+    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">' + accountsHtml + '</div>'
+  + '</div>';
+}
+
+function escapeHtml(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function showNotConnectedZone() {
@@ -573,15 +736,35 @@ async function connectSelectedBank() {
     });
     const data = await res.json();
     if (data.link) {
-      // Écriture PROPRE (pas de merge) pour éviter les données résiduelles d'une ancienne connexion
-      await window._setDoc(window._doc(window._db, 'bank_connections', window._uid), {
-        pending_requisition_id: data.requisition_id,
-        agreement_id: data.agreement_id || null,
-        institution_id: _selectedBank.id,
-        institution_name: _selectedBank.name,
-        status: 'pending',
-        createdAt: new Date().toISOString()
-      });
+      // Si l'utilisateur ajoute une 2e (ou Nème) banque, on écrit dans la sous-collection.
+      // Sinon (1re banque ou cliente legacy en train d'écraser sa banque) → doc racine (compat).
+      if (_addingBank || _userBanks.length > 0) {
+        // Mode multi-banques : créer un sous-doc
+        const newBankId = generateBankId();
+        _connectingBankId = newBankId;
+        await window._setDoc(window._doc(window._db, 'bank_connections', window._uid, 'banks', newBankId), {
+          pending_requisition_id: data.requisition_id,
+          agreement_id: data.agreement_id || null,
+          institution_id: _selectedBank.id,
+          institution_name: _selectedBank.name,
+          status: 'pending',
+          createdAt: new Date().toISOString()
+        });
+        // Stocker dans sessionStorage pour retrouver après redirect
+        try { sessionStorage.setItem('alteore_connecting_bank_id', newBankId); } catch(e){}
+      } else {
+        // Mode legacy : doc racine
+        _connectingBankId = null;
+        try { sessionStorage.removeItem('alteore_connecting_bank_id'); } catch(e){}
+        await window._setDoc(window._doc(window._db, 'bank_connections', window._uid), {
+          pending_requisition_id: data.requisition_id,
+          agreement_id: data.agreement_id || null,
+          institution_id: _selectedBank.id,
+          institution_name: _selectedBank.name,
+          status: 'pending',
+          createdAt: new Date().toISOString()
+        });
+      }
 
       // Redirect vers la banque
       window.location.href = data.link;
@@ -598,10 +781,22 @@ async function connectSelectedBank() {
 // ── FINALISATION APRÈS RETOUR BANQUE ──
 async function finalizeBankConnection(reqId) {
   let realReqId = reqId;
+  // 1. Retrouver le bankId en cours de connexion (sous-doc) via sessionStorage
+  let connectingBankId = null;
+  try { connectingBankId = sessionStorage.getItem('alteore_connecting_bank_id'); } catch(e){}
+
+  // 2. Si reqId est le placeholder, le récupérer depuis Firestore
   if (reqId === 'REQUISITION_ID' || !reqId || reqId.length < 10) {
     try {
-      const snap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
-      if (snap.exists()) realReqId = snap.data().pending_requisition_id;
+      if (connectingBankId) {
+        // Lire depuis le sous-doc
+        const snap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid, 'banks', connectingBankId));
+        if (snap.exists()) realReqId = snap.data().pending_requisition_id;
+      } else {
+        // Lire depuis le doc racine (legacy)
+        const snap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
+        if (snap.exists()) realReqId = snap.data().pending_requisition_id;
+      }
     } catch(e) {}
   }
 
@@ -610,6 +805,9 @@ async function finalizeBankConnection(reqId) {
     showNotConnectedZone();
     return;
   }
+
+  // Pré-charger les autres banques pour ne pas perdre l'UI multi
+  try { await loadAllBanks(); } catch(e){}
 
   // Overlay pendant le chargement complet
   const ov = document.getElementById('syncOverlay');
@@ -634,8 +832,9 @@ async function finalizeBankConnection(reqId) {
 
     if (ov) ov.classList.remove('show');
 
-    // Reset propre pour éviter les données résiduelles d'une ancienne connexion
-    _connection = { pending_requisition_id: realReqId };
+    // Mémoriser la banque cible (sous-doc ou legacy) pour confirmAccountSelection
+    _connectingBankId = connectingBankId || null;
+    _connection = { pending_requisition_id: realReqId, _targetBankId: connectingBankId };
     _selectedAccountIds = [];
     _fullSyncData = data;
 
@@ -746,6 +945,8 @@ async function confirmAccountSelection() {
   btn.disabled = true;
   btn.textContent = '⏳ Enregistrement…';
 
+  // Déterminer la banque cible : sous-doc en cours de connexion, ou banque legacy
+  const targetBankId = _connectingBankId || (_connection && _connection._targetBankId) || null;
   const reqId = _connection?.requisition_id || _connection?.pending_requisition_id;
   if (!reqId) {
     showToast('❌ Aucune connexion bancaire trouvée.', 'error');
@@ -772,8 +973,13 @@ async function confirmAccountSelection() {
       throw new Error('Aucun compte sélectionné');
     }
 
-    // Aplatir les transactions des comptes sélectionnés
-    var allTx = selectedAccounts.flatMap(function(a) { return a.transactions || []; });
+    // Aplatir les transactions des comptes sélectionnés (avec bankId pour le dédup multi-banques)
+    var bankIdForTx = targetBankId || 'legacy';
+    var allTx = selectedAccounts.flatMap(function(a) {
+      return (a.transactions || []).map(function(t){
+        return Object.assign({}, t, { bankId: bankIdForTx });
+      });
+    });
     var accountsSummary = selectedAccounts.map(function(a) {
       return {
         accountId:         a.accountId || '',
@@ -785,42 +991,48 @@ async function confirmAccountSelection() {
         debitsCount:       a.debitsCount       || 0,
       };
     });
-    console.log('[SELECT] Comptes sélectionnés:', selectedAccounts.length, '| Transactions:', allTx.length);
+    console.log('[SELECT] Comptes sélectionnés:', selectedAccounts.length, '| Transactions:', allTx.length, '| Banque cible:', bankIdForTx);
 
-    // Écrire bank_pending
-    await window._setDoc(
-      window._doc(window._db, 'bank_pending', window._uid),
-      { transactions: allTx, syncedAt: new Date().toISOString(), requisition_id: reqId }
-    );
+    // ── MERGE bank_pending : on conserve les tx des AUTRES banques ──
+    await mergeBankPending(bankIdForTx, accountsSummary, allTx);
 
-    // Écrire bank_connections (sélection + résumé)
-    await window._setDoc(
-      window._doc(window._db, 'bank_connections', window._uid),
-      {
-        requisition_id: reqId,
-        accounts: accountsSummary,
-        selectedAccounts: _selectedAccountIds,
-        lastSync: new Date().toISOString(),
-        status: 'active'
-      },
-      { merge: true }
-    );
+    // ── Écrire la connexion bancaire (sous-doc OU doc racine selon le cas) ──
+    if (targetBankId) {
+      // Mode multi-banques : sous-collection
+      await window._setDoc(
+        window._doc(window._db, 'bank_connections', window._uid, 'banks', targetBankId),
+        {
+          requisition_id: reqId,
+          accounts: accountsSummary,
+          selectedAccounts: _selectedAccountIds,
+          lastSync: new Date().toISOString(),
+          status: 'active'
+        },
+        { merge: true }
+      );
+    } else {
+      // Mode legacy : doc racine
+      await window._setDoc(
+        window._doc(window._db, 'bank_connections', window._uid),
+        {
+          requisition_id: reqId,
+          accounts: accountsSummary,
+          selectedAccounts: _selectedAccountIds,
+          lastSync: new Date().toISOString(),
+          status: 'active'
+        },
+        { merge: true }
+      );
+    }
 
-    // Sync solde cashflow (non bloquant)
-    try {
-      var total = accountsSummary.reduce(function(s, a) { return s + (a.balanceNum || 0); }, 0);
-      if (total !== 0) {
-        var now = new Date();
-        var dateStr = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
-        await window._setDoc(
-          window._doc(window._db, 'cashflow', window._uid, 'config', 'tresorerie'),
-          { solde: total, date: dateStr, source: 'bank_sync', syncedAt: new Date().toISOString() }
-        );
-      }
-    } catch(e) { console.warn('[SELECT] cashflow skip:', e.message); }
+    // Recharger toutes les banques + recompute cashflow global
+    await loadAllBanks();
+    await recomputeCashflowFromAllBanks();
 
-    // MAJ state local
-    _connection = Object.assign({}, _connection, { accounts: accountsSummary, selectedAccounts: _selectedAccountIds, lastSync: new Date().toISOString(), status: 'active' });
+    // Nettoyer state de connexion
+    _connectingBankId = null;
+    _addingBank = false;
+    try { sessionStorage.removeItem('alteore_connecting_bank_id'); } catch(e){}
     _fullSyncData = null;
 
     var debitCount = allTx.filter(function(t) { return t.type === 'debit'; }).length;
@@ -836,67 +1048,135 @@ async function confirmAccountSelection() {
   }
 }
 
+// ── MERGE bank_pending : conserve les tx des autres banques ──
+// Stratégie : on filtre l'existant pour retirer toutes les tx dont l'accountId
+// appartient à la banque qu'on resync, puis on ajoute les nouvelles.
+async function mergeBankPending(bankId, newAccountsSummary, newTx) {
+  const ref = window._doc(window._db, 'bank_pending', window._uid);
+  let existing = [];
+  try {
+    const snap = await window._getDoc(ref);
+    if (snap.exists()) existing = snap.data().transactions || [];
+  } catch(e) { console.warn('[mergeBankPending] read failed', e); }
+
+  const newAccountIds = new Set(newAccountsSummary.map(function(a){return a.accountId;}));
+  // On garde les tx qui n'appartiennent pas aux comptes de cette banque
+  const kept = existing.filter(function(t){
+    if (!t || !t.accountId) return true; // sécurité : on garde
+    // Si une tx existante a un bankId qui correspond, on la jette aussi
+    if (t.bankId && t.bankId === bankId) return false;
+    // Sinon, on filtre par accountId (cas legacy sans bankId)
+    return !newAccountIds.has(t.accountId);
+  });
+
+  const merged = kept.concat(newTx);
+  await window._setDoc(ref, {
+    transactions: merged,
+    syncedAt: new Date().toISOString()
+  });
+  console.log('[mergeBankPending] kept:', kept.length, '| added:', newTx.length, '| total:', merged.length);
+}
+
+// Recalcule le solde cashflow comme la somme des balanceNum de TOUS les comptes
+// de TOUTES les banques.
+async function recomputeCashflowFromAllBanks() {
+  try {
+    let total = 0;
+    for (let i = 0; i < _userBanks.length; i++) {
+      const accs = _userBanks[i].accounts || [];
+      for (let j = 0; j < accs.length; j++) {
+        total += parseFloat(accs[j].balanceNum) || 0;
+      }
+    }
+    if (total !== 0) {
+      const now = new Date();
+      const dateStr = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
+      await window._setDoc(
+        window._doc(window._db, 'cashflow', window._uid, 'config', 'tresorerie'),
+        { solde: total, date: dateStr, source: 'bank_sync', syncedAt: new Date().toISOString() }
+      );
+      console.log('[cashflow] Solde global recalculé :', total);
+    }
+  } catch(e) { console.warn('[cashflow] recompute skip:', e.message); }
+}
+
 function cancelAccountSelect() {
   document.getElementById('account-select-zone').style.display = 'none';
-  if (_selectMode === 'manage' && _connection) {
-    showConnectedZone(_connection);
+
+  // Si on annule un mode "ajout d'une banque" qui a déjà créé un sous-doc pending,
+  // il faut le supprimer pour ne pas laisser une coquille vide.
+  if (_addingBank && _connectingBankId) {
+    const bid = _connectingBankId;
+    window._deleteDoc(window._doc(window._db, 'bank_connections', window._uid, 'banks', bid))
+      .catch(function(e){ console.warn('[cancel] cleanup pending sub-doc failed', e); });
+  }
+
+  _connectingBankId = null;
+  _addingBank = false;
+  try { sessionStorage.removeItem('alteore_connecting_bank_id'); } catch(e){}
+
+  // Retour : zone connectée si on a des banques, sinon zone non-connectée
+  if (_userBanks && _userBanks.length > 0) {
+    showConnectedZone();
   } else {
     showNotConnectedZone();
   }
   _selectMode = null;
 }
 
+// Legacy : appelé par l'ancien bouton "⚙️ Gérer mes comptes" du status-card.
+// Si plusieurs banques, on lance un picker simple. Sinon on délègue à la 1re.
 async function manageAccounts() {
-  const reqId = _connection?.requisition_id || _connection?.pending_requisition_id;
-  if (!reqId) {
+  if (!_userBanks || _userBanks.length === 0) {
     showToast('❌ Aucune connexion bancaire active.', 'error');
     return;
   }
-
-  // Overlay pendant le chargement
-  const ov = document.getElementById('syncOverlay');
-  const ovT = document.getElementById('syncOverlayText');
-  const ovS = document.getElementById('syncOverlaySub');
-  if (ov) ov.classList.add('show');
-  if (ovT) ovT.textContent = 'Chargement des comptes…';
-  if (ovS) ovS.textContent = 'Récupération des informations bancaires';
-
-  try {
-    const res = await fetch('/api/bank-sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requisition_id: reqId })
-    });
-    let data;
-    try { data = await res.json(); }
-    catch(e) { throw new Error('Réponse API invalide (statut HTTP ' + res.status + ')'); }
-    if (!res.ok || !data.success) throw new Error(data.error || 'Erreur sync');
-
-    if (ov) ov.classList.remove('show');
-    _fullSyncData = data;
-    _selectMode = 'manage';
-    showAccountSelectZone(data.accounts);
-  } catch(e) {
-    if (ov) ov.classList.remove('show');
-    var msg = e.message || 'Erreur inconnue';
-    if (msg.includes('patienter') || msg.includes('rate') || msg.includes('429')) {
-      msg = 'Votre banque limite temporairement les connexions. Veuillez patienter 5 à 10 minutes avant de réessayer. Ce n\'est pas un problème Alteore.';
-    }
-    showError(msg);
+  if (_userBanks.length === 1) {
+    return manageAccountsForBank(_userBanks[0].bankId);
   }
+  // Plusieurs banques : prompt simple
+  const names = _userBanks.map(function(b,i){return (i+1)+'. '+b.name;}).join('\n');
+  const choice = prompt('Plusieurs banques connectées. Tapez le numéro de la banque à gérer :\n\n'+names);
+  if (!choice) return;
+  const idx = parseInt(choice, 10) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= _userBanks.length) {
+    showToast('❌ Choix invalide', 'error');
+    return;
+  }
+  return manageAccountsForBank(_userBanks[idx].bankId);
 }
 
 // ── SYNC — récupère les transactions et les stocke dans bank_pending (pas dans Pilotage) ──
-async function fetchAndStagePending(requisitionId, dateFrom) {
-  // ── 1. Appel API GoCardless (sans Firebase Admin) ──────────────────────
-  console.log('[SYNC] Appel /api/bank-sync, requisition_id:', requisitionId, 'date_from:', dateFrom);
+// fetchAndStagePending : sync UNE banque + merge dans bank_pending.
+// Signature historique conservée pour compat (requisitionId, dateFrom) → utilise la 1re banque legacy/active.
+// Nouvelle signature préférée : (bank, dateFrom) où bank = objet _userBanks[i].
+async function fetchAndStagePending(arg1, dateFrom) {
+  // Résoudre la banque cible
+  let bank = null;
+  let requisitionId = null;
+  if (arg1 && typeof arg1 === 'object' && arg1.bankId) {
+    bank = arg1;
+    requisitionId = bank.requisition_id || bank.pending_requisition_id;
+  } else if (typeof arg1 === 'string') {
+    // Compat ancien : on reçoit une string requisition_id
+    requisitionId = arg1;
+    // Retrouver la banque correspondante (par requisition_id)
+    for (let i = 0; i < _userBanks.length; i++) {
+      const b = _userBanks[i];
+      if (b.requisition_id === requisitionId || b.pending_requisition_id === requisitionId) {
+        bank = b;
+        break;
+      }
+    }
+  }
+  if (!requisitionId) throw new Error('Aucun requisition_id trouvé');
+
+  console.log('[SYNC] Appel /api/bank-sync, bank:', bank ? bank.name : '?', '| reqId:', requisitionId, '| date_from:', dateFrom);
   const body = { requisition_id: requisitionId };
   if (dateFrom) body.date_from = dateFrom;
 
-  // Filtrer par comptes sélectionnés (depuis state ou Firestore)
-  const selAccts = _selectedAccountIds.length > 0
-    ? _selectedAccountIds
-    : (_connection?.selectedAccounts || []);
+  // Filtrer par comptes sélectionnés de cette banque
+  const selAccts = bank && Array.isArray(bank.selectedAccounts) ? bank.selectedAccounts : [];
   if (selAccts.length > 0) {
     body.selected_accounts = selAccts;
     console.log('[SYNC] Comptes filtrés:', selAccts.length);
@@ -922,56 +1202,60 @@ async function fetchAndStagePending(requisitionId, dateFrom) {
     throw new Error('Aucun compte retourné par l\'API');
   }
 
-  // ── 2. Aplatir les transactions ────────────────────────────────────────
-  const allTx = data.accounts.flatMap(a => a.transactions || []);
-  const accountsSummary = data.accounts.map(a => ({
-    accountId:         a.accountId || '',
-    iban:              a.iban      || '',
-    name:              a.name      || 'Compte bancaire',
-    balance:           a.balance   || null,
-    balanceNum:        a.balanceNum || 0,
-    transactionsCount: a.transactionsCount || 0,
-    debitsCount:       a.debitsCount       || 0,
-  }));
-  console.log('[SYNC] Transactions totales:', allTx.length, '| Comptes:', accountsSummary.length);
+  const bankIdForTx = bank ? bank.bankId : 'legacy';
 
-  // ── 3. Écrire bank_pending ─────────────────────────────────────────────
-  console.log('[SYNC] Écriture bank_pending…');
-  await window._setDoc(
-    window._doc(window._db, 'bank_pending', window._uid),
-    { transactions: allTx, syncedAt: new Date().toISOString(), requisition_id: requisitionId }
-  );
-  console.log('[SYNC] bank_pending écrit OK');
+  // ── 2. Aplatir les transactions, taguer avec bankId pour le merge ─────
+  const allTx = data.accounts.flatMap(function(a){
+    return (a.transactions || []).map(function(t){
+      return Object.assign({}, t, { bankId: bankIdForTx });
+    });
+  });
+  const accountsSummary = data.accounts.map(function(a){
+    return {
+      accountId:         a.accountId || '',
+      iban:              a.iban      || '',
+      name:              a.name      || 'Compte bancaire',
+      balance:           a.balance   || null,
+      balanceNum:        a.balanceNum || 0,
+      transactionsCount: a.transactionsCount || 0,
+      debitsCount:       a.debitsCount       || 0,
+    };
+  });
+  console.log('[SYNC] Transactions totales:', allTx.length, '| Comptes:', accountsSummary.length, '| bankId:', bankIdForTx);
 
-  // ── 4. Écrire bank_connections ─────────────────────────────────────────
-  console.log('[SYNC] Écriture bank_connections…');
-  await window._setDoc(
-    window._doc(window._db, 'bank_connections', window._uid),
-    { requisition_id: requisitionId, accounts: accountsSummary, lastSync: new Date().toISOString(), status: 'active' },
-    { merge: true }
-  );
+  // ── 3. MERGE bank_pending (conserve les tx des autres banques) ────────
+  await mergeBankPending(bankIdForTx, accountsSummary, allTx);
+
+  // ── 4. Écrire la connexion bancaire (sous-doc OU doc racine selon le cas) ──
+  if (bank && !bank.isLegacy) {
+    // Sous-collection
+    await window._setDoc(
+      window._doc(window._db, 'bank_connections', window._uid, 'banks', bank.bankId),
+      { requisition_id: requisitionId, accounts: accountsSummary, lastSync: new Date().toISOString(), status: 'active' },
+      { merge: true }
+    );
+  } else {
+    // Legacy : doc racine
+    await window._setDoc(
+      window._doc(window._db, 'bank_connections', window._uid),
+      { requisition_id: requisitionId, accounts: accountsSummary, lastSync: new Date().toISOString(), status: 'active' },
+      { merge: true }
+    );
+  }
   console.log('[SYNC] bank_connections écrit OK');
 
-  // ── 5. Sync solde cashflow (non bloquant) ─────────────────────────────
-  try {
-    const total = accountsSummary.reduce((s, a) => s + (a.balanceNum || 0), 0);
-    if (total !== 0) {
-      await window._setDoc(
-        window._doc(window._db, 'cashflow', window._uid, 'config', 'tresorerie'),
-        { solde: total, date: (()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');})(), source: 'bank_sync', syncedAt: new Date().toISOString() }
-      );
-      console.log('[SYNC] cashflow solde:', total);
-    }
-  } catch(e) { console.warn('[SYNC] cashflow skip:', e.message); }
+  // ── 5. Recalcul cashflow global ────────────────────────────────────────
+  // Recharger les banques avant pour avoir les soldes à jour
+  await loadAllBanks();
+  await recomputeCashflowFromAllBanks();
 
-  // ── 6. Mettre à jour _connection pour l'UI ────────────────────────────
-  _connection = { ..._connection, accounts: accountsSummary, lastSync: new Date().toISOString(), status: 'active' };
-
-  return allTx.filter(t => t.type === 'debit').length;
+  return allTx.filter(function(t){return t.type === 'debit';}).length;
 }
 
+// syncNow : sync TOUTES les banques connectées séquentiellement.
+// Conservé pour le bouton "Synchroniser maintenant" global.
 async function syncNow() {
-  if (!_connection?.requisition_id && !_connection?.pending_requisition_id) {
+  if (!_userBanks || _userBanks.length === 0) {
     showError('Aucune connexion bancaire active. Connectez votre banque d\'abord.');
     return;
   }
@@ -983,52 +1267,237 @@ async function syncNow() {
   const btnMain     = document.getElementById('btn-sync-main');
   const dot         = document.getElementById('status-dot');
 
-  // Masquer toute erreur précédente
   const errDiv = document.getElementById('sync-error-banner');
   if (errDiv) errDiv.remove();
 
   if (overlay)     overlay.classList.add('show');
-  if (overlayText) overlayText.textContent = 'Connexion à votre banque…';
-  if (overlaySub)  overlaySub.textContent  = 'Récupération des transactions GoCardless';
   if (btnTop)      btnTop.disabled  = true;
   if (btnMain)     btnMain.disabled = true;
   if (dot)         dot.className    = 'status-dot syncing';
 
-  try {
-    const reqId = _connection.requisition_id || _connection.pending_requisition_id;
-    console.log('[SYNC] reqId:', reqId);
+  const dateFrom = (document.getElementById('sync-date-from')||{}).value || '';
+  let totalCount = 0;
+  let firstError = null;
 
-    if (overlayText) overlayText.textContent = 'Analyse des transactions…';
-    if (overlaySub)  overlaySub.textContent  = 'Écriture dans Firestore…';
+  for (let i = 0; i < _userBanks.length; i++) {
+    const b = _userBanks[i];
+    if (overlayText) overlayText.textContent = 'Synchronisation : ' + b.name + ' (' + (i+1) + '/' + _userBanks.length + ')';
+    if (overlaySub)  overlaySub.textContent  = 'Récupération des transactions GoCardless…';
+    try {
+      const count = await fetchAndStagePending(b, dateFrom);
+      totalCount += count;
+    } catch(e) {
+      console.error('[SYNC] Erreur sur', b.name, ':', e.message);
+      if (!firstError) firstError = { bank: b.name, msg: e.message || 'Erreur inconnue' };
+    }
+  }
 
-    const count = await fetchAndStagePending(reqId, (document.getElementById('sync-date-from')||{}).value || '');
-
-    if (overlayText) overlayText.textContent = `✅ ${count} dépense(s) prêtes !`;
-    if (overlaySub)  overlaySub.textContent  = 'Redirection vers la validation…';
-
-    setTimeout(() => {
-      if (overlay) overlay.classList.remove('show');
-      window.location.href = 'bank-validation.html';
-    }, 900);
-
-  } catch(e) {
+  if (firstError && totalCount === 0) {
     if (overlay) overlay.classList.remove('show');
     if (btnTop)  btnTop.disabled  = false;
     if (btnMain) btnMain.disabled = false;
     if (dot)     dot.className    = 'status-dot inactive';
+    let msg = firstError.msg;
+    if (msg.includes('EXPIRED') || msg.includes('expirée')) {
+      msg = '⌛ Connexion ' + firstError.bank + ' expirée. Déconnectez et reconnectez cette banque.';
+    } else if (msg.includes('patienter') || msg.includes('rate') || msg.includes('429')) {
+      msg = '⏳ ' + firstError.bank + ' limite temporairement les connexions. Patientez 5-10 min.';
+    }
+    showError(msg);
+    return;
+  }
 
+  if (overlayText) overlayText.textContent = '✅ ' + totalCount + ' dépense(s) prêtes !';
+  if (overlaySub)  overlaySub.textContent  = 'Redirection vers la validation…';
+  setTimeout(function() {
+    if (overlay) overlay.classList.remove('show');
+    window.location.href = 'bank-validation.html';
+  }, 900);
+}
+
+// Sync UNE seule banque (bouton 🔄 Sync sur une carte de banque)
+async function syncOneBank(bankId) {
+  const bank = getBankById(bankId);
+  if (!bank) { showToast('❌ Banque introuvable', 'error'); return; }
+  if (!bank.requisition_id && !bank.pending_requisition_id) {
+    showToast('❌ Aucune connexion active pour cette banque', 'error');
+    return;
+  }
+
+  const overlay     = document.getElementById('syncOverlay');
+  const overlayText = document.getElementById('syncOverlayText');
+  const overlaySub  = document.getElementById('syncOverlaySub');
+
+  const errDiv = document.getElementById('sync-error-banner');
+  if (errDiv) errDiv.remove();
+
+  if (overlay)     overlay.classList.add('show');
+  if (overlayText) overlayText.textContent = 'Synchronisation : ' + bank.name + '…';
+  if (overlaySub)  overlaySub.textContent  = 'Récupération des transactions GoCardless';
+
+  try {
+    const dateFrom = (document.getElementById('sync-date-from')||{}).value || '';
+    const count = await fetchAndStagePending(bank, dateFrom);
+
+    if (overlayText) overlayText.textContent = '✅ ' + count + ' dépense(s) prêtes !';
+    if (overlaySub)  overlaySub.textContent  = 'Redirection vers la validation…';
+    setTimeout(function() {
+      if (overlay) overlay.classList.remove('show');
+      window.location.href = 'bank-validation.html';
+    }, 900);
+  } catch(e) {
+    if (overlay) overlay.classList.remove('show');
     let msg = e.message || 'Erreur inconnue';
     if (msg.includes('EXPIRED') || msg.includes('expirée')) {
-      msg = '⌛ Connexion bancaire expirée. Déconnectez et reconnectez votre banque.';
-    }
-    if (msg.includes('patienter') || msg.includes('rate') || msg.includes('429')) {
-      msg = '⏳ Votre banque limite temporairement les connexions. Veuillez patienter 5 à 10 minutes avant de réessayer. Ce n\'est pas un problème Alteore.';
+      msg = '⌛ Connexion ' + bank.name + ' expirée. Déconnectez et reconnectez cette banque.';
+    } else if (msg.includes('patienter') || msg.includes('rate') || msg.includes('429')) {
+      msg = '⏳ ' + bank.name + ' limite temporairement les connexions. Patientez 5-10 min.';
     }
     console.error('[SYNC] Erreur:', msg);
-
-    // Afficher l'erreur de façon persistante (pas un toast qui disparaît)
     showError(msg);
   }
+}
+
+// Gérer les comptes d'UNE banque (bouton ⚙️ Comptes sur une carte)
+async function manageAccountsForBank(bankId) {
+  const bank = getBankById(bankId);
+  if (!bank) { showToast('❌ Banque introuvable', 'error'); return; }
+  const reqId = bank.requisition_id || bank.pending_requisition_id;
+  if (!reqId) {
+    showToast('❌ Aucune connexion active pour cette banque', 'error');
+    return;
+  }
+
+  const ov  = document.getElementById('syncOverlay');
+  const ovT = document.getElementById('syncOverlayText');
+  const ovS = document.getElementById('syncOverlaySub');
+  if (ov) ov.classList.add('show');
+  if (ovT) ovT.textContent = 'Chargement des comptes ' + bank.name + '…';
+  if (ovS) ovS.textContent = 'Récupération des informations bancaires';
+
+  try {
+    const res = await fetch('/api/bank-sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requisition_id: reqId })
+    });
+    let data;
+    try { data = await res.json(); }
+    catch(e) { throw new Error('Réponse API invalide (statut HTTP ' + res.status + ')'); }
+    if (!res.ok || !data.success) throw new Error(data.error || 'Erreur sync');
+
+    if (ov) ov.classList.remove('show');
+    _fullSyncData = data;
+    _selectMode = 'manage';
+    // Mémoriser la banque cible pour confirmAccountSelection
+    _connectingBankId = bank.isLegacy ? null : bank.bankId;
+    _connection = Object.assign({}, bank, { _targetBankId: _connectingBankId });
+    showAccountSelectZone(data.accounts);
+  } catch(e) {
+    if (ov) ov.classList.remove('show');
+    var msg = e.message || 'Erreur inconnue';
+    if (msg.includes('patienter') || msg.includes('rate') || msg.includes('429')) {
+      msg = bank.name + ' limite temporairement les connexions. Patientez 5-10 minutes.';
+    }
+    showError(msg);
+  }
+}
+
+// Déconnecter UNE banque (bouton 🔌 sur une carte)
+async function disconnectOneBank(bankId) {
+  const bank = getBankById(bankId);
+  if (!bank) { showToast('❌ Banque introuvable', 'error'); return; }
+
+  const msg = _userBanks.length > 1
+    ? 'Déconnecter ' + bank.name + ' ?\n\nLes autres banques resteront connectées. Les données déjà importées dans Pilotage seront conservées.'
+    : 'Déconnecter ' + bank.name + ' et supprimer toutes les données bancaires stockées ?\n\nLes données déjà importées dans Pilotage seront conservées.';
+  if (!confirm(msg)) return;
+
+  try {
+    const reqId = bank.requisition_id || bank.pending_requisition_id || null;
+    const agrId = bank.agreement_id || null;
+
+    // 1. Supprimer côté GoCardless (requisition + agreement de cette banque)
+    if (reqId || agrId) {
+      try {
+        await fetch('/api/bank-connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: window._uid, action: 'disconnect', requisition_id: reqId, agreement_id: agrId })
+        });
+        console.log('[DISCONNECT] GoCardless cleanup done for', bank.name);
+      } catch(e) { console.warn('[DISCONNECT] GoCardless cleanup failed:', e.message); }
+    }
+
+    // 2. Supprimer côté Firestore : doc racine OU sous-doc
+    if (bank.isLegacy) {
+      // Pour la legacy, on supprime SEULEMENT les champs de connexion, pas linkedTransactions[]
+      // (qui est global au user et utilisé par le rapprochement bancaire)
+      const rootRef = window._doc(window._db, 'bank_connections', window._uid);
+      try {
+        const rootSnap = await window._getDoc(rootRef);
+        if (rootSnap.exists()) {
+          const data = rootSnap.data() || {};
+          // Préserver linkedTransactions si présent ; supprimer les champs de connexion
+          const preserved = {};
+          if (Array.isArray(data.linkedTransactions)) preserved.linkedTransactions = data.linkedTransactions;
+          // Réécrire complètement (sans merge) pour purger les champs legacy
+          await window._setDoc(rootRef, preserved);
+        }
+      } catch(e) { console.warn('[DISCONNECT] root cleanup failed:', e.message); }
+    } else {
+      // Sous-doc : suppression simple
+      try {
+        await window._deleteDoc(window._doc(window._db, 'bank_connections', window._uid, 'banks', bank.bankId));
+      } catch(e) { console.warn('[DISCONNECT] subdoc delete failed:', e.message); }
+    }
+
+    // 3. Nettoyer bank_pending : retirer SEULEMENT les tx de cette banque
+    try {
+      const pendRef = window._doc(window._db, 'bank_pending', window._uid);
+      const snap = await window._getDoc(pendRef);
+      if (snap.exists()) {
+        const existing = snap.data().transactions || [];
+        const accountIds = new Set((bank.accounts || []).map(function(a){return a.accountId;}));
+        const kept = existing.filter(function(t){
+          if (!t) return false;
+          if (t.bankId && t.bankId === bank.bankId) return false;
+          if (!t.bankId && accountIds.has(t.accountId)) return false;
+          return true;
+        });
+        if (kept.length === 0) {
+          await window._deleteDoc(pendRef);
+        } else {
+          await window._setDoc(pendRef, { transactions: kept, syncedAt: new Date().toISOString() });
+        }
+      }
+    } catch(e) { console.warn('[DISCONNECT] bank_pending cleanup failed:', e.message); }
+
+    // 4. Recharger les banques + recompute cashflow
+    await loadAllBanks();
+    await recomputeCashflowFromAllBanks();
+
+    // 5. Si plus aucune banque, supprimer le solde cashflow et afficher la zone "non connecté"
+    if (_userBanks.length === 0) {
+      try { await window._deleteDoc(window._doc(window._db, 'cashflow', window._uid, 'config', 'tresorerie')); } catch(e){}
+      showNotConnectedZone();
+    } else {
+      showConnectedZone();
+    }
+
+    showToast('✅ ' + bank.name + ' déconnectée', 'success');
+  } catch(e) {
+    showToast('❌ Erreur : ' + e.message, 'error');
+  }
+}
+
+// Lancer le flow "+ Connecter une autre banque" (banques existantes conservées)
+function addAnotherBank() {
+  _addingBank = true;
+  _connectingBankId = null;
+  _selectedBank = null;
+  document.getElementById('connected-zone').style.display = 'none';
+  showBankPicker();
 }
 
 function showError(msg) {
@@ -1049,51 +1518,67 @@ function showError(msg) {
   if (content) content.insertBefore(div, content.firstChild);
 }
 
-// ── DÉCONNEXION ──
+// ── DÉCONNEXION GLOBALE (toutes les banques) ──
+// Conservée pour le bouton legacy en haut du status-card.
+// Boucle sur toutes les banques et appelle disconnectOneBank pour chacune.
 async function disconnectBank() {
-  if (!confirm('Déconnecter votre banque et supprimer toutes les données bancaires stockées ?\n\nLes données déjà importées dans Pilotage seront conservées.')) return;
+  if (!_userBanks || _userBanks.length === 0) return;
+  const lbl = _userBanks.length === 1
+    ? 'Déconnecter ' + _userBanks[0].name + ' et supprimer toutes les données bancaires stockées ?'
+    : 'Déconnecter TOUTES les banques (' + _userBanks.length + ') et supprimer toutes les données bancaires stockées ?';
+  if (!confirm(lbl + '\n\nLes données déjà importées dans Pilotage seront conservées.')) return;
+
   try {
-    // 1. Lire les IDs GoCardless avant de tout supprimer
-    var reqId = _connection?.requisition_id || _connection?.pending_requisition_id || null;
-    var agrId = _connection?.agreement_id || null;
+    // Copie de la liste car disconnectOneBank modifie _userBanks via loadAllBanks
+    const banksCopy = _userBanks.slice();
+    for (let i = 0; i < banksCopy.length; i++) {
+      const b = banksCopy[i];
+      const reqId = b.requisition_id || b.pending_requisition_id || null;
+      const agrId = b.agreement_id || null;
 
-    // Si pas en mémoire, lire depuis Firestore
-    if (!reqId) {
-      try {
-        var snap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
-        if (snap.exists()) {
-          var d = snap.data();
-          reqId = d.requisition_id || d.pending_requisition_id || null;
-          agrId = d.agreement_id || null;
-        }
-      } catch(e) {}
+      // GoCardless cleanup
+      if (reqId || agrId) {
+        try {
+          await fetch('/api/bank-connect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ uid: window._uid, action: 'disconnect', requisition_id: reqId, agreement_id: agrId })
+          });
+        } catch(e) { console.warn('[DISCONNECT] GoCardless failed for', b.name, ':', e.message); }
+      }
+
+      // Firestore cleanup
+      if (b.isLegacy) {
+        const rootRef = window._doc(window._db, 'bank_connections', window._uid);
+        try {
+          const rootSnap = await window._getDoc(rootRef);
+          if (rootSnap.exists()) {
+            const data = rootSnap.data() || {};
+            const preserved = {};
+            if (Array.isArray(data.linkedTransactions)) preserved.linkedTransactions = data.linkedTransactions;
+            await window._setDoc(rootRef, preserved);
+          }
+        } catch(e) { console.warn('[DISCONNECT] root cleanup failed:', e.message); }
+      } else {
+        try {
+          await window._deleteDoc(window._doc(window._db, 'bank_connections', window._uid, 'banks', b.bankId));
+        } catch(e) { console.warn('[DISCONNECT] subdoc delete failed:', e.message); }
+      }
     }
 
-    // 2. Supprimer côté GoCardless (requisition + agreement)
-    if (reqId || agrId) {
-      try {
-        await fetch('/api/bank-connect', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ uid: window._uid, action: 'disconnect', requisition_id: reqId, agreement_id: agrId })
-        });
-        console.log('[DISCONNECT] GoCardless cleanup done');
-      } catch(e) { console.warn('[DISCONNECT] GoCardless cleanup failed:', e.message); }
-    }
-
-    // 3. Supprimer toutes les données Firestore
-    await window._deleteDoc(window._doc(window._db, 'bank_connections', window._uid));
+    // Vider bank_pending et cashflow
     try { await window._deleteDoc(window._doc(window._db, 'bank_pending', window._uid)); } catch(e) {}
     try { await window._deleteDoc(window._doc(window._db, 'cashflow', window._uid, 'config', 'tresorerie')); } catch(e) {}
 
-    // 4. Reset state local
+    // Reset state local
     _connection = null;
+    _userBanks = [];
     _fullSyncData = null;
     _selectedAccountIds = [];
     _previewAccounts = [];
 
     showNotConnectedZone();
-    showToast('Banque déconnectée — toutes les données ont été supprimées (Alteore + GoCardless).', 'success');
+    showToast('Toutes les banques ont été déconnectées (Alteore + GoCardless).', 'success');
   } catch(e) {
     showToast('Erreur : ' + e.message, 'error');
   }
@@ -1189,6 +1674,11 @@ window.toggleAccount = toggleAccount;
 window.confirmAccountSelection = confirmAccountSelection;
 window.cancelAccountSelect = cancelAccountSelect;
 window.manageAccounts = manageAccounts;
+// Multi-banques
+window.addAnotherBank = addAnotherBank;
+window.syncOneBank = syncOneBank;
+window.manageAccountsForBank = manageAccountsForBank;
+window.disconnectOneBank = disconnectOneBank;
 
 // ── PURGE lignes bank_sync (nettoyage en cas de doublons parasites) ──
 async function purgeBankLines() {
