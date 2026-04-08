@@ -1110,6 +1110,13 @@ async function loadMonth() {
     if (!window._rhPaiesByMonth[key] && window._getDocs && window._collection) {
       promises.paies = window._getDocs(window._collection(window._db,'rh',window._uid,'paie')).catch(function(){ return null; });
     }
+    // Wave 4-bis : charger aussi les heures de travail du mois (rh/{uid}/temps).
+    // Permet au fallback "estimé depuis heures" de calculer un brut quand aucune fiche de paie n'existe.
+    // Lecture seule, défensive — si la collection n'existe pas, on retombe sur la fiche statique.
+    if (!window._rhTempsByMonth) window._rhTempsByMonth = {};
+    if (!window._rhTempsByMonth[key] && window._getDocs && window._collection) {
+      promises.temps = window._getDocs(window._collection(window._db,'rh',window._uid,'temps')).catch(function(){ return null; });
+    }
 
     // Attendre TOUT en parallèle
     var keys = Object.keys(promises);
@@ -1213,6 +1220,31 @@ async function loadMonth() {
     }
     // Toujours définir _rhPaiesCurrentMonth pour le mois affiché (pour usage par calcMasseSalariale)
     window._rhPaiesCurrentMonth = (window._rhPaiesByMonth && window._rhPaiesByMonth[key]) || {};
+
+    // ── Wave 4-bis : traiter les heures de travail chargées (cache par mois) ──
+    // Format Firestore : rh/{uid}/temps/{moisKey}_{empId}
+    // Map résultat : window._rhTempsByMonth[moisKey][empId] = { heuresTravaillees, heureSup, mois, ... }
+    if (results.temps && !window._rhTempsByMonth[key]) {
+      try {
+        var allTemps = {};
+        results.temps.forEach(function(d){
+          var t = d.data() || {};
+          var tMois = t.mois || (d.id || '').split('_')[0];
+          var tEmpId = t.employeId || (d.id || '').split('_').slice(1).join('_');
+          if (!tMois || !tEmpId) return;
+          if (!allTemps[tMois]) allTemps[tMois] = {};
+          allTemps[tMois][tEmpId] = t;
+        });
+        Object.keys(allTemps).forEach(function(mk){
+          if (!window._rhTempsByMonth[mk]) window._rhTempsByMonth[mk] = allTemps[mk];
+        });
+        if (!window._rhTempsByMonth[key]) window._rhTempsByMonth[key] = {};
+      } catch(e) {
+        console.warn('[wave 4-bis] erreur parsing temps (non bloquant):', e);
+        window._rhTempsByMonth[key] = {};
+      }
+    }
+    window._rhTempsCurrentMonth = (window._rhTempsByMonth && window._rhTempsByMonth[key]) || {};
 
     // ── Traiter Dettes sync (résultat déjà chargé) ──
     _syncDettesFromSnap(data, key, results.dettes);
@@ -1955,10 +1987,38 @@ function getEmployePaieForCurrentMonth(empId) {
   };
 }
 
+// Wave 4-bis : helper de calcul brut depuis heures travaillées.
+// Reproduit la logique simple de calcBrutFromHeures de rh-paie.html (sans majorations nuit/dimanche).
+// Retourne 0 si données insuffisantes.
+function calcBrutFromHeuresLight(emp, heuresTravaillees, heureSup) {
+  var salaireBrut = parseFloat(emp.salaireBrut) || 0;
+  var heuresHebdo = parseFloat(emp.heuresHebdo) || 35;
+  if (salaireBrut <= 0 || heuresHebdo <= 0) return 0;
+  var hR = parseFloat(heuresTravaillees) || 0;
+  var hS = parseFloat(heureSup) || 0;
+  // Taux horaire = brut mensuel / heures mensualisées (heuresHebdo * 52/12)
+  var tauxH = salaireBrut / heuresHebdo / (52/12);
+  var brutBase = tauxH * hR;
+  // 8 premières heures sup à +25%, au-delà à +50%
+  var sup8 = Math.min(hS, 8);
+  var supPlus = Math.max(0, hS - 8);
+  var brutSup = tauxH * (sup8 * 1.25 + supPlus * 1.50);
+  return Math.round((brutBase + brutSup) * 100) / 100;
+}
+
+// Récupère les heures du mois courant pour un employé donné.
+function getEmployeTempsForCurrentMonth(empId) {
+  if (!empId) return null;
+  var cache = window._rhTempsCurrentMonth || {};
+  return cache[empId] || null;
+}
+
 // Calcule la ligne masse salariale pour un employé en mode auto-paie.
 // Retourne { brut, taux, cout, source, valide, isFallback }
-// - source = 'paie-validee' | 'paie-brouillon' | 'fiche-statique'
-// - isFallback = true si on est tombé sur la fiche statique faute de paie disponible
+// Wave 4-bis : ordre de fallback en cascade :
+//   1) Fiche de paie validée ou brouillon
+//   2) Calcul depuis heures travaillées (rh/{uid}/temps)
+//   3) Brut statique de la fiche employé
 function getEmployeMSLineAutoPaie(emp) {
   var paie = getEmployePaieForCurrentMonth(emp.id);
   if (paie && paie.superbrut > 0) {
@@ -1972,7 +2032,29 @@ function getEmployeMSLineAutoPaie(emp) {
       isFallback: false
     };
   }
-  // Fallback : fiche statique de l'employé (comme l'ancien mode auto)
+  // Wave 4-bis : tenter d'estimer depuis les heures réelles travaillées
+  var temps = getEmployeTempsForCurrentMonth(emp.id);
+  if (temps) {
+    var hR = parseFloat(temps.heuresTravaillees) || 0;
+    var hS = parseFloat(temps.heureSup) || 0;
+    if (hR > 0) {
+      var brutEst = calcBrutFromHeuresLight(emp, hR, hS);
+      if (brutEst > 0) {
+        var tauxEst = getMSTaux(emp);
+        return {
+          brut: brutEst,
+          taux: tauxEst,
+          cout: brutEst * (1 + tauxEst / 100),
+          source: 'heures-estimees',
+          valide: false,
+          isFallback: false,
+          heuresTravaillees: hR,
+          heureSup: hS
+        };
+      }
+    }
+  }
+  // Fallback ultime : fiche statique de l'employé (comme l'ancien mode auto)
   var brutStatic = parseFloat(emp.salaireBrut) || 0;
   var taux = getMSTaux(emp);
   var coutStatic = brutStatic * (1 + taux / 100);
@@ -2104,6 +2186,34 @@ function renderMasseSalariale(data, t, forceRender) {
     return html;
   }
 
+  // Wave 4-bis : bandeau d'aide affiché uniquement en mode auto-paie pour expliquer le système
+  // de fallback en cascade et indiquer comment obtenir la précision maximale.
+  if (isAutoPaie) {
+    html += '<div style="background:linear-gradient(135deg,#eff6ff,#f0f9ff);border:1px solid #bfdbfe;border-radius:10px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:flex-start;gap:10px;font-size:11px;line-height:1.5;color:#1e40af">' +
+      '<div style="font-size:18px;flex-shrink:0">💡</div>' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-weight:700;margin-bottom:4px;color:#1e3a8a">Comment fonctionne le mode automatique</div>' +
+        'Pilotage cherche la donnée la plus précise dans cet ordre :<br>' +
+        '<span style="display:inline-block;margin-top:4px">' +
+          '<span style="background:#d1fae5;color:#065f46;padding:1px 6px;border-radius:6px;font-weight:700">✅ Paie validée</span> ' +
+          '<span style="opacity:.8">→ </span>' +
+          '<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:6px;font-weight:700">⚠ Non validée</span> ' +
+          '<span style="opacity:.8">→ </span>' +
+          '<span style="background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:6px;font-weight:700">📊 Estimé heures</span> ' +
+          '<span style="opacity:.8">→ </span>' +
+          '<span style="background:#e5e7eb;color:#475569;padding:1px 6px;border-radius:6px;font-weight:700">📋 Fiche statique</span>' +
+        '</span><br>' +
+        '<div style="margin-top:6px">' +
+          '<strong>📊 Estimé heures</strong> = calcul automatique depuis vos pointages (rh-temps), <strong>sans</strong> majorations nuit/dimanche/jours fériés. C\'est un ordre de grandeur fiable pour piloter votre marge.' +
+        '</div>' +
+        '<div style="margin-top:4px">' +
+          '<strong>Pour une précision maximale</strong> (avec toutes les majorations URSSAF, heures de nuit, dimanches, primes…) : ouvrez ' +
+          '<a href="rh-paie.html" style="color:#1d4ed8;font-weight:700;text-decoration:underline">le module Paie</a>, vérifiez les fiches du mois et cliquez sur <strong>Valider</strong>. La fiche validée passera automatiquement en priorité sur l\'estimation, puis revenez ici et cliquez sur <strong>🔄 RH</strong> pour recharger.' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }
+
   // Tableau salariés
   html += '<table class="data-table"><thead><tr>' +
     '<th>Salarié</th>' +
@@ -2127,8 +2237,15 @@ function renderMasseSalariale(data, t, forceRender) {
       } else if (line.source === 'paie-brouillon') {
         srcBadge = '<span style="font-size:9px;font-weight:700;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:8px" title="Fiche de paie présente mais NON validée — pensez à la valider dans le module Paie">⚠ Non validée</span>';
         rowBg = 'background:rgba(245,158,11,0.06);';
+      } else if (line.source === 'heures-estimees') {
+        // Wave 4-bis : calcul depuis heures travaillées (rh/{uid}/temps)
+        var tipH = 'Estimé depuis ' + (line.heuresTravaillees||0).toFixed(1) + 'h travaillées';
+        if (line.heureSup > 0) tipH += ' + ' + line.heureSup.toFixed(1) + 'h sup';
+        tipH += ' (sans majorations nuit/dimanche/JF). Pour un calcul exact, validez la fiche dans le module Paie.';
+        srcBadge = '<span style="font-size:9px;font-weight:700;background:#dbeafe;color:#1e40af;padding:2px 7px;border-radius:8px" title="' + tipH + '">📊 Estimé heures</span>';
+        rowBg = 'background:rgba(59,130,246,0.05);';
       } else {
-        srcBadge = '<span style="font-size:9px;font-weight:700;background:#e5e7eb;color:#475569;padding:2px 7px;border-radius:8px" title="Aucune fiche de paie pour ce mois — utilise le brut statique de la fiche employé">📋 Fiche statique</span>';
+        srcBadge = '<span style="font-size:9px;font-weight:700;background:#e5e7eb;color:#475569;padding:2px 7px;border-radius:8px" title="Aucune fiche de paie ni heures pour ce mois — utilise le brut statique de la fiche employé">📋 Fiche statique</span>';
         rowBg = 'background:rgba(148,163,184,0.04);';
       }
       html += '<tr style="' + rowBg + '">' +
