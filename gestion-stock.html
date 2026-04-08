@@ -1608,6 +1608,7 @@ function parseCSV(text){
 // avant que l'utilisateur soit bloqué.
 // Retourne {mapping, fixes:[{header, from, to, reason}]} — fixes vide si rien à corriger.
 function _postProcessMapping(mapping, headers, sampleRows){
+  console.log('[postProcess] called with mapping:',JSON.parse(JSON.stringify(mapping)));
   var fixes=[];
   var fields=function(){return Object.keys(mapping).filter(function(h){return mapping[h]&&mapping[h]!=='_ignore'}).map(function(h){return mapping[h]})};
 
@@ -1666,6 +1667,7 @@ function _postProcessMapping(mapping, headers, sampleRows){
     }
   }
 
+  console.log('[postProcess] final mapping:',JSON.parse(JSON.stringify(mapping)),'fixes:',fixes);
   return {mapping:mapping, fixes:fixes};
 }
 
@@ -1678,34 +1680,94 @@ async function aiDetectMapping(){
   document.getElementById('import-fname').textContent='📄 '+_importFileName;
   document.getElementById('import-finfo').textContent=_importRows.length+' ligne(s) · '+_importHeaders.length+' colonne(s)';
 
+  console.log('[import] === START aiDetectMapping ===');
+  console.log('[import] headers:',_importHeaders);
+  console.log('[import] sample row:',_importRows[0]);
+
+  var aiNotes = '';
+  var aiSource = '';
   try{
     var resp=await authFetch('/api/stock-import-ai',{headers:_importHeaders,sampleRows:_importRows.slice(0,5)});
     var data=await resp.json();
     if(data.mapping){
       _importMapping=data.mapping;
       var conf=data.confidence||0;
-      var srcLabel = data.detectedSource ? ' · Source détectée : '+esc(data.detectedSource) : '';
-      statusEl.innerHTML='<span class="ai-confidence '+(conf>=0.8?'ai-conf-high':conf>=0.5?'ai-conf-mid':'ai-conf-low')+'">'+(conf>=0.8?'✅ Confiance élevée':conf>=0.5?'⚠️ Confiance moyenne':'⚡ À vérifier')+' ('+Math.round(conf*100)+'%)</span>'+(data.notes?'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+esc(data.notes)+srcLabel+'</div>':'');
+      aiNotes = data.notes||'';
+      aiSource = data.detectedSource||'';
+      var srcLabel = aiSource ? ' · Source détectée : '+esc(aiSource) : '';
+      statusEl.innerHTML='<span class="ai-confidence '+(conf>=0.8?'ai-conf-high':conf>=0.5?'ai-conf-mid':'ai-conf-low')+'">'+(conf>=0.8?'✅ Confiance élevée':conf>=0.5?'⚠️ Confiance moyenne':'⚡ À vérifier')+' ('+Math.round(conf*100)+'%)</span>'+(aiNotes?'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+esc(aiNotes)+srcLabel+'</div>':'');
+      console.log('[import] AI returned mapping:',_importMapping,'confidence:',conf);
     } else {
       _importMapping=fallbackMapping(_importHeaders);
       statusEl.innerHTML='<span class="badge badge-orange">⚠️ Mapping automatique (IA indisponible)</span>';
+      console.log('[import] AI returned no mapping, using fallback:',_importMapping);
     }
   }catch(e){
     _importMapping=fallbackMapping(_importHeaders);
     statusEl.innerHTML='<span class="badge badge-orange">⚠️ Mapping par défaut (erreur IA: '+esc(e.message)+')</span>';
+    console.log('[import] AI error, using fallback:',e.message,_importMapping);
   }
-  // ── Filet de sécurité : corrige les erreurs critiques de l'IA ──
+
+  // ══════════════════════════════════════════════════════════
+  // FILETS DE SÉCURITÉ EMPILÉS — l'IA ne peut pas se planter
+  // sans qu'au moins un de ces 3 filets la rattrape
+  // ══════════════════════════════════════════════════════════
+  var safetyFixes=[];
+
+  // ── Filet 1 : si l'IA n'a mappé NI ref NI name, applique le fallback déterministe
+  // pour récupérer ses suggestions ref/name (basées sur les noms exacts des colonnes)
+  function _has(field){return Object.keys(_importMapping).some(function(h){return _importMapping[h]===field})}
+  if(!_has('ref') && !_has('name')){
+    console.log('[import] FILET 1: AI did not map ref or name, running fallback override');
+    var fbMap = fallbackMapping(_importHeaders);
+    console.log('[import] FILET 1: fallback says:',fbMap);
+    Object.keys(fbMap).forEach(function(h){
+      if((fbMap[h]==='ref'||fbMap[h]==='name') && (!_importMapping[h]||_importMapping[h]==='_ignore')){
+        var prev = _importMapping[h]||'_ignore';
+        _importMapping[h] = fbMap[h];
+        safetyFixes.push({header:h,from:prev,to:fbMap[h],reason:'Filet 1 — alias exact détecté par le fallback'});
+        console.log('[import] FILET 1: '+h+' '+prev+' → '+fbMap[h]);
+      }
+    });
+  }
+
+  // ── Filet 2 : post-process classique (parentRefName sans variantes, score d'unicité)
+  console.log('[import] FILET 2: running post-process');
   var pp=_postProcessMapping(_importMapping, _importHeaders, _importRows.slice(0,8));
   _importMapping=pp.mapping;
-  if(pp.fixes.length){
-    var fixHtml=pp.fixes.map(function(fx){
+  pp.fixes.forEach(function(f){f.reason='Filet 2 — '+f.reason; safetyFixes.push(f)});
+  console.log('[import] FILET 2 fixes:',pp.fixes);
+
+  // ── Filet 3 : DERNIER RECOURS — si toujours rien sur ref/name, prend la première
+  // colonne ignorée non vide et la promote sur ref. Garantit que l'import n'est jamais bloqué.
+  if(!_has('ref') && !_has('name')){
+    console.log('[import] FILET 3: still no ref/name, last-resort promotion');
+    for(var i=0;i<_importHeaders.length;i++){
+      var h=_importHeaders[i];
+      if(_importMapping[h] && _importMapping[h]!=='_ignore') continue;
+      var sample=_importRows[0]?_ps(_importRows[0][i]):'';
+      if(!sample) continue;
+      _importMapping[h]='ref';
+      safetyFixes.push({header:h,from:'_ignore',to:'ref',reason:'Filet 3 — DERNIER RECOURS, première colonne non vide promue en SKU pour débloquer l\'import'});
+      console.log('[import] FILET 3: forced '+h+' → ref (last resort)');
+      break;
+    }
+  }
+
+  console.log('[import] FINAL mapping:',_importMapping);
+  console.log('[import] safety fixes applied:',safetyFixes);
+
+  // Affiche les corrections dans l'UI
+  if(safetyFixes.length){
+    var fixHtml=safetyFixes.map(function(fx){
       return '<div style="font-size:10px;color:#92400e;margin-top:3px">🔧 <strong>'+esc(fx.header)+'</strong> : auto-corrigé en <strong>'+esc(fx.to)+'</strong> <span style="color:var(--muted)">('+esc(fx.reason)+')</span></div>';
     }).join('');
     statusEl.innerHTML += '<div style="margin-top:6px;padding:8px 10px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px">'+fixHtml+'</div>';
   }
+
   renderMappingUI();
   renderImportPreview();
-  // Show go button + reset its handler to executeImport (in case prior import left it on a different handler)
+  // Show go button + reset its handler to executeImport
   var goBtn=document.getElementById('import-go-btn');
   goBtn.style.display='';
   goBtn.disabled=false;
@@ -2139,6 +2201,18 @@ function _buildProductsFromRows(){
     if(idx.cat!=null) p._catRaw = _extractCatLabel(row[idx.cat]);
     if(idx.sousCat!=null) p._sousCatRaw = _extractCatLabel(row[idx.sousCat]);
     if(idx.sousSousCat!=null) p._sousSousCatRaw = _extractCatLabel(row[idx.sousSousCat]);
+
+    // ── CUSTOM FIELDS : stocke les colonnes ignorées dans p._extras ──
+    // Garantit que rien n'est perdu : toute info du fichier source est persistée,
+    // accessible plus tard pour des calculs ou affichage.
+    var extras={};
+    for(var hi=0;hi<_importHeaders.length;hi++){
+      var hh=_importHeaders[hi];
+      if(_importMapping[hh] && _importMapping[hh]!=='_ignore') continue;
+      var val=_ps(row[hi]);
+      if(val) extras[hh]=val;
+    }
+    if(Object.keys(extras).length) p._extras=extras;
 
     // Smart fallback : if pa missing but pmpa or cump present, use them
     if(p.pa==null){
