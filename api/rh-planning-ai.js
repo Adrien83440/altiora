@@ -93,7 +93,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: Math.min(max_tokens || 8000, 16000),
+        max_tokens: Math.min(max_tokens || 16000, 32000),
         messages: [{ role: 'user', content: prompt }]
       })
     });
