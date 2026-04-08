@@ -473,15 +473,43 @@ tr.row-alerte{background:#fffbeb}
         <div class="tbl-wrap" style="max-height:200px;overflow-y:auto">
           <table id="import-preview"></table>
         </div>
+        <div style="margin-top:16px;padding:12px 14px;background:#fafbff;border:1.5px solid var(--border);border-radius:10px">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:6px">Si une référence existe déjà dans votre stock :</label>
+          <select id="import-conflict-strategy" class="filter-sel" style="width:100%;font-size:13px">
+            <option value="ask">Me demander pour chaque conflit (recommandé)</option>
+            <option value="replace">Tout remplacer (mon fichier est plus à jour)</option>
+            <option value="merge">Tout fusionner (garder mon stock actuel + mettre à jour les infos)</option>
+            <option value="skip">Tout ignorer (ne rien modifier sur les existants)</option>
+          </select>
+        </div>
+      </div>
+      <!-- Step 2b: Families confirmation (conditional) -->
+      <div id="import-step-2b" style="display:none">
+        <div style="font-size:14px;font-weight:700;margin-bottom:6px">🆕 Nouvelles familles à créer</div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Ces familles n'existent pas encore dans votre stock. Elles seront créées automatiquement avec une icône et une couleur par défaut. Vous pourrez les personnaliser après l'import via l'onglet Catalogue.</p>
+        <div id="import-newfams-zone" style="max-height:340px;overflow-y:auto"></div>
       </div>
       <!-- Step 3: Conflicts -->
       <div id="import-step-3" style="display:none">
-        <div style="font-size:14px;font-weight:700;margin-bottom:12px">⚠️ Références existantes détectées</div>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Ces références existent déjà dans votre stock. Choisissez l'action pour chaque conflit :</p>
-        <div id="import-conflicts-zone"></div>
+        <div style="font-size:14px;font-weight:700;margin-bottom:6px">⚠️ Références existantes détectées</div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Ces références existent déjà dans votre stock. Vous pouvez décider en masse ou cas par cas :</p>
+        <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+          <button class="btn btn-outline btn-sm" onclick="bulkConflictDecision('skip')">↪️ Tout ignorer</button>
+          <button class="btn btn-outline btn-sm" onclick="bulkConflictDecision('replace')">🔄 Tout remplacer</button>
+          <button class="btn btn-outline btn-sm" onclick="bulkConflictDecision('merge')">🔀 Tout fusionner</button>
+          <span style="margin-left:auto;font-size:11px;color:var(--muted);align-self:center" id="import-conflicts-count"></span>
+        </div>
+        <div id="import-conflicts-zone" style="max-height:340px;overflow-y:auto"></div>
+      </div>
+      <!-- Step 4: Progress -->
+      <div id="import-step-4" style="display:none;text-align:center;padding:30px 0">
+        <div class="spin" style="margin:0 auto 14px;width:32px;height:32px;border-width:4px"></div>
+        <div id="import-progress-text" style="font-size:13px;font-weight:700;color:var(--text)">Préparation de l'import…</div>
+        <div id="import-progress-sub" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
       </div>
     </div>
     <div class="modal-foot">
+      <button class="btn btn-outline" id="import-back-btn" style="display:none" onclick="importGoBack()">← Retour</button>
       <button class="btn btn-outline" onclick="closeImportModal()">Annuler</button>
       <button class="btn btn-ai" id="import-go-btn" style="display:none" onclick="executeImport()">📥 Importer <span id="import-count"></span> produits</button>
     </div>
@@ -1501,16 +1529,24 @@ window.deleteMov=deleteMov;
 var _importHeaders=[], _importRows=[], _importMapping={}, _importFileName='';
 
 function openImportModal(){
-  document.getElementById('import-step-1').style.display='';
-  document.getElementById('import-step-2').style.display='none';
-  document.getElementById('import-step-3').style.display='none';
-  document.getElementById('import-go-btn').style.display='none';
+  _importState=null;
   document.getElementById('import-file').value='';
   document.getElementById('importOverlay').classList.add('show');
+  // showStep is defined later in the file but window-exposed; use direct DOM here
+  // since showStep relies on go-btn handlers we'll set later. Manual reset to step 1:
+  ['1','2','2b','3','4'].forEach(function(s){
+    var el=document.getElementById('import-step-'+s);
+    if(el) el.style.display = (s==='1' ? '' : 'none');
+  });
+  document.getElementById('import-go-btn').style.display='none';
+  document.getElementById('import-back-btn').style.display='none';
 }
 window.openImportModal=openImportModal;
 
-function closeImportModal(){document.getElementById('importOverlay').classList.remove('show')}
+function closeImportModal(){
+  document.getElementById('importOverlay').classList.remove('show');
+  _importState=null;
+}
 window.closeImportModal=closeImportModal;
 
 async function handleImportFile(file){
@@ -1547,18 +1583,20 @@ function parseCSV(text){
 async function aiDetectMapping(){
   var statusEl=document.getElementById('import-ai-status');
   statusEl.innerHTML='<span class="badge badge-purple">🧠 IA en cours d\'analyse...</span>';
-  document.getElementById('import-step-1').style.display='none';
+  // Switch to step 2
+  ['1','2b','3','4'].forEach(function(s){var el=document.getElementById('import-step-'+s);if(el)el.style.display='none'});
   document.getElementById('import-step-2').style.display='';
   document.getElementById('import-fname').textContent='📄 '+_importFileName;
   document.getElementById('import-finfo').textContent=_importRows.length+' ligne(s) · '+_importHeaders.length+' colonne(s)';
 
   try{
-    var resp=await authFetch('/api/stock-import-ai',{headers:_importHeaders,sampleRows:_importRows.slice(0,4)});
+    var resp=await authFetch('/api/stock-import-ai',{headers:_importHeaders,sampleRows:_importRows.slice(0,5)});
     var data=await resp.json();
     if(data.mapping){
       _importMapping=data.mapping;
       var conf=data.confidence||0;
-      statusEl.innerHTML='<span class="ai-confidence '+(conf>=0.8?'ai-conf-high':conf>=0.5?'ai-conf-mid':'ai-conf-low')+'">'+(conf>=0.8?'✅ Confiance élevée':conf>=0.5?'⚠️ Confiance moyenne':'⚡ À vérifier')+' ('+Math.round(conf*100)+'%)</span>'+(data.notes?'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+esc(data.notes)+'</div>':'');
+      var srcLabel = data.detectedSource ? ' · Source détectée : '+esc(data.detectedSource) : '';
+      statusEl.innerHTML='<span class="ai-confidence '+(conf>=0.8?'ai-conf-high':conf>=0.5?'ai-conf-mid':'ai-conf-low')+'">'+(conf>=0.8?'✅ Confiance élevée':conf>=0.5?'⚠️ Confiance moyenne':'⚡ À vérifier')+' ('+Math.round(conf*100)+'%)</span>'+(data.notes?'<div style="font-size:10px;color:var(--muted);margin-top:4px">'+esc(data.notes)+srcLabel+'</div>':'');
     } else {
       _importMapping=fallbackMapping(_importHeaders);
       statusEl.innerHTML='<span class="badge badge-orange">⚠️ Mapping automatique (IA indisponible)</span>';
@@ -1569,7 +1607,13 @@ async function aiDetectMapping(){
   }
   renderMappingUI();
   renderImportPreview();
-  document.getElementById('import-go-btn').style.display='';
+  // Show go button + reset its handler to executeImport (in case prior import left it on a different handler)
+  var goBtn=document.getElementById('import-go-btn');
+  goBtn.style.display='';
+  goBtn.disabled=false;
+  goBtn.innerHTML='📥 Importer <span id="import-count"></span> produits';
+  goBtn.onclick=executeImport;
+  document.getElementById('import-back-btn').style.display='none';
   document.getElementById('import-count').textContent=_importRows.length;
 }
 
@@ -1842,76 +1886,413 @@ function renderImportPlan(){
   if(countEl) countEl.textContent=plan.totalProducts;
 }
 
+// ══════════════════════════════════════════════════════════
+// IMPORT PIPELINE — Wave 3
+// Stages: executeImport → [step 2b families] → [step 3 conflicts] → doImportFinal
+// State carried across stages: _importState
+// ══════════════════════════════════════════════════════════
+var _importState = null;
+
+// Numeric parser tolerant to ',' and empty values. Returns null if not parseable.
+function _pn(v){
+  if(v==null||v==='') return null;
+  var s=String(v).trim().replace(',','.').replace(/[^\d\.\-]/g,'');
+  if(!s) return null;
+  var n=parseFloat(s);
+  return isNaN(n)?null:n;
+}
+function _ps(v){return v==null?'':String(v).trim()}
+
+// Build the list of products from the file rows + mapping. Pure function.
+// Returns { products: [...], skippedCount: N }
+function _buildProductsFromRows(){
+  var idx={};
+  _importHeaders.forEach(function(h,i){var f=_importMapping[h];if(f&&f!=='_ignore')idx[f]=i});
+  var hasVariants = (idx.taille!=null || idx.couleur!=null);
+  var seen={};
+  var products=[];
+  var skipped=0;
+
+  for(var i=0;i<_importRows.length;i++){
+    var row=_importRows[i];
+    var rawRef = idx.ref!=null ? _ps(row[idx.ref]) : '';
+    var rawName = idx.name!=null ? _ps(row[idx.name]) : '';
+    var rawTaille = idx.taille!=null ? _ps(row[idx.taille]) : '';
+    var rawCouleur = idx.couleur!=null ? _ps(row[idx.couleur]) : '';
+    var rawParentName = idx.parentRefName!=null ? _ps(row[idx.parentRefName]) : '';
+
+    if(!rawRef && !rawName){skipped++;continue}
+
+    // Compute SKU and parentRef
+    var sku, parentRef = null;
+    if(hasVariants && rawRef && (rawTaille||rawCouleur)){
+      var variantSuffix = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_');
+      sku = rawRef + (variantSuffix?'-'+variantSuffix:'');
+      parentRef = rawRef;
+    } else {
+      sku = rawRef || rawName.slice(0,40).toUpperCase().replace(/\s+/g,'-');
+    }
+    var skuKey = sku.toLowerCase();
+    if(seen[skuKey]){skipped++;continue}
+    seen[skuKey]=1;
+
+    // Build product object
+    var p = {
+      id: uid(),
+      ref: sku,
+      stockType: 'marchandise',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    // Name : if variants and parent name available, compose "Modele T40 7876"
+    if(rawName){
+      p.name = rawName;
+    } else if(rawParentName){
+      var bits=[rawParentName];
+      if(rawTaille) bits.push('T'+rawTaille);
+      if(rawCouleur) bits.push(rawCouleur);
+      p.name = bits.join(' ');
+    } else {
+      p.name = rawRef;
+    }
+    if(parentRef) p.parentRef = parentRef;
+    if(rawTaille) p.taille = rawTaille;
+    if(rawCouleur) p.couleur = rawCouleur;
+
+    // String fields
+    var strFields = ['ean','refFournisseur','fournisseur','unite','emplacement','lot','dlc','catSolde','notes'];
+    strFields.forEach(function(f){
+      if(idx[f]!=null){var v=_ps(row[idx[f]]);if(v) p[f]=v}
+    });
+    // stockType override if file has it
+    if(idx.stockType!=null){
+      var st=_ps(row[idx.stockType]).toLowerCase();
+      if(st.indexOf('mati')>=0) p.stockType='matiere';
+      else if(st.indexOf('fini')>=0) p.stockType='fini';
+      else if(st) p.stockType='marchandise';
+    }
+    // Numeric fields (preserve null vs 0)
+    var numFields = ['pa','pmpa','cump','pv','txMarque','stockBase','min','qMin','qMax','qAppro','qReservee','qCommande','condQte','valorisation'];
+    numFields.forEach(function(f){
+      if(idx[f]!=null){var n=_pn(row[idx[f]]);if(n!=null) p[f]=n}
+    });
+    // Soldes (boolean-ish)
+    if(idx.soldes!=null){
+      var sv=_ps(row[idx.soldes]).toLowerCase();
+      p.soldes = (sv==='1'||sv==='oui'||sv==='yes'||sv==='true'||sv==='y') ? 1 : 0;
+    }
+    // Stash cat/sousCat as raw strings — resolved to familyId in doImportFinal
+    if(idx.cat!=null) p._catRaw = _ps(row[idx.cat]);
+    if(idx.sousCat!=null) p._sousCatRaw = _ps(row[idx.sousCat]);
+
+    // Smart fallback : if pa missing but pmpa or cump present, use them
+    if(p.pa==null){
+      if(p.cump!=null) p.pa=p.cump;
+      else if(p.pmpa!=null) p.pa=p.pmpa;
+    }
+
+    // Default stockBase to 0 if absent
+    if(p.stockBase==null) p.stockBase=0;
+
+    products.push(p);
+  }
+  return {products:products, skippedCount:skipped};
+}
+
 async function executeImport(){
   var mapped={};
   _importHeaders.forEach(function(h,i){var f=_importMapping[h];if(f&&f!=='_ignore')mapped[f]=i});
   if(!mapped.ref&&!mapped.name){showToast('Mappez au moins Référence ou Nom',true);return}
 
-  var existingRefs={};_products.forEach(function(p){existingRefs[(p.ref||'').trim().toLowerCase()]=p});
-  var newProds=[], conflicts=[];
-  _importRows.forEach(function(row){
-    var p={id:uid(),stockType:'marchandise'};
-    Object.keys(mapped).forEach(function(field){p[field]=row[mapped[field]]||''});
-    if(!p.ref&&p.name) p.ref=p.name.slice(0,20).toUpperCase().replace(/\s+/g,'-');
-    if(!p.ref) return;
-    var refKey=(p.ref||'').trim().toLowerCase();
-    if(existingRefs[refKey]) conflicts.push({existing:existingRefs[refKey],imported:p});
-    else newProds.push(p);
+  // Stage 1 : build products from rows
+  var built = _buildProductsFromRows();
+  if(!built.products.length){showToast('Aucune ligne valide à importer',true);return}
+
+  // Determine families to create
+  function _nrm(s){return (s||'').toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
+  var existingFamRoots={};
+  var existingFamSubs={};
+  _families.forEach(function(f){
+    if(!f.parentId) existingFamRoots[_nrm(f.name)]=f;
+    else {
+      var par=_families.find(function(x){return x.id===f.parentId});
+      if(par) existingFamSubs[_nrm(par.name)+'|'+_nrm(f.name)]=f;
+    }
+  });
+  var newFamRoots={}, newFamSubs={};
+  built.products.forEach(function(p){
+    if(p._catRaw){
+      var ck=_nrm(p._catRaw);
+      if(!existingFamRoots[ck] && !newFamRoots[ck]) newFamRoots[ck]=p._catRaw;
+      if(p._sousCatRaw){
+        var sk=_nrm(p._sousCatRaw);
+        var compKey=ck+'|'+sk;
+        if(!existingFamSubs[compKey] && !newFamSubs[compKey]) newFamSubs[compKey]={parent:p._catRaw,name:p._sousCatRaw};
+      }
+    }
   });
 
-  if(conflicts.length){
-    renderConflicts(conflicts, newProds);
+  // Determine conflicts
+  var existingRefs={};
+  _products.forEach(function(p){if(p.ref) existingRefs[String(p.ref).trim().toLowerCase()]=p});
+  var conflicts=[], freshProds=[];
+  built.products.forEach(function(p){
+    var k=p.ref.toLowerCase();
+    if(existingRefs[k]) conflicts.push({existing:existingRefs[k],imported:p});
+    else freshProds.push(p);
+  });
+
+  _importState = {
+    fresh: freshProds,
+    conflicts: conflicts,
+    newFamRoots: Object.values(newFamRoots),
+    newFamSubs: Object.values(newFamSubs),
+    skippedCount: built.skippedCount,
+    decisions: {} // index → 'skip'|'replace'|'merge'
+  };
+
+  // Apply pre-selected conflict strategy if not 'ask'
+  var strategy = document.getElementById('import-conflict-strategy').value;
+  if(strategy!=='ask'){
+    conflicts.forEach(function(c,i){_importState.decisions[i]=strategy});
+  }
+
+  // Stage 2 : if there are families to create, show step 2b
+  var hasFams = _importState.newFamRoots.length>0 || _importState.newFamSubs.length>0;
+  if(hasFams){
+    showStep('2b');
+    renderNewFamiliesConfirmation();
     return;
   }
 
-  await doImport(newProds, []);
+  // Otherwise jump straight to conflicts (or final)
+  proceedAfterFamilies();
 }
 window.executeImport=executeImport;
 
-function renderConflicts(conflicts, newProds){
-  document.getElementById('import-step-2').style.display='none';
-  document.getElementById('import-step-3').style.display='';
-  var zone=document.getElementById('import-conflicts-zone');
-  zone.innerHTML=conflicts.map(function(c,i){
-    return '<div style="padding:10px;border:1.5px solid var(--border);border-radius:8px;margin-bottom:8px"><div style="font-weight:700">'+esc(c.existing.ref)+' — '+esc(c.existing.name)+'</div><div style="font-size:11px;color:var(--muted);margin:4px 0">Stock actuel: '+esc(c.existing.stockBase||'?')+' · Import: '+esc(c.imported.stockBase||'?')+'</div><select id="conflict-'+i+'" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit"><option value="skip">Ignorer (garder l\'existant)</option><option value="replace">Remplacer par l\'import</option><option value="merge">Fusionner (garder stock existant + infos import)</option></select></div>';
-  }).join('');
-  document.getElementById('import-go-btn').textContent='✅ Appliquer les décisions';
-  document.getElementById('import-go-btn').onclick=function(){
-    var resolved=[];
-    conflicts.forEach(function(c,i){
-      var decision=document.getElementById('conflict-'+i).value;
-      if(decision==='replace') resolved.push(Object.assign({},c.imported,{id:c.existing.id}));
-      else if(decision==='merge') resolved.push(Object.assign({},c.existing,c.imported,{id:c.existing.id,stockBase:c.existing.stockBase}));
-    });
-    doImport(newProds, resolved);
-  };
-}
+function showStep(step){
+  ['1','2','2b','3','4'].forEach(function(s){
+    var el=document.getElementById('import-step-'+s);
+    if(el) el.style.display='none';
+  });
+  var target=document.getElementById('import-step-'+step);
+  if(target) target.style.display='';
 
-async function doImport(newProds, resolved){
-  var btn=document.getElementById('import-go-btn');
-  btn.disabled=true;btn.textContent='⏳ Import en cours...';
-  try{
-    var batch=window._writeBatch(window._db);
-    newProds.forEach(function(p){
-      p.updatedAt=new Date().toISOString();
-      batch.set(window._doc(window._db,'stock',window._uid,'products',p.id),p);
-      _products.push(p);
-    });
-    resolved.forEach(function(p){
-      p.updatedAt=new Date().toISOString();
-      batch.set(window._doc(window._db,'stock',window._uid,'products',p.id),p);
-      var idx=_products.findIndex(function(x){return x.id===p.id});
-      if(idx>=0)_products[idx]=p; else _products.push(p);
-    });
-    await batch.commit();
-    closeImportModal();
-    showToast('✅ '+(newProds.length+resolved.length)+' produit(s) importé(s)');
-    renderAll();
-  }catch(e){
-    showToast('❌ Erreur: '+e.message,true);
-    btn.disabled=false;btn.textContent='Réessayer';
+  var goBtn=document.getElementById('import-go-btn');
+  var backBtn=document.getElementById('import-back-btn');
+  if(step==='1'){
+    goBtn.style.display='none';backBtn.style.display='none';
+  } else if(step==='2'){
+    goBtn.style.display='';backBtn.style.display='none';
+    goBtn.textContent='📥 Importer ';
+    var sp=document.createElement('span');sp.id='import-count';goBtn.appendChild(sp);
+    goBtn.appendChild(document.createTextNode(' produits'));
+    goBtn.onclick=executeImport;
+    renderImportPlan();
+  } else if(step==='2b'){
+    goBtn.style.display='';backBtn.style.display='';
+    goBtn.innerHTML='✅ Créer les familles et continuer';
+    goBtn.onclick=proceedAfterFamilies;
+  } else if(step==='3'){
+    goBtn.style.display='';backBtn.style.display='';
+    goBtn.innerHTML='✅ Appliquer les décisions et importer';
+    goBtn.onclick=proceedAfterConflicts;
+  } else if(step==='4'){
+    goBtn.style.display='none';backBtn.style.display='none';
   }
 }
+
+function importGoBack(){
+  // From 2b → 2, from 3 → 2 (or 2b if there were families)
+  var visible=null;
+  ['2b','3'].forEach(function(s){
+    if(document.getElementById('import-step-'+s).style.display!=='none') visible=s;
+  });
+  if(visible==='2b'||visible==='3') showStep('2');
+}
+window.importGoBack=importGoBack;
+
+function renderNewFamiliesConfirmation(){
+  var zone=document.getElementById('import-newfams-zone');
+  var st=_importState;
+  var html='';
+  if(st.newFamRoots.length){
+    html += '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Familles principales ('+st.newFamRoots.length+')</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-bottom:18px">';
+    st.newFamRoots.forEach(function(name){
+      var d=_famDefaults(name);
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid var(--border);border-radius:10px;background:white"><div style="width:32px;height:32px;border-radius:8px;background:'+d.color+'20;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">'+d.icon+'</div><div style="font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(name)+'">'+esc(name)+'</div></div>';
+    });
+    html += '</div>';
+  }
+  if(st.newFamSubs.length){
+    html += '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Sous-familles ('+st.newFamSubs.length+')</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">';
+    st.newFamSubs.forEach(function(s){
+      var d=_famDefaults(s.name);
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid var(--border);border-radius:10px;background:white"><div style="width:28px;height:28px;border-radius:6px;background:'+d.color+'20;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">'+d.icon+'</div><div style="font-size:11px;overflow:hidden"><div style="color:var(--muted);font-size:9px">'+esc(s.parent)+' ›</div><div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(s.name)+'</div></div></div>';
+    });
+    html += '</div>';
+  }
+  zone.innerHTML=html;
+}
+
+function proceedAfterFamilies(){
+  var st=_importState;
+  // If there are conflicts AND user chose 'ask', show step 3
+  var unresolvedConflicts = st.conflicts.filter(function(c,i){return !st.decisions[i]});
+  if(unresolvedConflicts.length){
+    showStep('3');
+    renderConflicts();
+    return;
+  }
+  // Otherwise go straight to execution
+  doImportFinal();
+}
+window.proceedAfterFamilies=proceedAfterFamilies;
+
+function renderConflicts(){
+  var st=_importState;
+  document.getElementById('import-conflicts-count').textContent = st.conflicts.length+' conflit(s)';
+  var zone=document.getElementById('import-conflicts-zone');
+  zone.innerHTML=st.conflicts.map(function(c,i){
+    var current=st.decisions[i]||'skip';
+    var existStock=c.existing.stockBase!=null?c.existing.stockBase:'?';
+    var newStock=c.imported.stockBase!=null?c.imported.stockBase:'?';
+    return '<div style="padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;margin-bottom:6px;display:flex;align-items:center;gap:12px">'+
+      '<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(c.existing.ref)+' — '+esc(c.existing.name||'')+'</div>'+
+      '<div style="font-size:10px;color:var(--muted);margin-top:2px">Stock actuel: '+esc(existStock)+' · Import: '+esc(newStock)+'</div></div>'+
+      '<select onchange="_importState.decisions['+i+']=this.value" style="padding:6px 10px;border:1.5px solid var(--border);border-radius:6px;font-family:inherit;font-size:11px">'+
+      '<option value="skip"'+(current==='skip'?' selected':'')+'>↪️ Ignorer</option>'+
+      '<option value="replace"'+(current==='replace'?' selected':'')+'>🔄 Remplacer</option>'+
+      '<option value="merge"'+(current==='merge'?' selected':'')+'>🔀 Fusionner</option>'+
+      '</select></div>';
+  }).join('');
+}
+
+function bulkConflictDecision(decision){
+  if(!_importState) return;
+  _importState.conflicts.forEach(function(c,i){_importState.decisions[i]=decision});
+  renderConflicts();
+}
+window.bulkConflictDecision=bulkConflictDecision;
+
+function proceedAfterConflicts(){
+  doImportFinal();
+}
+window.proceedAfterConflicts=proceedAfterConflicts;
+
+async function doImportFinal(){
+  var st=_importState;
+  if(!st){showToast('État import perdu',true);return}
+  showStep('4');
+  var txt=document.getElementById('import-progress-text');
+  var sub=document.getElementById('import-progress-sub');
+
+  try{
+    // ── Stage A : create families ──
+    txt.textContent='Création des familles…';
+    sub.textContent=(st.newFamRoots.length+st.newFamSubs.length)+' à créer';
+
+    if(st.newFamRoots.length || st.newFamSubs.length){
+      var famBatch = window._writeBatch(window._db);
+      // Roots first (so subs can reference them)
+      for(var i=0;i<st.newFamRoots.length;i++){
+        await resolveFamilyByPath(st.newFamRoots[i], '', {batch: famBatch});
+      }
+      for(var j=0;j<st.newFamSubs.length;j++){
+        await resolveFamilyByPath(st.newFamSubs[j].parent, st.newFamSubs[j].name, {batch: famBatch});
+      }
+      await famBatch.commit();
+    }
+
+    // ── Stage B : resolve familyId on each product to import ──
+    txt.textContent='Préparation des produits…';
+    function _nrm(s){return (s||'').toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
+    function _famIdFor(catRaw, sousCatRaw){
+      if(!catRaw && !sousCatRaw) return null;
+      var ck=_nrm(catRaw);
+      var rootFam = _families.find(function(f){return !f.parentId && _nrm(f.name)===ck});
+      if(!rootFam) return null;
+      if(!sousCatRaw) return rootFam.id;
+      var sk=_nrm(sousCatRaw);
+      var subFam = _families.find(function(f){return f.parentId===rootFam.id && _nrm(f.name)===sk});
+      return subFam ? subFam.id : rootFam.id;
+    }
+
+    // Apply familyId + clean transient fields on fresh products
+    st.fresh.forEach(function(p){
+      var fid = _famIdFor(p._catRaw, p._sousCatRaw);
+      if(fid) p.familyId=fid;
+      p.cat = p._sousCatRaw || p._catRaw || '';
+      delete p._catRaw; delete p._sousCatRaw;
+    });
+
+    // Build the list of products to actually write : fresh + resolved conflicts
+    var toWrite = st.fresh.slice();
+    var conflictsHandled = 0;
+    st.conflicts.forEach(function(c,i){
+      var dec = st.decisions[i] || 'skip';
+      if(dec==='skip') return;
+      var imp = c.imported;
+      var fid = _famIdFor(imp._catRaw, imp._sousCatRaw);
+      if(fid) imp.familyId=fid;
+      imp.cat = imp._sousCatRaw || imp._catRaw || '';
+      delete imp._catRaw; delete imp._sousCatRaw;
+      var merged;
+      if(dec==='replace'){
+        // Keep existing id, replace everything else
+        merged = Object.assign({}, imp, {id: c.existing.id, createdAt: c.existing.createdAt || imp.createdAt});
+      } else if(dec==='merge'){
+        // Existing as base, overlay non-empty imported fields, keep existing stockBase
+        merged = Object.assign({}, c.existing);
+        Object.keys(imp).forEach(function(k){
+          if(k==='id'||k==='stockBase'||k==='createdAt') return;
+          if(imp[k]!=null && imp[k]!=='') merged[k]=imp[k];
+        });
+        merged.updatedAt = new Date().toISOString();
+      }
+      if(merged) {toWrite.push(merged); conflictsHandled++}
+    });
+
+    // ── Stage C : write products in batches of 400 ──
+    txt.textContent='Import des produits…';
+    var BATCH_SIZE=400;
+    var written=0;
+    for(var k=0;k<toWrite.length;k+=BATCH_SIZE){
+      var chunk=toWrite.slice(k,k+BATCH_SIZE);
+      var batch=window._writeBatch(window._db);
+      chunk.forEach(function(p){
+        batch.set(window._doc(window._db,'stock',window._uid,'products',p.id),p);
+      });
+      await batch.commit();
+      written += chunk.length;
+      sub.textContent=written+' / '+toWrite.length;
+    }
+
+    // ── Stage D : update local _products array ──
+    toWrite.forEach(function(p){
+      var idx = _products.findIndex(function(x){return x.id===p.id});
+      if(idx>=0) _products[idx]=p;
+      else _products.push(p);
+    });
+
+    closeImportModal();
+    var msg = '✅ '+st.fresh.length+' nouveau(x) produit(s)';
+    if(conflictsHandled) msg += ', '+conflictsHandled+' mis à jour';
+    if(st.newFamRoots.length||st.newFamSubs.length) msg += ', '+(st.newFamRoots.length+st.newFamSubs.length)+' famille(s) créée(s)';
+    showToast(msg);
+    _importState=null;
+    renderAll();
+  }catch(e){
+    console.error('Import error:',e);
+    showToast('❌ Erreur: '+e.message,true);
+    sub.innerHTML='<span style="color:var(--red)">'+esc(e.message)+'</span><br><button class="btn btn-outline btn-sm" style="margin-top:10px" onclick="showStep(\'2\')">Retour au mapping</button>';
+  }
+}
+window.doImportFinal=doImportFinal;
+window.showStep=showStep;
+
 
 // ══════════════════════════════════════════════════════════
 // SETTINGS
