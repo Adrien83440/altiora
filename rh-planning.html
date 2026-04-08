@@ -1563,7 +1563,16 @@ async function loadEmps(){
   try{
     const s=await window._getDocs(window._col(window._db,'rh',window._uid,'employes'));
     s.forEach(d=>{const e=d.data();if(e.statut!=='archive')_emps.push({id:d.id,...e});});
-    _emps.sort((a,b)=>(a.prenom||'').localeCompare(b.prenom||''));
+    // Tri : par secteur (poste) d'abord, puis par prénom dans chaque secteur
+    // Les employés sans poste défini sont placés à la fin
+    _emps.sort((a,b)=>{
+      const pa=(a.poste||'').trim().toLowerCase();
+      const pb=(b.poste||'').trim().toLowerCase();
+      if(!pa&&pb)return 1;
+      if(pa&&!pb)return -1;
+      if(pa!==pb)return pa.localeCompare(pb);
+      return (a.prenom||'').localeCompare(b.prenom||'');
+    });
   }catch(e){console.warn(e);}
   buildPosteFilter();
   renderLegend();
@@ -1742,7 +1751,18 @@ function renderGantt(){
   if(!vis.length){
     h+=`<div class="empty-plan"><div style="font-size:42px;margin-bottom:12px">👥</div><h3>Aucun employé visible</h3><a href="rh-employes.html" style="color:var(--rh-main);font-weight:700;margin-top:8px">+ Ajouter des employés →</a></div>`;
   } else {
+    let _lastPoste=null;
     vis.forEach((e,i)=>{
+      // Séparateur de secteur quand le poste change
+      const curPoste=(e.poste||'').trim();
+      if(curPoste!==_lastPoste){
+        const lbl=curPoste||'Sans secteur';
+        h+=`<div class="gantt-sector-sep" style="display:grid;grid-template-columns:${cols};background:rgba(99,102,241,.06);border-top:1px solid rgba(99,102,241,.2);border-bottom:1px solid rgba(99,102,241,.15)">
+          <div style="padding:6px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--rh-main)">▸ ${lbl}</div>
+          <div style="grid-column:2/-1"></div>
+        </div>`;
+        _lastPoste=curPoste;
+      }
       const cc=COLS[i%COLS.length];
       const weekH=empWeekH(e.id,days);
       const ccn=getCCN(e);
