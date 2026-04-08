@@ -465,6 +465,10 @@ tr.row-alerte{background:#fffbeb}
         </div>
         <div style="font-size:12px;font-weight:700;margin-bottom:8px">🧠 Mapping IA — Vérifiez et ajustez si besoin :</div>
         <div id="import-mapping-zone"></div>
+        <div id="import-plan-card" style="margin-top:16px;padding:14px 16px;border:1.5px solid var(--blue-light);background:linear-gradient(135deg,#f0f4ff,#faf5ff);border-radius:12px;display:none">
+          <div style="font-size:11px;font-weight:800;color:var(--blue-main);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">📋 Plan d'import</div>
+          <div id="import-plan-content"></div>
+        </div>
         <div style="margin-top:16px;font-size:12px;font-weight:700;margin-bottom:8px">👁 Aperçu des premières lignes :</div>
         <div class="tbl-wrap" style="max-height:200px;overflow-y:auto">
           <table id="import-preview"></table>
@@ -1570,22 +1574,98 @@ async function aiDetectMapping(){
 }
 
 function fallbackMapping(headers){
-  var aliases={ref:['ref','sku','code','reference','code article'],ean:['ean','barcode','gtin','upc','code barre'],name:['nom','name','designation','libelle','produit','article','description'],cat:['categorie','category','famille','rayon','type'],fournisseur:['fournisseur','supplier','marque','brand'],pa:['pa','prix achat','cout','cost','pu ht','prix unitaire'],pv:['pv','prix vente','prix','price','pvht','prix de vente'],stockBase:['stock','quantite','qty','qte','quantity','en stock'],min:['min','seuil','minimum','alerte','stock min'],unite:['unite','unit','mesure'],emplacement:['emplacement','zone','location','rayon','depot']};
+  var aliases={
+    ref:['ref','sku','code','reference','code article','idart','code modele','code modèle','code art','article'],
+    ean:['ean','barcode','gtin','upc','code barre','code-barre','code barres','multi code','gencod','gencode'],
+    refFournisseur:['ref fourn','ref. fourn','ref fournisseur','ref frns','cod fourn','code fournisseur','reference fournisseur'],
+    name:['nom','name','designation','désignation','libelle','libellé','produit','description','article','designation produit','intitule','intitulé'],
+    parentRefName:['modele','modèle','style','famille produit','model'],
+    fournisseur:['fournisseur','supplier','marque','brand','fabricant','producteur'],
+    cat:['categorie','catégorie','category','famille','rayon','cfamille','c famille','cat','family','dept','departement','département'],
+    sousCat:['sous categorie','sous-catégorie','sous catégorie','sous famille','sous-famille','cssfamille','css famille','sub category','sub-cat','subfamily','sfamille','type produit'],
+    taille:['taille','size','pointure','t.','t '],
+    couleur:['couleur','coloris','color','colour','col.','colorie'],
+    pa:['pa','prix achat','cout','cost','pu ht','prix unitaire','prix achat ht','puht','cout achat','coût achat'],
+    pmpa:['pmpa','prix moyen pondere','prix moyen pondéré','pmp achat'],
+    cump:['cump','cmup','pmp','cout moyen','coût moyen','cout unitaire moyen','coût unitaire moyen'],
+    pv:['pv','prix vente','prix','price','pvht','pv ht','prix de vente','prix vente ht','ht'],
+    txMarque:['tx marq','tx marque','taux marque','marge %','marge pct','marge'],
+    stockBase:['stock','quantite','quantité','qty','qte','qté','quantity','en stock','qte en stock','qté en stock','dispo','disponible','stock dispo'],
+    min:['min','seuil','minimum','alerte','stock min','seuil alerte','stock minimum','seuil mini'],
+    qMin:['q mini','q_mini','qmini','quantite mini','quantité mini'],
+    qMax:['q maxi','q_maxi','qmaxi','quantite maxi','quantité maxi','stock max','max stock'],
+    qAppro:['q appro','q_appro','qappro','reappro','réappro','quantite appro','quantité appro','prevision','prévision'],
+    qReservee:['qte reservee','qté reservée','qte reservée','reserve','réservé','reserved','reserve client'],
+    qCommande:['qte en cde','qté en cde','en commande','en cde','on order','qte commandee'],
+    valorisation:['valorisation','stock value','valeur stock','valeur','valo'],
+    unite:['unite','unité','unit','mesure','um'],
+    emplacement:['emplacement','zone','location','rayon stockage','depot','dépôt','allee','allée'],
+    lot:['lot','n lot','n° lot','numero lot','numéro lot'],
+    dlc:['dlc','dluo','date limite','peremption','péremption','expiry'],
+    condQte:['cond','conditionnement','colisage','colis','pack','par colis'],
+    stockType:['type produit','stock type','nature'],
+    soldes:['solde','soldes','en solde','sale'],
+    catSolde:['catsolde','cat solde','categorie solde','catégorie solde','type solde'],
+    notes:['notes','note','remarque','remarques','commentaire','description longue','nota','observation']
+  };
+  // Headers to actively ignore
+  var ignoreList=['ttc','prix vente ttc','pv ttc','pvtc','prix ttc'];
   var map={};
   headers.forEach(function(h){
-    var norm=h.toLowerCase().trim().replace(/[_\-]/g,' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    var norm=h.toLowerCase().trim().replace(/[_\-\.]/g,' ').replace(/\s+/g,' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
     map[h]='_ignore';
+    // Check explicit ignore first
+    if(ignoreList.indexOf(norm)>=0){return}
+    // Then try to match aliases (longest match wins to avoid "code" matching "code barre")
+    var bestField=null,bestLen=0;
     Object.keys(aliases).forEach(function(field){
       aliases[field].forEach(function(a){
         var an=a.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-        if(norm===an||norm.includes(an)){map[h]=field}
+        if((norm===an||norm.includes(an)) && an.length>bestLen){
+          bestField=field;bestLen=an.length;
+        }
       });
     });
+    if(bestField) map[h]=bestField;
   });
   return map;
 }
 
-var FIELD_OPTIONS=[{v:'_ignore',l:'— Ignorer —'},{v:'ref',l:'Référence / SKU'},{v:'ean',l:'Code EAN'},{v:'name',l:'Nom / Désignation'},{v:'cat',l:'Catégorie'},{v:'fournisseur',l:'Fournisseur'},{v:'pa',l:'Prix d\'achat HT'},{v:'pv',l:'Prix de vente HT'},{v:'stockBase',l:'Stock actuel'},{v:'min',l:'Seuil alerte'},{v:'unite',l:'Unité'},{v:'emplacement',l:'Emplacement'},{v:'lot',l:'N° de lot'},{v:'dlc',l:'DLC / DLUO'},{v:'condQte',l:'Conditionnement'},{v:'notes',l:'Notes'},{v:'stockType',l:'Type (matière/fini/marchandise)'}];
+var FIELD_OPTIONS=[
+  {v:'_ignore',l:'— Ignorer —'},
+  {v:'ref',l:'Référence / SKU'},
+  {v:'ean',l:'Code EAN / Barcode'},
+  {v:'refFournisseur',l:'Réf. fournisseur'},
+  {v:'name',l:'Nom / Désignation'},
+  {v:'parentRefName',l:'Modèle parent (libellé)'},
+  {v:'fournisseur',l:'Fournisseur / Marque'},
+  {v:'cat',l:'Famille / Catégorie'},
+  {v:'sousCat',l:'Sous-famille / Sous-catégorie'},
+  {v:'taille',l:'Taille / Pointure'},
+  {v:'couleur',l:'Couleur / Coloris'},
+  {v:'pa',l:'Prix d\'achat HT (PA)'},
+  {v:'pmpa',l:'Prix moyen pondéré achat (PMPA)'},
+  {v:'cump',l:'Coût unitaire moyen pondéré (CUMP)'},
+  {v:'pv',l:'Prix de vente HT'},
+  {v:'txMarque',l:'Taux de marque (%)'},
+  {v:'stockBase',l:'Stock actuel'},
+  {v:'min',l:'Seuil alerte (Alteore)'},
+  {v:'qMin',l:'Stock min informatif (Q_Mini)'},
+  {v:'qMax',l:'Stock max (Q_Maxi)'},
+  {v:'qAppro',l:'Qté réappro (Q_Appro)'},
+  {v:'qReservee',l:'Qté réservée client'},
+  {v:'qCommande',l:'Qté en commande fournisseur'},
+  {v:'valorisation',l:'Valorisation stock'},
+  {v:'unite',l:'Unité'},
+  {v:'emplacement',l:'Emplacement / Zone'},
+  {v:'lot',l:'N° de lot'},
+  {v:'dlc',l:'DLC / DLUO'},
+  {v:'condQte',l:'Conditionnement'},
+  {v:'stockType',l:'Type (matière/fini/marchandise)'},
+  {v:'soldes',l:'En soldes (oui/non)'},
+  {v:'catSolde',l:'Catégorie soldes'},
+  {v:'notes',l:'Notes / Remarques'}
+];
 
 function renderMappingUI(){
   var zone=document.getElementById('import-mapping-zone');
@@ -1601,6 +1681,165 @@ function renderImportPreview(){
   var preview=_importRows.slice(0,5);
   var tbl=document.getElementById('import-preview');
   tbl.innerHTML='<thead><tr>'+mapped.map(function(h){return '<th style="text-align:left">'+esc(_importMapping[h])+'<br><span style="font-weight:400;text-transform:none;font-size:9px">'+esc(h)+'</span></th>'}).join('')+'</tr></thead><tbody>'+preview.map(function(row){return '<tr>'+mapped.map(function(h){var idx=_importHeaders.indexOf(h);return '<td style="text-align:left">'+esc(row[idx]||'')+'</td>'}).join('')+'</tr>'}).join('')+'</tbody>';
+  // Refresh the import plan
+  renderImportPlan();
+}
+
+// ── Analyse the planned import : products, variants, families to create ──
+// Returns a synthesis object used both by the preview UI (Wave 2) and by
+// executeImport (Wave 3). NEVER mutates state — pure read function.
+function analyzeImportPlan(){
+  // Build column index
+  var idx={};
+  _importHeaders.forEach(function(h,i){var f=_importMapping[h];if(f&&f!=='_ignore')idx[f]=i});
+
+  // Existing data (case-insensitive maps for fast lookup)
+  var existingRefs={};
+  _products.forEach(function(p){if(p.ref) existingRefs[String(p.ref).trim().toLowerCase()]=p});
+  function _nrm(s){return (s||'').toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
+  var existingFamRoots={};
+  var existingFamSubs={}; // key = parentKey + '|' + childKey
+  _families.forEach(function(f){
+    if(!f.parentId) existingFamRoots[_nrm(f.name)]=f;
+    else {
+      var parent=_families.find(function(x){return x.id===f.parentId});
+      if(parent) existingFamSubs[_nrm(parent.name)+'|'+_nrm(f.name)]=f;
+    }
+  });
+
+  var hasVariants = (idx.taille!=null || idx.couleur!=null);
+  var modelGroups={}; // parentRef → {name, count}
+  var seenSkus={};   // composite SKU → 1
+  var newFamRoots={}, newFamSubs={};
+  var conflictsExisting=0;
+  var validRows=0, skippedRows=0;
+  var rows=_importRows;
+
+  for(var i=0;i<rows.length;i++){
+    var row=rows[i];
+    // Determine the model code (parent ref) and variant code
+    var rawRef = (idx.ref!=null ? row[idx.ref] : '').toString().trim();
+    var rawName = (idx.name!=null ? row[idx.name] : '').toString().trim();
+    var rawTaille = (idx.taille!=null ? row[idx.taille] : '').toString().trim();
+    var rawCouleur = (idx.couleur!=null ? row[idx.couleur] : '').toString().trim();
+    var rawCat = (idx.cat!=null ? row[idx.cat] : '').toString().trim();
+    var rawSousCat = (idx.sousCat!=null ? row[idx.sousCat] : '').toString().trim();
+
+    // Need at least ref or name to be importable
+    if(!rawRef && !rawName){skippedRows++;continue}
+
+    // Compute SKU (variant or simple)
+    var sku;
+    if(hasVariants && rawRef && (rawTaille||rawCouleur)){
+      var variantSuffix = [rawTaille,rawCouleur].filter(Boolean).join('-');
+      sku = rawRef + (variantSuffix?'-'+variantSuffix:'');
+    } else {
+      sku = rawRef || rawName.slice(0,40).toUpperCase().replace(/\s+/g,'-');
+    }
+    var skuKey = sku.toLowerCase();
+    if(seenSkus[skuKey]){skippedRows++;continue} // dedupe inside file
+    seenSkus[skuKey]=1;
+
+    // Track parent groups
+    if(hasVariants && rawRef && (rawTaille||rawCouleur)){
+      if(!modelGroups[rawRef]) modelGroups[rawRef]={name:rawName||rawRef,count:0};
+      modelGroups[rawRef].count++;
+    }
+
+    // Conflict with existing
+    if(existingRefs[skuKey]) conflictsExisting++;
+
+    // Track families to create
+    if(rawCat){
+      var ck=_nrm(rawCat);
+      if(!existingFamRoots[ck] && !newFamRoots[ck]) newFamRoots[ck]=rawCat;
+      if(rawSousCat){
+        var sk=_nrm(rawSousCat);
+        var compositeKey=ck+'|'+sk;
+        if(!existingFamSubs[compositeKey] && !newFamSubs[compositeKey]){
+          newFamSubs[compositeKey]={parent:rawCat,name:rawSousCat};
+        }
+      }
+    }
+    validRows++;
+  }
+
+  var totalProducts = validRows;
+  var modelCount = Object.keys(modelGroups).length;
+  var simpleCount = totalProducts - Object.keys(modelGroups).reduce(function(a,k){return a+modelGroups[k].count},0);
+
+  return {
+    totalRows: rows.length,
+    validRows: validRows,
+    skippedRows: skippedRows,
+    totalProducts: totalProducts,
+    hasVariants: hasVariants,
+    modelCount: modelCount,
+    simpleCount: simpleCount,
+    variantTotal: totalProducts - simpleCount,
+    newFamRoots: Object.values(newFamRoots),
+    newFamSubs: Object.values(newFamSubs),
+    conflictsExisting: conflictsExisting,
+    hasRef: idx.ref!=null,
+    hasName: idx.name!=null
+  };
+}
+
+function renderImportPlan(){
+  var card=document.getElementById('import-plan-card');
+  var content=document.getElementById('import-plan-content');
+  if(!card||!content) return;
+  var plan;
+  try{plan=analyzeImportPlan()}catch(e){card.style.display='none';return}
+
+  // If neither ref nor name mapped, hide the card and let executeImport handle the error
+  if(!plan.hasRef && !plan.hasName){
+    card.style.display='block';
+    content.innerHTML='<div style="color:var(--red);font-size:12px;font-weight:600">⚠️ Vous devez mapper au moins une colonne sur "Référence / SKU" ou "Nom / Désignation" pour pouvoir importer.</div>';
+    document.getElementById('import-go-btn').disabled=true;
+    return;
+  }
+  document.getElementById('import-go-btn').disabled=false;
+
+  var lines=[];
+  // Main count
+  if(plan.hasVariants && plan.modelCount>0){
+    lines.push('<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px">📦 <span style="color:var(--blue-main)">'+plan.totalProducts+'</span> produits à créer <span style="font-weight:400;color:var(--muted);font-size:11px">('+plan.modelCount+' modèles avec '+plan.variantTotal+' variantes'+(plan.simpleCount>0?' + '+plan.simpleCount+' produits simples':'')+')</span></div>');
+  } else {
+    lines.push('<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:6px">📦 <span style="color:var(--blue-main)">'+plan.totalProducts+'</span> produits à créer</div>');
+  }
+
+  // Families to create
+  if(plan.newFamRoots.length>0){
+    var sample=plan.newFamRoots.slice(0,5).map(esc).join(', ');
+    var more=plan.newFamRoots.length>5?' <span style="color:var(--muted)">(+'+(plan.newFamRoots.length-5)+' autres)</span>':'';
+    lines.push('<div style="font-size:12px;margin-top:4px">🆕 <strong>'+plan.newFamRoots.length+' nouvelle(s) famille(s) à créer</strong> : <span style="color:var(--muted)">'+sample+more+'</span></div>');
+  }
+  if(plan.newFamSubs.length>0){
+    var sampleS=plan.newFamSubs.slice(0,3).map(function(s){return esc(s.parent)+' › '+esc(s.name)}).join(', ');
+    var moreS=plan.newFamSubs.length>3?' <span style="color:var(--muted)">(+'+(plan.newFamSubs.length-3)+' autres)</span>':'';
+    lines.push('<div style="font-size:12px;margin-top:4px">🆕 <strong>'+plan.newFamSubs.length+' nouvelle(s) sous-famille(s) à créer</strong> : <span style="color:var(--muted)">'+sampleS+moreS+'</span></div>');
+  }
+  if(plan.newFamRoots.length===0 && plan.newFamSubs.length===0){
+    lines.push('<div style="font-size:12px;margin-top:4px;color:var(--green)">✅ Toutes les familles existent déjà — aucune création nécessaire</div>');
+  }
+
+  // Conflicts
+  if(plan.conflictsExisting>0){
+    lines.push('<div style="font-size:12px;margin-top:6px;padding-top:6px;border-top:1px dashed #c7d2fe">⚠️ <strong>'+plan.conflictsExisting+' référence(s) existent déjà</strong> dans votre stock — vous pourrez choisir Remplacer / Fusionner / Ignorer à l\'étape suivante</div>');
+  }
+
+  // Skipped
+  if(plan.skippedRows>0){
+    lines.push('<div style="font-size:11px;margin-top:4px;color:var(--muted)">ℹ️ '+plan.skippedRows+' ligne(s) ignorée(s) (vides ou doublons internes au fichier)</div>');
+  }
+
+  content.innerHTML=lines.join('');
+  card.style.display='block';
+
+  // Update import button label with the real count
+  var countEl=document.getElementById('import-count');
+  if(countEl) countEl.textContent=plan.totalProducts;
 }
 
 async function executeImport(){
