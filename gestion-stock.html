@@ -1641,7 +1641,7 @@ async function aiDetectMapping(){
 
 function fallbackMapping(headers){
   var aliases={
-    ref:['code','reference','code article','code art','article','sku','ref'],
+    ref:['code','reference','code article','code art','article','sku','ref','declinaison','déclinaison','variante','variant','code variante','code variant','decli'],
     ean:['ean','barcode','gtin','upc','code barre','code-barre','code barres','multi code','gencod','gencode'],
     refFournisseur:['ref fourn','ref. fourn','ref fournisseur','ref frns','cod fourn','code fournisseur','reference fournisseur'],
     name:['nom','name','designation','désignation','libelle','libellé','produit','description','intitule','intitulé','desi'],
@@ -1792,22 +1792,14 @@ function analyzeImportPlan(){
 
   for(var i=0;i<rows.length;i++){
     var row=rows[i];
-    var rawRef = (idx.ref!=null ? row[idx.ref] : '').toString().trim();
-    if(rawRef==='###'||rawRef==='-') rawRef='';
-    var rawName = (idx.name!=null ? row[idx.name] : '').toString().trim();
-    if(rawName==='###') rawName='';
-    var rawTaille = (idx.taille!=null ? row[idx.taille] : '').toString().trim();
-    if(rawTaille==='###') rawTaille='';
-    var rawCouleur = (idx.couleur!=null ? row[idx.couleur] : '').toString().trim();
-    if(rawCouleur==='###') rawCouleur='';
-    var rawParentName = (hasParent ? row[idx.parentRefName] : '').toString().trim();
-    if(rawParentName==='###') rawParentName='';
-    var rawCat = (idx.cat!=null ? row[idx.cat] : '').toString().trim();
-    if(rawCat==='###') rawCat='';
-    var rawSousCat = (idx.sousCat!=null ? row[idx.sousCat] : '').toString().trim();
-    if(rawSousCat==='###') rawSousCat='';
-    var rawSousSousCat = (idx.sousSousCat!=null ? row[idx.sousSousCat] : '').toString().trim();
-    if(rawSousSousCat==='###') rawSousSousCat='';
+    var rawRef = _ps(idx.ref!=null ? row[idx.ref] : '');
+    var rawName = _ps(idx.name!=null ? row[idx.name] : '');
+    var rawTaille = _ps(idx.taille!=null ? row[idx.taille] : '');
+    var rawCouleur = _ps(idx.couleur!=null ? row[idx.couleur] : '');
+    var rawParentName = _ps(hasParent ? row[idx.parentRefName] : '');
+    var rawCat = _extractCatLabel(idx.cat!=null ? row[idx.cat] : '');
+    var rawSousCat = _extractCatLabel(idx.sousCat!=null ? row[idx.sousCat] : '');
+    var rawSousSousCat = _extractCatLabel(idx.sousSousCat!=null ? row[idx.sousSousCat] : '');
 
     if(!rawRef && !rawName){skippedRows++;continue}
 
@@ -1959,6 +1951,21 @@ function _ps(v){
   return s;
 }
 
+// For category labels: extract the text portion of "code - libellé" composite values.
+// Examples: "165 - bijoux" → "bijoux", "01 - Femme" → "Femme", "A12 - Chaussures" → "Chaussures"
+// Leaves normal labels untouched: "ACCESSOIRES" → "ACCESSOIRES", "PRET A PORTER" → "PRET A PORTER"
+function _extractCatLabel(v){
+  var s=_ps(v);
+  if(!s) return '';
+  // Match "<alphanumeric short code> <separator> <text>"
+  // Code is 1-6 chars, separator is - – — followed by space
+  var m=s.match(/^([\w]{1,6})\s*[-–—]\s+(.+)$/);
+  if(m && m[2].length>=2 && /[a-zA-ZÀ-ÿ]/.test(m[2])){
+    return m[2].trim();
+  }
+  return s;
+}
+
 // Build the list of products from the file rows + mapping. Pure function.
 // Returns { products: [...], skippedCount: N }
 function _buildProductsFromRows(){
@@ -2052,9 +2059,10 @@ function _buildProductsFromRows(){
       p.soldes = (sv==='1'||sv==='oui'||sv==='yes'||sv==='true'||sv==='y') ? 1 : 0;
     }
     // Stash cat/sousCat/sousSousCat as raw strings — resolved to familyId in doImportFinal
-    if(idx.cat!=null) p._catRaw = _ps(row[idx.cat]);
-    if(idx.sousCat!=null) p._sousCatRaw = _ps(row[idx.sousCat]);
-    if(idx.sousSousCat!=null) p._sousSousCatRaw = _ps(row[idx.sousSousCat]);
+    // Apply composite "code - libellé" extraction here so the family creation uses clean names
+    if(idx.cat!=null) p._catRaw = _extractCatLabel(row[idx.cat]);
+    if(idx.sousCat!=null) p._sousCatRaw = _extractCatLabel(row[idx.sousCat]);
+    if(idx.sousSousCat!=null) p._sousSousCatRaw = _extractCatLabel(row[idx.sousSousCat]);
 
     // Smart fallback : if pa missing but pmpa or cump present, use them
     if(p.pa==null){
