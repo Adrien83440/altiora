@@ -53,18 +53,20 @@ export default async function handler(req, res) {
 Champs cibles disponibles (id → description) :
 
 — IDENTIFIANTS —
-- ref : Référence produit / SKU / Code article (le plus stable côté logiciel source : "Code", "IdArt", "Code article")
+- ref : Référence produit / SKU / Code article. **PRIORITÉ ABSOLUE** au champ "Code" / "Code article" / "Reference" qui contient un identifiant alphanumérique stable (ex: "A140722154424"). Ne PAS choisir "IdArt" / "ID" / "RecordID" qui sont des identifiants techniques internes au logiciel source — laisse-les sur _ignore. Si seul "IdArt" existe (pas de "Code"), alors mappe-le sur ref en dernier recours.
 - ean : Code-barres EAN / UPC / GTIN (8-13 chiffres, parfois nommé "Multi Code", "Barcode", "Gencod")
 - refFournisseur : Référence du produit chez le fournisseur ("Ref. Fourn.", "Cod. Fourn.", "Ref Frns")
 
 — DESCRIPTION —
-- name : Nom / Désignation / Libellé du produit ("Designation", "Libellé", "Article", "Modele" si pas de variantes)
-- parentRefName : Nom du modèle parent quand le fichier contient des variantes ("Modele", "Modèle", "Style", "Famille produit"). À utiliser UNIQUEMENT si une colonne distincte sert d'identifiant produit (ref) ET qu'une autre colonne donne le libellé du modèle parent.
+- name : Nom / Désignation / Libellé court ("Designation", "Libellé", "Article", "Description courte")
+- parentRefName : **Nom/code du modèle parent** quand le fichier contient des variantes ("Modele", "Modèle", "Style"). **TRÈS IMPORTANT** : si une colonne s'appelle "Modele" / "Modèle" ET qu'il existe des colonnes Taille ou Coloris/Couleur, alors Modele DOIT être mappé sur parentRefName même si les premières lignes affichent "###" ou sont vides (les marqueurs "###" signifient "non applicable" pour les produits non-textiles, mais d'autres lignes auront des valeurs réelles).
 - fournisseur : Fournisseur ou Marque ("Marque", "Fabricant", "Fournisseur", "Brand", "Supplier")
 
-— CATÉGORISATION (deux niveaux) —
-- cat : Famille / Catégorie principale / Rayon ("cFAMILLE", "Famille", "Catégorie", "Rayon", "Cat", "Family")
-- sousCat : Sous-famille / Sous-catégorie ("CSSFAMILLE", "Sous-famille", "Sous-catégorie", "Sub-cat", "Type")
+— CATÉGORISATION (jusqu'à TROIS niveaux hiérarchiques) —
+- cat : Famille principale / Catégorie racine / Rayon (niveau 1, le plus large : "cRAYON", "Rayon", "Département", "Famille principale")
+- sousCat : Sous-famille / Sous-catégorie (niveau 2 : "cFAMILLE", "Famille", "Catégorie", "Sub-cat")
+- sousSousCat : Sous-sous-famille (niveau 3, le plus précis : "CSSFAMILLE", "Sous-sous-famille", "ssfamille", "Sub-sub-cat")
+**RÈGLE IMPORTANTE** : si tu vois TROIS colonnes hiérarchiques (ex: cRAYON, cFAMILLE, CSSFAMILLE), mappe-les RESPECTIVEMENT à cat, sousCat, sousSousCat. Si tu n'en vois que deux (ex: Famille + Sous-famille), mappe-les à cat et sousCat. Ne JAMAIS ignorer un niveau hiérarchique, c'est de l'information précieuse pour l'organisation du stock.
 
 — VARIANTES (clothing/textile/bijoux) —
 - taille : Taille ou pointure ("Taille", "Size", "Pointure", "T.")
@@ -95,9 +97,9 @@ Champs cibles disponibles (id → description) :
 - dlc : Date limite de consommation
 - condQte : Conditionnement / Colisage (nombre par carton)
 - stockType : Type (matiere = matière première, fini = produit fini, marchandise = marchandise pour revente)
-- soldes : En soldes (oui/non, 0/1)
+- soldes : En soldes (oui/non, 0/1). Mappe aussi les colonnes "Promo" / "En promo" si aucune autre colonne soldes plus explicite n'existe.
 - catSolde : Catégorie de soldes ("CatSolde", "Type solde")
-- notes : Remarques / Description / Commentaire libre / Nota
+- notes : Remarques / Description / Commentaire libre / Nota / **"Comp. Définition"** / "Comp. Defn" / "Description longue"
 
 — À IGNORER —
 - _ignore : Colonne à ignorer (ne pas importer)
@@ -123,12 +125,13 @@ INSTRUCTIONS DE MAPPING :
 2. Si une colonne ne correspond à aucun champ, utilise "_ignore".
 3. **TVA / Prix HT vs TTC** : Alteore travaille EN HT. Si le fichier a "HT" ET "TTC", "HT" → pv, "TTC" → _ignore. Si une seule colonne "Prix" existe, regarde l'écart avec PA pour deviner.
 4. **Plusieurs colonnes "prix d'achat"** : si tu vois PA + PMPA + CUMP, mappe-les RESPECTIVEMENT à pa, pmpa, cump (ne les fusionne pas).
-5. **Catégorie hiérarchique** : si tu vois "cFAMILLE" et "CSSFAMILLE", c'est respectivement cat (famille principale) et sousCat (sous-famille). De même "Famille"+"Sous-famille", "Rayon"+"Catégorie", etc.
-6. **Variantes (taille/couleur)** : détecte "Taille", "Coloris", "Couleur", "Size", "Color". Ces colonnes signifient que le fichier contient des variantes d'un modèle parent.
-7. **Modèle parent vs SKU** : si tu vois à la fois une colonne "Modele/Modèle/Style" ET une colonne "Code/Ref/SKU/IdArt", la SKU unique est le code article (ref) et le modèle est parentRefName (libellé du groupe parent). Si "Modele" est la seule colonne nom, alors Modele → name et pas de parentRefName.
+5. **Catégorie hiérarchique** : si tu vois "cFAMILLE" et "CSSFAMILLE", c'est respectivement cat (famille principale) et sousCat (sous-famille). De même "Famille"+"Sous-famille", "Rayon"+"Catégorie", etc. Si tu vois TROIS niveaux (ex: cRAYON, cFAMILLE, CSSFAMILLE), utilise cat + sousCat + sousSousCat — ne JAMAIS ignorer un niveau.
+6. **Variantes (taille/couleur)** : détecte "Taille", "Coloris", "Couleur", "Size", "Color". Ces colonnes signifient que le fichier contient des variantes d'un modèle parent. Dès que tu détectes une de ces colonnes, cherche aussi une colonne "Modele" / "Modèle" / "Style" et mappe-la sur parentRefName.
+7. **Modèle parent vs SKU** : si tu vois à la fois une colonne "Modele/Modèle/Style" ET une colonne "Code/Ref/SKU/IdArt", la SKU unique est le **Code** (alphanumérique long, jamais "IdArt") et le modèle est parentRefName (libellé du groupe parent). **PRIORITÉ ABSOLUE** : si "Code" et "IdArt" coexistent, mappe Code→ref et laisse IdArt sur _ignore. IdArt est un identifiant technique interne du logiciel source qui peut changer entre les exports.
 8. **EAN** : si tu vois des codes numériques de 8-13 chiffres dans une colonne, c'est probablement un EAN — même si la colonne s'appelle "Multi Code", "Code barres", "Gencod" ou similaire.
 9. **Q_Mini / Stock min** : voir la définition détaillée ci-dessus. En cas de doute, "Q_Mini" → min.
-10. **Valeurs vides ou marqueurs "###"** dans les exemples : ignore-les pour deviner le contenu, base-toi sur les autres lignes.
+10. **Marqueur "###" et valeurs vides** : le marqueur "###" est utilisé par certains logiciels (notamment Polaris) pour signifier "champ non applicable pour cette ligne". Traite-le **exactement comme une valeur vide** : il ne doit JAMAIS te faire ignorer une colonne. Si la colonne "Modele" affiche "###" sur les premières lignes mais existe avec d'autres colonnes Taille/Coloris, mappe-la quand même sur parentRefName — d'autres lignes du fichier auront probablement des valeurs réelles.
+11. **Colonnes Promo / Comp. Définition** : "Promo" → soldes (sauf si une colonne plus explicite "Soldes" existe). "Comp. Définition" / "Comp. Defn" → notes.
 
 Pour le champ "confidence" :
 - 0.9-1.0 : tous les headers sont reconnus, le mapping est évident
