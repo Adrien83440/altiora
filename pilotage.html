@@ -1104,6 +1104,12 @@ async function loadMonth() {
       promises.employes = window._getDocs(window._collection(window._db,'rh',window._uid,'employes')).catch(function(){ return null; });
       promises.objectifs = window._getDocs(window._collection(window._db,'rh',window._uid,'objectifs')).catch(function(){ return null; });
     }
+    // Wave 4 : charger les fiches de paie du mois courant pour le mode auto-paie
+    // (lecture seule, lecture additive, gestion défensive d'erreur — ne casse rien si la collection n'existe pas)
+    if (!window._rhPaiesByMonth) window._rhPaiesByMonth = {};
+    if (!window._rhPaiesByMonth[key] && window._getDocs && window._collection) {
+      promises.paies = window._getDocs(window._collection(window._db,'rh',window._uid,'paie')).catch(function(){ return null; });
+    }
 
     // Attendre TOUT en parallèle
     var keys = Object.keys(promises);
@@ -1179,6 +1185,34 @@ async function loadMonth() {
         if (!hasManuel) data.masseSalariale.mode = 'auto';
       }
     }
+
+    // ── Wave 4 : traiter les fiches de paie chargées (cache par mois) ──
+    // Format Firestore : rh/{uid}/paie/{moisKey}_{empId}
+    // Map résultat : window._rhPaiesByMonth[moisKey][empId] = { brut, brutTotal, superbrut, valide, ... }
+    if (results.paies && !window._rhPaiesByMonth[key]) {
+      try {
+        var allPaies = {};
+        results.paies.forEach(function(d){
+          var paie = d.data() || {};
+          var pMois = paie.mois || (d.id || '').split('_')[0];
+          var pEmpId = paie.employeId || (d.id || '').split('_').slice(1).join('_');
+          if (!pMois || !pEmpId) return;
+          if (!allPaies[pMois]) allPaies[pMois] = {};
+          allPaies[pMois][pEmpId] = paie;
+        });
+        // Stocker tous les mois lus (comme ça si la cliente change de mois on a déjà tout)
+        Object.keys(allPaies).forEach(function(mk){
+          if (!window._rhPaiesByMonth[mk]) window._rhPaiesByMonth[mk] = allPaies[mk];
+        });
+        // Marquer le mois courant comme chargé même si vide
+        if (!window._rhPaiesByMonth[key]) window._rhPaiesByMonth[key] = {};
+      } catch(e) {
+        console.warn('[wave4] erreur parsing paies (non bloquant):', e);
+        window._rhPaiesByMonth[key] = {};
+      }
+    }
+    // Toujours définir _rhPaiesCurrentMonth pour le mois affiché (pour usage par calcMasseSalariale)
+    window._rhPaiesCurrentMonth = (window._rhPaiesByMonth && window._rhPaiesByMonth[key]) || {};
 
     // ── Traiter Dettes sync (résultat déjà chargé) ──
     _syncDettesFromSnap(data, key, results.dettes);
@@ -1880,9 +1914,87 @@ function getMSTaux(emp) {
   return 42;
 }
 
+// ═══════════════════════════════════════════
+// WAVE 4 — RÉCUPÉRATION AUTO MASSE SALARIALE DEPUIS RH-PAIE
+// ═══════════════════════════════════════════
+// Le module rh-paie.html stocke pour chaque mois et chaque employé une fiche de paie complète :
+// rh/{uid}/paie/{moisKey}_{empId} = { brut, prime, brutTotal, cotPat, superbrut, valide, ... }
+// Le mode 'auto-paie' lit ces données EN LECTURE SEULE et les utilise comme source de vérité,
+// avec un fallback intelligent ligne par ligne si aucune fiche de paie n'existe pour ce mois.
+//
+// SÉCURITÉ : aucune écriture vers rh/{uid}/paie. Aucune modification de RH. Aucun changement
+// de schéma. Mode additif strict, ancien mode 'auto' préservé tel quel.
+
+// Retourne les données de paie pour un employé sur le mois affiché.
+// Returns { brutTotal, superbrut, source, valide } | null si aucune fiche.
+// source = 'paie-validee' | 'paie-brouillon' | null
+function getEmployePaieForCurrentMonth(empId) {
+  var paies = window._rhPaiesCurrentMonth || {};
+  var p = paies[empId];
+  if (!p || typeof p !== 'object') return null;
+  // Defensive : extraire avec fallback à 0
+  var brutTotal = parseFloat(p.brutTotal);
+  if (isNaN(brutTotal) || brutTotal < 0) {
+    // Fallback : reconstruire depuis brut + prime si brutTotal absent
+    var brut = parseFloat(p.brut) || 0;
+    var prime = parseFloat(p.prime) || 0;
+    brutTotal = brut + prime;
+  }
+  var superbrut = parseFloat(p.superbrut);
+  if (isNaN(superbrut) || superbrut < 0) {
+    // Fallback : reconstruire depuis brutTotal + cotPat
+    var cotPat = parseFloat(p.cotPat) || 0;
+    superbrut = brutTotal + cotPat;
+  }
+  if (brutTotal <= 0 && superbrut <= 0) return null;
+  return {
+    brutTotal: brutTotal,
+    superbrut: superbrut,
+    source: p.valide ? 'paie-validee' : 'paie-brouillon',
+    valide: !!p.valide
+  };
+}
+
+// Calcule la ligne masse salariale pour un employé en mode auto-paie.
+// Retourne { brut, taux, cout, source, valide, isFallback }
+// - source = 'paie-validee' | 'paie-brouillon' | 'fiche-statique'
+// - isFallback = true si on est tombé sur la fiche statique faute de paie disponible
+function getEmployeMSLineAutoPaie(emp) {
+  var paie = getEmployePaieForCurrentMonth(emp.id);
+  if (paie && paie.superbrut > 0) {
+    // Source = fiche de paie réelle. On retourne directement le superbrut comme coût employeur.
+    // brut = brutTotal (brut + prime), pour affichage
+    return {
+      brut: paie.brutTotal,
+      cout: paie.superbrut,
+      source: paie.source,
+      valide: paie.valide,
+      isFallback: false
+    };
+  }
+  // Fallback : fiche statique de l'employé (comme l'ancien mode auto)
+  var brutStatic = parseFloat(emp.salaireBrut) || 0;
+  var taux = getMSTaux(emp);
+  var coutStatic = brutStatic * (1 + taux / 100);
+  return {
+    brut: brutStatic,
+    taux: taux,
+    cout: coutStatic,
+    source: 'fiche-statique',
+    valide: false,
+    isFallback: true
+  };
+}
+
 function calcMasseSalariale(ms) {
   var totalSal = 0, totalDir = 0, totalPrimes = 0;
-  if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
+  if (ms.mode === 'auto-paie' && window._rhEmployes && window._rhEmployes.length > 0) {
+    // Wave 4 : mode auto-paie — somme des superbrut depuis rh-paie, avec fallback fiche statique
+    window._rhEmployes.forEach(function(e) {
+      var line = getEmployeMSLineAutoPaie(e);
+      totalSal += line.cout || 0;
+    });
+  } else if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
     window._rhEmployes.forEach(function(e) {
       var brut = parseFloat(e.salaireBrut) || 0;
       var taux = getMSTaux(e);
@@ -1961,15 +2073,27 @@ function renderMasseSalariale(data, t, forceRender) {
   var ms = data.masseSalariale || {};
   var hasRH = window._rhEmployes && window._rhEmployes.length > 0;
   var isAuto = ms.mode === 'auto' && hasRH;
+  var isAutoPaie = ms.mode === 'auto-paie' && hasRH; // wave 4
   var msCalc = calcMasseSalariale(ms);
+
+  // Wave 4 : badge de mode (3 valeurs possibles)
+  var modeBadge;
+  if (isAutoPaie) modeBadge = '<span class="section-title-badge" style="background:#dbeafe;color:#1e40af">🔗 Auto fiches paie</span>';
+  else if (isAuto) modeBadge = '<span class="section-title-badge" style="background:#fef3c7;color:#b45309">🔗 Auto fiche</span>';
+  else modeBadge = '<span class="section-title-badge" style="background:#fef3c7;color:#b45309">✏️ Manuel</span>';
 
   var html = '<div class="section-card full' + secColClass('ms') + '" id="sec-ms" style="margin-bottom:16px">' +
     '<div class="section-head">' +
-      '<div class="section-title section-toggle" onclick="toggleSection(\'ms\')"><span class="chevron">▸</span> 👥 Masse salariale & Rémunération <span class="section-title-badge" style="background:#fef3c7;color:#b45309">' + (isAuto ? '🔗 Auto RH' : '✏️ Manuel') + '</span>' + (msCalc.total > 0 ? ' <span class="sec-badge-count">' + fmtN(msCalc.total) + ' €</span>' : '') + '</div>' +
+      '<div class="section-title section-toggle" onclick="toggleSection(\'ms\')"><span class="chevron">▸</span> 👥 Masse salariale & Rémunération ' + modeBadge + (msCalc.total > 0 ? ' <span class="sec-badge-count">' + fmtN(msCalc.total) + ' €</span>' : '') + '</div>' +
       '<div class="section-actions" onclick="event.stopPropagation()">' +
-        (hasRH ? '<button class="btn btn-outline btn-sm" onclick="toggleMSMode()" id="ms-mode-btn">' + (isAuto ? '✏️ Passer en manuel' : '🔗 Mode auto RH') + '</button>' : '') +
+        (hasRH ? '<select class="cell-input" style="width:auto;font-size:11px;padding:4px 8px;cursor:pointer" onchange="setMSMode(this.value)" title="Mode de calcul de la masse salariale">' +
+          '<option value="manuel"' + (ms.mode === 'manuel' ? ' selected' : '') + '>✏️ Manuel</option>' +
+          '<option value="auto"' + (ms.mode === 'auto' ? ' selected' : '') + '>🔗 Auto fiche employé</option>' +
+          '<option value="auto-paie"' + (ms.mode === 'auto-paie' ? ' selected' : '') + '>🔗 Auto fiches de paie</option>' +
+        '</select>' : '') +
+        (isAutoPaie ? '<button class="btn btn-outline btn-sm" onclick="refreshRhPaiesCurrent()" title="Recharger les fiches de paie depuis le module RH">🔄 RH</button>' : '') +
         '<button class="btn btn-outline btn-sm" style="color:#059669;border-color:#059669" onclick="fetchAllURSSAF()" id="ms-urssaf-btn">🔄 Taux URSSAF 2026</button>' +
-        (!isAuto ? '<button class="btn btn-outline btn-sm" onclick="ensureSectionOpen(\'ms\');addMSLigne()">+ Salarié</button>' : '') +
+        (!isAuto && !isAutoPaie ? '<button class="btn btn-outline btn-sm" onclick="ensureSectionOpen(\'ms\');addMSLigne()">+ Salarié</button>' : '') +
       '</div>' +
     '</div>' +
     '<div class="section-body" id="ms-body">';
@@ -1983,14 +2107,41 @@ function renderMasseSalariale(data, t, forceRender) {
   // Tableau salariés
   html += '<table class="data-table"><thead><tr>' +
     '<th>Salarié</th>' +
-    (isAuto ? '<th>Poste</th><th>Contrat</th>' : '') +
+    (isAuto || isAutoPaie ? '<th>Poste</th><th>Contrat</th>' : '') +
     '<th>Brut mensuel (€)</th>' +
     '<th>Taux charges (%)</th>' +
     '<th>Coût employeur (€)</th>' +
-    (!isAuto ? '<th></th>' : '') +
+    (isAutoPaie ? '<th>Source</th>' : '') +
+    (!isAuto && !isAutoPaie ? '<th></th>' : '') +
     '</tr></thead><tbody id="ms-tbody">';
 
-  if (isAuto) {
+  if (isAutoPaie) {
+    // Wave 4 : mode "auto fiches de paie" — lit window._rhPaiesCurrentMonth
+    window._rhEmployes.forEach(function(e) {
+      var line = getEmployeMSLineAutoPaie(e);
+      // Couleurs et badge selon la source
+      var srcBadge, rowBg;
+      if (line.source === 'paie-validee') {
+        srcBadge = '<span style="font-size:9px;font-weight:700;background:#d1fae5;color:#065f46;padding:2px 7px;border-radius:8px" title="Fiche de paie validée dans le module RH">✅ Paie validée</span>';
+        rowBg = '';
+      } else if (line.source === 'paie-brouillon') {
+        srcBadge = '<span style="font-size:9px;font-weight:700;background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:8px" title="Fiche de paie présente mais NON validée — pensez à la valider dans le module Paie">⚠ Non validée</span>';
+        rowBg = 'background:rgba(245,158,11,0.06);';
+      } else {
+        srcBadge = '<span style="font-size:9px;font-weight:700;background:#e5e7eb;color:#475569;padding:2px 7px;border-radius:8px" title="Aucune fiche de paie pour ce mois — utilise le brut statique de la fiche employé">📋 Fiche statique</span>';
+        rowBg = 'background:rgba(148,163,184,0.04);';
+      }
+      html += '<tr style="' + rowBg + '">' +
+        '<td style="font-weight:600">' + (e.prenom || '') + ' ' + (e.nom || '') + '</td>' +
+        '<td>' + (e.poste || '—') + '</td>' +
+        '<td>' + (e.typeContrat || 'CDI') + ' ' + (e.heuresHebdo || 35) + 'h</td>' +
+        '<td style="text-align:right">' + fmtN(line.brut) + '</td>' +
+        '<td style="text-align:center;color:var(--muted);font-size:11px">' + (line.isFallback ? '~' + (line.taux || 42) + '%' : 'inclus') + '</td>' +
+        '<td style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(line.cout) + '</td>' +
+        '<td>' + srcBadge + '</td>' +
+        '</tr>';
+    });
+  } else if (isAuto) {
     window._rhEmployes.forEach(function(e) {
       var brut = parseFloat(e.salaireBrut) || 0;
       var taux = getMSTaux(e);
@@ -2020,10 +2171,10 @@ function renderMasseSalariale(data, t, forceRender) {
   }
 
   html += '</tbody>' +
-    '<tfoot><tr><td colspan="' + (isAuto ? 3 : 1) + '">TOTAL SALARIÉS</td>' +
+    '<tfoot><tr><td colspan="' + ((isAuto || isAutoPaie) ? 3 : 1) + '">TOTAL SALARIÉS</td>' +
     '<td></td><td></td>' +
     '<td style="text-align:right;font-weight:800;color:#f59e0b"><span id="tot-msSal">' + fmtN(msCalc.salaries) + '</span> €</td>' +
-    (!isAuto ? '<td></td>' : '') +
+    (isAutoPaie ? '<td></td>' : (!isAuto ? '<td></td>' : '')) +
     '</tr></tfoot></table>';
 
   // Section Dirigeant
@@ -2148,6 +2299,52 @@ function toggleMSMode() {
   if (!_data.masseSalariale) return;
   _data.masseSalariale.mode = _data.masseSalariale.mode === 'auto' ? 'manuel' : 'auto';
   renderPage(_data, parseInt(document.getElementById('monthSelect').value));
+}
+
+// Wave 4 : sélecteur 3 modes (manuel / auto / auto-paie)
+function setMSMode(mode) {
+  if (!_data.masseSalariale) return;
+  if (mode !== 'manuel' && mode !== 'auto' && mode !== 'auto-paie') mode = 'manuel';
+  _data.masseSalariale.mode = mode;
+  scheduleSave();
+  renderPage(_data, parseInt(document.getElementById('monthSelect').value));
+  refreshTotals();
+}
+
+// Wave 4 : recharger les fiches de paie depuis rh/{uid}/paie pour le mois courant
+// (lecture seule, défensif). Appelé depuis le bouton "🔄 RH" en mode auto-paie.
+async function refreshRhPaiesCurrent() {
+  if (!window._uid || !window._getDocs || !window._collection) {
+    showToast('Connexion non disponible', 'warning');
+    return;
+  }
+  var key = window._year + '-' + String(parseInt(document.getElementById('monthSelect').value)+1).padStart(2,'0');
+  // Forcer le rechargement en effaçant le cache du mois courant
+  if (window._rhPaiesByMonth && window._rhPaiesByMonth[key]) {
+    delete window._rhPaiesByMonth[key];
+  }
+  try {
+    var snap = await window._getDocs(window._collection(window._db,'rh',window._uid,'paie'));
+    var allPaies = {};
+    snap.forEach(function(d){
+      var paie = d.data() || {};
+      var pMois = paie.mois || (d.id || '').split('_')[0];
+      var pEmpId = paie.employeId || (d.id || '').split('_').slice(1).join('_');
+      if (!pMois || !pEmpId) return;
+      if (!allPaies[pMois]) allPaies[pMois] = {};
+      allPaies[pMois][pEmpId] = paie;
+    });
+    if (!window._rhPaiesByMonth) window._rhPaiesByMonth = {};
+    Object.keys(allPaies).forEach(function(mk){ window._rhPaiesByMonth[mk] = allPaies[mk]; });
+    if (!window._rhPaiesByMonth[key]) window._rhPaiesByMonth[key] = {};
+    window._rhPaiesCurrentMonth = window._rhPaiesByMonth[key];
+    var nb = Object.keys(window._rhPaiesCurrentMonth).length;
+    showToast('🔄 ' + nb + ' fiche(s) de paie rechargée(s) pour ce mois', 'success');
+    renderPage(_data, parseInt(document.getElementById('monthSelect').value));
+  } catch(e) {
+    console.warn('[refreshRhPaiesCurrent] erreur :', e);
+    showToast('❌ Erreur de chargement des fiches de paie', 'error');
+  }
 }
 
 function updateMSTaux(empId, val) {
