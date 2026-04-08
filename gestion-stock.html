@@ -344,9 +344,15 @@ tr.row-alerte{background:#fffbeb}
       <div class="mfield"><label>Nom du produit *</label><input id="mp-name" placeholder="Ex: Farine T55 25kg"/></div>
       <div class="mrow3">
         <div class="mfield"><label>Type</label><select id="mp-type"><option value="marchandise">Marchandise</option><option value="matiere">Matière première</option><option value="fini">Produit fini</option></select></div>
-        <div class="mfield"><label>Famille / Catégorie</label><select id="mp-family"></select></div>
+        <div class="mfield"><label>Famille / Sous-famille</label><select id="mp-family"></select></div>
         <div class="mfield"><label>Fournisseur</label><input id="mp-fourn" placeholder="Ex: Metro" list="fourn-list"/><datalist id="fourn-list"></datalist></div>
       </div>
+      <div class="mrow3">
+        <div class="mfield"><label>Taille</label><input id="mp-taille" placeholder="Ex: 40, M, XL..."/></div>
+        <div class="mfield"><label>Couleur / Coloris</label><input id="mp-couleur" placeholder="Ex: Noir, 7876..."/></div>
+        <div class="mfield"><label>Réf. fournisseur</label><input id="mp-ref-fourn" placeholder="Code chez le fournisseur"/></div>
+      </div>
+      <div class="mfield" id="mp-parent-row" style="display:none"><label>Modèle parent</label><input id="mp-parent-ref" readonly style="background:#f9fafb;color:var(--muted);font-family:monospace;font-size:11px"/><div style="font-size:10px;color:var(--muted);margin-top:2px">Ce produit est une variante (taille/couleur) du modèle ci-dessus</div></div>
       <div class="mrow3">
         <div class="mfield"><label>Prix d'achat HT (€)</label><input id="mp-pa" type="number" step="0.01" placeholder="0.00"/></div>
         <div class="mfield"><label>Prix de vente HT (€)</label><input id="mp-pv" type="number" step="0.01" placeholder="0.00"/></div>
@@ -364,6 +370,30 @@ tr.row-alerte{background:#fffbeb}
       </div>
       <div class="mfield"><label>N° de lot</label><input id="mp-lot" placeholder="LOT-2026-001"/></div>
       <div class="mfield"><label>Notes</label><textarea id="mp-notes" rows="2" placeholder="Informations complémentaires..."></textarea></div>
+      <details style="margin-top:14px;border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;background:#fafbff">
+        <summary style="cursor:pointer;font-size:12px;font-weight:700;color:var(--blue-main);user-select:none">⚙️ Infos avancées (CUMP, seuils détaillés, soldes...)</summary>
+        <div style="margin-top:12px">
+          <div class="mrow3">
+            <div class="mfield"><label>PMPA (€)</label><input id="mp-pmpa" type="number" step="0.001" placeholder="Prix moyen pondéré achat"/></div>
+            <div class="mfield"><label>CUMP (€)</label><input id="mp-cump" type="number" step="0.001" placeholder="Coût unitaire moyen pondéré"/></div>
+            <div class="mfield"><label>Taux de marque (%)</label><input id="mp-tx-marque" type="number" step="0.01" placeholder="Calculé par votre logiciel source"/></div>
+          </div>
+          <div class="mrow3">
+            <div class="mfield"><label>Stock min (Q_Mini)</label><input id="mp-qmin" type="number" step="1" placeholder="Seuil informatif"/></div>
+            <div class="mfield"><label>Stock max (Q_Maxi)</label><input id="mp-qmax" type="number" step="1" placeholder="Stock cible max"/></div>
+            <div class="mfield"><label>Quantité réappro (Q_Appro)</label><input id="mp-qappro" type="number" step="1" placeholder="Qté à commander"/></div>
+          </div>
+          <div class="mrow3">
+            <div class="mfield"><label>Qté réservée client</label><input id="mp-qreservee" type="number" step="1" placeholder="0"/></div>
+            <div class="mfield"><label>Qté en commande fournisseur</label><input id="mp-qcommande" type="number" step="1" placeholder="0"/></div>
+            <div class="mfield"><label>Valorisation (€)</label><input id="mp-valorisation" type="number" step="0.01" placeholder="Auto"/></div>
+          </div>
+          <div class="mrow">
+            <div class="mfield"><label>En soldes</label><select id="mp-soldes"><option value="0">Non</option><option value="1">Oui</option></select></div>
+            <div class="mfield"><label>Catégorie soldes</label><input id="mp-cat-solde" placeholder="Ex: -30%, FIN_SERIE..."/></div>
+          </div>
+        </div>
+      </details>
     </div>
     <div class="modal-foot">
       <button class="btn btn-danger btn-sm" id="mp-del-btn" style="display:none;margin-right:auto" onclick="deleteProd()">🗑 Supprimer</button>
@@ -762,6 +792,9 @@ async function loadAll(){
     // Migrate from old single-doc format if exists
     await migrateOldFormat();
 
+    // Silent migration: products with cat string but no familyId → resolve/create
+    await migrateCatStringToFamilyId();
+
     setSaveStatus('','');
   }catch(e){
     console.error('Stock load error:',e);
@@ -795,6 +828,103 @@ async function migrateOldFormat(){
     await loadAll();
     showToast('✅ Migration terminée : '+count+' produits');
   }catch(e){console.warn('Migration skipped:',e)}
+}
+
+// ══════════════════════════════════════════════════════════
+// FAMILY RESOLVER (used by import + cat→familyId migration)
+// ══════════════════════════════════════════════════════════
+// Default colors/icons for auto-created families (rotates by name hash)
+var _famColorPalette=['#60a5fa','#f59e0b','#10b981','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#6366f1','#84cc16'];
+var _famIconPalette=['📦','🏷️','🛍️','🎁','📚','🍞','💄','👕','🪑','🧴'];
+function _famDefaults(name){
+  var h=0; for(var i=0;i<(name||'').length;i++) h=(h*31+name.charCodeAt(i))|0;
+  h=Math.abs(h);
+  return {color:_famColorPalette[h%_famColorPalette.length],icon:_famIconPalette[h%_famIconPalette.length]};
+}
+function _normFamName(s){return (s||'').toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
+
+// Resolve a family by name (and optional sub-name) to a familyId.
+// Auto-creates the family/sub-family if missing. Pass createBatch=null
+// to create immediately, or a writeBatch to defer commits.
+async function resolveFamilyByPath(catName, sousCatName, opts){
+  opts = opts || {};
+  var batch = opts.batch || null;
+  catName = (catName||'').toString().trim();
+  sousCatName = (sousCatName||'').toString().trim();
+  if(!catName && !sousCatName) return null;
+
+  // Find or create root family
+  var parentId = null;
+  if(catName){
+    var nk = _normFamName(catName);
+    var existing = _families.find(function(f){return !f.parentId && _normFamName(f.name)===nk});
+    if(existing){ parentId = existing.id; }
+    else {
+      var d = _famDefaults(catName);
+      var newFam = {id:uid(),name:catName,icon:d.icon,color:d.color,desc:'',parentId:null,level:0,createdAt:new Date().toISOString()};
+      _families.push(newFam);
+      var ref = window._doc(window._db,'stock',window._uid,'families',newFam.id);
+      if(batch) batch.set(ref,newFam);
+      else await window._setDoc(ref,newFam);
+      parentId = newFam.id;
+    }
+  }
+
+  // Find or create sub-family
+  if(sousCatName){
+    var nk2 = _normFamName(sousCatName);
+    var existing2 = _families.find(function(f){return f.parentId===parentId && _normFamName(f.name)===nk2});
+    if(existing2) return existing2.id;
+    var d2 = _famDefaults(sousCatName);
+    var newSub = {id:uid(),name:sousCatName,icon:d2.icon,color:d2.color,desc:'',parentId:parentId,level:1,createdAt:new Date().toISOString()};
+    _families.push(newSub);
+    var ref2 = window._doc(window._db,'stock',window._uid,'families',newSub.id);
+    if(batch) batch.set(ref2,newSub);
+    else await window._setDoc(ref2,newSub);
+    return newSub.id;
+  }
+
+  return parentId;
+}
+window.resolveFamilyByPath = resolveFamilyByPath;
+
+// ══════════════════════════════════════════════════════════
+// SILENT MIGRATION : products with p.cat (string) but no p.familyId
+// → resolve to familyId, auto-create families if missing.
+// Runs once after loadAll(). Does NOT touch products already migrated.
+// ══════════════════════════════════════════════════════════
+async function migrateCatStringToFamilyId(){
+  try{
+    var toFix = _products.filter(function(p){
+      return (p.cat && String(p.cat).trim()) && !p.familyId;
+    });
+    if(!toFix.length) return;
+    console.log('[migrate-cat] '+toFix.length+' produit(s) à rattacher à une famille');
+    var batch = window._writeBatch(window._db);
+    var count = 0;
+    for(var i=0;i<toFix.length;i++){
+      var p = toFix[i];
+      // p.cat may be "ACCESSOIRES" or "ACCESSOIRES > PRODUIT ENTRETIEN" (legacy import edge cases)
+      var parts = String(p.cat).split(/\s*[>\/|]\s*/).filter(Boolean);
+      var cat = parts[0]||'';
+      var sub = parts[1]||'';
+      var fid = await resolveFamilyByPath(cat, sub, {batch: batch});
+      if(fid){
+        p.familyId = fid;
+        batch.set(window._doc(window._db,'stock',window._uid,'products',p.id), p);
+        count++;
+      }
+      // Firestore batch limit safety
+      if(count>0 && count%400===0){
+        await batch.commit();
+        batch = window._writeBatch(window._db);
+      }
+    }
+    if(count>0) await batch.commit();
+    console.log('[migrate-cat] '+count+' produit(s) rattaché(s)');
+  }catch(e){
+    console.warn('[migrate-cat] skipped:',e);
+  }
 }
 
 async function saveProdToFirestore(p){
@@ -1222,9 +1352,13 @@ function openProdModal(id){
   }
   buildFamOpts(null,'');
   famSel.innerHTML=opts;
-  // Fill fields
-  var fields={ref:'mp-ref',ean:'mp-ean',name:'mp-name',stockType:'mp-type',fournisseur:'mp-fourn',pa:'mp-pa',pv:'mp-pv',tva:'mp-tva',stockBase:'mp-stock',min:'mp-min',unite:'mp-unite',emplacement:'mp-empl',condQte:'mp-cond',dlc:'mp-dlc',lot:'mp-lot',notes:'mp-notes'};
+  // Fill fields (base + variant + advanced)
+  var fields={ref:'mp-ref',ean:'mp-ean',name:'mp-name',stockType:'mp-type',fournisseur:'mp-fourn',pa:'mp-pa',pv:'mp-pv',tva:'mp-tva',stockBase:'mp-stock',min:'mp-min',unite:'mp-unite',emplacement:'mp-empl',condQte:'mp-cond',dlc:'mp-dlc',lot:'mp-lot',notes:'mp-notes',taille:'mp-taille',couleur:'mp-couleur',refFournisseur:'mp-ref-fourn',pmpa:'mp-pmpa',cump:'mp-cump',txMarque:'mp-tx-marque',qMin:'mp-qmin',qMax:'mp-qmax',qAppro:'mp-qappro',qReservee:'mp-qreservee',qCommande:'mp-qcommande',valorisation:'mp-valorisation',soldes:'mp-soldes',catSolde:'mp-cat-solde'};
   Object.keys(fields).forEach(function(k){var el=document.getElementById(fields[k]);if(el)el.value=p?(p[k]!=null?p[k]:''):''});
+  // Show parent ref row only if this product is a variant
+  var parentRow=document.getElementById('mp-parent-row');
+  if(p&&p.parentRef){parentRow.style.display='';document.getElementById('mp-parent-ref').value=p.parentRef}
+  else{parentRow.style.display='none';document.getElementById('mp-parent-ref').value=''}
   // Pour un produit existant, afficher le stock CALCULÉ (pas stockBase)
   var stockInfo=document.getElementById('mp-stock-info');
   if(p){
@@ -1265,7 +1399,7 @@ async function saveProd(){
     oldComputed = stk[oldRef] ? stk[oldRef].qty : pf(p.stockBase);
   }
 
-  var fields={ref:'mp-ref',ean:'mp-ean',name:'mp-name',stockType:'mp-type',fournisseur:'mp-fourn',pa:'mp-pa',pv:'mp-pv',tva:'mp-tva',stockBase:'mp-stock',min:'mp-min',unite:'mp-unite',emplacement:'mp-empl',condQte:'mp-cond',dlc:'mp-dlc',lot:'mp-lot',notes:'mp-notes'};
+  var fields={ref:'mp-ref',ean:'mp-ean',name:'mp-name',stockType:'mp-type',fournisseur:'mp-fourn',pa:'mp-pa',pv:'mp-pv',tva:'mp-tva',stockBase:'mp-stock',min:'mp-min',unite:'mp-unite',emplacement:'mp-empl',condQte:'mp-cond',dlc:'mp-dlc',lot:'mp-lot',notes:'mp-notes',taille:'mp-taille',couleur:'mp-couleur',refFournisseur:'mp-ref-fourn',pmpa:'mp-pmpa',cump:'mp-cump',txMarque:'mp-tx-marque',qMin:'mp-qmin',qMax:'mp-qmax',qAppro:'mp-qappro',qReservee:'mp-qreservee',qCommande:'mp-qcommande',valorisation:'mp-valorisation',soldes:'mp-soldes',catSolde:'mp-cat-solde'};
   Object.keys(fields).forEach(function(k){var el=document.getElementById(fields[k]);if(el)p[k]=el.value});
   // Family assignment
   var famId = document.getElementById('mp-family').value||'';
