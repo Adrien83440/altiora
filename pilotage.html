@@ -2292,6 +2292,52 @@ function scheduleDirURSSAF() {
   }, 1000);
 }
 
+// ═══════════════════════════════════════════
+// STATUTS DE POINTAGE PERSONNALISÉS
+// ═══════════════════════════════════════════
+// Demande cliente : avoir plus d'options que Oui/Non pour suivre l'état des paiements.
+// Valeurs possibles : Non (défaut, gris) / Oui (payé, vert) / À payer (alerte, orange)
+//                    / Prélèvement à venir (programmé, bleu) / CB (paiement carte, violet)
+// IMPORTANT : Pour les calculs (totaux, dashboard), seul "Oui" compte comme pointé.
+// Les autres valeurs sont des intentions visuelles uniquement.
+var POINTE_OPTIONS = ['Non', 'Oui', 'À payer', 'Prélèvement à venir', 'CB'];
+var POINTE_STYLES = {
+  'Non':                   { bg: '#f3f4f6', fg: '#475569', border: '#cbd5e1' }, // gris neutre
+  'Oui':                   { bg: '#d1fae5', fg: '#065f46', border: '#10b981' }, // vert
+  'À payer':               { bg: '#fef3c7', fg: '#92400e', border: '#f59e0b' }, // orange alerte
+  'Prélèvement à venir':   { bg: '#dbeafe', fg: '#1e40af', border: '#3b82f6' }, // bleu programmé
+  'CB':                    { bg: '#ede9fe', fg: '#5b21b6', border: '#8b5cf6' }  // violet
+};
+
+// Génère un <select> stylé pour la colonne "Pointé".
+// @param onchangeExpr  expression JS exécutée quand la valeur change
+//                      (ex: "_data.chargesFixe[3].pointe=this.value")
+// @param currentValue  valeur actuelle de la ligne (peut être undefined)
+function pointeSelectHtml(onchangeExpr, currentValue) {
+  // Compat ascendante : ancien comportement Oui/Non. Tout ce qui n'est pas dans la liste retombe sur "Non".
+  var v = currentValue || 'Non';
+  if (POINTE_OPTIONS.indexOf(v) === -1) v = 'Non';
+  var st = POINTE_STYLES[v] || POINTE_STYLES['Non'];
+  var styleAttr = 'width:128px;background:' + st.bg + ';color:' + st.fg + ';border-color:' + st.border + ';font-weight:600;font-size:11px';
+  var opts = POINTE_OPTIONS.map(function(o){
+    return '<option value="' + o + '"' + (v === o ? ' selected' : '') + '>' + o + '</option>';
+  }).join('');
+  // onchange : on applique la valeur ET on rafraîchit le style du select directement
+  var fullOnchange = onchangeExpr + ';refreshPointeStyle(this);scheduleSave()';
+  return '<select class="cell-input pointe-select" style="' + styleAttr + '" onchange="' + fullOnchange + '">' + opts + '</select>';
+}
+
+// Rafraîchit l'apparence d'un <select> de pointage après changement
+function refreshPointeStyle(sel) {
+  if (!sel) return;
+  var v = sel.value || 'Non';
+  if (POINTE_OPTIONS.indexOf(v) === -1) v = 'Non';
+  var st = POINTE_STYLES[v] || POINTE_STYLES['Non'];
+  sel.style.background = st.bg;
+  sel.style.color = st.fg;
+  sel.style.borderColor = st.border;
+}
+
 // Petit badge 🔗 affiché à côté du fournisseur quand la ligne a été pointée
 // via le rapprochement bancaire (bank-validation.html). Purement visuel.
 function bankLinkBadge(r){
@@ -2326,7 +2372,7 @@ function renderCharges(rows, key) {
     var isBankLinked = !!(r.bankLink && r.bankLink.bankTxId);
     var rowBg = isExcep ? 'background:rgba(249,115,22,0.06);' : (isBankLinked ? 'background:rgba(99,102,241,0.05);' : '');
     return '<tr style="' + rowBg + '">' +
-      '<td><select class="cell-input" style="width:55px" onchange="_data[\'' + key + '\'][' + i + '].pointe=this.value"><option' + (r.pointe==='Oui'?' selected':'') + '>Oui</option><option' + (r.pointe==='Non'?' selected':'') + '>Non</option></select></td>' +
+      '<td>' + pointeSelectHtml("_data['" + key + "'][" + i + "].pointe=this.value", r.pointe) + '</td>' +
       '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + supplierInputHtml(key, i, r.fournisseur||'') + ficheBtn + bankLinkBadge(r) + '</div></td>' +
       '<td>' + catalogInputHtml('types', key+'-typ-'+i, r.type||'', 'width:95px', 'Type', '_data[\''+key+'\']['+i+'].type=this.value') + '</td>' +
       '<td><input class="cell-input" style="width:76px' + (!window._htMode?';color:var(--muted)':'') + '" type="text" inputmode="decimal" placeholder="' + (window._htMode?'HT':'auto') + '" value="' + (r.montantHT||'') + '" id="' + key + '-ht-' + i + '" oninput="updateChargeHT(\'' + key + '\',' + i + ',this.value)"/></td>' +
@@ -2557,7 +2603,7 @@ function renderCredits(rows) {
     var isBankLinkedC = !!(r.bankLink && r.bankLink.bankTxId);
     var trAttr = ' class="row-principal" id="cred-row-' + i + '"' + (isBankLinkedC ? ' style="background:rgba(99,102,241,0.05)"' : '');
     return '<tr' + trAttr + '>' +
-      '<td><select class="cell-input" style="width:58px" onchange="_data.credits[' + i + '].pointe=this.value"><option' + (r.pointe==='Oui'?' selected':'') + '>Oui</option><option' + (r.pointe==='Non'?' selected':'') + '>Non</option></select></td>' +
+      '<td>' + pointeSelectHtml("_data.credits[" + i + "].pointe=this.value", r.pointe) + '</td>' +
       '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + catalogInputHtml('clients', 'credN-'+i, r.fournisseur||'', 'width:120px', 'Nom crédit', 'updateCreditField('+i+',\'fournisseur\',this.value)') + bankLinkBadge(r) + '</div></td>' +
       '<td><input class="cell-input" style="width:85px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="updateCreditMontant(' + i + ',this.value)"/></td>' +
       '<td><input class="cell-input" style="width:65px" type="text" inputmode="decimal" placeholder="%" value="' + (r.tauxInteret||'') + '" oninput="updateCreditTaux(' + i + ',this.value)"/></td>' +
