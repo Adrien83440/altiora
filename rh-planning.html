@@ -1221,19 +1221,19 @@
         <div class="ai-param-card">
           <div class="ai-param-lbl">👥 Min. personnes / shift</div>
           <div class="ai-param-hint">Nombre minimum de personnes qui doivent être présentes sur chaque créneau d'ouverture</div>
-          <input class="ai-field" id="ai-ms" type="number" min="1" value="2"/>
+          <input class="ai-field" id="ai-ms" type="number" min="1" value="2" oninput="saveAIForm()"/>
         </div>
         <div class="ai-param-card">
           <div class="ai-param-lbl">🛌 Jours de repos / semaine / employé</div>
           <div class="ai-param-hint">Chaque employé aura ce nombre de jours de repos <b>en plus</b> des jours où l'entreprise est fermée. Ex : 2 = l'employé ne travaille pas 2 jours parmi les jours ouverts.</div>
-          <input class="ai-field" id="ai-rd" type="number" min="0" max="5" value="2"/>
+          <input class="ai-field" id="ai-rd" type="number" min="0" max="5" value="2" oninput="saveAIForm()"/>
         </div>
       </div>
 
       <!-- INSTRUCTIONS LIBRES -->
       <div class="mf">
         <label class="ml">Instructions spécifiques</label>
-        <textarea class="mi" id="ai-inst" rows="3" placeholder="Ex : Marie ne travaille pas le lundi. Pas d'ouverture le dimanche. Préférer des shifts matin/soir en rotation. Gérer la polyvalence caisse/cuisine…" style="resize:none;font-size:12px"></textarea>
+        <textarea class="mi" id="ai-inst" rows="3" placeholder="Ex : Marie ne travaille pas le lundi. Pas d'ouverture le dimanche. Préférer des shifts matin/soir en rotation. Gérer la polyvalence caisse/cuisine…" style="resize:none;font-size:12px" oninput="saveAIForm()"></textarea>
       </div>
       <div id="ai-res-wrap" style="display:none">
         <div class="ai-res-box" id="ai-res-box">
@@ -3315,7 +3315,34 @@ var _aiSchedule=[];
 var _AI_JOURS=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
 var _AI_JS_DAYS=[1,2,3,4,5,6,0]; // lun=1,...,dim=0
 
+function _aiLSKey(){return 'alteore_ai_planning_form_'+(window._uid||'anon');}
+function saveAIForm(){
+  try{
+    var ms=document.getElementById('ai-ms');
+    var rd=document.getElementById('ai-rd');
+    var inst=document.getElementById('ai-inst');
+    var data={schedule:_aiSchedule, ms:ms?ms.value:'', rd:rd?rd.value:'', inst:inst?inst.value:''};
+    localStorage.setItem(_aiLSKey(), JSON.stringify(data));
+  }catch(e){}
+}
+function loadAIForm(){
+  try{
+    var raw=localStorage.getItem(_aiLSKey());
+    if(!raw)return false;
+    var d=JSON.parse(raw);
+    if(d.schedule&&Array.isArray(d.schedule)&&d.schedule.length===7) _aiSchedule=d.schedule;
+    setTimeout(function(){
+      var ms=document.getElementById('ai-ms'); if(ms&&d.ms) ms.value=d.ms;
+      var rd=document.getElementById('ai-rd'); if(rd&&d.rd) rd.value=d.rd;
+      var inst=document.getElementById('ai-inst'); if(inst&&d.inst) inst.value=d.inst;
+    },50);
+    return !!(d.schedule&&Array.isArray(d.schedule)&&d.schedule.length===7);
+  }catch(e){return false}
+}
+window.saveAIForm=saveAIForm;
+
 function initAISchedule(){
+  if(loadAIForm()){renderAISchedule();return;}
   var defaultPlages=(_joursFermes.plagesOuverture||[{deb:'09:00',fin:'18:00'}]).map(function(p){return{deb:p.deb,fin:p.fin};});
   var closedDays=_joursFermes.hebdo||[0,6];
   _aiSchedule=_AI_JOURS.map(function(nom,i){
@@ -3361,7 +3388,7 @@ function toggleAIDay(di){
     var def=(_joursFermes.plagesOuverture||[{deb:'09:00',fin:'18:00'}]);
     d.plages=def.map(function(p){return{deb:p.deb,fin:p.fin};});
   }
-  renderAISchedule();
+  renderAISchedule();saveAIForm();
 }
 window.toggleAIDay=toggleAIDay;
 
@@ -3373,7 +3400,7 @@ function addAISlot(di){
   var h=parseInt(newDeb)||14;
   var newFin=String(Math.min(h+4,23)).padStart(2,'0')+':00';
   d.plages.push({deb:newDeb,fin:newFin});
-  renderAISchedule();
+  renderAISchedule();saveAIForm();
 }
 window.addAISlot=addAISlot;
 
@@ -3381,12 +3408,13 @@ function removeAISlot(di,si){
   var d=_aiSchedule[di];
   if(d.plages.length<=1)return;
   d.plages.splice(si,1);
-  renderAISchedule();
+  renderAISchedule();saveAIForm();
 }
 window.removeAISlot=removeAISlot;
 
 function updateAISlot(di,si,field,val){
   _aiSchedule[di].plages[si][field]=val;
+  saveAIForm();
 }
 window.updateAISlot=updateAISlot;
 
