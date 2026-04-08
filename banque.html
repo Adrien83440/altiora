@@ -605,6 +605,24 @@ function showConnectedZone() {
 }
 
 function renderBankCard(bank) {
+  // ── Détection d'état anormal ──
+  // 1) PENDING > 10 minutes = connexion jamais finalisée, bloquée
+  // 2) EXPIRED = dernière sync > 90 jours (limite GoCardless)
+  let abnormalState = null; // 'pending' | 'expired' | null
+  const now = Date.now();
+  const createdTs = bank.createdAt ? new Date(bank.createdAt).getTime() : 0;
+  const lastSyncTs = bank.lastSync ? new Date(bank.lastSync).getTime() : 0;
+
+  const isPending = !bank.requisition_id && bank.pending_requisition_id;
+  const pendingAgeMs = createdTs ? (now - createdTs) : 0;
+  const TEN_MIN = 10 * 60 * 1000;
+
+  if (isPending && pendingAgeMs > TEN_MIN) {
+    abnormalState = 'pending';
+  } else if (lastSyncTs && (now - lastSyncTs) > 90 * 24 * 60 * 60 * 1000) {
+    abnormalState = 'expired';
+  }
+
   const accountsHtml = (bank.accounts && bank.accounts.length > 0)
     ? bank.accounts.map(function(acc){
         return '<div class="account-card">'
@@ -614,7 +632,9 @@ function renderBankCard(bank) {
           + '<div class="account-tx">' + (acc.transactionsCount || 0) + ' transactions · <span style="color:var(--red)">' + (acc.debitsCount||0) + ' dépenses</span></div>'
           + '</div>';
       }).join('')
-    : '<div style="padding:8px;color:var(--muted);font-size:11px;font-style:italic">Aucun compte sélectionné — cliquez sur ⚙️ Comptes</div>';
+    : (abnormalState === 'pending'
+        ? ''  // pas d'affichage "aucun compte" en mode pending, le bandeau explique déjà
+        : '<div style="padding:8px;color:var(--muted);font-size:11px;font-style:italic">Aucun compte sélectionné — cliquez sur ⚙️ Comptes</div>');
 
   const lastSyncTxt = bank.lastSync
     ? new Date(bank.lastSync).toLocaleDateString('fr-FR') + ' à ' + new Date(bank.lastSync).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})
@@ -623,7 +643,37 @@ function renderBankCard(bank) {
   // Échapper le bankId pour les onclick
   const sid = String(bank.bankId).replace(/'/g,"\\'");
 
-  return '<div class="bank-block" style="border:1.5px solid var(--border);border-radius:14px;padding:14px 16px;background:rgba(255,255,255,0.5);margin-bottom:12px">'
+  // ── Construction du bandeau d'alerte si état anormal ──
+  let alertBanner = '';
+  if (abnormalState === 'pending') {
+    const createdDateTxt = bank.createdAt
+      ? 'depuis le ' + new Date(bank.createdAt).toLocaleDateString('fr-FR') + ' à ' + new Date(bank.createdAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})
+      : '';
+    alertBanner = '<div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:flex-start;gap:12px">'
+      + '<div style="font-size:24px;flex-shrink:0">⚠️</div>'
+      + '<div style="flex:1;min-width:0">'
+        + '<div style="font-size:13px;font-weight:800;color:#92400e;margin-bottom:3px">Connexion en attente de finalisation ' + createdDateTxt + '</div>'
+        + '<div style="font-size:12px;color:#92400e;line-height:1.5;margin-bottom:10px">Il semble que la connexion n\'ait pas pu être finalisée sur le site de votre banque. Cela peut arriver si la page a été fermée avant la fin, ou si votre banque a rencontré un problème. <strong>Annulez cette tentative</strong> et reconnectez-vous.</div>'
+        + '<button class="btn btn-primary btn-sm" onclick="cancelPendingBank(\'' + sid + '\')" style="background:linear-gradient(135deg,#d97706,#f59e0b);padding:7px 14px;font-size:12px">🗑 Annuler la tentative et réessayer</button>'
+      + '</div>'
+    + '</div>';
+  } else if (abnormalState === 'expired') {
+    alertBanner = '<div style="background:linear-gradient(135deg,#fee2e2,#fecaca);border:2px solid #dc2626;border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:flex-start;gap:12px">'
+      + '<div style="font-size:24px;flex-shrink:0">⌛</div>'
+      + '<div style="flex:1;min-width:0">'
+        + '<div style="font-size:13px;font-weight:800;color:#991b1b;margin-bottom:3px">Connexion bancaire expirée</div>'
+        + '<div style="font-size:12px;color:#991b1b;line-height:1.5;margin-bottom:10px">Les connexions bancaires ont une durée de vie de <strong>90 jours maximum</strong> (réglementation DSP2). Votre dernière synchronisation remonte à plus de 90 jours. Vous devez <strong>déconnecter cette banque puis vous reconnecter</strong> pour continuer à synchroniser vos transactions.</div>'
+        + '<button class="btn btn-danger btn-sm" onclick="disconnectOneBank(\'' + sid + '\')" style="padding:7px 14px;font-size:12px">🔌 Déconnecter et reconnecter</button>'
+      + '</div>'
+    + '</div>';
+  }
+
+  const borderColor = abnormalState === 'pending' ? '#f59e0b'
+                    : abnormalState === 'expired' ? '#dc2626'
+                    : 'var(--border)';
+
+  return '<div class="bank-block" style="border:1.5px solid ' + borderColor + ';border-radius:14px;padding:14px 16px;background:rgba(255,255,255,0.5);margin-bottom:12px">'
+    + alertBanner
     + '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
       + '<div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0">'
         + '<span style="font-size:18px">🏦</span>'
@@ -633,12 +683,12 @@ function renderBankCard(bank) {
         + '</div>'
       + '</div>'
       + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
-        + '<button class="btn btn-success btn-sm" onclick="syncOneBank(\'' + sid + '\')" title="Synchroniser cette banque">🔄 Sync</button>'
-        + '<button class="btn btn-outline btn-sm" onclick="manageAccountsForBank(\'' + sid + '\')" title="Modifier les comptes synchronisés">⚙️ Comptes</button>'
+        + (abnormalState !== 'pending' ? '<button class="btn btn-success btn-sm" onclick="syncOneBank(\'' + sid + '\')" title="Synchroniser cette banque">🔄 Sync</button>' : '')
+        + (abnormalState !== 'pending' ? '<button class="btn btn-outline btn-sm" onclick="manageAccountsForBank(\'' + sid + '\')" title="Modifier les comptes synchronisés">⚙️ Comptes</button>' : '')
         + '<button class="btn btn-danger btn-sm" onclick="disconnectOneBank(\'' + sid + '\')" title="Déconnecter cette banque">🔌</button>'
       + '</div>'
     + '</div>'
-    + '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">' + accountsHtml + '</div>'
+    + (accountsHtml ? '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">' + accountsHtml + '</div>' : '')
   + '</div>';
 }
 
@@ -1491,6 +1541,70 @@ async function disconnectOneBank(bankId) {
   }
 }
 
+// Annuler une tentative de connexion bloquée en état "pending".
+// Nettoie le sous-doc (ou les champs legacy), nettoie GoCardless, laisse tout le reste intact.
+async function cancelPendingBank(bankId) {
+  const bank = getBankById(bankId);
+  if (!bank) { showToast('❌ Banque introuvable', 'error'); return; }
+  if (!confirm('Annuler cette tentative de connexion bloquée et revenir à l\'écran de connexion ?\n\nLes autres banques connectées ne seront pas affectées.')) return;
+
+  const ov  = document.getElementById('syncOverlay');
+  const ovT = document.getElementById('syncOverlayText');
+  if (ov) ov.classList.add('show');
+  if (ovT) ovT.textContent = 'Annulation de la tentative…';
+
+  try {
+    const reqId = bank.pending_requisition_id || bank.requisition_id || null;
+    const agrId = bank.agreement_id || null;
+
+    // 1. Supprimer côté GoCardless au cas où (non bloquant)
+    if (reqId || agrId) {
+      try {
+        await fetch('/api/bank-connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: window._uid, action: 'disconnect', requisition_id: reqId, agreement_id: agrId })
+        });
+      } catch(e) { console.warn('[cancelPending] GoCardless cleanup non bloquant :', e.message); }
+    }
+
+    // 2. Nettoyer Firestore selon le type (legacy ou sous-doc)
+    if (bank.isLegacy) {
+      // Legacy : préserver linkedTransactions[] (wave 1), supprimer les champs de connexion
+      const rootRef = window._doc(window._db, 'bank_connections', window._uid);
+      const rootSnap = await window._getDoc(rootRef);
+      if (rootSnap.exists()) {
+        const data = rootSnap.data() || {};
+        const preserved = {};
+        if (Array.isArray(data.linkedTransactions)) preserved.linkedTransactions = data.linkedTransactions;
+        await window._setDoc(rootRef, preserved);
+      }
+    } else {
+      // Sous-doc : suppression simple
+      await window._deleteDoc(window._doc(window._db, 'bank_connections', window._uid, 'banks', bank.bankId));
+    }
+
+    // 3. Nettoyer sessionStorage au cas où un flag de connexion y serait resté
+    try { sessionStorage.removeItem('alteore_connecting_bank_id'); } catch(e){}
+    _connectingBankId = null;
+    _addingBank = false;
+
+    // 4. Recharger l'état et afficher la bonne zone
+    await loadAllBanks();
+    if (ov) ov.classList.remove('show');
+    if (_userBanks.length === 0) {
+      showNotConnectedZone();
+    } else {
+      showConnectedZone();
+    }
+
+    showToast('✅ Tentative annulée. Vous pouvez maintenant reconnecter votre banque.', 'success');
+  } catch(e) {
+    if (ov) ov.classList.remove('show');
+    showToast('❌ Erreur : ' + e.message, 'error');
+  }
+}
+
 // Lancer le flow "+ Connecter une autre banque" (banques existantes conservées)
 function addAnotherBank() {
   _addingBank = true;
@@ -1679,6 +1793,7 @@ window.addAnotherBank = addAnotherBank;
 window.syncOneBank = syncOneBank;
 window.manageAccountsForBank = manageAccountsForBank;
 window.disconnectOneBank = disconnectOneBank;
+window.cancelPendingBank = cancelPendingBank;
 
 // ── PURGE lignes bank_sync (nettoyage en cas de doublons parasites) ──
 async function purgeBankLines() {
