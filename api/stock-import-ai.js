@@ -54,7 +54,8 @@ Champs cibles disponibles (id → description) :
 
 — IDENTIFIANTS —
 - ref : Référence produit / SKU / Code article. **PRIORITÉ ABSOLUE** au champ "Code" / "Code article" / "Reference" qui contient un identifiant alphanumérique stable (ex: "A140722154424"). Ne PAS choisir "IdArt" / "ID" / "RecordID" qui sont des identifiants techniques internes au logiciel source — laisse-les sur _ignore. Si seul "IdArt" existe (pas de "Code"), alors mappe-le sur ref en dernier recours.
-  **CAS PARTICULIER textile/bijouterie** : si le fichier n'a AUCUNE colonne explicite "Code"/"Référence" mais contient une colonne "Déclinaison" / "Variante" / "Variant" / "Code variante" / "Decli" — c'est LE SKU unique du fichier (souvent un code composite avec espaces ou tirets, ex: "37522    1300"). Mappe-la sur ref. Sans ce mapping l'import est impossible.
+  **🚨 RÈGLE ABSOLUE textile/bijouterie/caisse** : si le fichier contient une colonne "Déclinaison" / "Declinaison" / "Variante" / "Variant" / "Code variante" / "Decli", **TU DOIS ABSOLUMENT la mapper sur "ref"**, peu importe ce que tu penses du contenu. Ces colonnes contiennent TOUJOURS le SKU unique (souvent un code composite type "37522    1300" avec espaces multiples — c'est NORMAL, ne change rien). Ne JAMAIS mapper Déclinaison sur sousCat, sousSousCat, parentRefName, ou name. Si tu vois "Déclinaison" dans les headers, ref = Déclinaison. Point final.
+  **Exemple concret** : fichier avec headers ["Marque","RFS","Déclinaison","Stock","PA Stock"] → mapping correct = {"Marque":"fournisseur","RFS":"cat","Déclinaison":"ref","Stock":"stockBase","PA Stock":"cump"}. Sans le mapping ref = Déclinaison, l'import est impossible.
 - ean : Code-barres EAN / UPC / GTIN (8-13 chiffres, parfois nommé "Multi Code", "Barcode", "Gencod")
 - refFournisseur : Référence du produit chez le fournisseur ("Ref. Fourn.", "Cod. Fourn.", "Ref Frns")
 
@@ -119,6 +120,18 @@ Exemples de données (5 premières lignes) :
 ${sampleText}
 
 ${fieldsDef}
+
+═══════════════════════════════════════════════════════
+RÈGLES ABSOLUES (à respecter en priorité, sans exception)
+═══════════════════════════════════════════════════════
+
+**RÈGLE A — ref ou name OBLIGATOIRE** : ton mapping DOIT contenir au moins UNE colonne mappée sur "ref" OU sur "name". Sans ça l'import est impossible et l'utilisateur est bloqué. Si aucune colonne ne semble parfaite, choisis la moins mauvaise et mets-la sur ref. Préfère mapper une colonne incertaine sur ref plutôt que de tout laisser sur _ignore.
+
+**RÈGLE B — parentRefName INTERDIT sans variantes** : tu ne peux mapper une colonne sur "parentRefName" QUE si le fichier contient AUSSI au moins une colonne Taille/Size/Pointure OU Couleur/Coloris/Color/Colour. Si aucune de ces colonnes variantes n'existe, parentRefName est INTERDIT — utilise ref à la place. Une colonne qui contient des codes uniques par ligne sans colonne variante associée est forcément une référence produit (ref), pas un groupe parent.
+
+**RÈGLE C — Déclinaison / Variante = SKU dans 99% des cas** : si tu vois une colonne nommée "Déclinaison", "Variante", "Variant", "Code variante", "Decli" et qu'il n'y a pas d'autre colonne Code/Référence évidente, c'est LE SKU du fichier. Mappe-la sur ref. Ne la mets PAS sur parentRefName ni sur sousCat. C'est une règle forte propre aux logiciels de caisse textile/bijouterie.
+
+═══════════════════════════════════════════════════════
 
 INSTRUCTIONS DE MAPPING :
 
