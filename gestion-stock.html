@@ -875,17 +875,23 @@ function _famDefaults(name){
 }
 function _normFamName(s){return (s||'').toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
 
-// Resolve a family by name (and optional sub-name) to a familyId.
-// Auto-creates the family/sub-family if missing. Pass createBatch=null
+// Resolve a family by name (and optional sub-name, sous-sous-name) to a familyId.
+// Auto-creates the family/sub-family/sub-sub-family if missing. Pass batch=null
 // to create immediately, or a writeBatch to defer commits.
-async function resolveFamilyByPath(catName, sousCatName, opts){
+async function resolveFamilyByPath(catName, sousCatName, sousSousCatName, opts){
+  // Backward compat: signature was (cat, sousCat, opts) — detect old signature
+  if(sousSousCatName && typeof sousSousCatName==='object' && !opts){
+    opts = sousSousCatName;
+    sousSousCatName = null;
+  }
   opts = opts || {};
   var batch = opts.batch || null;
   catName = (catName||'').toString().trim();
   sousCatName = (sousCatName||'').toString().trim();
-  if(!catName && !sousCatName) return null;
+  sousSousCatName = (sousSousCatName||'').toString().trim();
+  if(!catName && !sousCatName && !sousSousCatName) return null;
 
-  // Find or create root family
+  // Find or create root family (level 0)
   var parentId = null;
   if(catName){
     var nk = _normFamName(catName);
@@ -902,18 +908,34 @@ async function resolveFamilyByPath(catName, sousCatName, opts){
     }
   }
 
-  // Find or create sub-family
+  // Find or create sub-family (level 1)
   if(sousCatName){
     var nk2 = _normFamName(sousCatName);
     var existing2 = _families.find(function(f){return f.parentId===parentId && _normFamName(f.name)===nk2});
-    if(existing2) return existing2.id;
-    var d2 = _famDefaults(sousCatName);
-    var newSub = {id:uid(),name:sousCatName,icon:d2.icon,color:d2.color,desc:'',parentId:parentId,level:1,createdAt:new Date().toISOString()};
-    _families.push(newSub);
-    var ref2 = window._doc(window._db,'stock',window._uid,'families',newSub.id);
-    if(batch) batch.set(ref2,newSub);
-    else await window._setDoc(ref2,newSub);
-    return newSub.id;
+    if(existing2){ parentId = existing2.id; }
+    else {
+      var d2 = _famDefaults(sousCatName);
+      var newSub = {id:uid(),name:sousCatName,icon:d2.icon,color:d2.color,desc:'',parentId:parentId,level:1,createdAt:new Date().toISOString()};
+      _families.push(newSub);
+      var ref2 = window._doc(window._db,'stock',window._uid,'families',newSub.id);
+      if(batch) batch.set(ref2,newSub);
+      else await window._setDoc(ref2,newSub);
+      parentId = newSub.id;
+    }
+  }
+
+  // Find or create sub-sub-family (level 2)
+  if(sousSousCatName){
+    var nk3 = _normFamName(sousSousCatName);
+    var existing3 = _families.find(function(f){return f.parentId===parentId && _normFamName(f.name)===nk3});
+    if(existing3) return existing3.id;
+    var d3 = _famDefaults(sousSousCatName);
+    var newSubSub = {id:uid(),name:sousSousCatName,icon:d3.icon,color:d3.color,desc:'',parentId:parentId,level:2,createdAt:new Date().toISOString()};
+    _families.push(newSubSub);
+    var ref3 = window._doc(window._db,'stock',window._uid,'families',newSubSub.id);
+    if(batch) batch.set(ref3,newSubSub);
+    else await window._setDoc(ref3,newSubSub);
+    return newSubSub.id;
   }
 
   return parentId;
@@ -940,7 +962,7 @@ async function migrateCatStringToFamilyId(){
       var parts = String(p.cat).split(/\s*[>\/|]\s*/).filter(Boolean);
       var cat = parts[0]||'';
       var sub = parts[1]||'';
-      var fid = await resolveFamilyByPath(cat, sub, {batch: batch});
+      var fid = await resolveFamilyByPath(cat, sub, null, {batch: batch});
       if(fid){
         p.familyId = fid;
         batch.set(window._doc(window._db,'stock',window._uid,'products',p.id), p);
@@ -1619,14 +1641,15 @@ async function aiDetectMapping(){
 
 function fallbackMapping(headers){
   var aliases={
-    ref:['ref','sku','code','reference','code article','idart','code modele','code modèle','code art','article'],
+    ref:['code','reference','code article','code art','article','sku','ref'],
     ean:['ean','barcode','gtin','upc','code barre','code-barre','code barres','multi code','gencod','gencode'],
     refFournisseur:['ref fourn','ref. fourn','ref fournisseur','ref frns','cod fourn','code fournisseur','reference fournisseur'],
-    name:['nom','name','designation','désignation','libelle','libellé','produit','description','article','designation produit','intitule','intitulé'],
-    parentRefName:['modele','modèle','style','famille produit','model'],
+    name:['nom','name','designation','désignation','libelle','libellé','produit','description','intitule','intitulé','desi'],
+    parentRefName:['modele','modèle','style','famille produit','model','collection','ref modele','code modele','code modèle'],
     fournisseur:['fournisseur','supplier','marque','brand','fabricant','producteur'],
-    cat:['categorie','catégorie','category','famille','rayon','cfamille','c famille','cat','family','dept','departement','département'],
-    sousCat:['sous categorie','sous-catégorie','sous catégorie','sous famille','sous-famille','cssfamille','css famille','sub category','sub-cat','subfamily','sfamille','type produit'],
+    cat:['categorie','catégorie','category','famille','rayon','crayon','c rayon','cat','family','dept','departement','département','famille principale'],
+    sousCat:['sous categorie','sous-catégorie','sous catégorie','sous famille','sous-famille','cfamille','c famille','sub category','sub-cat','subfamily','sfamille','type produit','niveau 2'],
+    sousSousCat:['sous sous categorie','sous-sous-categorie','sous sous famille','sous-sous-famille','cssfamille','css famille','ssfamille','ss famille','sub sub cat','niveau 3','3eme niveau','3ème niveau'],
     taille:['taille','size','pointure','t.','t '],
     couleur:['couleur','coloris','color','colour','col.','colorie'],
     pa:['pa','prix achat','cout','cost','pu ht','prix unitaire','prix achat ht','puht','cout achat','coût achat'],
@@ -1648,12 +1671,12 @@ function fallbackMapping(headers){
     dlc:['dlc','dluo','date limite','peremption','péremption','expiry'],
     condQte:['cond','conditionnement','colisage','colis','pack','par colis'],
     stockType:['type produit','stock type','nature'],
-    soldes:['solde','soldes','en solde','sale'],
+    soldes:['solde','soldes','en solde','sale','promo','en promo'],
     catSolde:['catsolde','cat solde','categorie solde','catégorie solde','type solde'],
-    notes:['notes','note','remarque','remarques','commentaire','description longue','nota','observation']
+    notes:['notes','note','remarque','remarques','commentaire','description longue','nota','observation','comp definition','comp. definition','comp défn','comp defn']
   };
-  // Headers to actively ignore
-  var ignoreList=['ttc','prix vente ttc','pv ttc','pvtc','prix ttc'];
+  // Headers to actively ignore (technical IDs, UI fields, internal calculations)
+  var ignoreList=['ttc','prix vente ttc','pv ttc','pvtc','prix ttc','idart','id art','recordid','record id','dispo','disponible','prevision','prévision','n etq','n° etq','aux'];
   var map={};
   headers.forEach(function(h){
     var norm=h.toLowerCase().trim().replace(/[_\-\.]/g,' ').replace(/\s+/g,' ').normalize('NFD').replace(/[\u0300-\u036f]/g,'');
@@ -1683,8 +1706,9 @@ var FIELD_OPTIONS=[
   {v:'name',l:'Nom / Désignation'},
   {v:'parentRefName',l:'Modèle parent (libellé)'},
   {v:'fournisseur',l:'Fournisseur / Marque'},
-  {v:'cat',l:'Famille / Catégorie'},
-  {v:'sousCat',l:'Sous-famille / Sous-catégorie'},
+  {v:'cat',l:'Famille / Catégorie (niveau 1)'},
+  {v:'sousCat',l:'Sous-famille (niveau 2)'},
+  {v:'sousSousCat',l:'Sous-sous-famille (niveau 3)'},
   {v:'taille',l:'Taille / Pointure'},
   {v:'couleur',l:'Couleur / Coloris'},
   {v:'pa',l:'Prix d\'achat HT (PA)'},
@@ -1742,66 +1766,85 @@ function analyzeImportPlan(){
   _products.forEach(function(p){if(p.ref) existingRefs[String(p.ref).trim().toLowerCase()]=p});
   function _nrm(s){return (s||'').toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
   var existingFamRoots={};
-  var existingFamSubs={}; // key = parentKey + '|' + childKey
+  var existingFamSubs={};
+  var existingFamSubSubs={};
   _families.forEach(function(f){
-    if(!f.parentId) existingFamRoots[_nrm(f.name)]=f;
+    if(!f.parentId){existingFamRoots[_nrm(f.name)]=f;return}
+    var par=_families.find(function(x){return x.id===f.parentId});
+    if(!par) return;
+    if(!par.parentId) existingFamSubs[_nrm(par.name)+'|'+_nrm(f.name)]=f;
     else {
-      var parent=_families.find(function(x){return x.id===f.parentId});
-      if(parent) existingFamSubs[_nrm(parent.name)+'|'+_nrm(f.name)]=f;
+      var grand=_families.find(function(x){return x.id===par.parentId});
+      if(grand) existingFamSubSubs[_nrm(grand.name)+'|'+_nrm(par.name)+'|'+_nrm(f.name)]=f;
     }
   });
 
   var hasVariants = (idx.taille!=null || idx.couleur!=null);
-  var modelGroups={}; // parentRef → {name, count}
-  var seenSkus={};   // composite SKU → 1
-  var newFamRoots={}, newFamSubs={};
+  var hasParent = (idx.parentRefName!=null);
+  function _slug(s){return (s||'').toString().trim().replace(/[\/\\\s]+/g,'-').replace(/[^\w\-]/g,'').toLowerCase()}
+
+  var modelGroups={}; // parent slug → {name, count}
+  var seenSkus={};
+  var newFamRoots={}, newFamSubs={}, newFamSubSubs={};
   var conflictsExisting=0;
   var validRows=0, skippedRows=0;
   var rows=_importRows;
 
   for(var i=0;i<rows.length;i++){
     var row=rows[i];
-    // Determine the model code (parent ref) and variant code
     var rawRef = (idx.ref!=null ? row[idx.ref] : '').toString().trim();
+    if(rawRef==='###'||rawRef==='-') rawRef='';
     var rawName = (idx.name!=null ? row[idx.name] : '').toString().trim();
+    if(rawName==='###') rawName='';
     var rawTaille = (idx.taille!=null ? row[idx.taille] : '').toString().trim();
+    if(rawTaille==='###') rawTaille='';
     var rawCouleur = (idx.couleur!=null ? row[idx.couleur] : '').toString().trim();
+    if(rawCouleur==='###') rawCouleur='';
+    var rawParentName = (hasParent ? row[idx.parentRefName] : '').toString().trim();
+    if(rawParentName==='###') rawParentName='';
     var rawCat = (idx.cat!=null ? row[idx.cat] : '').toString().trim();
+    if(rawCat==='###') rawCat='';
     var rawSousCat = (idx.sousCat!=null ? row[idx.sousCat] : '').toString().trim();
+    if(rawSousCat==='###') rawSousCat='';
+    var rawSousSousCat = (idx.sousSousCat!=null ? row[idx.sousSousCat] : '').toString().trim();
+    if(rawSousSousCat==='###') rawSousSousCat='';
 
-    // Need at least ref or name to be importable
     if(!rawRef && !rawName){skippedRows++;continue}
 
-    // Compute SKU (variant or simple)
-    var sku;
-    if(hasVariants && rawRef && (rawTaille||rawCouleur)){
-      var variantSuffix = [rawTaille,rawCouleur].filter(Boolean).join('-');
+    // Compute SKU and parent
+    var sku, parentSlug=null;
+    if(rawParentName && (rawTaille||rawCouleur)){
+      parentSlug = _slug(rawParentName) || rawParentName;
+      sku = rawRef || (parentSlug + '-' + [rawTaille,rawCouleur].filter(Boolean).join('-'));
+    } else if(hasVariants && rawRef && (rawTaille||rawCouleur)){
+      var variantSuffix = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_');
       sku = rawRef + (variantSuffix?'-'+variantSuffix:'');
+      parentSlug = rawRef;
     } else {
       sku = rawRef || rawName.slice(0,40).toUpperCase().replace(/\s+/g,'-');
     }
     var skuKey = sku.toLowerCase();
-    if(seenSkus[skuKey]){skippedRows++;continue} // dedupe inside file
+    if(seenSkus[skuKey]){skippedRows++;continue}
     seenSkus[skuKey]=1;
 
-    // Track parent groups
-    if(hasVariants && rawRef && (rawTaille||rawCouleur)){
-      if(!modelGroups[rawRef]) modelGroups[rawRef]={name:rawName||rawRef,count:0};
-      modelGroups[rawRef].count++;
+    if(parentSlug){
+      if(!modelGroups[parentSlug]) modelGroups[parentSlug]={name:rawParentName||rawName||rawRef,count:0};
+      modelGroups[parentSlug].count++;
     }
 
-    // Conflict with existing
     if(existingRefs[skuKey]) conflictsExisting++;
 
-    // Track families to create
     if(rawCat){
       var ck=_nrm(rawCat);
       if(!existingFamRoots[ck] && !newFamRoots[ck]) newFamRoots[ck]=rawCat;
       if(rawSousCat){
         var sk=_nrm(rawSousCat);
-        var compositeKey=ck+'|'+sk;
-        if(!existingFamSubs[compositeKey] && !newFamSubs[compositeKey]){
-          newFamSubs[compositeKey]={parent:rawCat,name:rawSousCat};
+        var compKey=ck+'|'+sk;
+        if(!existingFamSubs[compKey] && !newFamSubs[compKey]) newFamSubs[compKey]={parent:rawCat,name:rawSousCat};
+        if(rawSousSousCat){
+          var sk2=_nrm(rawSousSousCat);
+          var compKey2=ck+'|'+sk+'|'+sk2;
+          if(!existingFamSubSubs[compKey2] && !newFamSubSubs[compKey2]) newFamSubSubs[compKey2]={grandparent:rawCat,parent:rawSousCat,name:rawSousSousCat};
         }
       }
     }
@@ -1810,19 +1853,21 @@ function analyzeImportPlan(){
 
   var totalProducts = validRows;
   var modelCount = Object.keys(modelGroups).length;
-  var simpleCount = totalProducts - Object.keys(modelGroups).reduce(function(a,k){return a+modelGroups[k].count},0);
+  var variantTotal = Object.keys(modelGroups).reduce(function(a,k){return a+modelGroups[k].count},0);
+  var simpleCount = totalProducts - variantTotal;
 
   return {
     totalRows: rows.length,
     validRows: validRows,
     skippedRows: skippedRows,
     totalProducts: totalProducts,
-    hasVariants: hasVariants,
+    hasVariants: hasVariants||hasParent,
     modelCount: modelCount,
     simpleCount: simpleCount,
-    variantTotal: totalProducts - simpleCount,
+    variantTotal: variantTotal,
     newFamRoots: Object.values(newFamRoots),
     newFamSubs: Object.values(newFamSubs),
+    newFamSubSubs: Object.values(newFamSubSubs),
     conflictsExisting: conflictsExisting,
     hasRef: idx.ref!=null,
     hasName: idx.name!=null
@@ -1864,7 +1909,12 @@ function renderImportPlan(){
     var moreS=plan.newFamSubs.length>3?' <span style="color:var(--muted)">(+'+(plan.newFamSubs.length-3)+' autres)</span>':'';
     lines.push('<div style="font-size:12px;margin-top:4px">🆕 <strong>'+plan.newFamSubs.length+' nouvelle(s) sous-famille(s) à créer</strong> : <span style="color:var(--muted)">'+sampleS+moreS+'</span></div>');
   }
-  if(plan.newFamRoots.length===0 && plan.newFamSubs.length===0){
+  if(plan.newFamSubSubs && plan.newFamSubSubs.length>0){
+    var sampleSS=plan.newFamSubSubs.slice(0,3).map(function(s){return esc(s.grandparent)+' › '+esc(s.parent)+' › '+esc(s.name)}).join(', ');
+    var moreSS=plan.newFamSubSubs.length>3?' <span style="color:var(--muted)">(+'+(plan.newFamSubSubs.length-3)+' autres)</span>':'';
+    lines.push('<div style="font-size:12px;margin-top:4px">🆕 <strong>'+plan.newFamSubSubs.length+' nouvelle(s) sous-sous-famille(s) à créer</strong> : <span style="color:var(--muted)">'+sampleSS+moreSS+'</span></div>');
+  }
+  if(plan.newFamRoots.length===0 && plan.newFamSubs.length===0 && (!plan.newFamSubSubs||plan.newFamSubSubs.length===0)){
     lines.push('<div style="font-size:12px;margin-top:4px;color:var(--green)">✅ Toutes les familles existent déjà — aucune création nécessaire</div>');
   }
 
@@ -1901,7 +1951,13 @@ function _pn(v){
   var n=parseFloat(s);
   return isNaN(n)?null:n;
 }
-function _ps(v){return v==null?'':String(v).trim()}
+function _ps(v){
+  if(v==null) return '';
+  var s=String(v).trim();
+  // Polaris/legacy "non applicable" marker → treat as empty
+  if(s==='###'||s==='#N/A'||s==='N/A'||s==='-') return '';
+  return s;
+}
 
 // Build the list of products from the file rows + mapping. Pure function.
 // Returns { products: [...], skippedCount: N }
@@ -1909,9 +1965,12 @@ function _buildProductsFromRows(){
   var idx={};
   _importHeaders.forEach(function(h,i){var f=_importMapping[h];if(f&&f!=='_ignore')idx[f]=i});
   var hasVariants = (idx.taille!=null || idx.couleur!=null);
+  var hasParent = (idx.parentRefName!=null);
   var seen={};
   var products=[];
   var skipped=0;
+
+  function _slug(s){return (s||'').toString().trim().replace(/[\/\\\s]+/g,'-').replace(/[^\w\-]/g,'').toLowerCase()}
 
   for(var i=0;i<_importRows.length;i++){
     var row=_importRows[i];
@@ -1919,13 +1978,23 @@ function _buildProductsFromRows(){
     var rawName = idx.name!=null ? _ps(row[idx.name]) : '';
     var rawTaille = idx.taille!=null ? _ps(row[idx.taille]) : '';
     var rawCouleur = idx.couleur!=null ? _ps(row[idx.couleur]) : '';
-    var rawParentName = idx.parentRefName!=null ? _ps(row[idx.parentRefName]) : '';
+    var rawParentName = hasParent ? _ps(row[idx.parentRefName]) : '';
 
     if(!rawRef && !rawName){skipped++;continue}
 
-    // Compute SKU and parentRef
+    // Compute SKU and parentRef.
+    // - If a parentRefName col exists AND is filled on this row → it's a variant
+    //   → parentRef = the model code (slug), ref = either the row's Code, or composite
+    // - Else if hasVariants (taille/couleur cols exist) AND this row has taille/couleur
+    //   → ref = composite (rawRef + suffix), parentRef = rawRef
+    // - Else → simple product, ref = rawRef
     var sku, parentRef = null;
-    if(hasVariants && rawRef && (rawTaille||rawCouleur)){
+    if(rawParentName && (rawTaille||rawCouleur)){
+      // True variant of a named model — parent is the model, sku is the row's unique Code
+      parentRef = _slug(rawParentName) || rawParentName;
+      sku = rawRef || (parentRef + '-' + [rawTaille,rawCouleur].filter(Boolean).join('-'));
+    } else if(hasVariants && rawRef && (rawTaille||rawCouleur)){
+      // Variant without explicit parent column → fallback: use rawRef as parent
       var variantSuffix = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_');
       sku = rawRef + (variantSuffix?'-'+variantSuffix:'');
       parentRef = rawRef;
@@ -1956,6 +2025,7 @@ function _buildProductsFromRows(){
       p.name = rawRef;
     }
     if(parentRef) p.parentRef = parentRef;
+    if(rawParentName) p.parentRefName = rawParentName;
     if(rawTaille) p.taille = rawTaille;
     if(rawCouleur) p.couleur = rawCouleur;
 
@@ -1981,9 +2051,10 @@ function _buildProductsFromRows(){
       var sv=_ps(row[idx.soldes]).toLowerCase();
       p.soldes = (sv==='1'||sv==='oui'||sv==='yes'||sv==='true'||sv==='y') ? 1 : 0;
     }
-    // Stash cat/sousCat as raw strings — resolved to familyId in doImportFinal
+    // Stash cat/sousCat/sousSousCat as raw strings — resolved to familyId in doImportFinal
     if(idx.cat!=null) p._catRaw = _ps(row[idx.cat]);
     if(idx.sousCat!=null) p._sousCatRaw = _ps(row[idx.sousCat]);
+    if(idx.sousSousCat!=null) p._sousSousCatRaw = _ps(row[idx.sousSousCat]);
 
     // Smart fallback : if pa missing but pmpa or cump present, use them
     if(p.pa==null){
@@ -2008,28 +2079,37 @@ async function executeImport(){
   var built = _buildProductsFromRows();
   if(!built.products.length){showToast('Aucune ligne valide à importer',true);return}
 
-  // Determine families to create
+  // Determine families to create (3 levels)
   function _nrm(s){return (s||'').toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
   var existingFamRoots={};
   var existingFamSubs={};
+  var existingFamSubSubs={};
   _families.forEach(function(f){
-    if(!f.parentId) existingFamRoots[_nrm(f.name)]=f;
-    else {
-      var par=_families.find(function(x){return x.id===f.parentId});
-      if(par) existingFamSubs[_nrm(par.name)+'|'+_nrm(f.name)]=f;
+    if(!f.parentId){existingFamRoots[_nrm(f.name)]=f;return}
+    var par=_families.find(function(x){return x.id===f.parentId});
+    if(!par) return;
+    if(!par.parentId){
+      // par is a root → f is a sub
+      existingFamSubs[_nrm(par.name)+'|'+_nrm(f.name)]=f;
+    } else {
+      // par is itself a sub → f is a sub-sub
+      var grand=_families.find(function(x){return x.id===par.parentId});
+      if(grand) existingFamSubSubs[_nrm(grand.name)+'|'+_nrm(par.name)+'|'+_nrm(f.name)]=f;
     }
   });
-  var newFamRoots={}, newFamSubs={};
+  var newFamRoots={}, newFamSubs={}, newFamSubSubs={};
   built.products.forEach(function(p){
-    if(p._catRaw){
-      var ck=_nrm(p._catRaw);
-      if(!existingFamRoots[ck] && !newFamRoots[ck]) newFamRoots[ck]=p._catRaw;
-      if(p._sousCatRaw){
-        var sk=_nrm(p._sousCatRaw);
-        var compKey=ck+'|'+sk;
-        if(!existingFamSubs[compKey] && !newFamSubs[compKey]) newFamSubs[compKey]={parent:p._catRaw,name:p._sousCatRaw};
-      }
-    }
+    if(!p._catRaw) return;
+    var ck=_nrm(p._catRaw);
+    if(!existingFamRoots[ck] && !newFamRoots[ck]) newFamRoots[ck]=p._catRaw;
+    if(!p._sousCatRaw) return;
+    var sk=_nrm(p._sousCatRaw);
+    var compKey=ck+'|'+sk;
+    if(!existingFamSubs[compKey] && !newFamSubs[compKey]) newFamSubs[compKey]={parent:p._catRaw,name:p._sousCatRaw};
+    if(!p._sousSousCatRaw) return;
+    var sk2=_nrm(p._sousSousCatRaw);
+    var compKey2=ck+'|'+sk+'|'+sk2;
+    if(!existingFamSubSubs[compKey2] && !newFamSubSubs[compKey2]) newFamSubSubs[compKey2]={grandparent:p._catRaw,parent:p._sousCatRaw,name:p._sousSousCatRaw};
   });
 
   // Determine conflicts
@@ -2047,8 +2127,9 @@ async function executeImport(){
     conflicts: conflicts,
     newFamRoots: Object.values(newFamRoots),
     newFamSubs: Object.values(newFamSubs),
+    newFamSubSubs: Object.values(newFamSubSubs),
     skippedCount: built.skippedCount,
-    decisions: {} // index → 'skip'|'replace'|'merge'
+    decisions: {}
   };
 
   // Apply pre-selected conflict strategy if not 'ask'
@@ -2058,7 +2139,7 @@ async function executeImport(){
   }
 
   // Stage 2 : if there are families to create, show step 2b
-  var hasFams = _importState.newFamRoots.length>0 || _importState.newFamSubs.length>0;
+  var hasFams = _importState.newFamRoots.length>0 || _importState.newFamSubs.length>0 || _importState.newFamSubSubs.length>0;
   if(hasFams){
     showStep('2b');
     renderNewFamiliesConfirmation();
@@ -2127,10 +2208,19 @@ function renderNewFamiliesConfirmation(){
   }
   if(st.newFamSubs.length){
     html += '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Sous-familles ('+st.newFamSubs.length+')</div>';
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px">';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin-bottom:18px">';
     st.newFamSubs.forEach(function(s){
       var d=_famDefaults(s.name);
       html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid var(--border);border-radius:10px;background:white"><div style="width:28px;height:28px;border-radius:6px;background:'+d.color+'20;display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0">'+d.icon+'</div><div style="font-size:11px;overflow:hidden"><div style="color:var(--muted);font-size:9px">'+esc(s.parent)+' ›</div><div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(s.name)+'</div></div></div>';
+    });
+    html += '</div>';
+  }
+  if(st.newFamSubSubs && st.newFamSubSubs.length){
+    html += '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Sous-sous-familles ('+st.newFamSubSubs.length+')</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px">';
+    st.newFamSubSubs.forEach(function(s){
+      var d=_famDefaults(s.name);
+      html += '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border:1.5px solid var(--border);border-radius:10px;background:white"><div style="width:26px;height:26px;border-radius:6px;background:'+d.color+'20;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0">'+d.icon+'</div><div style="font-size:11px;overflow:hidden;min-width:0"><div style="color:var(--muted);font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(s.grandparent)+' › '+esc(s.parent)+' ›</div><div style="font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(s.name)+'</div></div></div>';
     });
     html += '</div>';
   }
@@ -2190,18 +2280,24 @@ async function doImportFinal(){
   var sub=document.getElementById('import-progress-sub');
 
   try{
-    // ── Stage A : create families ──
+    // ── Stage A : create families (up to 3 levels) ──
     txt.textContent='Création des familles…';
-    sub.textContent=(st.newFamRoots.length+st.newFamSubs.length)+' à créer';
+    sub.textContent=(st.newFamRoots.length+st.newFamSubs.length+(st.newFamSubSubs?st.newFamSubSubs.length:0))+' à créer';
 
-    if(st.newFamRoots.length || st.newFamSubs.length){
+    if(st.newFamRoots.length || st.newFamSubs.length || (st.newFamSubSubs && st.newFamSubSubs.length)){
       var famBatch = window._writeBatch(window._db);
       // Roots first (so subs can reference them)
       for(var i=0;i<st.newFamRoots.length;i++){
-        await resolveFamilyByPath(st.newFamRoots[i], '', {batch: famBatch});
+        await resolveFamilyByPath(st.newFamRoots[i], '', null, {batch: famBatch});
       }
       for(var j=0;j<st.newFamSubs.length;j++){
-        await resolveFamilyByPath(st.newFamSubs[j].parent, st.newFamSubs[j].name, {batch: famBatch});
+        await resolveFamilyByPath(st.newFamSubs[j].parent, st.newFamSubs[j].name, null, {batch: famBatch});
+      }
+      if(st.newFamSubSubs){
+        for(var jj=0;jj<st.newFamSubSubs.length;jj++){
+          var ss=st.newFamSubSubs[jj];
+          await resolveFamilyByPath(ss.grandparent, ss.parent, ss.name, {batch: famBatch});
+        }
       }
       await famBatch.commit();
     }
@@ -2209,23 +2305,28 @@ async function doImportFinal(){
     // ── Stage B : resolve familyId on each product to import ──
     txt.textContent='Préparation des produits…';
     function _nrm(s){return (s||'').toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')}
-    function _famIdFor(catRaw, sousCatRaw){
-      if(!catRaw && !sousCatRaw) return null;
+    function _famIdFor(catRaw, sousCatRaw, sousSousCatRaw){
+      if(!catRaw && !sousCatRaw && !sousSousCatRaw) return null;
       var ck=_nrm(catRaw);
       var rootFam = _families.find(function(f){return !f.parentId && _nrm(f.name)===ck});
       if(!rootFam) return null;
       if(!sousCatRaw) return rootFam.id;
       var sk=_nrm(sousCatRaw);
       var subFam = _families.find(function(f){return f.parentId===rootFam.id && _nrm(f.name)===sk});
-      return subFam ? subFam.id : rootFam.id;
+      if(!subFam) return rootFam.id;
+      if(!sousSousCatRaw) return subFam.id;
+      var sk2=_nrm(sousSousCatRaw);
+      var subSubFam = _families.find(function(f){return f.parentId===subFam.id && _nrm(f.name)===sk2});
+      return subSubFam ? subSubFam.id : subFam.id;
     }
 
     // Apply familyId + clean transient fields on fresh products
     st.fresh.forEach(function(p){
-      var fid = _famIdFor(p._catRaw, p._sousCatRaw);
+      var fid = _famIdFor(p._catRaw, p._sousCatRaw, p._sousSousCatRaw);
       if(fid) p.familyId=fid;
-      p.cat = p._sousCatRaw || p._catRaw || '';
-      delete p._catRaw; delete p._sousCatRaw;
+      // p.cat = deepest level name (for backward-compat catalogue display)
+      p.cat = p._sousSousCatRaw || p._sousCatRaw || p._catRaw || '';
+      delete p._catRaw; delete p._sousCatRaw; delete p._sousSousCatRaw;
     });
 
     // Build the list of products to actually write : fresh + resolved conflicts
@@ -2235,16 +2336,14 @@ async function doImportFinal(){
       var dec = st.decisions[i] || 'skip';
       if(dec==='skip') return;
       var imp = c.imported;
-      var fid = _famIdFor(imp._catRaw, imp._sousCatRaw);
+      var fid = _famIdFor(imp._catRaw, imp._sousCatRaw, imp._sousSousCatRaw);
       if(fid) imp.familyId=fid;
-      imp.cat = imp._sousCatRaw || imp._catRaw || '';
-      delete imp._catRaw; delete imp._sousCatRaw;
+      imp.cat = imp._sousSousCatRaw || imp._sousCatRaw || imp._catRaw || '';
+      delete imp._catRaw; delete imp._sousCatRaw; delete imp._sousSousCatRaw;
       var merged;
       if(dec==='replace'){
-        // Keep existing id, replace everything else
         merged = Object.assign({}, imp, {id: c.existing.id, createdAt: c.existing.createdAt || imp.createdAt});
       } else if(dec==='merge'){
-        // Existing as base, overlay non-empty imported fields, keep existing stockBase
         merged = Object.assign({}, c.existing);
         Object.keys(imp).forEach(function(k){
           if(k==='id'||k==='stockBase'||k==='createdAt') return;
@@ -2280,7 +2379,8 @@ async function doImportFinal(){
     closeImportModal();
     var msg = '✅ '+st.fresh.length+' nouveau(x) produit(s)';
     if(conflictsHandled) msg += ', '+conflictsHandled+' mis à jour';
-    if(st.newFamRoots.length||st.newFamSubs.length) msg += ', '+(st.newFamRoots.length+st.newFamSubs.length)+' famille(s) créée(s)';
+    var famTotal = st.newFamRoots.length+st.newFamSubs.length+(st.newFamSubSubs?st.newFamSubSubs.length:0);
+    if(famTotal) msg += ', '+famTotal+' famille(s) créée(s)';
     showToast(msg);
     _importState=null;
     renderAll();
