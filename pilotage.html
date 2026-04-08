@@ -1602,7 +1602,7 @@ function renderPage(data, month) {
         '</div>' +
       '</div>' +
       '<div class="section-body">' +
-      '<table class="data-table"><thead><tr><th>Pointé</th><th>Fournisseur</th><th>Type</th><th>Montant HT</th><th>TVA %</th><th>Total TTC</th><th>Déductible</th><th></th></tr></thead>' +
+      '<table class="data-table"><thead><tr><th>Pointé</th><th>Fournisseur</th><th>Type</th><th>Montant HT</th><th>TVA %</th><th>Total TTC</th><th>Déductible</th><th title="Périodicité de la charge (mensuelle, trimestrielle, etc.)">Périodicité</th><th></th></tr></thead>' +
       '<tbody id="cf-tbody">' + secTbody('cf', renderCharges(data.chargesFixe, 'chargesFixe')) + '</tbody>' +
       '<tfoot><tr><td colspan="3">TOTAL CHARGES FIXES HT</td><td><span id="tot-fixHT">' + fmtN(t.fixesHT) + '</span> €</td><td>—</td><td><span id="tot-fixTTC">' + fmtN(t.fixesTTC) + '</span> €</td><td colspan="2">TVA déd. : <span id="tot-fixTVA">' + fmtN(t.fixesTVA) + '</span> €</td></tr>' +
       '<tr><td colspan="8" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCharge(\'chargesFixe\',\'cf-tbody\')">+ Ligne</button></td></tr></tfoot>' +
@@ -1646,7 +1646,7 @@ function renderPage(data, month) {
     '<div class="section-card full' + secColClass('leas') + '" id="sec-leas" style="margin-bottom:16px">' +
         '<div class="section-head"><div class="section-title section-toggle" onclick="toggleSection(\'leas\')"><span class="chevron">▸</span> 🚗 LOA / LLD / Leasing <span class="section-title-badge badge-blue">Soumis TVA</span>' + (!window._htMode ? ' <span class="section-title-badge" style="background:#e0f2fe;color:#0369a1;font-size:10px">Saisie TTC</span>' : '') + (t.leasingHT > 0 ? ' <span class="sec-badge-count">' + fmtN(t.leasingHT) + ' €</span>' : '') + '</div><button class="btn btn-outline btn-sm" onclick="event.stopPropagation();ensureSectionOpen(\'leas\');addCharge(\'leasing\',\'leas-tbody\')">+ Ligne</button></div>' +
         '<div class="section-body">' +
-        '<table class="data-table"><thead><tr><th>Pointé</th><th>Fournisseur</th><th>Type</th><th>Montant HT</th><th>TVA %</th><th>Total TTC</th><th>Déd.</th><th>Début / Fin</th><th></th></tr></thead>' +
+        '<table class="data-table"><thead><tr><th>Pointé</th><th>Fournisseur</th><th>Type</th><th>Montant HT</th><th>TVA %</th><th>Total TTC</th><th>Déd.</th><th title="Périodicité de la charge (mensuelle, trimestrielle, etc.)">Périodicité</th><th>Début / Fin</th><th></th></tr></thead>' +
         '<tbody id="leas-tbody">' + secTbody('leas', renderCharges(data.leasing, 'leasing')) + '</tbody>' +
         '<tfoot><tr><td colspan="3">TOTAL LEASING HT</td><td><span id="tot-leasHT">' + fmtN(t.leasingHT) + '</span> €</td><td>—</td><td><span id="tot-leasTTC">' + fmtN(t.leasingTTC) + '</span> €</td><td colspan="3"></td></tr>' +
         '<tr><td colspan="9" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCharge(\'leasing\',\'leas-tbody\')">+ Ligne</button></td></tr></tfoot>' +
@@ -2338,6 +2338,49 @@ function refreshPointeStyle(sel) {
   sel.style.borderColor = st.border;
 }
 
+// ═══════════════════════════════════════════
+// PÉRIODICITÉ DES CHARGES (wave 2)
+// ═══════════════════════════════════════════
+// Demande cliente : pouvoir saisir des charges trimestrielles (mutuelle, AG2R, leasing au trimestre).
+// Approche : chaque ligne (chargesFixe / leasing) peut porter un champ r.periodicite.
+// Si absent → traité comme 'mensuelle' (compat ascendante stricte avec toutes les données existantes).
+// IMPACT métier : la propagation (propagateLeasing, applyFixedCharges en mode line) saute des mois selon
+// la périodicité. Une charge trimestrielle apparaît tous les 3 mois, une annuelle tous les 12 mois.
+// Une ponctuelle ne se propage pas (1 seule occurrence). C'est la réalité bancaire — compatible avec
+// le rapprochement bancaire wave 1 qui matche au TTC.
+var PERIOD_OPTIONS = [
+  { v: 'mensuelle',     label: '📅 Mensuelle',     step: 1  },
+  { v: 'trimestrielle', label: '🔄 Trimestrielle', step: 3  },
+  { v: 'annuelle',      label: '📆 Annuelle',      step: 12 },
+  { v: 'ponctuelle',    label: '📌 Ponctuelle',    step: 0  }  // step 0 = pas de propagation
+];
+
+function getPeriodStep(periodicite) {
+  var v = periodicite || 'mensuelle';
+  for (var i = 0; i < PERIOD_OPTIONS.length; i++) {
+    if (PERIOD_OPTIONS[i].v === v) return PERIOD_OPTIONS[i].step;
+  }
+  return 1; // fallback mensuel
+}
+
+function periodSelectHtml(onchangeExpr, currentValue) {
+  var v = currentValue || 'mensuelle';
+  // Vérifier que la valeur est connue, sinon retomber sur mensuelle
+  var valid = false;
+  for (var i = 0; i < PERIOD_OPTIONS.length; i++) {
+    if (PERIOD_OPTIONS[i].v === v) { valid = true; break; }
+  }
+  if (!valid) v = 'mensuelle';
+  var opts = PERIOD_OPTIONS.map(function(o){
+    return '<option value="' + o.v + '"' + (v === o.v ? ' selected' : '') + '>' + o.label + '</option>';
+  }).join('');
+  // Style discret : juste un fond légèrement coloré si pas mensuelle (pour attirer l'œil)
+  var bg = (v !== 'mensuelle') ? '#fef3c7' : '#fff';
+  var styleAttr = 'width:115px;background:' + bg + ';font-size:11px;font-weight:600';
+  var fullOnchange = onchangeExpr + ';scheduleSave()';
+  return '<select class="cell-input period-select" style="' + styleAttr + '" onchange="' + fullOnchange + '" title="Périodicité de la charge — détermine la fréquence de propagation sur les autres mois">' + opts + '</select>';
+}
+
 // Petit badge 🔗 affiché à côté du fournisseur quand la ligne a été pointée
 // via le rapprochement bancaire (bank-validation.html). Purement visuel.
 function bankLinkBadge(r){
@@ -2379,6 +2422,10 @@ function renderCharges(rows, key) {
       '<td><select class="cell-input" style="width:55px" onchange="updateChargeTVARate(\'' + key + '\',' + i + ',this.value)">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + (rate==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select></td>' +
       '<td><input class="cell-input" style="width:76px' + (window._htMode?';color:var(--muted)':'') + '" type="text" inputmode="decimal" placeholder="' + (window._htMode?'auto':'TTC') + '" value="' + (ttc!==0?ttc.toFixed(2):'') + '" id="' + key + '-ttc-' + i + '" oninput="updateChargeTTC(\'' + key + '\',' + i + ',this.value)"/></td>' +
       '<td><select class="cell-input" style="width:55px" onchange="_data[\'' + key + '\'][' + i + '].deductible=this.value;refreshTotals()"><option' + (r.deductible==='Oui'?' selected':'') + '>Oui</option><option' + (r.deductible==='Non'?' selected':'') + '>Non</option></select></td>' +
+      // Wave 2 : périodicité (chargesFixe + leasing uniquement, pas chargesVar)
+      ((key==='chargesFixe' || key==='leasing')
+        ? '<td>' + periodSelectHtml("_data['" + key + "'][" + i + "].periodicite=this.value", r.periodicite) + '</td>'
+        : '') +
       (key==='leasing' ? '<td style="white-space:nowrap;min-width:130px">' +
         mpHtml('mpL-'+i+'-deb','leasing',i,'dateDebut',r.dateDebut||'') +
         '<div style="margin-top:4px">' + mpHtml('mpL-'+i+'-fin','leasing',i,'dateFin',r.dateFin||'') + '</div>' +
@@ -2708,6 +2755,14 @@ async function propagateLeasing(i) {
   // Auto-corriger les dates mal formatées en base
   if (r.dateDebut !== normDebut) { r.dateDebut = normDebut; scheduleSave(); }
   if (r.dateFin   !== normFin)   { r.dateFin   = normFin;   scheduleSave(); }
+
+  // Wave 2 : déterminer le pas selon la périodicité
+  var step = getPeriodStep(r.periodicite); // 1=mensuelle, 3=trimestrielle, 12=annuelle, 0=ponctuelle
+  if (step === 0) {
+    showToast('⚠ Charge ponctuelle : pas de propagation','warning');
+    return;
+  }
+
   // Spinner sur le bouton
   var row = document.querySelector('#leas-tbody tr:nth-child(' + (i+1) + ')');
   var btn2 = row ? row.querySelector('.btn-orange') : null;
@@ -2736,7 +2791,9 @@ async function propagateLeasing(i) {
       await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md);
       count++;
     } catch(e) { console.warn('propagateLeasing erreur', key, e); }
-    curM++; if(curM>11){curM=0;curY++;}
+    // Wave 2 : avancer du nombre de mois selon la périodicité (1, 3 ou 12)
+    curM += step;
+    while (curM > 11) { curM -= 12; curY++; }
   }
   showToast('⚡ Leasing propagé sur ' + count + ' mois', 'success');
   if(btn2){btn2.innerHTML=origText2;btn2.disabled=false;}
@@ -3649,6 +3706,18 @@ async function applyFixedCharges() {
     for (var m = fromM; m <= 11; m++) targets.push({year: selYear, month: m});
     for (var m = 0; m <= toM; m++)    targets.push({year: selYear+1, month: m});
   }
+
+  // ─── Wave 2 : helper pour savoir si une ligne doit apparaître sur un mois cible
+  // selon sa périodicité, en se référant au mois courant (mois d'origine de la ligne)
+  function shouldAppearOnTarget(line, tgt) {
+    var step = getPeriodStep(line.periodicite);
+    if (step === 0) return false; // ponctuelle : pas de propagation
+    if (step === 1) return true;  // mensuelle : tous les mois
+    // Trimestrielle (3) ou annuelle (12) : vérifier l'écart en mois depuis le mois courant
+    var monthsDiff = (tgt.year - window._year) * 12 + (tgt.month - currentM);
+    return (monthsDiff % step) === 0;
+  }
+
   var count = 0;
   for (var t = 0; t < targets.length; t++) {
     var tgt = targets[t];
@@ -3663,14 +3732,18 @@ async function applyFixedCharges() {
       }
       var hasCharges = md.chargesFixe && md.chargesFixe.some(function(c){return c.fournisseur||c.montantHT;});
       if (isLineMode) {
-        // Mode ligne : ajouter si n'existe pas déjà
+        // Mode ligne : ajouter si n'existe pas déjà ET si la périodicité l'autorise
+        if (!shouldAppearOnTarget(fixedCharges[0], tgt)) continue;
         if(!md.chargesFixe) md.chargesFixe = [];
         var already = md.chargesFixe.some(function(c){return c.fournisseur===fixedCharges[0].fournisseur && c.type===fixedCharges[0].type;});
         if(!already) { md.chargesFixe.push(fixedCharges[0]); await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md); count++; }
         continue;
       }
+      // Mode "all" : on filtre les charges selon leur périodicité individuelle
+      var chargesForThisMonth = fixedCharges.filter(function(c){ return shouldAppearOnTarget(c, tgt); });
+      if (chargesForThisMonth.length === 0) continue;
       if (mode === 'all' || !hasCharges) {
-        md.chargesFixe = fixedCharges;
+        md.chargesFixe = chargesForThisMonth;
         await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md);
         count++;
       }
@@ -4027,6 +4100,40 @@ function pickCatItem(uid, value) {
   inp.value = value;
   inp.dispatchEvent(new Event('input', {bubbles:true}));
   hideCatSugg(uid);
+
+  // Wave 2 : auto-pré-remplissage de la périodicité depuis la fiche fournisseur.
+  // Le uid d'un input fournisseur a le format "{key}-sup-{i}" (cf. supplierInputHtml).
+  // Si une fiche existe avec freqFacturation défini, on applique sur la ligne ET on rafraîchit
+  // visuellement le <select> de périodicité de la même ligne sans re-render complet (pas de perte de focus).
+  try {
+    var m = uid.match(/^(chargesFixe|leasing)-sup-(\d+)$/);
+    if (m && _fichesMap) {
+      var key = m[1];
+      var idx = parseInt(m[2]);
+      var fiche = _fichesMap[(value || '').toLowerCase()];
+      if (fiche && fiche.freqFacturation && _data[key] && _data[key][idx]) {
+        // Mapper freqFacturation (mensuel/trimestriel/ponctuel) → periodicite (mensuelle/trimestrielle/ponctuelle)
+        var map = { mensuel: 'mensuelle', trimestriel: 'trimestrielle', annuel: 'annuelle', ponctuel: 'ponctuelle' };
+        var newPeriod = map[fiche.freqFacturation];
+        if (newPeriod && _data[key][idx].periodicite !== newPeriod) {
+          _data[key][idx].periodicite = newPeriod;
+          // Mettre à jour le <select> visuellement sans re-rendre la ligne
+          var tbId = (key === 'leasing') ? 'leas-tbody' : 'fixe-tbody';
+          var rowEl = document.querySelector('#' + tbId + ' tr:nth-child(' + (idx + 1) + ')');
+          if (rowEl) {
+            var periodSel = rowEl.querySelector('.period-select');
+            if (periodSel) {
+              periodSel.value = newPeriod;
+              // Rafraîchir le fond coloré (jaune si pas mensuel)
+              periodSel.style.background = (newPeriod !== 'mensuelle') ? '#fef3c7' : '#fff';
+            }
+          }
+          scheduleSave();
+          showToast('🔄 Périodicité auto : ' + newPeriod + ' (depuis fiche fournisseur)', 'success');
+        }
+      }
+    }
+  } catch(e) { console.warn('auto-périodicité erreur', e); }
 }
 
 function saveCatItem(uid, cat, value) {
