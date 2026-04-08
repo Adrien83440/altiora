@@ -2310,10 +2310,10 @@ var POINTE_STYLES = {
 };
 
 // Génère un <select> stylé pour la colonne "Pointé".
-// @param onchangeExpr  expression JS exécutée quand la valeur change
-//                      (ex: "_data.chargesFixe[3].pointe=this.value")
+// @param key      table cible : 'chargesFixe' / 'chargesVar' / 'leasing' / 'credits'
+// @param i        index de la ligne
 // @param currentValue  valeur actuelle de la ligne (peut être undefined)
-function pointeSelectHtml(onchangeExpr, currentValue) {
+function pointeSelectHtml(key, i, currentValue) {
   // Compat ascendante : ancien comportement Oui/Non. Tout ce qui n'est pas dans la liste retombe sur "Non".
   var v = currentValue || 'Non';
   if (POINTE_OPTIONS.indexOf(v) === -1) v = 'Non';
@@ -2322,8 +2322,8 @@ function pointeSelectHtml(onchangeExpr, currentValue) {
   var opts = POINTE_OPTIONS.map(function(o){
     return '<option value="' + o + '"' + (v === o ? ' selected' : '') + '>' + o + '</option>';
   }).join('');
-  // onchange : on applique la valeur ET on rafraîchit le style du select directement
-  var fullOnchange = onchangeExpr + ';refreshPointeStyle(this);scheduleSave()';
+  // onchange : applique la valeur, rafraîchit le style, propage au groupe (wave 3), sauvegarde
+  var fullOnchange = "_data['" + key + "'][" + i + "].pointe=this.value;refreshPointeStyle(this);propagatePointeToGroup(this,'" + key + "'," + i + ");scheduleSave()";
   return '<select class="cell-input pointe-select" style="' + styleAttr + '" onchange="' + fullOnchange + '">' + opts + '</select>';
 }
 
@@ -2381,6 +2381,77 @@ function periodSelectHtml(onchangeExpr, currentValue) {
   return '<select class="cell-input period-select" style="' + styleAttr + '" onchange="' + fullOnchange + '" title="Périodicité de la charge — détermine la fréquence de propagation sur les autres mois">' + opts + '</select>';
 }
 
+// ═══════════════════════════════════════════
+// GROUPES DE LIGNES VENTILÉES TVA (wave 3)
+// ═══════════════════════════════════════════
+// Quand une charge est ventilée via openSplitCharge (ex: Carrefour 120€ → 80€ à 5,5% + 40€ à 20%),
+// les lignes générées partagent un même splitGroupId. Cela permet :
+//   - d'afficher un badge visuel "🔗 1/2" indiquant l'appartenance au groupe
+//   - de propager automatiquement le pointage sur toutes les lignes du groupe
+//   - de matcher la SOMME des TTC du groupe contre une transaction bancaire dans le rapprochement
+// COMPAT ASCENDANTE : toutes les lignes splittées AVANT cette wave n'ont pas de splitGroupId,
+// elles continuent de fonctionner comme aujourd'hui (pointage individuel, pas de regroupement visuel).
+// Pour ré-activer le groupement, l'utilisateur peut re-ventiler la ligne via le bouton ✂️.
+
+function genSplitGroupId() {
+  return 'sg_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 8);
+}
+
+// Retourne tous les indices des lignes du même splitGroupId qu'une ligne donnée.
+// Si la ligne n'a pas de splitGroupId, retourne [idx] (juste elle-même).
+function getSplitGroupIndices(key, idx) {
+  if (!_data[key] || !_data[key][idx]) return [idx];
+  var gid = _data[key][idx].splitGroupId;
+  if (!gid) return [idx];
+  var indices = [];
+  for (var i = 0; i < _data[key].length; i++) {
+    if (_data[key][i] && _data[key][i].splitGroupId === gid) indices.push(i);
+  }
+  return indices;
+}
+
+// Propage la valeur de pointage à toutes les lignes du même groupe.
+// Appelé depuis l'onchange du <select> pointé. Reçoit l'élément <select> qui a déclenché.
+// AUTOMATIQUE et SILENCIEUX comme demandé par Adrien (option a).
+function propagatePointeToGroup(sel, key, idx) {
+  if (!sel) return;
+  var newVal = sel.value;
+  var indices = getSplitGroupIndices(key, idx);
+  if (indices.length <= 1) return; // pas un groupe, rien à propager
+  // Appliquer la même valeur à toutes les autres lignes du groupe
+  for (var i = 0; i < indices.length; i++) {
+    var k = indices[i];
+    if (k === idx) continue; // déjà fait par l'onchange standard
+    _data[key][k].pointe = newVal;
+    // Mettre à jour le <select> visuellement sans re-rendre toute la table
+    var tbId = (key === 'chargesFixe') ? 'cf-tbody' : (key === 'chargesVar') ? 'cv-tbody' : 'leas-tbody';
+    var rowEl = document.querySelector('#' + tbId + ' tr:nth-child(' + (k + 1) + ')');
+    if (rowEl) {
+      var sibSel = rowEl.querySelector('.pointe-select');
+      if (sibSel && sibSel.value !== newVal) {
+        sibSel.value = newVal;
+        refreshPointeStyle(sibSel);
+      }
+    }
+  }
+  showToast('🔗 ' + indices.length + ' lignes groupées pointées', 'success');
+}
+
+// Badge à afficher quand une ligne fait partie d'un groupe ventilé TVA (wave 3).
+// Affiche "🔗 N/M" où N = position dans le groupe, M = total. Au survol : tooltip avec le total TTC.
+// Rien si la ligne n'appartient pas à un groupe (compat ascendante).
+function splitGroupBadge(key, idx) {
+  var r = _data[key] && _data[key][idx];
+  if (!r || !r.splitGroupId) return '';
+  var indices = getSplitGroupIndices(key, idx);
+  if (indices.length <= 1) return '';
+  var pos = indices.indexOf(idx) + 1;
+  var total = indices.length;
+  var totalTtc = r.splitGroupTotal ? Number(r.splitGroupTotal).toFixed(2) + ' €' : '?';
+  var tip = 'Ligne ' + pos + ' de ' + total + ' (ventilation TVA · total ' + totalTtc + ')';
+  return '<span style="display:inline-flex;align-items:center;font-size:9px;font-weight:700;padding:2px 5px;border-radius:8px;background:#dbeafe;color:#1e40af;border:1px solid #bfdbfe;margin-left:3px;cursor:help" title="' + tip + '">🔗 ' + pos + '/' + total + '</span>';
+}
+
 // Petit badge 🔗 affiché à côté du fournisseur quand la ligne a été pointée
 // via le rapprochement bancaire (bank-validation.html). Purement visuel.
 function bankLinkBadge(r){
@@ -2413,10 +2484,13 @@ function renderCharges(rows, key) {
     var ficheBtn = nom ? ' <button class="btn-fiche' + (ficheExists?' has-fiche':'') + '" title="' + (ficheExists?'Voir fiche':'Créer fiche') + '" onclick="event.stopPropagation();openFicheByName(\'' + safeNom + '\')">' + (ficheExists?'🏢':'📋') + '</button>' : '';
     var isExcep = key==='chargesVar' && r.exceptionnel;
     var isBankLinked = !!(r.bankLink && r.bankLink.bankTxId);
-    var rowBg = isExcep ? 'background:rgba(249,115,22,0.06);' : (isBankLinked ? 'background:rgba(99,102,241,0.05);' : '');
+    var isSplitGroup = !!r.splitGroupId; // wave 3
+    var rowBg = isExcep ? 'background:rgba(249,115,22,0.06);'
+              : isBankLinked ? 'background:rgba(99,102,241,0.05);'
+              : isSplitGroup ? 'background:rgba(59,130,246,0.04);' : '';
     return '<tr style="' + rowBg + '">' +
-      '<td>' + pointeSelectHtml("_data['" + key + "'][" + i + "].pointe=this.value", r.pointe) + '</td>' +
-      '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + supplierInputHtml(key, i, r.fournisseur||'') + ficheBtn + bankLinkBadge(r) + '</div></td>' +
+      '<td>' + pointeSelectHtml(key, i, r.pointe) + '</td>' +
+      '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + supplierInputHtml(key, i, r.fournisseur||'') + ficheBtn + bankLinkBadge(r) + splitGroupBadge(key, i) + '</div></td>' +
       '<td>' + catalogInputHtml('types', key+'-typ-'+i, r.type||'', 'width:95px', 'Type', '_data[\''+key+'\']['+i+'].type=this.value') + '</td>' +
       '<td><input class="cell-input" style="width:76px' + (!window._htMode?';color:var(--muted)':'') + '" type="text" inputmode="decimal" placeholder="' + (window._htMode?'HT':'auto') + '" value="' + (r.montantHT||'') + '" id="' + key + '-ht-' + i + '" oninput="updateChargeHT(\'' + key + '\',' + i + ',this.value)"/></td>' +
       '<td><select class="cell-input" style="width:55px" onchange="updateChargeTVARate(\'' + key + '\',' + i + ',this.value)">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + (rate==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select></td>' +
@@ -2562,6 +2636,9 @@ function validateSplitCharge() {
   var idx = _splitChargeCtx.idx;
   var original = _data[key][idx];
 
+  // Wave 3 : générer un splitGroupId unique pour cette ventilation, partagé par toutes les nouvelles lignes
+  var sgId = genSplitGroupId();
+
   // Build new rows from split lines
   var newRows = [];
   for (var i = 0; i < _splitChargeCtx.lines.length; i++) {
@@ -2579,7 +2656,9 @@ function validateSplitCharge() {
       exceptionnel: _splitChargeCtx.originalExceptionnel,
       source: original.source || '',
       bankTxId: original.bankTxId ? original.bankTxId + '_split' + i : '',
-      importedAt: original.importedAt || ''
+      importedAt: original.importedAt || '',
+      splitGroupId: sgId,           // wave 3 : lien de groupe
+      splitGroupTotal: _splitChargeCtx.originalTTC // wave 3 : TTC total du groupe (utile pour bank-validation)
     });
   }
 
@@ -2650,7 +2729,7 @@ function renderCredits(rows) {
     var isBankLinkedC = !!(r.bankLink && r.bankLink.bankTxId);
     var trAttr = ' class="row-principal" id="cred-row-' + i + '"' + (isBankLinkedC ? ' style="background:rgba(99,102,241,0.05)"' : '');
     return '<tr' + trAttr + '>' +
-      '<td>' + pointeSelectHtml("_data.credits[" + i + "].pointe=this.value", r.pointe) + '</td>' +
+      '<td>' + pointeSelectHtml('credits', i, r.pointe) + '</td>' +
       '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + catalogInputHtml('clients', 'credN-'+i, r.fournisseur||'', 'width:120px', 'Nom crédit', 'updateCreditField('+i+',\'fournisseur\',this.value)') + bankLinkBadge(r) + '</div></td>' +
       '<td><input class="cell-input" style="width:85px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="updateCreditMontant(' + i + ',this.value)"/></td>' +
       '<td><input class="cell-input" style="width:65px" type="text" inputmode="decimal" placeholder="%" value="' + (r.tauxInteret||'') + '" oninput="updateCreditTaux(' + i + ',this.value)"/></td>' +

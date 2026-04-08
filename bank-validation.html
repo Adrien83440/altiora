@@ -483,6 +483,10 @@ function detectMatches(tx, montantTtc){
     monthOffset(tx.monthKey, 1)
   ];
   const out=[];
+  // Wave 3 : pour la détection de groupes ventilés, on collecte d'abord toutes les lignes
+  // groupées sur les 3 mois pour pouvoir sommer leurs TTC. Map clé = mk + '|' + section + '|' + splitGroupId
+  const groupAccumulator = {};
+
   for(const mk of monthsToCheck){
     const m=_pilData[mk];
     if(!m) continue;
@@ -512,6 +516,35 @@ function detectMatches(tx, montantTtc){
         } else {
           ttcCents=Math.round(ht*(1+tvaRate/100)*100);
         }
+
+        // Wave 3 : si la ligne fait partie d'un groupe ventilé, on accumule pour le matching de groupe
+        // (et on saute le matching individuel — la ligne ne doit pas matcher seule, c'est le groupe qui match)
+        if (r.splitGroupId) {
+          const gKey = mk + '|' + sec + '|' + r.splitGroupId;
+          if (!groupAccumulator[gKey]) {
+            groupAccumulator[gKey] = {
+              monthKey: mk,
+              section: sec,
+              splitGroupId: r.splitGroupId,
+              indices: [],
+              fournisseurs: [],
+              totalCents: 0,
+              firstHt: 0,
+              firstTvaRate: 0,
+              dateCharge: r.date||r.dateDebut||''
+            };
+          }
+          groupAccumulator[gKey].indices.push(i);
+          groupAccumulator[gKey].fournisseurs.push(r.fournisseur||r.nom||'(sans nom)');
+          groupAccumulator[gKey].totalCents += ttcCents;
+          if (groupAccumulator[gKey].firstHt === 0) {
+            groupAccumulator[gKey].firstHt = ht;
+            groupAccumulator[gKey].firstTvaRate = tvaRate;
+          }
+          continue; // ne pas matcher individuellement
+        }
+
+        // Matching individuel classique
         if(ttcCents!==targetCents) continue;
         out.push({
           monthKey:mk,
@@ -521,11 +554,39 @@ function detectMatches(tx, montantTtc){
           montantHT:ht,
           tvaRate:tvaRate,
           montantTTC:ttcCents/100,
-          dateCharge:r.date||r.dateDebut||''
+          dateCharge:r.date||r.dateDebut||'',
+          isGroup: false
         });
       }
     }
   }
+
+  // Wave 3 : second passage — vérifier les groupes accumulés pour voir s'ils matchent le montant cible
+  for (const gKey in groupAccumulator) {
+    const g = groupAccumulator[gKey];
+    if (g.totalCents !== targetCents) continue;
+    // Représentant : on prend le 1er fournisseur. Pour l'affichage on dira "X +N autres".
+    const firstName = g.fournisseurs[0] || '(groupe)';
+    const otherCount = g.fournisseurs.length - 1;
+    const displayName = otherCount > 0
+      ? firstName + ' (+' + otherCount + ' ligne' + (otherCount>1?'s':'') + ')'
+      : firstName;
+    out.push({
+      monthKey: g.monthKey,
+      section: g.section,
+      index: g.indices[0], // index du représentant (1ère ligne du groupe)
+      fournisseur: displayName,
+      montantHT: g.firstHt, // pas significatif pour un groupe, mais on garde quelque chose
+      tvaRate: g.firstTvaRate,
+      montantTTC: g.totalCents / 100,
+      dateCharge: g.dateCharge,
+      isGroup: true,
+      splitGroupId: g.splitGroupId,
+      groupIndices: g.indices,
+      groupFournisseurs: g.fournisseurs
+    });
+  }
+
   return out;
 }
 
@@ -879,12 +940,28 @@ function showCurrentMatch(){
     const monthLabel=formatMonthLabel(m.monthKey);
     const tvaLabel=m.tvaRate>0?`TVA ${m.tvaRate}%`:'TVA 0%';
     const dateInfo=m.dateCharge?escHtml(m.dateCharge):'(sans date)';
+    // Wave 3 : si c'est un match de groupe ventilé, on affiche un badge spécial
+    // et on liste les fournisseurs sous-jacents pour que la cliente sache exactement ce qu'elle lie.
+    let groupBlock = '';
+    let metaLine = `${CAT_LABELS[m.section]||m.section} · ${monthLabel} · ${dateInfo} · ${tvaLabel}`;
+    if (m.isGroup) {
+      const n = (m.groupIndices||[]).length;
+      const fList = (m.groupFournisseurs||[]).map(escHtml).join(' · ');
+      metaLine = `${CAT_LABELS[m.section]||m.section} · ${monthLabel} · ${dateInfo}`;
+      groupBlock = `
+        <div style="margin-top:6px;padding:6px 9px;background:#dbeafe;border:1px solid #bfdbfe;border-radius:6px;font-size:11px;color:#1e40af;line-height:1.4">
+          <strong>🔗 Ventilation TVA — ${n} lignes liées</strong><br>
+          <span style="color:#3730a3">${fList}</span><br>
+          <span style="font-size:10px;opacity:.8">Lier ce candidat marquera les ${n} lignes comme pointées en une seule fois.</span>
+        </div>`;
+    }
     return `
       <div class="match-cand" id="match-cand-${i}" onclick="selectMatch(${i})">
         <input type="radio" name="match-pick" value="${i}" onclick="event.stopPropagation();selectMatch(${i})"/>
         <div class="match-cand-info">
           <strong>${escHtml(m.fournisseur)}</strong>
-          <div class="match-cand-meta">${CAT_LABELS[m.section]||m.section} · ${monthLabel} · ${dateInfo} · ${tvaLabel}</div>
+          <div class="match-cand-meta">${metaLine}</div>
+          ${groupBlock}
         </div>
         <div class="match-cand-amt">${fmt(m.montantTTC)} TTC</div>
       </div>
@@ -926,52 +1003,71 @@ async function linkSelectedMatch(){
   linkBtn.textContent='⏳';
 
   try{
+    // Wave 3 : si c'est un match de GROUPE ventilé, on lie toutes les lignes du groupe d'un coup.
+    // Sinon (cas standard), on lie juste la ligne unique. La logique est unifiée via une liste d'indices.
+    const indicesToLink = match.isGroup ? match.groupIndices : [match.index];
+
     // 1. Re-lecture du document pilotage pour modification (évite stale data)
     const docRef=window._doc(window._db,'pilotage',window._uid,'months',match.monthKey);
     const snap=await window._getDoc(docRef);
     if(!snap.exists()) throw new Error('Mois pilotage introuvable');
     const data={...snap.data()};
     if(!Array.isArray(data[match.section])) throw new Error('Section introuvable');
-    if(!data[match.section][match.index]) throw new Error('Charge introuvable');
 
-    // 2. Vérification anti-stale : le montant TTC doit toujours correspondre
-    const r=data[match.section][match.index];
-    if(r.bankLink&&r.bankLink.bankTxId){
-      throw new Error('Cette charge a déjà été liée à une autre transaction');
-    }
-    let ht;
-    if(match.section==='credits'){
-      ht=parseFloat(String(r.montant||'').replace(',','.'))||0;
-    } else {
-      ht=parseFloat(String(r.montantHT||'').replace(',','.'))||0;
-    }
-    const tvaParsed=parseFloat(r.tvaRate);
-    const tvaR=isNaN(tvaParsed)?0:tvaParsed;
-    let ttcCents;
-    if(r.montantTTC_bank){
-      ttcCents=Math.round((parseFloat(String(r.montantTTC_bank).replace(',','.'))||0)*100);
-    } else {
-      ttcCents=Math.round(ht*(1+tvaR/100)*100);
-    }
-    if(ttcCents!==Math.round(tx.montant*100)){
-      throw new Error('La charge a été modifiée entretemps. Recharge la page.');
-    }
-
-    // 3. Marquer la charge comme pointée + ajouter bankLink
-    data[match.section][match.index]={
-      ...r,
-      pointe:'Oui',
-      bankLink:{
-        bankTxId:tx.bankTxId,
-        linkedAt:new Date().toISOString(),
-        bankLabel:(tx.label||tx.customLabel||'').substring(0,200),
-        bankDate:tx.date||'',
-        bankMontantTTC:tx.montant.toFixed(2),
-        accountIban:tx.accountIban||'',
-        accountName:tx.accountName||''
+    // 2. Vérification anti-stale : pour un groupe, on revérifie la SOMME des TTC.
+    //    Pour une ligne unique, on revérifie le TTC de la ligne.
+    let totalCentsCheck = 0;
+    let firstHt = 0, firstTvaR = 0;
+    for (const idx of indicesToLink) {
+      const r = data[match.section][idx];
+      if (!r) throw new Error('Charge introuvable (index ' + idx + ')');
+      if (r.bankLink && r.bankLink.bankTxId) {
+        throw new Error('Une des lignes du groupe a déjà été liée à une autre transaction');
       }
+      let ht;
+      if (match.section === 'credits') {
+        ht = parseFloat(String(r.montant||'').replace(',','.')) || 0;
+      } else {
+        ht = parseFloat(String(r.montantHT||'').replace(',','.')) || 0;
+      }
+      const tvaParsed = parseFloat(r.tvaRate);
+      const tvaR = isNaN(tvaParsed) ? 0 : tvaParsed;
+      let ttcCents;
+      if (r.montantTTC_bank) {
+        ttcCents = Math.round((parseFloat(String(r.montantTTC_bank).replace(',','.'))||0)*100);
+      } else {
+        ttcCents = Math.round(ht * (1 + tvaR/100) * 100);
+      }
+      totalCentsCheck += ttcCents;
+      if (firstHt === 0) { firstHt = ht; firstTvaR = tvaR; }
+    }
+    if (totalCentsCheck !== Math.round(tx.montant*100)) {
+      throw new Error('Le montant a été modifié entretemps. Recharge la page.');
+    }
+
+    // 3. Marquer chaque ligne comme pointée + ajouter bankLink
+    //    Toutes les lignes du groupe partagent le même bankLink (avec un flag splitGroup pour info)
+    const bankLinkObj = {
+      bankTxId: tx.bankTxId,
+      linkedAt: new Date().toISOString(),
+      bankLabel: (tx.label || tx.customLabel || '').substring(0,200),
+      bankDate: tx.date || '',
+      bankMontantTTC: tx.montant.toFixed(2),
+      accountIban: tx.accountIban || '',
+      accountName: tx.accountName || ''
     };
-    await window._setDoc(docRef,data,{merge:true});
+    if (match.isGroup) {
+      bankLinkObj.splitGroup = true;
+      bankLinkObj.splitGroupSize = indicesToLink.length;
+    }
+    for (const idx of indicesToLink) {
+      data[match.section][idx] = {
+        ...data[match.section][idx],
+        pointe: 'Oui',
+        bankLink: bankLinkObj
+      };
+    }
+    await window._setDoc(docRef, data, {merge:true});
 
     // 4. Archiver la transaction bancaire dans bank_connections.linkedTransactions[]
     try{
@@ -991,9 +1087,11 @@ async function linkSelectedMatch(){
             monthKey:match.monthKey,
             section:match.section,
             index:match.index,
+            indices: indicesToLink, // wave 3 : liste complète des index si groupe
+            isGroup: !!match.isGroup,
             fournisseur:match.fournisseur,
-            montantHT:ht.toFixed(2),
-            tvaRate:tvaR
+            montantHT:firstHt.toFixed(2),
+            tvaRate:firstTvaR
           },
           linkedAt:new Date().toISOString()
         });
@@ -1008,14 +1106,22 @@ async function linkSelectedMatch(){
     tx.matchResolved=true;
     tx.linkedTo={section:match.section,monthKey:match.monthKey,fournisseur:match.fournisseur};
 
-    // 6. Mettre à jour le cache _pilData et retirer cette charge des matches d'autres tx
+    // 6. Mettre à jour le cache _pilData et retirer ces charges des matches d'autres tx
     if(_pilData[match.monthKey]&&Array.isArray(_pilData[match.monthKey][match.section])){
-      _pilData[match.monthKey][match.section][match.index]=data[match.section][match.index];
+      for (const idx of indicesToLink) {
+        _pilData[match.monthKey][match.section][idx] = data[match.section][idx];
+      }
     }
     _txList.forEach(function(t){
       if(t===tx||!Array.isArray(t.matches)) return;
       t.matches=t.matches.filter(function(mm){
-        return !(mm.monthKey===match.monthKey&&mm.section===match.section&&mm.index===match.index);
+        // Retirer les matches qui pointent vers une des lignes qu'on vient de lier
+        if (mm.monthKey !== match.monthKey || mm.section !== match.section) return true;
+        // Pour un groupe, on enlève tout match qui touche n'importe lequel des indices liés
+        if (mm.isGroup) {
+          return !(mm.groupIndices||[]).some(function(gi){ return indicesToLink.indexOf(gi) >= 0; });
+        }
+        return indicesToLink.indexOf(mm.index) === -1;
       });
     });
 
