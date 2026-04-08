@@ -67,7 +67,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: max_tokens || 3000,
+        max_tokens: Math.min(max_tokens || 8000, 16000),
         messages: [{ role: 'user', content: prompt }]
       })
     });
@@ -83,6 +83,10 @@ export default async function handler(req, res) {
       ?.filter(b => b.type === 'text')
       ?.map(b => b.text)
       ?.join('\n') || '';
+
+    if (data.stop_reason === 'max_tokens') {
+      return res.status(502).json({ error: 'Réponse IA tronquée. Réduisez le nombre d\'employés ou simplifiez les instructions.' });
+    }
 
     return res.status(200).json({ text, usage: data.usage || null });
 
