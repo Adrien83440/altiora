@@ -1602,6 +1602,73 @@ function parseCSV(text){
   return {headers:headers,rows:rows};
 }
 
+// ── POST-PROCESS du mapping IA — filet de sécurité déterministe ──
+// L'IA peut se planter sur des cas limites (Déclinaison mappé sur parentRefName,
+// fichier sans ref ni name, etc.). Cette fonction corrige les erreurs critiques
+// avant que l'utilisateur soit bloqué.
+// Retourne {mapping, fixes:[{header, from, to, reason}]} — fixes vide si rien à corriger.
+function _postProcessMapping(mapping, headers, sampleRows){
+  var fixes=[];
+  var fields=function(){return Object.keys(mapping).filter(function(h){return mapping[h]&&mapping[h]!=='_ignore'}).map(function(h){return mapping[h]})};
+
+  // ── Fix 1 : parentRefName mappé SANS colonnes variantes (taille/couleur)
+  // C'est forcément un mauvais mapping : un groupe parent n'a de sens qu'avec des variantes.
+  // → on rebascule sur ref si pas de ref existant, sinon sur _ignore.
+  var f=fields();
+  var hasVariants = f.indexOf('taille')>=0 || f.indexOf('couleur')>=0;
+  if(!hasVariants){
+    Object.keys(mapping).forEach(function(h){
+      if(mapping[h]==='parentRefName'){
+        var hasRef = fields().indexOf('ref')>=0;
+        if(!hasRef){
+          mapping[h]='ref';
+          fixes.push({header:h,from:'parentRefName',to:'ref',reason:'pas de colonne variante (Taille/Couleur) → c\'est un SKU, pas un parent'});
+        } else {
+          mapping[h]='_ignore';
+          fixes.push({header:h,from:'parentRefName',to:'_ignore',reason:'parentRefName interdit sans variantes et un ref existe déjà'});
+        }
+      }
+    });
+  }
+
+  // ── Fix 2 : aucun ref ni name → trouve la meilleure colonne candidate
+  f=fields();
+  var hasRef = f.indexOf('ref')>=0;
+  var hasName = f.indexOf('name')>=0;
+  if(!hasRef && !hasName && headers.length && sampleRows.length){
+    // Score chaque colonne ignored sur :
+    //   - unicité par ligne (proportion de valeurs distinctes)
+    //   - longueur moyenne raisonnable (3-50 chars)
+    //   - non vide sur la majorité des lignes
+    var bestCol=null, bestScore=-1;
+    headers.forEach(function(h, idx){
+      if(mapping[h] && mapping[h]!=='_ignore') return;
+      var vals=sampleRows.map(function(r){return _ps(r[idx])}).filter(Boolean);
+      if(vals.length<2) return;
+      var avgLen = vals.reduce(function(a,v){return a+v.length},0) / vals.length;
+      if(avgLen<2 || avgLen>60) return;
+      var unique = {};
+      vals.forEach(function(v){unique[v.toLowerCase()]=1});
+      var uniqueRatio = Object.keys(unique).length / vals.length;
+      var fillRate = vals.length / sampleRows.length;
+      // Bonus si le nom de la colonne contient un mot-clé "code/ref/article/declinaison"
+      var nameBonus=0;
+      var hn=h.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+      ['declinaison','code','ref','article','sku','reference','variant','id'].forEach(function(kw){
+        if(hn.indexOf(kw)>=0) nameBonus=0.3;
+      });
+      var score = uniqueRatio * fillRate + nameBonus;
+      if(score>bestScore){bestScore=score; bestCol=h}
+    });
+    if(bestCol && bestScore>=0.5){
+      mapping[bestCol]='ref';
+      fixes.push({header:bestCol,from:'_ignore',to:'ref',reason:'aucun SKU détecté par l\'IA, j\'ai promu la colonne avec le meilleur ratio d\'unicité'});
+    }
+  }
+
+  return {mapping:mapping, fixes:fixes};
+}
+
 async function aiDetectMapping(){
   var statusEl=document.getElementById('import-ai-status');
   statusEl.innerHTML='<span class="badge badge-purple">🧠 IA en cours d\'analyse...</span>';
@@ -1626,6 +1693,15 @@ async function aiDetectMapping(){
   }catch(e){
     _importMapping=fallbackMapping(_importHeaders);
     statusEl.innerHTML='<span class="badge badge-orange">⚠️ Mapping par défaut (erreur IA: '+esc(e.message)+')</span>';
+  }
+  // ── Filet de sécurité : corrige les erreurs critiques de l'IA ──
+  var pp=_postProcessMapping(_importMapping, _importHeaders, _importRows.slice(0,8));
+  _importMapping=pp.mapping;
+  if(pp.fixes.length){
+    var fixHtml=pp.fixes.map(function(fx){
+      return '<div style="font-size:10px;color:#92400e;margin-top:3px">🔧 <strong>'+esc(fx.header)+'</strong> : auto-corrigé en <strong>'+esc(fx.to)+'</strong> <span style="color:var(--muted)">('+esc(fx.reason)+')</span></div>';
+    }).join('');
+    statusEl.innerHTML += '<div style="margin-top:6px;padding:8px 10px;background:#fef3c7;border:1px solid #fcd34d;border-radius:6px">'+fixHtml+'</div>';
   }
   renderMappingUI();
   renderImportPreview();
