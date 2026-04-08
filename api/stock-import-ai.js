@@ -54,6 +54,7 @@ Champs cibles disponibles (id → description) :
 
 — IDENTIFIANTS —
 - ref : Référence produit / SKU / Code article. **PRIORITÉ ABSOLUE** au champ "Code" / "Code article" / "Reference" qui contient un identifiant alphanumérique stable (ex: "A140722154424"). Ne PAS choisir "IdArt" / "ID" / "RecordID" qui sont des identifiants techniques internes au logiciel source — laisse-les sur _ignore. Si seul "IdArt" existe (pas de "Code"), alors mappe-le sur ref en dernier recours.
+  **CAS PARTICULIER textile/bijouterie** : si le fichier n'a AUCUNE colonne explicite "Code"/"Référence" mais contient une colonne "Déclinaison" / "Variante" / "Variant" / "Code variante" / "Decli" — c'est LE SKU unique du fichier (souvent un code composite avec espaces ou tirets, ex: "37522    1300"). Mappe-la sur ref. Sans ce mapping l'import est impossible.
 - ean : Code-barres EAN / UPC / GTIN (8-13 chiffres, parfois nommé "Multi Code", "Barcode", "Gencod")
 - refFournisseur : Référence du produit chez le fournisseur ("Ref. Fourn.", "Cod. Fourn.", "Ref Frns")
 
@@ -132,6 +133,8 @@ INSTRUCTIONS DE MAPPING :
 9. **Q_Mini / Stock min** : voir la définition détaillée ci-dessus. En cas de doute, "Q_Mini" → min.
 10. **Marqueur "###" et valeurs vides** : le marqueur "###" est utilisé par certains logiciels (notamment Polaris) pour signifier "champ non applicable pour cette ligne". Traite-le **exactement comme une valeur vide** : il ne doit JAMAIS te faire ignorer une colonne. Si la colonne "Modele" affiche "###" sur les premières lignes mais existe avec d'autres colonnes Taille/Coloris, mappe-la quand même sur parentRefName — d'autres lignes du fichier auront probablement des valeurs réelles.
 11. **Colonnes Promo / Comp. Définition** : "Promo" → soldes (sauf si une colonne plus explicite "Soldes" existe). "Comp. Définition" / "Comp. Defn" → notes.
+12. **Catégorie au format composite "code - libellé"** : si une colonne catégorie/famille contient des valeurs comme "165 - bijoux", "01 - Femme", "A12 - Chaussures", mappe-la quand même sur cat/sousCat — le système extraira automatiquement la partie texte ("bijoux", "Femme", "Chaussures") avant de créer la famille.
+13. **Fichier sans colonne nom/désignation** : certains exports de logiciels de caisse (textile, bijouterie) n'ont AUCUNE colonne nom — juste des codes. Dans ce cas, **ne mappe rien sur name**, mais assure-toi que ref est bien mappé (Déclinaison ou autre code unique). Le système utilisera le code comme nom par défaut. Ne JAMAIS inventer un nom à partir d'autres colonnes. Mentionne ce cas dans "notes".
 
 Pour le champ "confidence" :
 - 0.9-1.0 : tous les headers sont reconnus, le mapping est évident
