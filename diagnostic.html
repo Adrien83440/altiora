@@ -73,21 +73,25 @@
     <!-- Zone connecté : intro + bouton lancement -->
     <div id="ready-zone" style="display:none">
       <p class="intro">
-        Bonjour <strong id="user-greet">…</strong>, le diagnostic va collecter automatiquement les informations suivantes :
+        Bonjour <strong id="user-greet">…</strong>, le diagnostic va collecter automatiquement les informations suivantes pour aider l'équipe Alteore :
       </p>
       <ul style="font-size:12px;color:#64748b;line-height:1.8;margin:0 0 18px 18px">
-        <li>Informations de votre compte (plan, navigateur, écran)</li>
-        <li>État de la connexion Firestore</li>
-        <li>Connexions bancaires actuelles et leur statut</li>
-        <li>Transactions en attente d'import</li>
-        <li>Données brutes de votre banque (si connectée)</li>
-        <li>Erreurs JavaScript récentes</li>
+        <li>Compte, plan, navigateur, écran</li>
+        <li>État de la connexion Firestore et du profil entreprise</li>
+        <li>Pilotage des 6 derniers mois (charges, leasing, crédits, CA)</li>
+        <li>Marges, fournisseurs, fiches produits, coût de revient</li>
+        <li>Stock, mouvements, familles, paramètres</li>
+        <li>Fidélisation, segments, crédits SMS</li>
+        <li>RH, employés, planning, congés, recrutement</li>
+        <li>Cashflow, dettes, panier moyen, copilote IA, bilans</li>
+        <li>Connexions bancaires + transactions en attente</li>
+        <li>Tickets support, erreurs JavaScript récentes, logs console</li>
       </ul>
       <p class="intro" style="margin-bottom:0">
-        ⏱ Durée : environ <strong>10 à 30 secondes</strong>. Aucune donnée sensible (mot de passe, IBAN complet) n'est collectée.
+        ⏱ Durée : environ <strong>20 à 60 secondes</strong>. Aucune donnée sensible (mot de passe, IBAN complet, contenus de messages) n'est collectée — uniquement des compteurs et des structures techniques.
       </p>
       <div style="text-align:center;margin-top:22px">
-        <button class="btn-login" onclick="startDiagnostic()">🚀 Lancer le diagnostic</button>
+        <button class="btn-login" onclick="startDiagnostic()">🚀 Lancer le diagnostic complet</button>
       </div>
     </div>
 
@@ -95,7 +99,7 @@
     <div id="running-zone" style="display:none">
       <div class="progress-wrap">
         <div class="progress-bar"><div class="progress-fill" id="pfill"></div></div>
-        <div class="progress-text">Étape <strong id="pcur">0</strong> / <strong id="ptot">8</strong> — <span id="plabel">Démarrage…</span></div>
+        <div class="progress-text">Étape <strong id="pcur">0</strong> / <strong id="ptot">14</strong> — <span id="plabel">Démarrage…</span></div>
       </div>
       <div class="steps" id="steps-list"></div>
     </div>
@@ -121,7 +125,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-  import { initializeFirestore, doc, setDoc, getDoc, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { initializeFirestore, doc, setDoc, getDoc, collection, getDocs, query, where, limit, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   const app = initializeApp({
     apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
@@ -136,6 +140,7 @@
   window._auth = auth; window._db = db;
   window._doc = doc; window._setDoc = setDoc; window._getDoc = getDoc;
   window._collection = collection; window._getDocs = getDocs;
+  window._query = query; window._where = where; window._limit = limit; window._orderBy = orderBy;
 
   onAuthStateChanged(auth, function(user){
     if (!user) {
@@ -234,15 +239,62 @@ function setProgress(cur, total, label) {
 }
 
 const STEPS = [
-  { id: 1, label: 'Informations du compte' },
-  { id: 2, label: 'Connexion Firestore' },
-  { id: 3, label: 'Lecture du profil utilisateur' },
-  { id: 4, label: 'Connexions bancaires' },
-  { id: 5, label: 'Transactions en attente d\'import' },
-  { id: 6, label: 'Données pilotage récentes' },
-  { id: 7, label: 'Données brutes de la banque' },
-  { id: 8, label: 'Envoi du rapport' }
+  { id: 1,  label: 'Compte & environnement' },
+  { id: 2,  label: 'Connexion Firestore' },
+  { id: 3,  label: 'Profil utilisateur & entreprise' },
+  { id: 4,  label: 'Pilotage (6 derniers mois)' },
+  { id: 5,  label: 'Marges, fournisseurs, coût de revient' },
+  { id: 6,  label: 'Stock & inventaire' },
+  { id: 7,  label: 'Fidélisation & SMS' },
+  { id: 8,  label: 'Ressources humaines' },
+  { id: 9,  label: 'Cashflow, dettes, panier moyen' },
+  { id: 10, label: 'Copilote IA & bilans' },
+  { id: 11, label: 'Connexions bancaires' },
+  { id: 12, label: 'Données brutes de la banque' },
+  { id: 13, label: 'Tickets support & paramètres' },
+  { id: 14, label: 'Envoi du rapport' }
 ];
+
+// Helpers Firestore — collecte sécurisée
+async function _safeGetDoc(path){
+  try {
+    var ref = window._doc.apply(null, [window._db].concat(path.split('/')));
+    var snap = await window._getDoc(ref);
+    return snap.exists() ? (snap.data() || {}) : null;
+  } catch(e) { return { _error: e.message }; }
+}
+async function _safeGetColl(path, opts){
+  try {
+    opts = opts || {};
+    var parts = path.split('/');
+    var collRef = window._collection.apply(null, [window._db].concat(parts));
+    var q = collRef;
+    if (opts.limit) q = window._query(collRef, window._limit(opts.limit));
+    var snap = await window._getDocs(q);
+    var docs = [];
+    snap.forEach(function(d){ docs.push(Object.assign({_id: d.id}, d.data() || {})); });
+    return docs;
+  } catch(e) { return { _error: e.message }; }
+}
+function _summarizeArray(arr, sampleSize){
+  if (!Array.isArray(arr)) return { count: 0, type: typeof arr };
+  return {
+    count: arr.length,
+    sample: arr.slice(0, sampleSize || 3)
+  };
+}
+function _objectKeysSummary(obj){
+  if (!obj || typeof obj !== 'object') return null;
+  var out = {};
+  Object.keys(obj).forEach(function(k){
+    var v = obj[k];
+    if (Array.isArray(v)) out[k] = '[array len=' + v.length + ']';
+    else if (v && typeof v === 'object') out[k] = '[object keys=' + Object.keys(v).length + ']';
+    else if (typeof v === 'string') out[k] = v.length > 80 ? v.substring(0, 80) + '…' : v;
+    else out[k] = v;
+  });
+  return out;
+}
 
 async function startDiagnostic() {
   document.getElementById('ready-zone').style.display = 'none';
@@ -258,15 +310,25 @@ async function startDiagnostic() {
       + '</div></div>';
   }).join('');
 
+  const TOTAL = STEPS.length;
   const reportId = generateReportId();
   document.getElementById('report-id').textContent = reportId;
+
+  // Optional ?ref= param to link this report to a support ticket
+  var urlRef = null;
+  try {
+    var sp = new URLSearchParams(window.location.search);
+    urlRef = sp.get('ref') || sp.get('ticket') || null;
+  } catch(e){}
 
   const report = {
     reportId: reportId,
     createdAt: new Date().toISOString(),
-    version: 'diag-v1',
+    version: 'diag-v2-global',
+    urlRef: urlRef,
     meta: {},
     firestore: {},
+    modules: {},
     network: {},
     tests: [],
     console_logs: [],
@@ -275,10 +337,16 @@ async function startDiagnostic() {
 
   let errorCount = 0;
   let warningCount = 0;
+  function logErr(stepNum, e){
+    report.tests.push({ step: stepNum, status: 'error', error: e.message || String(e) });
+    errorCount++;
+  }
 
-  // ── Étape 1 : meta du compte ──
-  setProgress(1, 8, 'Informations du compte');
-  setStep(1, 'Informations du compte', 'running');
+  // ─────────────────────────────────────────────
+  // ÉTAPE 1 — Compte & environnement
+  // ─────────────────────────────────────────────
+  setProgress(1, TOTAL, 'Compte & environnement');
+  setStep(1, 'Compte & environnement', 'running');
   try {
     report.meta = {
       uid: window._uid,
@@ -300,271 +368,402 @@ async function startDiagnostic() {
       platform: navigator.platform,
       now: new Date().toISOString()
     };
-    setStep(1, 'Informations du compte', 'done', report.meta.email || '');
-  } catch(e) {
-    setStep(1, 'Informations du compte', 'error', e.message);
-    report.tests.push({ step: 1, status: 'error', error: e.message });
-    errorCount++;
-  }
-  await sleep(300);
+    setStep(1, 'Compte & environnement', 'done', report.meta.email || '');
+  } catch(e) { setStep(1, 'Compte & environnement', 'error', e.message); logErr(1, e); }
+  await sleep(150);
 
-  // ── Étape 2 : test connexion Firestore ──
-  setProgress(2, 8, 'Connexion Firestore');
+  // ─────────────────────────────────────────────
+  // ÉTAPE 2 — Test connexion Firestore
+  // ─────────────────────────────────────────────
+  setProgress(2, TOTAL, 'Connexion Firestore');
   setStep(2, 'Connexion Firestore', 'running');
   try {
-    // Lecture sans danger : on lit le doc users/{uid}
-    const userRef = window._doc(window._db, 'users', window._uid);
-    const snap = await window._getDoc(userRef);
-    if (snap.exists()) {
-      setStep(2, 'Connexion Firestore', 'done', 'Lecture OK');
-    } else {
-      setStep(2, 'Connexion Firestore', 'done', 'Document users/{uid} introuvable');
-      warningCount++;
-    }
-  } catch(e) {
-    setStep(2, 'Connexion Firestore', 'error', e.message);
-    report.tests.push({ step: 2, status: 'error', error: e.message });
-    errorCount++;
-  }
-  await sleep(300);
+    var u = await _safeGetDoc('users/' + window._uid);
+    if (u && !u._error) setStep(2, 'Connexion Firestore', 'done', 'Lecture OK');
+    else { setStep(2, 'Connexion Firestore', 'done', 'users/{uid} introuvable'); warningCount++; }
+  } catch(e) { setStep(2, 'Connexion Firestore', 'error', e.message); logErr(2, e); }
+  await sleep(150);
 
-  // ── Étape 3 : profil utilisateur ──
-  setProgress(3, 8, 'Lecture du profil');
-  setStep(3, 'Lecture du profil utilisateur', 'running');
+  // ─────────────────────────────────────────────
+  // ÉTAPE 3 — Profil utilisateur & entreprise
+  // ─────────────────────────────────────────────
+  setProgress(3, TOTAL, 'Profil utilisateur & entreprise');
+  setStep(3, 'Profil utilisateur & entreprise', 'running');
   try {
-    const userRef = window._doc(window._db, 'users', window._uid);
-    const snap = await window._getDoc(userRef);
-    if (snap.exists()) {
-      const u = snap.data();
-      // Anonymiser : on garde les champs utiles SAUF stripeCustomerId, stripeSubscriptionId
+    var u3 = await _safeGetDoc('users/' + window._uid);
+    if (u3 && !u3._error) {
       report.firestore.user = {
-        plan: u.plan || null,
-        trialEnd: u.trialEnd || null,
-        promoCode: u.promoCode || null,
-        promoEnd: u.promoEnd || null,
-        promoLabel: u.promoLabel || null,
-        createdAt: u.createdAt || null,
-        email: u.email || null,
-        name: u.name || null,
-        hasStripeCustomer: !!u.stripeCustomerId,
-        hasStripeSubscription: !!u.stripeSubscriptionId
+        plan: u3.plan || null,
+        trialEnd: u3.trialEnd || null,
+        promoCode: u3.promoCode || null,
+        promoEnd: u3.promoEnd || null,
+        promoLabel: u3.promoLabel || null,
+        createdAt: u3.createdAt || null,
+        email: u3.email || null,
+        name: u3.name || null,
+        hasStripeCustomer: !!u3.stripeCustomerId,
+        hasStripeSubscription: !!u3.stripeSubscriptionId,
+        referralCode: u3.referralCode || null,
+        referredBy: u3.referredBy || null
       };
-      setStep(3, 'Lecture du profil utilisateur', 'done', 'plan : ' + (u.plan || '?'));
-    } else {
-      report.firestore.user = null;
-      setStep(3, 'Lecture du profil utilisateur', 'done', 'Aucun profil');
-      warningCount++;
-    }
-  } catch(e) {
-    setStep(3, 'Lecture du profil utilisateur', 'error', e.message);
-    report.tests.push({ step: 3, status: 'error', error: e.message });
-    errorCount++;
-  }
-  await sleep(300);
+    } else { report.firestore.user = null; warningCount++; }
 
-  // ── Étape 4 : connexions bancaires (doc racine + sous-collection banks/) ──
-  setProgress(4, 8, 'Connexions bancaires');
-  setStep(4, 'Connexions bancaires', 'running');
+    // Profil entreprise
+    var profilDocs = await _safeGetColl('profil/' + window._uid + '/data');
+    var profilSummary = null;
+    if (Array.isArray(profilDocs) && profilDocs.length > 0) {
+      profilSummary = profilDocs.map(function(d){
+        return { docId: d._id, keys: Object.keys(d).filter(function(k){return k!=='_id'}).length, hasIban: !!d.iban, hasSiret: !!d.siret, type: d.type || null };
+      });
+    }
+    report.modules.profil = { documentsCount: Array.isArray(profilDocs) ? profilDocs.length : 0, summary: profilSummary };
+
+    setStep(3, 'Profil utilisateur & entreprise', 'done', 'plan : ' + ((u3 && u3.plan) || '?') + ' · ' + (Array.isArray(profilDocs) ? profilDocs.length : 0) + ' doc(s) profil');
+  } catch(e) { setStep(3, 'Profil utilisateur & entreprise', 'error', e.message); logErr(3, e); }
+  await sleep(150);
+
+  // ─────────────────────────────────────────────
+  // ÉTAPE 4 — Pilotage (6 derniers mois)
+  // ─────────────────────────────────────────────
+  setProgress(4, TOTAL, 'Pilotage récent');
+  setStep(4, 'Pilotage (6 derniers mois)', 'running');
+  try {
+    const months = [];
+    const now = new Date();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'));
+    }
+    const pilotage = {};
+    let totalCa = 0, totalCharges = 0, monthsWithData = 0;
+    for (const m of months) {
+      var d = await _safeGetDoc('pilotage/' + window._uid + '/months/' + m);
+      if (d && !d._error) {
+        monthsWithData++;
+        var caCount = Array.isArray(d.ca) ? d.ca.length : 0;
+        var caSum = 0;
+        if (Array.isArray(d.ca)) {
+          d.ca.forEach(function(r){
+            var h055 = parseFloat(r.ht055)||0, h10 = parseFloat(r.ht10)||0, h20 = parseFloat(r.ht20)||0;
+            var multi = h055+h10+h20;
+            caSum += multi > 0 ? multi : (parseFloat(r.montantHT)||0);
+          });
+        }
+        totalCa += caSum;
+        pilotage[m] = {
+          chargesFixe_count: Array.isArray(d.chargesFixe) ? d.chargesFixe.length : 0,
+          chargesVar_count: Array.isArray(d.chargesVar) ? d.chargesVar.length : 0,
+          leasing_count: Array.isArray(d.leasing) ? d.leasing.length : 0,
+          credits_count: Array.isArray(d.credits) ? d.credits.length : 0,
+          ca_count: caCount,
+          ca_sum_HT: Math.round(caSum * 100) / 100,
+          bank_sync_lines: countBankSyncLines(d),
+          bank_linked_lines: countBankLinkedLines(d),
+          masseSalariale: typeof d.masseSalariale==='number' ? d.masseSalariale : null,
+          tauxCharges: typeof d.tauxCharges==='number' ? d.tauxCharges : null
+        };
+      } else { pilotage[m] = null; }
+    }
+    report.firestore.pilotage = pilotage;
+    report.modules.pilotage = { monthsScanned: months.length, monthsWithData: monthsWithData, totalCaHT: Math.round(totalCa * 100) / 100 };
+    setStep(4, 'Pilotage (6 derniers mois)', 'done', monthsWithData + '/' + months.length + ' mois · CA total ' + Math.round(totalCa) + '€');
+  } catch(e) { setStep(4, 'Pilotage (6 derniers mois)', 'error', e.message); logErr(4, e); }
+  await sleep(150);
+
+  // ─────────────────────────────────────────────
+  // ÉTAPE 5 — Marges, fournisseurs, coût de revient
+  // ─────────────────────────────────────────────
+  setProgress(5, TOTAL, 'Marges & produits');
+  setStep(5, 'Marges, fournisseurs, coût de revient', 'running');
+  try {
+    var margesProduits = await _safeGetColl('marges/' + window._uid + '/produits');
+    var margesParams = await _safeGetColl('marges/' + window._uid + '/params');
+    var produitsItems = await _safeGetColl('produits/' + window._uid + '/items');
+    var fournisseurs = await _safeGetDoc('fournisseurs/' + window._uid);
+    var fichesItems = await _safeGetColl('fiches/' + window._uid + '/items');
+    var catalogues = await _safeGetDoc('catalogues/' + window._uid);
+
+    report.modules.marges = {
+      produits_count: Array.isArray(margesProduits) ? margesProduits.length : 0,
+      params_count: Array.isArray(margesParams) ? margesParams.length : 0,
+      cout_revient_count: Array.isArray(produitsItems) ? produitsItems.length : 0,
+      fournisseurs_keys: fournisseurs && !fournisseurs._error ? Object.keys(fournisseurs).length : 0,
+      fiches_count: Array.isArray(fichesItems) ? fichesItems.length : 0,
+      catalogues_keys: catalogues && !catalogues._error ? Object.keys(catalogues).length : 0,
+      sample_produit: Array.isArray(margesProduits) && margesProduits.length > 0 ? _objectKeysSummary(margesProduits[0]) : null
+    };
+    setStep(5, 'Marges, fournisseurs, coût de revient', 'done',
+      (report.modules.marges.produits_count) + ' produits marges · ' + report.modules.marges.cout_revient_count + ' coût rev. · ' + report.modules.marges.fiches_count + ' fiches');
+  } catch(e) { setStep(5, 'Marges, fournisseurs, coût de revient', 'error', e.message); logErr(5, e); }
+  await sleep(150);
+
+  // ─────────────────────────────────────────────
+  // ÉTAPE 6 — Stock & inventaire
+  // ─────────────────────────────────────────────
+  setProgress(6, TOTAL, 'Stock & inventaire');
+  setStep(6, 'Stock & inventaire', 'running');
+  try {
+    var stockProducts = await _safeGetColl('stock/' + window._uid + '/products', { limit: 500 });
+    var stockMovements = await _safeGetColl('stock/' + window._uid + '/movements', { limit: 200 });
+    var stockFamilies = await _safeGetColl('stock/' + window._uid + '/families');
+    var stockSettings = await _safeGetDoc('stock/' + window._uid + '/config/settings');
+
+    var withFamilyId = 0, withoutFamilyId = 0, withVariants = 0, withExtras = 0, totalStockValue = 0;
+    if (Array.isArray(stockProducts)) {
+      stockProducts.forEach(function(p){
+        if (p.familyId) withFamilyId++;
+        else if (p.cat) withoutFamilyId++;
+        if (p.parentRef || p.taille || p.couleur) withVariants++;
+        if (p._extras) withExtras++;
+        var pa = parseFloat(p.cump || p.pmpa || p.pa) || 0;
+        var qty = parseFloat(p.stockBase) || 0;
+        totalStockValue += pa * qty;
+      });
+    }
+    var rootFams = 0, subFams = 0, subSubFams = 0;
+    if (Array.isArray(stockFamilies)) {
+      stockFamilies.forEach(function(f){
+        if (!f.parentId) rootFams++;
+        else {
+          var par = stockFamilies.find(function(x){return x._id===f.parentId});
+          if (par && !par.parentId) subFams++;
+          else subSubFams++;
+        }
+      });
+    }
+    report.modules.stock = {
+      products_count: Array.isArray(stockProducts) ? stockProducts.length : 0,
+      products_truncated: Array.isArray(stockProducts) && stockProducts.length === 500,
+      movements_count: Array.isArray(stockMovements) ? stockMovements.length : 0,
+      movements_truncated: Array.isArray(stockMovements) && stockMovements.length === 200,
+      families_total: Array.isArray(stockFamilies) ? stockFamilies.length : 0,
+      families_root: rootFams,
+      families_sub: subFams,
+      families_subsub: subSubFams,
+      products_with_familyId: withFamilyId,
+      products_with_cat_no_familyId: withoutFamilyId,
+      products_with_variants: withVariants,
+      products_with_extras: withExtras,
+      total_stock_value_HT: Math.round(totalStockValue * 100) / 100,
+      settings: stockSettings && !stockSettings._error ? stockSettings : null,
+      sample_product: Array.isArray(stockProducts) && stockProducts.length > 0 ? _objectKeysSummary(stockProducts[0]) : null
+    };
+    if (withoutFamilyId > 0) warningCount++;
+    setStep(6, 'Stock & inventaire', 'done',
+      (report.modules.stock.products_count) + ' produits · ' + (report.modules.stock.families_total) + ' familles · valeur ' + Math.round(totalStockValue) + '€');
+  } catch(e) { setStep(6, 'Stock & inventaire', 'error', e.message); logErr(6, e); }
+  await sleep(150);
+
+  // ─────────────────────────────────────────────
+  // ÉTAPE 7 — Fidélisation & SMS
+  // ─────────────────────────────────────────────
+  setProgress(7, TOTAL, 'Fidélisation');
+  setStep(7, 'Fidélisation & SMS', 'running');
+  try {
+    var fidClients = await _safeGetColl('fidelite/' + window._uid + '/clients', { limit: 100 });
+    var fidSegments = await _safeGetColl('fidelite/' + window._uid + '/segments');
+    var fidConfig = await _safeGetDoc('fidelite_public_cfg/' + window._uid);
+    var smsCredits = await _safeGetDoc('sms_credits/' + window._uid);
+    var smsHistoryColl = await _safeGetColl('sms_credits/' + window._uid + '/history', { limit: 50 });
+
+    report.modules.fidelite = {
+      clients_count: Array.isArray(fidClients) ? fidClients.length : 0,
+      clients_truncated: Array.isArray(fidClients) && fidClients.length === 100,
+      segments_count: Array.isArray(fidSegments) ? fidSegments.length : 0,
+      hasConfig: !!(fidConfig && !fidConfig._error && Object.keys(fidConfig).length > 0),
+      sms_balance: smsCredits && !smsCredits._error ? (smsCredits.balance || 0) : 0,
+      sms_history_count: Array.isArray(smsHistoryColl) ? smsHistoryColl.length : 0,
+      sample_client_keys: Array.isArray(fidClients) && fidClients.length > 0 ? Object.keys(fidClients[0]).filter(function(k){return k!=='_id'}).length : 0
+    };
+    setStep(7, 'Fidélisation & SMS', 'done',
+      report.modules.fidelite.clients_count + ' clients · ' + report.modules.fidelite.segments_count + ' segments · ' + report.modules.fidelite.sms_balance + ' SMS');
+  } catch(e) { setStep(7, 'Fidélisation & SMS', 'error', e.message); logErr(7, e); }
+  await sleep(150);
+
+  // ─────────────────────────────────────────────
+  // ÉTAPE 8 — RH
+  // ─────────────────────────────────────────────
+  setProgress(8, TOTAL, 'RH');
+  setStep(8, 'Ressources humaines', 'running');
+  try {
+    var rhEmployes = await _safeGetColl('rh/' + window._uid + '/employes');
+    var rhPlanning = await _safeGetColl('rh/' + window._uid + '/planning', { limit: 30 });
+    var rhCongesDocs = await _safeGetColl('rh_conges/' + window._uid + '/demandes', { limit: 50 });
+    var rhRecrutOffres = await _safeGetColl('rh_recrutement/' + window._uid + '/offres');
+    var rhRecrutCandidats = await _safeGetColl('rh_recrutement/' + window._uid + '/candidats', { limit: 50 });
+    var rhParams = await _safeGetDoc('rh_params/' + window._uid);
+    var rhDocsGen = await _safeGetColl('rh_docs_gen/' + window._uid + '/items', { limit: 30 });
+
+    var congesByStatus = { pending: 0, approved: 0, refused: 0 };
+    if (Array.isArray(rhCongesDocs)) {
+      rhCongesDocs.forEach(function(c){
+        var s = (c.status || 'pending').toLowerCase();
+        if (congesByStatus[s] !== undefined) congesByStatus[s]++;
+      });
+    }
+    report.modules.rh = {
+      employes_count: Array.isArray(rhEmployes) ? rhEmployes.length : 0,
+      planning_docs: Array.isArray(rhPlanning) ? rhPlanning.length : 0,
+      conges_demandes: Array.isArray(rhCongesDocs) ? rhCongesDocs.length : 0,
+      conges_status: congesByStatus,
+      recrutement_offres: Array.isArray(rhRecrutOffres) ? rhRecrutOffres.length : 0,
+      recrutement_candidats: Array.isArray(rhRecrutCandidats) ? rhRecrutCandidats.length : 0,
+      docs_generes: Array.isArray(rhDocsGen) ? rhDocsGen.length : 0,
+      hasParams: !!(rhParams && !rhParams._error && Object.keys(rhParams).length > 0),
+      idcc: rhParams && !rhParams._error ? (rhParams.idcc || null) : null,
+      ccn: rhParams && !rhParams._error ? (rhParams.ccn || null) : null
+    };
+    setStep(8, 'Ressources humaines', 'done',
+      report.modules.rh.employes_count + ' employés · ' + report.modules.rh.conges_demandes + ' congés · ' + report.modules.rh.recrutement_candidats + ' candidats');
+  } catch(e) { setStep(8, 'Ressources humaines', 'error', e.message); logErr(8, e); }
+  await sleep(150);
+
+  // ─────────────────────────────────────────────
+  // ÉTAPE 9 — Cashflow, dettes, panier moyen
+  // ─────────────────────────────────────────────
+  setProgress(9, TOTAL, 'Cashflow & dettes');
+  setStep(9, 'Cashflow, dettes, panier moyen', 'running');
+  try {
+    var cashflowConfig = await _safeGetDoc('cashflow/' + window._uid + '/config/settings');
+    var dettesData = await _safeGetDoc('dettes/' + window._uid + '/data/all');
+    var panierData = await _safeGetColl('panier/' + window._uid + '/data');
+
+    var dettesCount = 0, dettesTotal = 0;
+    if (dettesData && !dettesData._error && Array.isArray(dettesData.dettes)) {
+      dettesCount = dettesData.dettes.length;
+      dettesData.dettes.forEach(function(d){ dettesTotal += parseFloat(d.montant)||0 });
+    }
+    report.modules.cashflow_dettes = {
+      hasCashflowConfig: !!(cashflowConfig && !cashflowConfig._error),
+      dettes_count: dettesCount,
+      dettes_total: Math.round(dettesTotal * 100) / 100,
+      panier_docs: Array.isArray(panierData) ? panierData.length : 0
+    };
+    setStep(9, 'Cashflow, dettes, panier moyen', 'done',
+      dettesCount + ' dettes (' + Math.round(dettesTotal) + '€) · ' + (Array.isArray(panierData) ? panierData.length : 0) + ' docs panier');
+  } catch(e) { setStep(9, 'Cashflow, dettes, panier moyen', 'error', e.message); logErr(9, e); }
+  await sleep(150);
+
+  // ─────────────────────────────────────────────
+  // ÉTAPE 10 — Copilote IA & bilans
+  // ─────────────────────────────────────────────
+  setProgress(10, TOTAL, 'Copilote & bilans');
+  setStep(10, 'Copilote IA & bilans', 'running');
+  try {
+    var copiloteBriefings = await _safeGetColl('copilote/' + window._uid + '/briefings', { limit: 20 });
+    var bilansYears = await _safeGetColl('bilans/' + window._uid + '/years');
+
+    report.modules.copilote_bilans = {
+      briefings_count: Array.isArray(copiloteBriefings) ? copiloteBriefings.length : 0,
+      bilans_years_count: Array.isArray(bilansYears) ? bilansYears.length : 0,
+      bilans_years: Array.isArray(bilansYears) ? bilansYears.map(function(b){return b._id}) : []
+    };
+    setStep(10, 'Copilote IA & bilans', 'done',
+      report.modules.copilote_bilans.briefings_count + ' briefings · ' + report.modules.copilote_bilans.bilans_years_count + ' bilans');
+  } catch(e) { setStep(10, 'Copilote IA & bilans', 'error', e.message); logErr(10, e); }
+  await sleep(150);
+
+  // ─────────────────────────────────────────────
+  // ÉTAPE 11 — Connexions bancaires
+  // ─────────────────────────────────────────────
+  setProgress(11, TOTAL, 'Connexions bancaires');
+  setStep(11, 'Connexions bancaires', 'running');
   try {
     const result = { root: null, subBanks: [] };
-    // Doc racine
-    try {
-      const rootSnap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
-      if (rootSnap.exists()) {
-        const d = rootSnap.data() || {};
-        result.root = {
-          institution_id: d.institution_id || null,
-          institution_name: d.institution_name || null,
-          status: d.status || null,
-          requisition_id: d.requisition_id ? (String(d.requisition_id).substring(0,8) + '…') : null,
-          has_pending_requisition_id: !!d.pending_requisition_id,
-          accountsCount: Array.isArray(d.accounts) ? d.accounts.length : 0,
-          accounts: Array.isArray(d.accounts) ? d.accounts.map(function(a){
-            return {
-              accountId: a.accountId ? (String(a.accountId).substring(0,8)+'…') : null,
-              name: a.name || null,
-              ibanMasked: a.iban ? maskIban(a.iban) : null,
-              balance: a.balance || null,
-              balanceNum: a.balanceNum,
-              transactionsCount: a.transactionsCount,
-              debitsCount: a.debitsCount
-            };
-          }) : [],
-          selectedAccountsCount: Array.isArray(d.selectedAccounts) ? d.selectedAccounts.length : 0,
-          lastSync: d.lastSync || null,
-          createdAt: d.createdAt || null,
-          linkedTransactionsCount: Array.isArray(d.linkedTransactions) ? d.linkedTransactions.length : 0
-        };
-      }
-    } catch(e) { result.root_error = e.message; }
-    // Sous-collection
-    try {
-      const banksColl = window._collection(window._db, 'bank_connections', window._uid, 'banks');
-      const snap = await window._getDocs(banksColl);
-      snap.forEach(function(d){
-        const b = d.data() || {};
+    var rootBank = await _safeGetDoc('bank_connections/' + window._uid);
+    if (rootBank && !rootBank._error && Object.keys(rootBank).length > 0) {
+      result.root = {
+        institution_id: rootBank.institution_id || null,
+        institution_name: rootBank.institution_name || null,
+        status: rootBank.status || null,
+        requisition_id: rootBank.requisition_id ? (String(rootBank.requisition_id).substring(0,8) + '…') : null,
+        has_pending_requisition_id: !!rootBank.pending_requisition_id,
+        accountsCount: Array.isArray(rootBank.accounts) ? rootBank.accounts.length : 0,
+        accounts: Array.isArray(rootBank.accounts) ? rootBank.accounts.map(function(a){
+          return { accountId: a.accountId ? (String(a.accountId).substring(0,8)+'…') : null, name: a.name || null, ibanMasked: a.iban ? maskIban(a.iban) : null, balance: a.balance || null, balanceNum: a.balanceNum, transactionsCount: a.transactionsCount, debitsCount: a.debitsCount };
+        }) : [],
+        selectedAccountsCount: Array.isArray(rootBank.selectedAccounts) ? rootBank.selectedAccounts.length : 0,
+        lastSync: rootBank.lastSync || null,
+        createdAt: rootBank.createdAt || null,
+        linkedTransactionsCount: Array.isArray(rootBank.linkedTransactions) ? rootBank.linkedTransactions.length : 0
+      };
+    }
+    var subBanksColl = await _safeGetColl('bank_connections/' + window._uid + '/banks');
+    if (Array.isArray(subBanksColl)) {
+      subBanksColl.forEach(function(b){
         result.subBanks.push({
-          bankId: d.id,
+          bankId: b._id,
           institution_id: b.institution_id || null,
           institution_name: b.institution_name || null,
           status: b.status || null,
           requisition_id: b.requisition_id ? (String(b.requisition_id).substring(0,8) + '…') : null,
           accountsCount: Array.isArray(b.accounts) ? b.accounts.length : 0,
           accounts: Array.isArray(b.accounts) ? b.accounts.map(function(a){
-            return {
-              accountId: a.accountId ? (String(a.accountId).substring(0,8)+'…') : null,
-              name: a.name || null,
-              ibanMasked: a.iban ? maskIban(a.iban) : null,
-              balance: a.balance || null,
-              balanceNum: a.balanceNum,
-              transactionsCount: a.transactionsCount,
-              debitsCount: a.debitsCount
-            };
+            return { accountId: a.accountId ? (String(a.accountId).substring(0,8)+'…') : null, name: a.name || null, ibanMasked: a.iban ? maskIban(a.iban) : null, balance: a.balance || null, balanceNum: a.balanceNum, transactionsCount: a.transactionsCount, debitsCount: a.debitsCount };
           }) : [],
           selectedAccountsCount: Array.isArray(b.selectedAccounts) ? b.selectedAccounts.length : 0,
           lastSync: b.lastSync || null,
           createdAt: b.createdAt || null
         });
       });
-    } catch(e) { result.subBanks_error = e.message; }
+    }
     report.firestore.bank_connections = result;
-    const totalBanks = (result.root ? 1 : 0) + result.subBanks.length;
-    setStep(4, 'Connexions bancaires', 'done', totalBanks + ' banque(s) trouvée(s)');
-  } catch(e) {
-    setStep(4, 'Connexions bancaires', 'error', e.message);
-    report.tests.push({ step: 4, status: 'error', error: e.message });
-    errorCount++;
-  }
-  await sleep(300);
 
-  // ── Étape 5 : bank_pending ──
-  setProgress(5, 8, 'Transactions en attente');
-  setStep(5, 'Transactions en attente d\'import', 'running');
-  try {
-    const snap = await window._getDoc(window._doc(window._db, 'bank_pending', window._uid));
-    if (snap.exists()) {
-      const d = snap.data() || {};
-      const txs = Array.isArray(d.transactions) ? d.transactions : [];
-      // Statistiques
-      const labels = {};
-      let blankLabels = 0;
-      let debits = 0, credits = 0;
-      const sample = [];
+    // bank_pending in same step (was step 5 in v1)
+    var bp = await _safeGetDoc('bank_pending/' + window._uid);
+    if (bp && !bp._error && bp.transactions) {
+      var txs = Array.isArray(bp.transactions) ? bp.transactions : [];
+      var labels = {}, blankLabels = 0, debits = 0, credits = 0;
+      var sample = [];
       txs.forEach(function(t, i){
-        if (i < 5) sample.push(t); // 5 premiers complets
+        if (i < 5) sample.push(t);
         if (!t.label || t.label === 'Transaction bancaire') blankLabels++;
         if (t.type === 'debit') debits++;
         if (t.type === 'credit') credits++;
-        const lk = (t.label || '').substring(0, 30);
+        var lk = (t.label || '').substring(0, 30);
         labels[lk] = (labels[lk] || 0) + 1;
       });
       report.firestore.bank_pending = {
-        transactionsCount: txs.length,
-        debitsCount: debits,
-        creditsCount: credits,
-        blankLabelsCount: blankLabels,
-        syncedAt: d.syncedAt || null,
-        sample: sample,
-        topLabels: Object.entries(labels)
-                    .sort(function(a,b){return b[1]-a[1];})
-                    .slice(0, 10)
-                    .map(function(p){ return { label: p[0], count: p[1] }; })
+        transactionsCount: txs.length, debitsCount: debits, creditsCount: credits, blankLabelsCount: blankLabels,
+        syncedAt: bp.syncedAt || null, sample: sample,
+        topLabels: Object.entries(labels).sort(function(a,b){return b[1]-a[1];}).slice(0, 10).map(function(p){ return { label: p[0], count: p[1] }; })
       };
-      let detail = txs.length + ' tx ; ' + blankLabels + ' libellés vides';
-      if (blankLabels === txs.length && txs.length > 0) {
-        detail = '⚠ TOUS les libellés sont vides (' + txs.length + ' tx)';
-        warningCount++;
-      }
-      setStep(5, 'Transactions en attente d\'import', 'done', detail);
-    } else {
-      report.firestore.bank_pending = null;
-      setStep(5, 'Transactions en attente d\'import', 'done', 'Aucune transaction en attente');
-    }
-  } catch(e) {
-    setStep(5, 'Transactions en attente d\'import', 'error', e.message);
-    report.tests.push({ step: 5, status: 'error', error: e.message });
-    errorCount++;
-  }
-  await sleep(300);
+      if (blankLabels === txs.length && txs.length > 0) warningCount++;
+    } else { report.firestore.bank_pending = null; }
 
-  // ── Étape 6 : pilotage récent (3 derniers mois) ──
-  setProgress(6, 8, 'Données pilotage récentes');
-  setStep(6, 'Données pilotage récentes', 'running');
-  try {
-    const months = [];
-    const now = new Date();
-    for (let i = 0; i < 3; i++) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'));
-    }
-    const pilotage = {};
-    for (const m of months) {
-      try {
-        const snap = await window._getDoc(window._doc(window._db, 'pilotage', window._uid, 'months', m));
-        if (snap.exists()) {
-          const d = snap.data() || {};
-          pilotage[m] = {
-            chargesFixe_count: Array.isArray(d.chargesFixe) ? d.chargesFixe.length : 0,
-            chargesVar_count: Array.isArray(d.chargesVar) ? d.chargesVar.length : 0,
-            leasing_count: Array.isArray(d.leasing) ? d.leasing.length : 0,
-            credits_count: Array.isArray(d.credits) ? d.credits.length : 0,
-            ca_count: Array.isArray(d.ca) ? d.ca.length : 0,
-            bank_sync_lines: countBankSyncLines(d),
-            bank_linked_lines: countBankLinkedLines(d)
-          };
-        } else {
-          pilotage[m] = null;
-        }
-      } catch(e) { pilotage[m] = { error: e.message }; }
-    }
-    report.firestore.pilotage = pilotage;
-    setStep(6, 'Données pilotage récentes', 'done', months.length + ' mois lus');
-  } catch(e) {
-    setStep(6, 'Données pilotage récentes', 'error', e.message);
-    report.tests.push({ step: 6, status: 'error', error: e.message });
-    errorCount++;
-  }
-  await sleep(300);
+    const totalBanks = (result.root ? 1 : 0) + result.subBanks.length;
+    setStep(11, 'Connexions bancaires', 'done', totalBanks + ' banque(s) · ' + (report.firestore.bank_pending ? report.firestore.bank_pending.transactionsCount + ' tx en attente' : 'pas de tx'));
+  } catch(e) { setStep(11, 'Connexions bancaires', 'error', e.message); logErr(11, e); }
+  await sleep(150);
 
-  // ── Étape 7 : données brutes GoCardless ──
-  setProgress(7, 8, 'Données brutes de la banque');
-  setStep(7, 'Données brutes de la banque', 'running');
+  // ─────────────────────────────────────────────
+  // ÉTAPE 12 — Données brutes de la banque (GoCardless / Bridge)
+  // ─────────────────────────────────────────────
+  setProgress(12, TOTAL, 'Données brutes banque');
+  setStep(12, 'Données brutes de la banque', 'running');
   try {
-    // Récupérer un requisition_id quelque part
     const banksToProbe = [];
     if (report.firestore.bank_connections && report.firestore.bank_connections.subBanks) {
       report.firestore.bank_connections.subBanks.forEach(function(b){
         if (b.requisition_id) banksToProbe.push({ source: 'sub', bankId: b.bankId, name: b.institution_name });
       });
     }
-    // Pour la legacy, il faut lire le doc racine en clair (pas la version masquée)
-    let legacyReqId = null;
-    let legacyName = null;
-    try {
-      const rootSnap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
-      if (rootSnap.exists()) {
-        const d = rootSnap.data() || {};
-        if (d.requisition_id) {
-          legacyReqId = d.requisition_id;
-          legacyName = d.institution_name || 'legacy';
-          banksToProbe.push({ source: 'legacy', requisition_id: legacyReqId, name: legacyName });
-        }
-      }
-    } catch(e){}
-    // Récupérer les sub avec leur vrai requisition_id (non masqué)
+    let legacyReqId = null, legacyName = null;
+    var rootForReqId = await _safeGetDoc('bank_connections/' + window._uid);
+    if (rootForReqId && !rootForReqId._error && rootForReqId.requisition_id) {
+      legacyReqId = rootForReqId.requisition_id;
+      legacyName = rootForReqId.institution_name || 'legacy';
+      banksToProbe.push({ source: 'legacy', requisition_id: legacyReqId, name: legacyName });
+    }
     const subRequisitionIds = {};
-    try {
-      const banksColl = window._collection(window._db, 'bank_connections', window._uid, 'banks');
-      const snap = await window._getDocs(banksColl);
-      snap.forEach(function(d){
-        const b = d.data() || {};
-        if (b.requisition_id) subRequisitionIds[d.id] = b.requisition_id;
-      });
-    } catch(e){}
+    var subForReqIds = await _safeGetColl('bank_connections/' + window._uid + '/banks');
+    if (Array.isArray(subForReqIds)) {
+      subForReqIds.forEach(function(b){ if (b.requisition_id) subRequisitionIds[b._id] = b.requisition_id; });
+    }
 
     if (banksToProbe.length === 0) {
       report.bank_debug_raw = null;
-      setStep(7, 'Données brutes de la banque', 'done', 'Aucune banque à interroger');
+      setStep(12, 'Données brutes de la banque', 'done', 'Aucune banque à interroger');
     } else {
       report.bank_debug_raw = [];
       let probed = 0;
@@ -573,38 +772,69 @@ async function startDiagnostic() {
           const reqIdToUse = bp.requisition_id || subRequisitionIds[bp.bankId];
           if (!reqIdToUse) continue;
           const r = await fetch('/api/bank-debug', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ requisition_id: reqIdToUse })
           });
           const txt = await r.text();
           let parsed;
           try { parsed = JSON.parse(txt); } catch(e) { parsed = { _parseError: true, raw: txt.substring(0, 500) }; }
-          report.bank_debug_raw.push({
-            bankName: bp.name,
-            source: bp.source,
-            httpStatus: r.status,
-            data: parsed
-          });
+          report.bank_debug_raw.push({ bankName: bp.name, source: bp.source, httpStatus: r.status, data: parsed });
           probed++;
-        } catch(e) {
-          report.bank_debug_raw.push({ bankName: bp.name, source: bp.source, error: e.message });
+        } catch(e) { report.bank_debug_raw.push({ bankName: bp.name, source: bp.source, error: e.message }); }
+      }
+      setStep(12, 'Données brutes de la banque', 'done', probed + '/' + banksToProbe.length + ' banque(s) interrogée(s)');
+    }
+  } catch(e) { setStep(12, 'Données brutes de la banque', 'error', e.message); logErr(12, e); }
+  await sleep(150);
+
+  // ─────────────────────────────────────────────
+  // ÉTAPE 13 — Tickets support & paramètres
+  // ─────────────────────────────────────────────
+  setProgress(13, TOTAL, 'Tickets & paramètres');
+  setStep(13, 'Tickets support & paramètres', 'running');
+  try {
+    var ticketsList = await _safeGetColl('tickets/' + window._uid + '/list', { limit: 30 });
+    var tutoProgress = await _safeGetDoc('tuto_progress/' + window._uid);
+
+    var ticketsByStatus = { open: 0, closed: 0, pending: 0 };
+    if (Array.isArray(ticketsList)) {
+      ticketsList.forEach(function(t){
+        var s = (t.status || 'open').toLowerCase();
+        if (ticketsByStatus[s] !== undefined) ticketsByStatus[s]++;
+      });
+    }
+    report.modules.support = {
+      tickets_count: Array.isArray(ticketsList) ? ticketsList.length : 0,
+      tickets_status: ticketsByStatus,
+      tuto_completed: tutoProgress && !tutoProgress._error ? (tutoProgress.completed || []).length : 0,
+      tuto_keys: tutoProgress && !tutoProgress._error ? Object.keys(tutoProgress).length : 0
+    };
+
+    // localStorage scan (Alteore-related keys only)
+    var lsKeys = {};
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (!k) continue;
+        if (k.indexOf('altiora') >= 0 || k.indexOf('alteore') >= 0 || k.indexOf('pilotage') >= 0 || k.indexOf('stock') >= 0 || k.indexOf('rh') >= 0) {
+          var v = localStorage.getItem(k) || '';
+          lsKeys[k] = v.length > 200 ? '[len ' + v.length + ']' : v;
         }
       }
-      setStep(7, 'Données brutes de la banque', 'done', probed + '/' + banksToProbe.length + ' banque(s) interrogée(s)');
-    }
-  } catch(e) {
-    setStep(7, 'Données brutes de la banque', 'error', e.message);
-    report.tests.push({ step: 7, status: 'error', error: e.message });
-    errorCount++;
-  }
-  await sleep(300);
+    } catch(e){}
+    report.localStorage = lsKeys;
 
-  // ── Étape 8 : envoi du rapport ──
-  setProgress(8, 8, 'Envoi du rapport');
-  setStep(8, 'Envoi du rapport', 'running');
+    setStep(13, 'Tickets support & paramètres', 'done',
+      report.modules.support.tickets_count + ' tickets · ' + Object.keys(lsKeys).length + ' clés localStorage');
+  } catch(e) { setStep(13, 'Tickets support & paramètres', 'error', e.message); logErr(13, e); }
+  await sleep(150);
+
+  // ─────────────────────────────────────────────
+  // ÉTAPE 14 — Envoi du rapport
+  // ─────────────────────────────────────────────
+  setProgress(14, TOTAL, 'Envoi du rapport');
+  setStep(14, 'Envoi du rapport', 'running');
   try {
-    // Joindre logs et erreurs capturés
     report.console_logs = _capturedLogs.slice(-MAX_LOGS);
     report.errors = _capturedErrors;
     report.errorCount = errorCount + _capturedErrors.length;
@@ -614,14 +844,17 @@ async function startDiagnostic() {
     const summaryParts = [];
     if (report.firestore.bank_pending && report.firestore.bank_pending.blankLabelsCount > 0
         && report.firestore.bank_pending.blankLabelsCount === report.firestore.bank_pending.transactionsCount) {
-      summaryParts.push('TOUS les libellés bancaires sont vides (' + report.firestore.bank_pending.transactionsCount + ' tx).');
+      summaryParts.push('TOUS les libellés bancaires vides (' + report.firestore.bank_pending.transactionsCount + ' tx)');
     }
-    const totalBanks = (report.firestore.bank_connections.root ? 1 : 0) + report.firestore.bank_connections.subBanks.length;
-    summaryParts.push(totalBanks + ' banque(s) connectée(s)');
+    var totalBanks = (report.firestore.bank_connections && report.firestore.bank_connections.root ? 1 : 0)
+                   + ((report.firestore.bank_connections && report.firestore.bank_connections.subBanks) ? report.firestore.bank_connections.subBanks.length : 0);
+    summaryParts.push(totalBanks + ' banque(s)');
     if (report.firestore.user) summaryParts.push('Plan : ' + (report.firestore.user.plan || '?'));
+    if (report.modules.stock) summaryParts.push(report.modules.stock.products_count + ' produits stock');
+    if (report.modules.fidelite) summaryParts.push(report.modules.fidelite.clients_count + ' clients fidélité');
+    if (report.modules.rh) summaryParts.push(report.modules.rh.employes_count + ' employés');
     report.summary = summaryParts.join(' · ');
 
-    // Écrire dans Firestore (avec sanitizer anti tableau-de-tableaux)
     const reportRef = window._doc(window._db, 'debug_reports', reportId);
     await window._setDoc(reportRef, sanitizeForFirestore({
       uid: window._uid,
@@ -629,7 +862,6 @@ async function startDiagnostic() {
       report: report
     }));
 
-    // Notifier l'admin par email (non bloquant)
     try {
       await fetch('/api/send-debug-email', {
         method: 'POST',
@@ -646,11 +878,10 @@ async function startDiagnostic() {
       });
     } catch(e) { console.warn('Notification email échouée :', e.message); }
 
-    setStep(8, 'Envoi du rapport', 'done', 'Envoyé à l\'équipe Alteore');
+    setStep(14, 'Envoi du rapport', 'done', 'Envoyé à l\'équipe Alteore');
   } catch(e) {
-    setStep(8, 'Envoi du rapport', 'error', e.message);
+    setStep(14, 'Envoi du rapport', 'error', e.message);
     errorCount++;
-    // Affichage erreur finale
     document.getElementById('final-zone').classList.add('show');
     document.getElementById('final-icon').textContent = '⚠️';
     document.getElementById('final-title').textContent = 'Échec de l\'envoi';
@@ -663,7 +894,7 @@ async function startDiagnostic() {
   document.getElementById('final-zone').classList.add('show');
   if (errorCount > 0) {
     document.getElementById('final-icon').textContent = '⚠️';
-    document.getElementById('final-title').textContent = 'Diagnostic envoyé (avec erreurs)';
+    document.getElementById('final-title').textContent = 'Diagnostic envoyé (avec ' + errorCount + ' erreur' + (errorCount>1?'s':'') + ')';
   } else {
     document.getElementById('final-icon').textContent = '✅';
     document.getElementById('final-title').textContent = 'Diagnostic envoyé';

@@ -242,6 +242,9 @@ function renderReport(data) {
 
   // Insights automatiques
   const insights = [];
+  const mods = r.modules || {};
+
+  // ── Insights bancaires (existants) ──
   if (fs.bank_pending && fs.bank_pending.transactionsCount > 0
       && fs.bank_pending.blankLabelsCount === fs.bank_pending.transactionsCount) {
     insights.push('<div class="insight critical"><strong>🚨 Tous les libellés bancaires sont vides</strong> (' + fs.bank_pending.transactionsCount + ' transactions). Probablement un champ libellé non extrait par <code>extractLabel()</code> dans <code>api/bank-sync.js</code>. Vérifie les <code>transactions_raw_keys</code> et <code>transactions_sample_booked</code> dans la section <strong>Données brutes GoCardless</strong> ci-dessous pour identifier le bon champ.</div>');
@@ -258,8 +261,30 @@ function renderReport(data) {
     insights.push('<div class="insight"><strong>ℹ️ Aucune banque connectée</strong> pour cet utilisateur.</div>');
   }
 
+  // ── Nouveaux insights — Stock ──
+  if (mods.stock) {
+    if (mods.stock.products_with_cat_no_familyId > 0) {
+      insights.push('<div class="insight"><strong>📦 Stock : ' + mods.stock.products_with_cat_no_familyId + ' produit(s) avec un nom de catégorie mais sans familyId</strong>. La migration silencieuse n\'a peut-être pas encore tourné, ou des familles n\'ont pas pu être créées. Vérifier <code>migrateCatStringToFamilyId()</code> dans gestion-stock.html.</div>');
+    }
+    if (mods.stock.products_truncated) {
+      insights.push('<div class="insight"><strong>📦 Stock : plus de 500 produits</strong> (lecture tronquée à 500). Le total réel n\'est pas reflété ici.</div>');
+    }
+  }
+  // ── Nouveaux insights — Pilotage ──
+  if (mods.pilotage && mods.pilotage.monthsWithData === 0) {
+    insights.push('<div class="insight"><strong>📊 Pilotage vide</strong> sur les 6 derniers mois — aucune donnée saisie ou synchronisée.</div>');
+  }
+  // ── Nouveaux insights — RH ──
+  if (mods.rh && mods.rh.employes_count > 0 && !mods.rh.hasParams) {
+    insights.push('<div class="insight"><strong>👥 RH : ' + mods.rh.employes_count + ' employés mais aucun paramètre RH</strong> (CCN/IDCC non configurés). Les contrats générés peuvent manquer d\'informations conventionnelles.</div>');
+  }
+  // ── Insight URL ref (lien support) ──
+  if (r.urlRef) {
+    insights.push('<div class="insight"><strong>🎫 Référence support :</strong> <code>' + escapeHtml(r.urlRef) + '</code> — le client a lancé le diagnostic via un lien tagué.</div>');
+  }
+
   let html = '<h2>' + escapeHtml((fs.user && fs.user.name) || meta.displayName || meta.email || 'Sans nom') + '</h2>';
-  html += '<div class="meta">' + escapeHtml(meta.email || '?') + ' · UID <code>' + escapeHtml(data.uid || '?') + '</code> · ' + dtTxt + '</div>';
+  html += '<div class="meta">' + escapeHtml(meta.email || '?') + ' · UID <code>' + escapeHtml(data.uid || '?') + '</code> · ' + dtTxt + ' · v' + escapeHtml(r.version || '?') + '</div>';
 
   if (r.summary) {
     html += '<div class="summary-box"><strong>Résumé :</strong> ' + escapeHtml(r.summary) + '</div>';
@@ -336,8 +361,127 @@ function renderReport(data) {
   // Pilotage
   if (fs.pilotage) {
     let pHtml = '<pre>' + escapeHtml(JSON.stringify(fs.pilotage, null, 2)) + '</pre>';
-    html += renderSection('4. Pilotage récent (3 derniers mois)', pHtml);
+    if (mods.pilotage) {
+      pHtml = renderKV({
+        'Mois scannés': mods.pilotage.monthsScanned,
+        'Mois avec données': mods.pilotage.monthsWithData,
+        'CA total HT (6 mois)': mods.pilotage.totalCaHT + ' €'
+      }) + '<h4 style="font-size:11px;font-weight:700;margin:12px 0 6px;color:#475569">Détail par mois :</h4>' + pHtml;
+    }
+    html += renderSection('4. 📊 Pilotage récent (6 derniers mois)', pHtml);
   }
+
+  // ════════════ NOUVEAUX MODULES (Wave 4) ════════════
+
+  // Profil entreprise
+  if (mods.profil) {
+    let prHtml = renderKV({
+      'Documents profil': mods.profil.documentsCount
+    });
+    if (mods.profil.summary && mods.profil.summary.length > 0) {
+      prHtml += '<h4 style="font-size:11px;font-weight:700;margin:12px 0 6px;color:#475569">Détail :</h4>';
+      prHtml += '<pre>' + escapeHtml(JSON.stringify(mods.profil.summary, null, 2)) + '</pre>';
+    }
+    html += renderSection('4b. 🏢 Profil entreprise', prHtml);
+  }
+
+  // Marges & produits
+  if (mods.marges) {
+    let mHtml = renderKV({
+      'Produits en marges': mods.marges.produits_count,
+      'Paramètres marges': mods.marges.params_count,
+      'Coût de revient (items)': mods.marges.cout_revient_count,
+      'Fournisseurs (clés)': mods.marges.fournisseurs_keys,
+      'Fiches fournisseurs': mods.marges.fiches_count,
+      'Catalogues (clés)': mods.marges.catalogues_keys
+    });
+    if (mods.marges.sample_produit) {
+      mHtml += '<h4 style="font-size:11px;font-weight:700;margin:12px 0 6px;color:#475569">Échantillon premier produit :</h4>';
+      mHtml += '<pre>' + escapeHtml(JSON.stringify(mods.marges.sample_produit, null, 2)) + '</pre>';
+    }
+    html += renderSection('5. 💰 Marges, fournisseurs, coût de revient', mHtml);
+  }
+
+  // Stock & inventaire
+  if (mods.stock) {
+    let sHtml = renderKV({
+      'Produits en stock': mods.stock.products_count + (mods.stock.products_truncated ? ' (tronqué à 500)' : ''),
+      'Mouvements': mods.stock.movements_count + (mods.stock.movements_truncated ? ' (tronqué à 200)' : ''),
+      'Familles total': mods.stock.families_total,
+      '— racines (niveau 1)': mods.stock.families_root,
+      '— sous-familles (niveau 2)': mods.stock.families_sub,
+      '— sous-sous (niveau 3)': mods.stock.families_subsub,
+      'Produits avec familyId': mods.stock.products_with_familyId,
+      'Produits sans familyId (mais avec cat)': mods.stock.products_with_cat_no_familyId,
+      'Produits avec variantes': mods.stock.products_with_variants,
+      'Produits avec _extras (custom fields)': mods.stock.products_with_extras,
+      'Valeur totale stock HT': mods.stock.total_stock_value_HT + ' €'
+    });
+    if (mods.stock.settings) {
+      sHtml += '<h4 style="font-size:11px;font-weight:700;margin:12px 0 6px;color:#475569">Paramètres stock :</h4>';
+      sHtml += '<pre>' + escapeHtml(JSON.stringify(mods.stock.settings, null, 2)) + '</pre>';
+    }
+    if (mods.stock.sample_product) {
+      sHtml += '<h4 style="font-size:11px;font-weight:700;margin:12px 0 6px;color:#475569">Échantillon premier produit :</h4>';
+      sHtml += '<pre>' + escapeHtml(JSON.stringify(mods.stock.sample_product, null, 2)) + '</pre>';
+    }
+    html += renderSection('6. 📦 Stock & inventaire', sHtml, mods.stock.products_with_cat_no_familyId > 0);
+  }
+
+  // Fidélisation & SMS
+  if (mods.fidelite) {
+    let fHtml = renderKV({
+      'Clients fidélité': mods.fidelite.clients_count + (mods.fidelite.clients_truncated ? ' (tronqué à 100)' : ''),
+      'Segments configurés': mods.fidelite.segments_count,
+      'Configuration publique': mods.fidelite.hasConfig ? 'oui' : 'non',
+      'Solde SMS': mods.fidelite.sms_balance,
+      'Historique SMS (entrées)': mods.fidelite.sms_history_count,
+      'Champs par client (échantillon)': mods.fidelite.sample_client_keys
+    });
+    html += renderSection('7. 💎 Fidélisation & SMS', fHtml);
+  }
+
+  // RH
+  if (mods.rh) {
+    let rhHtml = renderKV({
+      'Employés': mods.rh.employes_count,
+      'Documents planning': mods.rh.planning_docs,
+      'Demandes congés total': mods.rh.conges_demandes,
+      '— en attente': mods.rh.conges_status.pending,
+      '— approuvées': mods.rh.conges_status.approved,
+      '— refusées': mods.rh.conges_status.refused,
+      'Offres recrutement': mods.rh.recrutement_offres,
+      'Candidats': mods.rh.recrutement_candidats,
+      'Documents générés': mods.rh.docs_generes,
+      'Paramètres RH configurés': mods.rh.hasParams ? 'oui' : 'non',
+      'IDCC': mods.rh.idcc || '—',
+      'CCN': mods.rh.ccn || '—'
+    });
+    html += renderSection('8. 👥 Ressources humaines', rhHtml);
+  }
+
+  // Cashflow / Dettes / Panier
+  if (mods.cashflow_dettes) {
+    let cfHtml = renderKV({
+      'Configuration cashflow': mods.cashflow_dettes.hasCashflowConfig ? 'oui' : 'non',
+      'Dettes (nombre)': mods.cashflow_dettes.dettes_count,
+      'Dettes (total €)': mods.cashflow_dettes.dettes_total,
+      'Documents panier moyen': mods.cashflow_dettes.panier_docs
+    });
+    html += renderSection('9. 💸 Cashflow, dettes, panier moyen', cfHtml);
+  }
+
+  // Copilote / Bilans
+  if (mods.copilote_bilans) {
+    let cbHtml = renderKV({
+      'Briefings copilote IA': mods.copilote_bilans.briefings_count,
+      'Bilans annuels': mods.copilote_bilans.bilans_years_count,
+      'Années couvertes': (mods.copilote_bilans.bilans_years || []).join(', ') || '—'
+    });
+    html += renderSection('10. 🧠 Copilote IA & bilans', cbHtml);
+  }
+
+  // ════════════ FIN NOUVEAUX MODULES ════════════
 
   // Données brutes GoCardless — section CRITIQUE pour le bug de libellés
   if (r.bank_debug_raw) {
@@ -377,6 +521,25 @@ function renderReport(data) {
   if (r.tests && r.tests.length > 0) {
     let tHtml = '<pre>' + escapeHtml(JSON.stringify(r.tests, null, 2)) + '</pre>';
     html += renderSection('8. Erreurs internes du diagnostic', tHtml);
+  }
+
+  // Tickets support
+  if (mods.support) {
+    let supHtml = renderKV({
+      'Tickets support (total)': mods.support.tickets_count,
+      '— ouverts': mods.support.tickets_status.open,
+      '— en attente': mods.support.tickets_status.pending,
+      '— fermés': mods.support.tickets_status.closed,
+      'Étapes tutoriel complétées': mods.support.tuto_completed,
+      'Clés tuto_progress': mods.support.tuto_keys
+    });
+    html += renderSection('8b. 🎫 Tickets support & tutoriel', supHtml);
+  }
+
+  // localStorage
+  if (r.localStorage && Object.keys(r.localStorage).length > 0) {
+    let lsHtml = '<pre>' + escapeHtml(JSON.stringify(r.localStorage, null, 2)) + '</pre>';
+    html += renderSection('8c. 💾 localStorage Alteore (' + Object.keys(r.localStorage).length + ' clés)', lsHtml);
   }
 
   // Rapport complet brut
