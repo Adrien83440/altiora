@@ -542,46 +542,52 @@ function _calcMS(d) {
 }
 
 function calcMonth(m, raw, isFuture, monthKey) {
-  if (!raw) return { m, hasData:false, caHT:0, caTotal:0, rentreeSupp:0, prevCA:0, chargesHT:0, fixesHT:0, varHT:0, leasingHT:0, masseSalHT:0, creditsPrincipal:0, creditsInteret:0, cashflow:0, tvaCollectee:0, tvaDed:0, tvaDue:0, prevCharges:0, isFuture:!!isFuture };
+  if (!raw) return { m, hasData:false, caHT:0, caTTC:0, caTotal:0, rentreeSupp:0, prevCA:0, chargesHT:0, fixesHT:0, fixesTTC:0, varHT:0, varTTC:0, leasingHT:0, leasingTTC:0, masseSalHT:0, creditsPrincipal:0, creditsInteret:0, cashflow:0, tvaCollectee:0, tvaDed:0, tvaDue:0, prevCharges:0, isFuture:!!isFuture };
 
   // CA journalier
-  let caHT = 0, tvaC = 0;
+  let caHT = 0, caTTC = 0, tvaC = 0;
   (raw.ca||[]).forEach(r => {
     const a=pf(r.ht055),b=pf(r.ht10),c=pf(r.ht20),hC=htCust(r);
     caHT += a+b+c+hC;
+    // Wave 3 — calcul TTC ligne par ligne (cohérent avec dashboard/suivi-ca)
+    caTTC += Math.round(a*1.055*100)/100 + Math.round(b*1.10*100)/100 + Math.round(c*1.20*100)/100 + ttcCust(r);
     tvaC += Math.round(a*0.055*100)/100 + Math.round(b*0.10*100)/100 + Math.round(c*0.20*100)/100 + tvaCust(r);
   });
   // Factures pro
   (raw.facturesPro||[]).forEach(r => {
     const h055=pf(r.ht055),h10=pf(r.ht10),h20=pf(r.ht20),hC=htCust(r);
     caHT += h055+h10+h20+hC;
+    caTTC += Math.round(h055*1.055*100)/100 + Math.round(h10*1.10*100)/100 + Math.round(h20*1.20*100)/100 + ttcCust(r);
     tvaC += Math.round(h055*0.055*100)/100 + Math.round(h10*0.10*100)/100 + Math.round(h20*0.20*100)/100 + tvaCust(r);
   });
   // Rentrées supp
   let rentreeSupp = 0;
   (raw.rentreesSupp||[]).forEach(r => { rentreeSupp += pf(r.montant); });
   caHT += rentreeSupp;
+  caTTC += rentreeSupp; // rentrées supp traitées comme déjà nettes (pas de TVA)
 
   // Prévision
   let prevCA = 0;
   (raw.previsionCA||[]).forEach(r => { prevCA += pf(r.montant); });
 
-  // Charges fixes
-  let fixesHT=0, tvaDedF=0;
+  // Charges fixes — HT + TTC
+  let fixesHT=0, fixesTTC=0, tvaDedF=0;
   (raw.chargesFixe||[]).forEach(r => {
     const ht=pf(r.montantHT), rate=pf(r.tvaRate||20);
     fixesHT += ht;
+    fixesTTC += Math.round(ht*(1+rate/100)*100)/100;
     if (r.deductible !== 'Non') tvaDedF += Math.round(ht*rate/100*100)/100;
   });
-  // Charges variables
-  let varHT=0, tvaDedV=0;
+  // Charges variables — HT + TTC
+  let varHT=0, varTTC=0, tvaDedV=0;
   (raw.chargesVar||[]).forEach(r => {
     const ht=pf(r.montantHT), rate=pf(r.tvaRate||20);
     varHT += ht;
+    varTTC += Math.round(ht*(1+rate/100)*100)/100;
     if (r.deductible !== 'Non') tvaDedV += Math.round(ht*rate/100*100)/100;
   });
-  // Leasing — Wave 1 : respecte la plage dateDebut/dateFin comme pilotage
-  let leasingHT=0, tvaDedL=0;
+  // Leasing — HT + TTC — Wave 1 : respecte la plage dateDebut/dateFin comme pilotage
+  let leasingHT=0, leasingTTC=0, tvaDedL=0;
   (raw.leasing||[]).forEach(r => {
     if (monthKey && r.dateDebut && r.dateFin && window.CalcHelpers) {
       const deb = window.CalcHelpers.parseYYYYMM(r.dateDebut);
@@ -590,6 +596,7 @@ function calcMonth(m, raw, isFuture, monthKey) {
     }
     const ht=pf(r.montantHT), rate=pf(r.tvaRate||20);
     leasingHT += ht;
+    leasingTTC += Math.round(ht*(1+rate/100)*100)/100;
     if (r.deductible !== 'Non') tvaDedL += Math.round(ht*rate/100*100)/100;
   });
   // Crédits — Wave 1 : via CalcHelpers.parseCredits (gère formats actuel + legacy,
@@ -624,14 +631,29 @@ function calcMonth(m, raw, isFuture, monthKey) {
   const prevCAFinal  = isFuture ? (prevCA || prevCAFutur) : prevCA;
   const caHTReel     = isFuture ? 0 : (caHT - rentreeSupp);
   const caTotalReel  = isFuture ? 0 : caHT;
-  const cashflow     = isFuture ? 0 : (caHT - chargesHT);
+  // Wave 3 — CORRECTION bug #2 : cashflow en TTC, pas HT
+  // caTTC inclut déjà rentreeSupp (ajouté plus haut). Les charges en TTC
+  // incluent la TVA déductible. La différence reflète ce qui entre/sort
+  // réellement sur le compte bancaire ce mois-ci. La TVA due sera payée
+  // séparément lors de la déclaration.
+  const cashflow     = isFuture ? 0 : (
+    caTTC
+    - fixesTTC
+    - varTTC
+    - leasingTTC
+    - creditsPrincipal
+    - creditsInteret
+    - masseSalHT
+  );
 
   return { m, hasData:true,
-    caHT: caHTReel, caTotal: caTotalReel, rentreeSupp: isFuture?0:rentreeSupp,
+    caHT: caHTReel, caTTC: isFuture ? 0 : caTTC, caTotal: caTotalReel, rentreeSupp: isFuture?0:rentreeSupp,
     prevCA: prevCAFinal, prevCharges, isFuture: !!isFuture,
     chargesHT: isFuture?0:chargesHT,
-    fixesHT: isFuture?0:fixesHT, varHT: isFuture?0:varHT,
-    leasingHT: isFuture?0:leasingHT, masseSalHT: isFuture?0:masseSalHT,
+    fixesHT: isFuture?0:fixesHT, fixesTTC: isFuture?0:fixesTTC,
+    varHT: isFuture?0:varHT, varTTC: isFuture?0:varTTC,
+    leasingHT: isFuture?0:leasingHT, leasingTTC: isFuture?0:leasingTTC,
+    masseSalHT: isFuture?0:masseSalHT,
     creditsPrincipal: isFuture?0:creditsPrincipal, creditsInteret: isFuture?0:creditsInteret,
     cashflow, tvaCollectee: isFuture?0:tvaC, tvaDed: isFuture?0:tvaDed, tvaDue: isFuture?0:tvaDue };
 }
