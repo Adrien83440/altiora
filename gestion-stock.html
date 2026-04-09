@@ -1362,36 +1362,551 @@ function renderMovements(tc){
 }
 
 // ── Valorisation Tab ──
-function renderValo(tc){
+// ══════════════════════════════════════════════════════════
+// VALORISATION : onglet enrichi (KPIs + filtres + 3 vues + export)
+// ══════════════════════════════════════════════════════════
+var _valoSort = { col:'value', dir:'desc' };
+var _valoView = 'list'; // 'list' | 'family' | 'supplier'
+var _valoExpanded = {}; // family/supplier ids that are expanded
+
+function _getFamilyById(id){
+  return _families.find(function(f){return f.id===id});
+}
+function _getFamilyPath(famId){
+  // Returns "Grand-parent › Parent › Enfant"
+  var parts = [];
+  var cur = _getFamilyById(famId);
+  var safety = 0;
+  while(cur && safety<10){
+    parts.unshift(cur.name||'?');
+    cur = cur.parentId ? _getFamilyById(cur.parentId) : null;
+    safety++;
+  }
+  return parts.join(' › ') || '—';
+}
+function _getFamilyRoot(famId){
+  var cur = _getFamilyById(famId);
+  var safety = 0;
+  while(cur && cur.parentId && safety<10){
+    cur = _getFamilyById(cur.parentId);
+    safety++;
+  }
+  return cur || null;
+}
+
+// Build enriched items for valorisation (shared by all views)
+function _buildValoItems(){
   var stk = computeStocks();
   var items = _products.map(function(p){
     var ref=(p.ref||'').trim();
-    var s=stk[ref]||{qty:0,cmup:pf(p.pa),value:0};
-    return {ref:ref,name:p.name||ref,cat:p.cat||'—',qty:s.qty,cmup:s.cmup,value:s.value,pv:pf(p.pv),unite:p.unite||'u'};
-  }).filter(function(x){return x.value>0}).sort(function(a,b){return b.value-a.value});
-  var totalVal = items.reduce(function(s,x){return s+x.value},0);
-  var totalMarge = items.reduce(function(s,x){return s+(x.pv>0?(x.pv-x.cmup)*x.qty:0)},0);
+    var s=stk[ref]||{qty:pf(p.stockBase),cmup:pf(p.pa),value:0};
+    var qty = s.qty;
+    var cmup = s.cmup || pf(p.pa);
+    var value = qty * cmup;
+    var pv = pf(p.pv);
+    var margeUnit = pv>0 ? pv - cmup : 0;
+    var margeTotal = margeUnit * qty;
+    var margePct = pv>0 ? (margeUnit/pv*100) : 0;
+    var famRoot = _getFamilyRoot(p.familyId);
+    var famPath = p.familyId ? _getFamilyPath(p.familyId) : (p.cat||'—');
 
-  tc.innerHTML = `
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">💰 Valorisation du stock — Méthode : <span class="badge badge-purple">${{cmup:'CMUP',fifo:'FIFO',dernier:'Dernier prix'}[_settings.valoMethod||'cmup']}</span></div>
-        <div style="display:flex;gap:8px">
-          <button class="btn btn-outline btn-xs" onclick="saveSnapshot()">📸 Snapshot</button>
-        </div>
-      </div>
-      <div class="tbl-wrap"><table>
-        <thead><tr><th style="text-align:left">Référence</th><th style="text-align:left">Produit</th><th>Catégorie</th><th>Stock</th><th>CMUP</th><th>Valeur stock</th><th>% Total</th><th>PV HT</th><th>Marge pot.</th></tr></thead>
-        <tbody>
-          ${items.map(function(x){
-            var pct=totalVal>0?(x.value/totalVal*100):0;
-            var margePot=x.pv>0?(x.pv-x.cmup)*x.qty:0;
-            return '<tr><td style="text-align:left;font-weight:700">'+esc(x.ref)+'</td><td style="text-align:left">'+esc(x.name)+'</td><td>'+esc(x.cat)+'</td><td>'+fmt(x.qty,0)+' '+esc(x.unite)+'</td><td>'+fmtE(x.cmup)+'</td><td style="font-weight:700">'+fmtE(x.value)+'</td><td>'+fmt(pct,1)+'%</td><td>'+(x.pv>0?fmtE(x.pv):'—')+'</td><td style="font-weight:700;color:'+(margePot>=0?'var(--green)':'var(--red)')+'">'+fmtE(margePot)+'</td></tr>';
-          }).join('')}
-          <tr style="background:#f0f4ff;font-weight:800"><td style="text-align:left" colspan="5">TOTAL</td><td style="font-size:14px">${fmtE(totalVal)}</td><td>100%</td><td></td><td style="color:var(--green)">${fmtE(totalMarge)}</td></tr>
-        </tbody>
-      </table></div>
-    </div>`;
+    // Compute status
+    var min = pf(p.min);
+    var status = qty<=0 ? {key:'rupture',cls:'badge-red',label:'Rupture'}
+      : (min>0 && qty<=min) ? {key:'alerte',cls:'badge-orange',label:'Alerte'}
+      : {key:'ok',cls:'badge-green',label:'OK'};
+
+    return {
+      id: p.id, ref: ref, name: p.name||ref,
+      fournisseur: p.fournisseur||'',
+      taille: p.taille||'', couleur: p.couleur||'',
+      familyId: p.familyId||null,
+      famRootId: famRoot ? famRoot.id : null,
+      famRootName: famRoot ? famRoot.name : 'Non classé',
+      famRootIcon: famRoot ? (famRoot.icon||'📁') : '📦',
+      famPath: famPath,
+      qty: qty, cmup: cmup, value: value,
+      pv: pv, margeUnit: margeUnit, margeTotal: margeTotal, margePct: margePct,
+      unite: p.unite||'u',
+      _status: status,
+      _raw: p
+    };
+  }).filter(function(x){return x.value>0 || x.qty>0}); // show items with stock even if value=0
+  return items;
+}
+
+// Apply valorisation filters (reuses _catFilters state)
+function _applyValoFilters(items){
+  var f = _catFilters;
+  var q = (f.search||'').trim().toLowerCase();
+  return items.filter(function(x){
+    if(q){
+      var hay = (x.name+' '+x.ref+' '+x.fournisseur+' '+x.famPath).toLowerCase();
+      if(hay.indexOf(q)<0) return false;
+    }
+    if(f.taille && x.taille !== f.taille) return false;
+    if(f.couleur && x.couleur !== f.couleur) return false;
+    if(f.fournisseur && x.fournisseur !== f.fournisseur) return false;
+    if(f.status && x._status.key !== f.status) return false;
+    return true;
+  });
+}
+
+function _renderValoFilterBar(allItems){
+  // Build unique values from the items
+  var tailles = {}, couleurs = {}, fourns = {};
+  allItems.forEach(function(x){
+    if(x.taille) tailles[x.taille]=1;
+    if(x.couleur) couleurs[x.couleur]=1;
+    if(x.fournisseur) fourns[x.fournisseur]=1;
+  });
+  var tailleList = Object.keys(tailles).sort(function(a,b){var na=parseFloat(a),nb=parseFloat(b);if(!isNaN(na)&&!isNaN(nb))return na-nb;return a.localeCompare(b)});
+  var couleurList = Object.keys(couleurs).sort();
+  var fournList = Object.keys(fourns).sort();
+
+  var hasAnyFilter = !!(_catFilters.search||_catFilters.taille||_catFilters.couleur||_catFilters.fournisseur||_catFilters.status);
+
+  var html = '<div class="cat-filters">';
+  html += '<div class="filter-group"><label>Recherche</label>';
+  html += '<input type="text" class="filter-search" id="valo-filter-search" placeholder="Nom, réf, fournisseur..." value="'+esc(_catFilters.search)+'" oninput="_onValoFilterChange(\'search\',this.value)"/>';
+  html += '</div>';
+  if(tailleList.length){
+    html += '<div class="filter-group"><label>Taille</label><select class="filter-sel" onchange="_onValoFilterChange(\'taille\',this.value)">';
+    html += '<option value="">Toutes</option>';
+    tailleList.forEach(function(t){html += '<option value="'+esc(t)+'"'+(_catFilters.taille===t?' selected':'')+'>'+esc(t)+'</option>'});
+    html += '</select></div>';
+  }
+  if(couleurList.length){
+    html += '<div class="filter-group"><label>Couleur</label><select class="filter-sel" onchange="_onValoFilterChange(\'couleur\',this.value)">';
+    html += '<option value="">Toutes</option>';
+    couleurList.forEach(function(c){html += '<option value="'+esc(c)+'"'+(_catFilters.couleur===c?' selected':'')+'>'+esc(c)+'</option>'});
+    html += '</select></div>';
+  }
+  if(fournList.length){
+    html += '<div class="filter-group"><label>Fournisseur</label><select class="filter-sel" onchange="_onValoFilterChange(\'fournisseur\',this.value)">';
+    html += '<option value="">Tous</option>';
+    fournList.forEach(function(f){html += '<option value="'+esc(f)+'"'+(_catFilters.fournisseur===f?' selected':'')+'>'+esc(f)+'</option>'});
+    html += '</select></div>';
+  }
+  html += '<div class="filter-group"><label>Statut</label><select class="filter-sel" onchange="_onValoFilterChange(\'status\',this.value)">';
+  html += '<option value="">Tous</option>';
+  html += '<option value="ok"'+(_catFilters.status==='ok'?' selected':'')+'>✅ OK</option>';
+  html += '<option value="alerte"'+(_catFilters.status==='alerte'?' selected':'')+'>⚠️ Alerte</option>';
+  html += '<option value="rupture"'+(_catFilters.status==='rupture'?' selected':'')+'>🚨 Rupture</option>';
+  html += '</select></div>';
+
+  if(hasAnyFilter){
+    html += '<button class="filter-reset" onclick="_resetValoFilters()">✕ Réinitialiser</button>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _onValoFilterChange(field, value){
+  _catFilters[field] = value;
+  if(field==='search'){
+    clearTimeout(window._valoFilterDebounce);
+    window._valoFilterDebounce = setTimeout(function(){
+      renderTab();
+      var si = document.getElementById('valo-filter-search');
+      if(si){si.focus(); si.setSelectionRange(si.value.length,si.value.length)}
+    }, 180);
+  } else {
+    renderTab();
+  }
+}
+window._onValoFilterChange = _onValoFilterChange;
+
+function _resetValoFilters(){
+  _catFilters = { search:'', taille:'', couleur:'', fournisseur:'', status:'' };
+  renderTab();
+}
+window._resetValoFilters = _resetValoFilters;
+
+function setValoView(mode){
+  if(['list','family','supplier'].indexOf(mode)<0) return;
+  _valoView = mode;
+  renderTab();
+}
+window.setValoView = setValoView;
+
+function setValoSort(col){
+  if(_valoSort.col === col){
+    _valoSort.dir = _valoSort.dir==='asc' ? 'desc' : 'asc';
+  } else {
+    _valoSort.col = col;
+    _valoSort.dir = col==='name'||col==='ref'||col==='fournisseur'||col==='famPath' ? 'asc' : 'desc';
+  }
+  renderTab();
+}
+window.setValoSort = setValoSort;
+
+function toggleValoGroup(key){
+  _valoExpanded[key] = !_valoExpanded[key];
+  renderTab();
+}
+window.toggleValoGroup = toggleValoGroup;
+
+// Export CSV of currently filtered items
+function exportValoCSV(){
+  var all = _buildValoItems();
+  var items = _applyValoFilters(all);
+  if(!items.length){showToast('Rien à exporter',true);return}
+  var headers = ['Ref','Nom','Famille','Fournisseur','Taille','Couleur','Stock','CMUP','Valeur','PV','Marge unit','Marge totale','Marge %','Statut'];
+  var csvRows = [headers.join(';')];
+  items.forEach(function(x){
+    var row = [
+      x.ref, x.name, x.famPath, x.fournisseur, x.taille, x.couleur,
+      x.qty, x.cmup.toFixed(2), x.value.toFixed(2), x.pv.toFixed(2),
+      x.margeUnit.toFixed(2), x.margeTotal.toFixed(2), x.margePct.toFixed(1), x._status.label
+    ].map(function(v){
+      v = String(v||'');
+      if(v.indexOf(';')>=0 || v.indexOf('"')>=0 || v.indexOf('\n')>=0) return '"'+v.replace(/"/g,'""')+'"';
+      return v;
+    });
+    csvRows.push(row.join(';'));
+  });
+  var csv = '\ufeff' + csvRows.join('\n'); // BOM for Excel UTF-8
+  var blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'valorisation_alteore_'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url)},100);
+  showToast('✅ Export CSV généré');
+}
+window.exportValoCSV = exportValoCSV;
+
+function renderValo(tc){
+  var allItems = _buildValoItems();
+  var items = _applyValoFilters(allItems);
+
+  // ── KPIs globaux (calculés sur les items filtrés) ──
+  var totalVal = items.reduce(function(s,x){return s+x.value},0);
+  var totalMarge = items.reduce(function(s,x){return s+x.margeTotal},0);
+  var totalPv = items.reduce(function(s,x){return s + (x.pv*x.qty)},0);
+  var avgMargePct = totalPv>0 ? (totalMarge/totalPv*100) : 0;
+  var refsCount = items.length;
+
+  // Top famille racine par valeur
+  var famTotals = {};
+  items.forEach(function(x){
+    var k = x.famRootId || '_orphan';
+    if(!famTotals[k]) famTotals[k] = {name:x.famRootName, icon:x.famRootIcon, value:0, qty:0};
+    famTotals[k].value += x.value;
+    famTotals[k].qty += x.qty;
+  });
+  var topFam = Object.values(famTotals).sort(function(a,b){return b.value-a.value})[0];
+
+  // Concentration ABC : % valeur détenue par le top 20% des références
+  var sortedByValue = items.slice().sort(function(a,b){return b.value-a.value});
+  var top20Count = Math.max(1, Math.ceil(sortedByValue.length * 0.2));
+  var top20Value = sortedByValue.slice(0, top20Count).reduce(function(s,x){return s+x.value},0);
+  var concentration = totalVal>0 ? (top20Value/totalVal*100) : 0;
+
+  var method = {cmup:'CMUP',fifo:'FIFO',dernier:'Dernier prix'}[_settings.valoMethod||'cmup'];
+
+  var html = '';
+
+  // KPIs row
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px">';
+  html += '<div class="kpi-card" style="background:linear-gradient(135deg,#e0e7ff,#f5f3ff);border:1.5px solid #c7d2fe;border-radius:14px;padding:14px">';
+  html += '<div style="font-size:10px;font-weight:700;color:#4338ca;text-transform:uppercase;letter-spacing:.5px">💰 Valeur totale</div>';
+  html += '<div style="font-size:22px;font-weight:800;color:#1e1b4b;margin-top:4px">'+fmtE(totalVal)+'</div>';
+  html += '<div style="font-size:10px;color:#64748b;margin-top:2px">Méthode : '+method+'</div></div>';
+
+  html += '<div class="kpi-card" style="background:linear-gradient(135deg,#d1fae5,#ecfccb);border:1.5px solid #a7f3d0;border-radius:14px;padding:14px">';
+  html += '<div style="font-size:10px;font-weight:700;color:#047857;text-transform:uppercase;letter-spacing:.5px">💎 Marge potentielle</div>';
+  html += '<div style="font-size:22px;font-weight:800;color:#064e3b;margin-top:4px">'+fmtE(totalMarge)+'</div>';
+  html += '<div style="font-size:10px;color:#64748b;margin-top:2px">Si tout est vendu au PV</div></div>';
+
+  html += '<div class="kpi-card" style="background:linear-gradient(135deg,#fef3c7,#fed7aa);border:1.5px solid #fde68a;border-radius:14px;padding:14px">';
+  html += '<div style="font-size:10px;font-weight:700;color:#b45309;text-transform:uppercase;letter-spacing:.5px">📊 Marge moyenne</div>';
+  html += '<div style="font-size:22px;font-weight:800;color:#78350f;margin-top:4px">'+fmt(avgMargePct,1)+'%</div>';
+  html += '<div style="font-size:10px;color:#64748b;margin-top:2px">Pondérée par valeur</div></div>';
+
+  html += '<div class="kpi-card" style="background:linear-gradient(135deg,#dbeafe,#e0f2fe);border:1.5px solid #bfdbfe;border-radius:14px;padding:14px">';
+  html += '<div style="font-size:10px;font-weight:700;color:#1d4ed8;text-transform:uppercase;letter-spacing:.5px">📦 Références</div>';
+  html += '<div style="font-size:22px;font-weight:800;color:#1e3a8a;margin-top:4px">'+refsCount+'</div>';
+  html += '<div style="font-size:10px;color:#64748b;margin-top:2px">valorisées</div></div>';
+
+  html += '<div class="kpi-card" style="background:linear-gradient(135deg,#fce7f3,#fbcfe8);border:1.5px solid #f9a8d4;border-radius:14px;padding:14px">';
+  html += '<div style="font-size:10px;font-weight:700;color:#be185d;text-transform:uppercase;letter-spacing:.5px">🏆 Top famille</div>';
+  html += '<div style="font-size:14px;font-weight:800;color:#831843;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(topFam?(topFam.icon+' '+esc(topFam.name)):'—')+'</div>';
+  html += '<div style="font-size:10px;color:#64748b;margin-top:2px">'+(topFam?fmtE(topFam.value):'0€')+'</div></div>';
+
+  html += '<div class="kpi-card" style="background:linear-gradient(135deg,#fee2e2,#fecaca);border:1.5px solid #fca5a5;border-radius:14px;padding:14px">';
+  html += '<div style="font-size:10px;font-weight:700;color:#b91c1c;text-transform:uppercase;letter-spacing:.5px">🎯 Concentration</div>';
+  html += '<div style="font-size:22px;font-weight:800;color:#7f1d1d;margin-top:4px">'+fmt(concentration,0)+'%</div>';
+  html += '<div style="font-size:10px;color:#64748b;margin-top:2px">valeur du top 20%</div></div>';
+  html += '</div>';
+
+  // Action bar : view toggle + export
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;flex-wrap:wrap">';
+  html += '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">';
+  html += '<div class="view-toggle">';
+  html += '<button class="view-toggle-btn'+(_valoView==='list'?' active':'')+'" onclick="setValoView(\'list\')">☰ Liste détaillée</button>';
+  html += '<button class="view-toggle-btn'+(_valoView==='family'?' active':'')+'" onclick="setValoView(\'family\')">📂 Par famille</button>';
+  html += '<button class="view-toggle-btn'+(_valoView==='supplier'?' active':'')+'" onclick="setValoView(\'supplier\')">🏢 Par fournisseur</button>';
+  html += '</div>';
+  html += '</div>';
+  html += '<div style="display:flex;gap:6px">';
+  html += '<button class="btn btn-outline btn-sm" onclick="saveSnapshot()">📸 Snapshot</button>';
+  html += '<button class="btn btn-primary btn-sm" onclick="exportValoCSV()">⬇ Export CSV</button>';
+  html += '</div>';
+  html += '</div>';
+
+  // Filter bar
+  html += _renderValoFilterBar(allItems);
+
+  if(items.length === 0){
+    html += '<div style="padding:50px 20px;text-align:center;color:var(--muted);background:white;border:1.5px dashed var(--border);border-radius:12px"><div style="font-size:36px;margin-bottom:10px">💰</div><div style="font-size:14px;font-weight:700;margin-bottom:4px">Aucun produit valorisé</div><div style="font-size:12px">'+(allItems.length?'Aucun résultat avec les filtres actuels':'Importez vos produits pour voir leur valorisation')+'</div></div>';
+    tc.innerHTML = html;
+    return;
+  }
+
+  // Dispatch to correct view
+  if(_valoView === 'family'){
+    html += _renderValoByFamily(items, totalVal);
+  } else if(_valoView === 'supplier'){
+    html += _renderValoBySupplier(items, totalVal);
+  } else {
+    html += _renderValoList(items, totalVal);
+  }
+
+  tc.innerHTML = html;
+}
+
+// ── Vue Liste détaillée ──
+function _renderValoList(items, totalVal){
+  // Sort
+  var col = _valoSort.col, dir = _valoSort.dir;
+  var sorted = items.slice().sort(function(a,b){
+    var va = a[col], vb = b[col];
+    if(typeof va === 'string'){
+      va = va.toLowerCase(); vb = (vb||'').toLowerCase();
+      if(va<vb) return dir==='asc'?-1:1;
+      if(va>vb) return dir==='asc'?1:-1;
+      return 0;
+    }
+    return dir==='asc' ? (va-vb) : (vb-va);
+  });
+
+  function sa(c){if(col!==c)return'<span class="sort-arrow">↕</span>';return'<span class="sort-arrow">'+(dir==='asc'?'↑':'↓')+'</span>'}
+  function sc(c){return col===c?' sort-active':''}
+
+  var totalMarge = sorted.reduce(function(s,x){return s+x.margeTotal},0);
+  var totalQty = sorted.reduce(function(s,x){return s+x.qty},0);
+
+  var html = '<div class="prod-list-wrap"><table class="prod-list-tbl"><thead><tr>';
+  html += '<th class="ref-h'+sc('ref')+'" onclick="setValoSort(\'ref\')">Réf '+sa('ref')+'</th>';
+  html += '<th class="'+sc('name')+'" onclick="setValoSort(\'name\')">Nom '+sa('name')+'</th>';
+  html += '<th class="'+sc('famPath')+'" onclick="setValoSort(\'famPath\')">Famille '+sa('famPath')+'</th>';
+  html += '<th class="fourn-h'+sc('fournisseur')+'" onclick="setValoSort(\'fournisseur\')">Fournisseur '+sa('fournisseur')+'</th>';
+  html += '<th class="num'+sc('qty')+'" onclick="setValoSort(\'qty\')">Stock '+sa('qty')+'</th>';
+  html += '<th class="num'+sc('cmup')+'" onclick="setValoSort(\'cmup\')">CMUP '+sa('cmup')+'</th>';
+  html += '<th class="num'+sc('value')+'" onclick="setValoSort(\'value\')">Valeur '+sa('value')+'</th>';
+  html += '<th class="num">% Total</th>';
+  html += '<th class="num'+sc('pv')+'" onclick="setValoSort(\'pv\')">PV '+sa('pv')+'</th>';
+  html += '<th class="num'+sc('margeUnit')+'" onclick="setValoSort(\'margeUnit\')">M. unit '+sa('margeUnit')+'</th>';
+  html += '<th class="num'+sc('margeTotal')+'" onclick="setValoSort(\'margeTotal\')">M. totale '+sa('margeTotal')+'</th>';
+  html += '<th class="num'+sc('margePct')+'" onclick="setValoSort(\'margePct\')">Marge % '+sa('margePct')+'</th>';
+  html += '<th class="'+sc('status')+'">Statut</th>';
+  html += '</tr></thead><tbody>';
+
+  sorted.forEach(function(x){
+    var pct = totalVal>0?(x.value/totalVal*100):0;
+    var mClass = x.margePct>=30?'margin-pos':x.margePct>=10?'margin-mid':x.margePct>0?'margin-neg':'';
+    var rowCls = x._status.key==='rupture'?'row-rupture':x._status.key==='alerte'?'row-alerte':'';
+    html += '<tr class="'+rowCls+'" onclick="openProdModal(\''+x.id+'\')">';
+    html += '<td class="ref">'+esc(x.ref)+'</td>';
+    html += '<td class="name">'+esc(x.name)+'</td>';
+    html += '<td class="fourn">'+esc(x.famPath)+'</td>';
+    html += '<td class="fourn">'+esc(x.fournisseur||'—')+'</td>';
+    html += '<td class="num">'+fmt(x.qty,0)+' '+esc(x.unite)+'</td>';
+    html += '<td class="num">'+fmtE(x.cmup)+'</td>';
+    html += '<td class="num" style="font-weight:700">'+fmtE(x.value)+'</td>';
+    html += '<td class="num">'+fmt(pct,1)+'%</td>';
+    html += '<td class="num">'+(x.pv>0?fmtE(x.pv):'—')+'</td>';
+    html += '<td class="num">'+(x.margeUnit>0?fmtE(x.margeUnit):'—')+'</td>';
+    html += '<td class="num '+mClass+'">'+(x.margeTotal>0?fmtE(x.margeTotal):'—')+'</td>';
+    html += '<td class="num '+mClass+'">'+(x.margePct>0?fmt(x.margePct,0)+'%':'—')+'</td>';
+    html += '<td><span class="badge '+x._status.cls+'">'+x._status.label+'</span></td>';
+    html += '</tr>';
+  });
+
+  // Total row
+  html += '<tr style="background:#f0f4ff;font-weight:800;position:sticky;bottom:0">';
+  html += '<td colspan="4" style="text-align:left">TOTAL ('+sorted.length+' réf.)</td>';
+  html += '<td class="num">'+fmt(totalQty,0)+'</td>';
+  html += '<td class="num">—</td>';
+  html += '<td class="num" style="font-size:13px">'+fmtE(totalVal)+'</td>';
+  html += '<td class="num">100%</td>';
+  html += '<td class="num">—</td><td class="num">—</td>';
+  html += '<td class="num" style="color:var(--green)">'+fmtE(totalMarge)+'</td>';
+  html += '<td class="num">—</td><td></td>';
+  html += '</tr>';
+  html += '</tbody></table></div>';
+  html += '<div style="font-size:10px;color:var(--muted);margin-top:6px;text-align:right">💡 Cliquez sur une colonne pour trier</div>';
+  return html;
+}
+
+// ── Vue Par famille (groupée, expand/collapse) ──
+function _renderValoByFamily(items, totalVal){
+  // Group by famRootId
+  var groups = {};
+  items.forEach(function(x){
+    var k = x.famRootId || '_orphan';
+    if(!groups[k]) groups[k] = {key:k, name:x.famRootName, icon:x.famRootIcon, items:[], value:0, qty:0, margeTotal:0};
+    var g = groups[k];
+    g.items.push(x);
+    g.value += x.value;
+    g.qty += x.qty;
+    g.margeTotal += x.margeTotal;
+  });
+  var groupList = Object.values(groups).sort(function(a,b){return b.value-a.value});
+
+  var html = '<div class="prod-list-wrap"><table class="prod-list-tbl"><thead><tr>';
+  html += '<th style="width:30px"></th>';
+  html += '<th>Famille</th>';
+  html += '<th class="num">Nb réfs</th>';
+  html += '<th class="num">Stock total</th>';
+  html += '<th class="num">Valeur</th>';
+  html += '<th class="num">% du total</th>';
+  html += '<th class="num">Marge potentielle</th>';
+  html += '<th class="num">Marge %</th>';
+  html += '</tr></thead><tbody>';
+
+  groupList.forEach(function(g){
+    var pct = totalVal>0?(g.value/totalVal*100):0;
+    var totalPvFam = g.items.reduce(function(s,x){return s+(x.pv*x.qty)},0);
+    var margePct = totalPvFam>0?(g.margeTotal/totalPvFam*100):0;
+    var isExpanded = !!_valoExpanded['fam_'+g.key];
+    var arrow = isExpanded ? '▼' : '▶';
+
+    html += '<tr style="background:#fafbff;font-weight:700;cursor:pointer" onclick="toggleValoGroup(\'fam_'+esc(g.key).replace(/'/g,"\\'")+'\')">';
+    html += '<td style="text-align:center;font-size:10px;color:var(--muted)">'+arrow+'</td>';
+    html += '<td style="text-align:left">'+g.icon+' '+esc(g.name)+'</td>';
+    html += '<td class="num">'+g.items.length+'</td>';
+    html += '<td class="num">'+fmt(g.qty,0)+'</td>';
+    html += '<td class="num" style="font-size:13px">'+fmtE(g.value)+'</td>';
+    html += '<td class="num">'+fmt(pct,1)+'%</td>';
+    html += '<td class="num" style="color:var(--green)">'+fmtE(g.margeTotal)+'</td>';
+    html += '<td class="num">'+fmt(margePct,0)+'%</td>';
+    html += '</tr>';
+
+    if(isExpanded){
+      var subSorted = g.items.slice().sort(function(a,b){return b.value-a.value});
+      subSorted.forEach(function(x){
+        var rowCls = x._status.key==='rupture'?'row-rupture':x._status.key==='alerte'?'row-alerte':'';
+        html += '<tr class="'+rowCls+'" onclick="openProdModal(\''+x.id+'\')" style="cursor:pointer">';
+        html += '<td></td>';
+        html += '<td style="text-align:left;padding-left:26px"><span class="ref">'+esc(x.ref)+'</span> · '+esc(x.name)+(x.taille?' · T'+esc(x.taille):'')+(x.couleur?' · '+esc(x.couleur):'')+'</td>';
+        html += '<td class="num">—</td>';
+        html += '<td class="num">'+fmt(x.qty,0)+'</td>';
+        html += '<td class="num">'+fmtE(x.value)+'</td>';
+        html += '<td class="num">—</td>';
+        html += '<td class="num">'+(x.margeTotal>0?fmtE(x.margeTotal):'—')+'</td>';
+        html += '<td class="num">'+(x.margePct>0?fmt(x.margePct,0)+'%':'—')+'</td>';
+        html += '</tr>';
+      });
+    }
+  });
+
+  // Total row
+  var totalMarge = groupList.reduce(function(s,g){return s+g.margeTotal},0);
+  var totalQty = groupList.reduce(function(s,g){return s+g.qty},0);
+  html += '<tr style="background:#f0f4ff;font-weight:800">';
+  html += '<td></td><td style="text-align:left">TOTAL</td>';
+  html += '<td class="num">'+items.length+'</td>';
+  html += '<td class="num">'+fmt(totalQty,0)+'</td>';
+  html += '<td class="num" style="font-size:13px">'+fmtE(totalVal)+'</td>';
+  html += '<td class="num">100%</td>';
+  html += '<td class="num" style="color:var(--green)">'+fmtE(totalMarge)+'</td>';
+  html += '<td class="num">—</td>';
+  html += '</tr>';
+  html += '</tbody></table></div>';
+  html += '<div style="font-size:10px;color:var(--muted);margin-top:6px;text-align:right">💡 Cliquez sur une famille pour voir ses produits</div>';
+  return html;
+}
+
+// ── Vue Par fournisseur ──
+function _renderValoBySupplier(items, totalVal){
+  var groups = {};
+  items.forEach(function(x){
+    var k = x.fournisseur || '_sans';
+    if(!groups[k]) groups[k] = {key:k, name:x.fournisseur||'Sans fournisseur', items:[], value:0, qty:0, margeTotal:0};
+    var g = groups[k];
+    g.items.push(x);
+    g.value += x.value;
+    g.qty += x.qty;
+    g.margeTotal += x.margeTotal;
+  });
+  var groupList = Object.values(groups).sort(function(a,b){return b.value-a.value});
+
+  var html = '<div class="prod-list-wrap"><table class="prod-list-tbl"><thead><tr>';
+  html += '<th style="width:30px"></th>';
+  html += '<th>Fournisseur</th>';
+  html += '<th class="num">Nb réfs</th>';
+  html += '<th class="num">Stock</th>';
+  html += '<th class="num">Valeur</th>';
+  html += '<th class="num">% du total</th>';
+  html += '<th class="num">Marge potentielle</th>';
+  html += '<th class="num">Marge %</th>';
+  html += '</tr></thead><tbody>';
+
+  groupList.forEach(function(g){
+    var pct = totalVal>0?(g.value/totalVal*100):0;
+    var totalPvSup = g.items.reduce(function(s,x){return s+(x.pv*x.qty)},0);
+    var margePct = totalPvSup>0?(g.margeTotal/totalPvSup*100):0;
+    var isExpanded = !!_valoExpanded['sup_'+g.key];
+    var arrow = isExpanded ? '▼' : '▶';
+
+    html += '<tr style="background:#fafbff;font-weight:700;cursor:pointer" onclick="toggleValoGroup(\'sup_'+esc(g.key).replace(/'/g,"\\'")+'\')">';
+    html += '<td style="text-align:center;font-size:10px;color:var(--muted)">'+arrow+'</td>';
+    html += '<td style="text-align:left">🏢 '+esc(g.name)+'</td>';
+    html += '<td class="num">'+g.items.length+'</td>';
+    html += '<td class="num">'+fmt(g.qty,0)+'</td>';
+    html += '<td class="num" style="font-size:13px">'+fmtE(g.value)+'</td>';
+    html += '<td class="num">'+fmt(pct,1)+'%</td>';
+    html += '<td class="num" style="color:var(--green)">'+fmtE(g.margeTotal)+'</td>';
+    html += '<td class="num">'+fmt(margePct,0)+'%</td>';
+    html += '</tr>';
+
+    if(isExpanded){
+      var subSorted = g.items.slice().sort(function(a,b){return b.value-a.value});
+      subSorted.forEach(function(x){
+        var rowCls = x._status.key==='rupture'?'row-rupture':x._status.key==='alerte'?'row-alerte':'';
+        html += '<tr class="'+rowCls+'" onclick="openProdModal(\''+x.id+'\')" style="cursor:pointer">';
+        html += '<td></td>';
+        html += '<td style="text-align:left;padding-left:26px"><span class="ref">'+esc(x.ref)+'</span> · '+esc(x.name)+(x.taille?' · T'+esc(x.taille):'')+(x.couleur?' · '+esc(x.couleur):'')+'</td>';
+        html += '<td class="num">—</td>';
+        html += '<td class="num">'+fmt(x.qty,0)+'</td>';
+        html += '<td class="num">'+fmtE(x.value)+'</td>';
+        html += '<td class="num">—</td>';
+        html += '<td class="num">'+(x.margeTotal>0?fmtE(x.margeTotal):'—')+'</td>';
+        html += '<td class="num">'+(x.margePct>0?fmt(x.margePct,0)+'%':'—')+'</td>';
+        html += '</tr>';
+      });
+    }
+  });
+
+  var totalMarge = groupList.reduce(function(s,g){return s+g.margeTotal},0);
+  var totalQty = groupList.reduce(function(s,g){return s+g.qty},0);
+  html += '<tr style="background:#f0f4ff;font-weight:800">';
+  html += '<td></td><td style="text-align:left">TOTAL</td>';
+  html += '<td class="num">'+items.length+'</td>';
+  html += '<td class="num">'+fmt(totalQty,0)+'</td>';
+  html += '<td class="num" style="font-size:13px">'+fmtE(totalVal)+'</td>';
+  html += '<td class="num">100%</td>';
+  html += '<td class="num" style="color:var(--green)">'+fmtE(totalMarge)+'</td>';
+  html += '<td class="num">—</td>';
+  html += '</tr>';
+  html += '</tbody></table></div>';
+  html += '<div style="font-size:10px;color:var(--muted);margin-top:6px;text-align:right">💡 Cliquez sur un fournisseur pour voir ses produits</div>';
+  return html;
 }
 
 // ── Inventaire Tab ──
