@@ -44,14 +44,125 @@
   };
 
   /* ───────────────────────────────────────────────────────────────────────
+   * INTÉRÊTS D'EMPRUNT — computeMonthlyInterest(r, monthKey)
+   * ───────────────────────────────────────────────────────────────────────
+   * Calcule l'intérêt mensuel RÉEL d'un crédit, en fonction :
+   *   • du type d'amortissement (r.amort : 'lineaire', 'constant', 'infine', 'fixe')
+   *   • du mois courant relatif au début du prêt (capital restant dû)
+   *   • du taux annuel
+   *
+   * ═══ PROBLÈME HISTORIQUE CORRIGÉ (bug #15 de l'audit) ═══
+   * L'ancienne formule `r.montant × taux / 100 / 12` était mathématiquement
+   * fausse : `r.montant` est la part capital MENSUELLE (= capital/duree pour un
+   * amortissement linéaire), pas le capital restant dû. Pour un prêt 100k€ à
+   * 3% sur 5 ans, l'ancienne formule donnait 4,17 €/mois d'intérêt au lieu
+   * d'une moyenne réelle d'environ 127 €/mois. Sous-estimation ~30×.
+   * ═══════════════════════════════════════════════════════════════════════
+   *
+   * Données stockées sur un crédit pilotage :
+   *   { montant: "1666.67",    // part capital mensuelle (capital/duree)
+   *     tauxInteret: "3",      // taux annuel en %
+   *     amort: "lineaire" | "constant" | "infine" | "fixe",
+   *     dateDebut: "YYYY-MM",  // optionnel
+   *     dateFin:   "YYYY-MM" } // optionnel
+   *
+   * ─── AVEC DATES (calcul exact) ───
+   * On reconstitue capitalTotal = montant × duree, puis on calcule l'intérêt
+   * du mois k (0-indexé) selon l'amort type :
+   *   • lineaire : I_k = C × (1 - k/n) × r
+   *   • constant (mensualités constantes) : I_k = solde_k × r
+   *     où solde_k = C × ((1+r)^n - (1+r)^k) / ((1+r)^n - 1)
+   *   • infine : I_k = C × r (constant, capital repayé au dernier mois)
+   *   • fixe : I_k = C × r (constant, intérêts sur capital initial)
+   *
+   * ─── SANS DATES (fallback conservateur) ───
+   * Impossible de connaître duree et capital restant dû. On retombe sur
+   * l'ancienne formule pour ne pas casser l'historique des clients qui n'ont
+   * pas renseigné les dates de leurs crédits. Ces clients verront le même
+   * chiffre qu'avant la Wave 1.5 et pourront corriger en ajoutant les dates.
+   * ─────────────────────────────────────────────────────────────────────── */
+  H.computeMonthlyInterest = function (r, monthKey) {
+    var p = H.pf(r.montant);          // part capital mensuelle
+    var taux = H.pf(r.tauxInteret);   // taux annuel %
+    if (p <= 0 || taux <= 0) return 0;
+
+    var rateM = taux / 100 / 12;      // taux mensuel décimal
+
+    // Sans dates : fallback sur l'ancienne formule (sous-estimée mais
+    // compatible avec l'historique). Le client doit renseigner les dates
+    // pour bénéficier du calcul exact.
+    if (!r.dateDebut || !r.dateFin || !monthKey) {
+      return p * rateM;
+    }
+
+    var deb = H.parseYYYYMM(r.dateDebut);
+    var fin = H.parseYYYYMM(r.dateFin);
+    var now = H.parseYYYYMM(monthKey);
+    if (!deb || !fin || !now) return p * rateM;
+
+    // Calcul de la durée en mois (inclusive)
+    var debY = parseInt(deb.slice(0, 4), 10);
+    var debM = parseInt(deb.slice(5, 7), 10);
+    var finY = parseInt(fin.slice(0, 4), 10);
+    var finM = parseInt(fin.slice(5, 7), 10);
+    var duree = (finY - debY) * 12 + (finM - debM) + 1;
+    if (duree <= 0) return 0;
+
+    // Mois courant relatif au début (0-indexé)
+    var nowY = parseInt(now.slice(0, 4), 10);
+    var nowM = parseInt(now.slice(5, 7), 10);
+    var k = (nowY - debY) * 12 + (nowM - debM);
+    if (k < 0 || k >= duree) return 0;
+
+    // Capital total approximé. Exact pour 'lineaire' (où montant = capital/duree
+    // par construction). Pour les autres amortissements, c'est une reconstitution
+    // par la même formule linéaire — en pratique les clients saisissent leur
+    // "mensualité (principal)" comme capital/duree de toute façon.
+    var capitalTotal = p * duree;
+    var amort = r.amort || 'constant';
+
+    // ─── In fine : intérêts constants sur capital initial ───
+    if (amort === 'infine') {
+      return capitalTotal * rateM;
+    }
+
+    // ─── Intérêts fixes (prêt américain) : intérêts constants sur capital initial ───
+    if (amort === 'fixe') {
+      return capitalTotal * rateM;
+    }
+
+    // ─── Linéaire : capital constant, intérêts dégressifs ───
+    // Au mois k, le solde restant dû AVANT remboursement est :
+    //   C × (1 - k/n)     pour k = 0..n-1
+    // Intérêt du mois k = solde × rateM
+    if (amort === 'lineaire') {
+      var soldeL = capitalTotal * (1 - k / duree);
+      return soldeL * rateM;
+    }
+
+    // ─── Mensualités constantes (par défaut) ───
+    // Formule amortissement classique :
+    //   Solde au début du mois k = C × ((1+r)^n - (1+r)^k) / ((1+r)^n - 1)
+    //   Intérêt du mois k = solde × rateM
+    if (rateM === 0) {
+      // Pas d'intérêts (cas dégénéré)
+      return 0;
+    }
+    var factor = Math.pow(1 + rateM, duree);
+    var soldeK = capitalTotal * (factor - Math.pow(1 + rateM, k)) / (factor - 1);
+    return soldeK * rateM;
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
    * CRÉDITS — parseCredits(credits, monthKey)
    * ───────────────────────────────────────────────────────────────────────
    * Prend en charge DEUX formats :
    *
    *   FORMAT ACTUEL (depuis Wave pilotage V2)
    *   Une ligne unique par crédit :
-   *     { ligneType:'principal', montant, tauxInteret, tvaAuto, dateDebut, dateFin }
-   *   L'intérêt mensuel est calculé : p × taux/100/12
+   *     { ligneType:'principal', montant, tauxInteret, tvaAuto, dateDebut, dateFin, amort }
+   *   L'intérêt mensuel est calculé via computeMonthlyInterest (calcul exact
+   *   si les dates sont présentes, fallback sur l'ancienne formule sinon).
    *
    *   FORMAT LEGACY
    *   Deux lignes jumelées par crédit :
@@ -87,6 +198,8 @@
         var mt = H.pf(r.montant);
         if (r.tvaAuto && H.pf(r.tauxInteret) > 0) {
           // Recalculer depuis le principal associé (même fournisseur, en amont)
+          // Note : ici on conserve l'ancienne formule car le format legacy n'a
+          // ni amort ni dates fiables, et les données sont marginales.
           for (var j = i - 1; j >= 0; j--) {
             var c = credits[j];
             if (c && c.ligneType === 'principal' && c.fournisseur === r.fournisseur) {
@@ -103,13 +216,10 @@
       var p = H.pf(r.montant);
       result.principal += p;
 
-      // Format actuel : l'intérêt est calculé depuis le tauxInteret de la ligne principal.
-      // En format legacy, l'intérêt est porté par la ligne 'interet' séparée, donc on saute.
+      // Format actuel : calcul exact de l'intérêt via computeMonthlyInterest
+      // En format legacy, l'intérêt est porté par la ligne 'interet' séparée.
       if (!isLegacy) {
-        var taux = H.pf(r.tauxInteret);
-        if (p > 0 && taux > 0) {
-          result.interet += p * taux / 100 / 12;
-        }
+        result.interet += H.computeMonthlyInterest(r, monthKey);
       }
     }
 
@@ -323,8 +433,8 @@
 
     credit_interet: {
       title: 'Intérêts d\'emprunt',
-      short: 'Le coût réel de l\'argent emprunté.',
-      long: 'Les intérêts sont une charge financière déductible fiscalement. Ils figurent à la fois dans votre résultat économique (en tant que charge) et dans votre cashflow (en tant que sortie). Ils sont calculés automatiquement à partir du taux renseigné sur votre crédit.'
+      short: 'Le coût réel de l\'argent emprunté, basé sur le capital restant dû.',
+      long: 'Les intérêts sont une charge financière déductible fiscalement. Ils figurent à la fois dans votre résultat économique et dans votre cashflow. Alteore les calcule en fonction du type d\'amortissement de votre prêt (linéaire, mensualités constantes, in fine, intérêts fixes) et du capital restant dû au mois affiché — ils diminuent donc naturellement à mesure que vous remboursez votre prêt. Pour un calcul exact, renseignez bien les dates de début et de fin de chaque crédit.'
     },
 
     tva_collectee: {
