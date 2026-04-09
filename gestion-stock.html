@@ -1774,6 +1774,8 @@ async function aiDetectMapping(){
   goBtn.innerHTML='📥 Importer <span id="import-count"></span> produits';
   goBtn.onclick=executeImport;
   document.getElementById('import-back-btn').style.display='none';
+  // Initial count is the raw row count — renderImportPlan() will refine it
+  // to the actual de-duped product count as soon as it runs.
   document.getElementById('import-count').textContent=_importRows.length;
 }
 
@@ -1941,11 +1943,12 @@ function analyzeImportPlan(){
 
     if(!rawRef && !rawName){skippedRows++;continue}
 
-    // Compute SKU and parent
+    // Compute SKU and parent — MUST match _buildProductsFromRows logic exactly
     var sku, parentSlug=null;
     if(rawParentName && (rawTaille||rawCouleur)){
       parentSlug = _slug(rawParentName) || rawParentName;
-      sku = rawRef || (parentSlug + '-' + [rawTaille,rawCouleur].filter(Boolean).join('-'));
+      var variantSuffixP = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_');
+      sku = (rawRef || parentSlug) + '-' + variantSuffixP;
     } else if(hasVariants && rawRef && (rawTaille||rawCouleur)){
       var variantSuffix = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_');
       sku = rawRef + (variantSuffix?'-'+variantSuffix:'');
@@ -2129,15 +2132,18 @@ function _buildProductsFromRows(){
 
     // Compute SKU and parentRef.
     // - If a parentRefName col exists AND is filled on this row → it's a variant
-    //   → parentRef = the model code (slug), ref = either the row's Code, or composite
+    //   → parentRef = the model code (slug), sku = (rawRef OR parent) + "-" + suffix
+    //   IMPORTANT: we ALWAYS append the taille/couleur suffix when in this branch,
+    //   because multiple rows can share the same rawRef (Code) as parent identifier
+    //   (this is how Polaris textile files work : Code = model code, not line SKU)
     // - Else if hasVariants (taille/couleur cols exist) AND this row has taille/couleur
     //   → ref = composite (rawRef + suffix), parentRef = rawRef
     // - Else → simple product, ref = rawRef
     var sku, parentRef = null;
     if(rawParentName && (rawTaille||rawCouleur)){
-      // True variant of a named model — parent is the model, sku is the row's unique Code
       parentRef = _slug(rawParentName) || rawParentName;
-      sku = rawRef || (parentRef + '-' + [rawTaille,rawCouleur].filter(Boolean).join('-'));
+      var variantSuffix1 = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_');
+      sku = (rawRef || parentRef) + '-' + variantSuffix1;
     } else if(hasVariants && rawRef && (rawTaille||rawCouleur)){
       // Variant without explicit parent column → fallback: use rawRef as parent
       var variantSuffix = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_');
