@@ -304,9 +304,41 @@ main{margin-left:250px;flex:1;display:flex;flex-direction:column}
   </div>
 
   <div class="content" id="main-content">
+    <!-- Wave 4 — Bandeau info dismissible : import coût complet -->
+    <div id="wave4-info-banner" style="display:none;margin:0 0 16px;padding:14px 18px;background:linear-gradient(135deg,rgba(59,130,246,0.08),rgba(16,185,129,0.06));border:1px solid rgba(59,130,246,0.25);border-left:4px solid #3b82f6;border-radius:12px;position:relative;font-size:13px;line-height:1.55">
+      <button type="button" onclick="dismissWave4Banner()" aria-label="Fermer" style="position:absolute;top:10px;right:12px;background:transparent;border:none;color:#64748b;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px;line-height:1">×</button>
+      <div style="display:flex;gap:12px;align-items:flex-start;padding-right:30px">
+        <div style="font-size:22px;line-height:1">🧮</div>
+        <div style="flex:1">
+          <div style="font-weight:700;color:#1e40af;margin-bottom:4px">Import depuis le Coût de revient mis à jour</div>
+          <div style="color:#334155">
+            Auparavant, lors de l'import depuis une fiche Coût de revient, Alteore ne récupérait que <b>les matières premières</b> — en ignorant la main d'œuvre, les charges fixes, les emballages et la livraison. Résultat : vos prévisions affichaient des marges sensiblement surestimées.
+            <br><br>
+            👉 Désormais, l'import utilise par défaut le <b>coût complet</b> (matières + MO + CF + emballages + livraison). Lors de l'import, vous pouvez toujours basculer en mode « matières premières seules » si vous préférez une vision de marge brute commerciale. <b>Vos produits déjà importés ne sont pas affectés</b> — seuls les nouveaux imports utilisent le calcul corrigé.
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="loader-wrap"><div class="spin"></div><span style="font-size:12px;color:var(--muted)">Chargement…</span></div>
   </div>
 </main>
+
+<script>
+// Wave 4 — Gestion du bandeau info (affiché une fois, puis masqué définitivement)
+(function(){
+  try {
+    if (!localStorage.getItem('alt_wave4_prev_dismissed')) {
+      var b = document.getElementById('wave4-info-banner');
+      if (b) b.style.display = 'block';
+    }
+  } catch(e){}
+})();
+function dismissWave4Banner() {
+  try { localStorage.setItem('alt_wave4_prev_dismissed', '1'); } catch(e){}
+  var b = document.getElementById('wave4-info-banner');
+  if (b) b.style.display = 'none';
+}
+</script>
 
 <!-- ── MODAL AJOUT PRODUIT MANUEL ── -->
 <div class="modal-bg" id="modalManual">
@@ -393,7 +425,25 @@ main{margin-left:250px;flex:1;display:flex;flex-direction:column}
       <button class="modal-close" onclick="closeModal('modalCR')">✕</button>
     </div>
     <div class="modal-body">
-      <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Sélectionnez les produits. Le coût unitaire sera récupéré automatiquement.</p>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:14px">Sélectionnez les produits. Le coût unitaire sera récupéré automatiquement depuis votre fiche coût de revient.</p>
+      <!-- Wave 4 — Toggle mode de coût -->
+      <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:14px">
+        <div style="font-size:11px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">💡 Coût unitaire à importer</div>
+        <label style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;transition:background .15s" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background=''">
+          <input type="radio" name="crMode" id="crModeFull" value="full" checked onchange="setCRCostMode('full')" style="margin-top:3px"/>
+          <div style="flex:1;font-size:12px">
+            <div style="font-weight:700;color:#059669">Coût complet <span style="font-size:9px;font-weight:700;background:#d1fae5;color:#065f46;padding:2px 6px;border-radius:4px;text-transform:uppercase">Recommandé</span></div>
+            <div style="color:#64748b;font-size:11px;margin-top:2px">Inclut matières premières + main d'œuvre + charges fixes + emballages + livraison. Reflète votre marge nette réelle.</div>
+          </div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;transition:background .15s" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background=''">
+          <input type="radio" name="crMode" id="crModeMP" value="mp" onchange="setCRCostMode('mp')" style="margin-top:3px"/>
+          <div style="flex:1;font-size:12px">
+            <div style="font-weight:700;color:#334155">Matières premières seules</div>
+            <div style="color:#64748b;font-size:11px;margin-top:2px">Ancien comportement : n'inclut que les ingrédients. Marge brute uniquement, utile pour certains pilotages commerciaux.</div>
+          </div>
+        </label>
+      </div>
       <div class="import-list" id="crImportList">
         <div class="loader-wrap"><div class="spin"></div></div>
       </div>
@@ -1842,35 +1892,82 @@ async function openImportCR(){
     list.innerHTML='<div style="text-align:center;padding:20px;color:var(--muted);font-size:12px">Aucune fiche dans le Coût de revient.<br><a href="cout-revient.html" style="color:var(--blue)">Créer une fiche →</a></div>';
     return;
   }
+  renderCRImportList();
+}
 
+// Wave 4 — Rendu de la liste extrait pour pouvoir être rerenderer quand on
+// change de mode de coût (MP seul / Complet) sans refetcher Firestore
+function renderCRImportList(){
+  var list=document.getElementById('crImportList');
+  if (!list) return;
   var existingIds=_config.products.filter(function(p){return p.coutRevientId}).map(function(p){return p.coutRevientId});
+  // Wave 4 — Lire le mode de coût choisi (défaut : complet = recommandé)
+  var costMode = _config.costMode || 'full';
+  // Mettre à jour le toggle UI si présent
+  var toggleFull = document.getElementById('crModeFull');
+  var toggleMP = document.getElementById('crModeMP');
+  if (toggleFull) toggleFull.checked = (costMode === 'full');
+  if (toggleMP) toggleMP.checked = (costMode === 'mp');
   var html='';
   _crProducts.forEach(function(p){
     var already=existingIds.indexOf(p.id)>=0;
-    // Calculer le coût unitaire depuis la fiche
+    // Calculer tous les composants de coût depuis la fiche
     var qte=parseFloat(p.quantiteProduites)||1;
-    var mpTotal=(p.ingredients||[]).reduce(function(s,r){return s+(parseFloat(r.qte)||0)*(parseFloat(r.prixUnitaire)||0)},0);
-    var coutUnit=mpTotal/qte;
+    var ingr=(p.ingredients||[]).reduce(function(s,r){return s+(parseFloat(r.qte)||0)*(parseFloat(r.prixUnitaire)||0)},0);
+    // Wave 4 — FIX bug #5 : on importait SEULEMENT les ingrédients, ignorant
+    // MO + charges fixes + emballages + livraison. Les prévisions affichaient
+    // un coût unitaire très sous-estimé et des marges projetées fausses.
+    var mo=(p.mainOeuvre||[]).reduce(function(s,r){return s+(parseFloat(r.heures)||0)*(parseFloat(r.tauxHoraire)||0)},0);
+    var cf=(p.chargesFixes||[]).reduce(function(s,r){var m=parseFloat(r.montant)||0,rep=parseFloat(r.repartition)||0;return s+(m*rep/100)},0);
+    var emb=(p.emballages||[]).reduce(function(s,r){return s+(parseFloat(r.qte)||0)*(parseFloat(r.prixUnit)||0)},0);
+    var liv=(p.livraison||[]).reduce(function(s,r){return s+(parseFloat(r.montant)||0)},0);
+    var coutUnitMP = ingr/qte;
+    var coutUnitFull = (ingr+mo+cf+emb+liv)/qte;
+    var coutUnit = (costMode === 'mp') ? coutUnitMP : coutUnitFull;
 
     html+='<label class="import-item'+(already?' selected':'')+'">';
     html+='<input type="checkbox" class="ii-cb" value="'+p.id+'"'+(already?' checked disabled':'')+'/>';
     html+='<span style="font-size:18px">'+(p.emoji||'📦')+'</span>';
     html+='<div style="flex:1"><div style="font-size:12px;font-weight:700">'+p.nom+'</div>';
-    html+='<div style="font-size:10px;color:var(--muted)">'+(p.categorie||'—')+' · PV: '+fmtE(pf(p.prixVente))+' · Coût MP: '+fmtE(coutUnit)+'/u</div></div>';
+    html+='<div style="font-size:10px;color:var(--muted)">'+(p.categorie||'—')+' · PV: '+fmtE(pf(p.prixVente))+' · Coût '+(costMode==='mp'?'MP':'complet')+' : <b>'+fmtE(coutUnit)+'</b>/u';
+    // Afficher la décomposition si elle diffère
+    if (coutUnitFull > coutUnitMP + 0.01) {
+      html+='<br><span style="opacity:.75">MP '+fmtE(coutUnitMP)+' · Complet '+fmtE(coutUnitFull)+'</span>';
+    }
+    html+='</div>';
     if(already) html+='<span style="font-size:9px;color:var(--green);font-weight:700">✓ Déjà ajouté</span>';
     html+='</label>';
   });
   list.innerHTML=html;
 }
 
+// Wave 4 — Changer de mode de coût et re-rendre la liste d'import
+function setCRCostMode(mode){
+  if (mode !== 'mp' && mode !== 'full') return;
+  _config.costMode = mode;
+  try { saveConfig(); } catch(e){}
+  renderCRImportList();
+}
+
 function confirmImportCR(){
   var checks=document.querySelectorAll('#crImportList .ii-cb:checked:not(:disabled)');
   var added=0;
+  // Wave 4 — utiliser le mode de coût global (défaut : complet)
+  var costMode = _config.costMode || 'full';
   checks.forEach(function(cb){
     var cr=_crProducts.find(function(p){return p.id===cb.value});
     if(!cr) return;
     var qte=parseFloat(cr.quantiteProduites)||1;
-    var mpTotal=(cr.ingredients||[]).reduce(function(s,r){return s+(parseFloat(r.qte)||0)*(parseFloat(r.prixUnitaire)||0)},0);
+    // Wave 4 — FIX bug #5 : coût complet (MP + MO + CF + emb + liv)
+    // au lieu de seulement les ingrédients
+    var ingr=(cr.ingredients||[]).reduce(function(s,r){return s+(parseFloat(r.qte)||0)*(parseFloat(r.prixUnitaire)||0)},0);
+    var mo=(cr.mainOeuvre||[]).reduce(function(s,r){return s+(parseFloat(r.heures)||0)*(parseFloat(r.tauxHoraire)||0)},0);
+    var cf=(cr.chargesFixes||[]).reduce(function(s,r){var m=parseFloat(r.montant)||0,rep=parseFloat(r.repartition)||0;return s+(m*rep/100)},0);
+    var emb=(cr.emballages||[]).reduce(function(s,r){return s+(parseFloat(r.qte)||0)*(parseFloat(r.prixUnit)||0)},0);
+    var liv=(cr.livraison||[]).reduce(function(s,r){return s+(parseFloat(r.montant)||0)},0);
+    var coutMP = ingr/qte;
+    var coutFull = (ingr+mo+cf+emb+liv)/qte;
+    var coutUnit = (costMode === 'mp') ? coutMP : coutFull;
     _config.products.push({
       id:'cr_'+cr.id,
       name:cr.nom,
@@ -1881,7 +1978,10 @@ function confirmImportCR(){
       stockProductId:null,
       coutRevientId:cr.id,
       pvHT:pf(cr.prixVente),
-      coutUnitaire:mpTotal/qte
+      coutUnitaire: coutUnit,
+      costMode: costMode,
+      // Décomposition pour pouvoir switcher sans refetcher
+      costBreakdown: { ingr: ingr, mo: mo, cf: cf, emb: emb, liv: liv, qte: qte }
     });
     added++;
   });
@@ -1890,7 +1990,7 @@ function confirmImportCR(){
     document.getElementById('btnGenerate').disabled=false;
     saveConfig();
     renderPage();
-    showToast('✅ '+added+' produit'+(added>1?'s':'')+' importé'+(added>1?'s':''),'success');
+    showToast('✅ '+added+' produit'+(added>1?'s':'')+' importé'+(added>1?'s':'')+' (mode : '+(costMode==='mp'?'MP seul':'complet')+')','success');
   }
 }
 

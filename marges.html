@@ -567,6 +567,21 @@ html, body { overflow-x: hidden; max-width: 100vw; }
   </div>
 
   <div class="content">
+    <!-- Wave 4 — Bandeau info dismissible : mise à jour du calcul des marges nettes -->
+    <div id="wave4-info-banner" style="display:none;grid-column:1/-1;margin:0 0 16px;padding:14px 18px;background:linear-gradient(135deg,rgba(59,130,246,0.08),rgba(16,185,129,0.06));border:1px solid rgba(59,130,246,0.25);border-left:4px solid #3b82f6;border-radius:12px;position:relative;font-size:13px;line-height:1.55">
+      <button type="button" onclick="dismissWave4Banner()" aria-label="Fermer" style="position:absolute;top:10px;right:12px;background:transparent;border:none;color:#64748b;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px;line-height:1">×</button>
+      <div style="display:flex;gap:12px;align-items:flex-start;padding-right:30px">
+        <div style="font-size:22px;line-height:1">📊</div>
+        <div style="flex:1">
+          <div style="font-weight:700;color:#1e40af;margin-bottom:4px">Calcul des marges nettes corrigé</div>
+          <div style="color:#334155">
+            Auparavant, lorsque votre <b>clé de répartition</b> n'était pas renseignée, Alteore imputait par erreur <b>la totalité de vos charges fixes sur chaque unité vendue</b> — ce qui rendait toutes vos marges nettes absurdement négatives. C'est corrigé. Si votre clé est vide, les charges fixes ne sont plus imputées (et un avertissement s'affiche pour vous inciter à la renseigner).
+            <br><br>
+            👉 <b>Conséquence</b> : vos marges nettes affichées ont probablement <b>remonté</b>. Pour obtenir vos <b>vraies</b> marges nettes, renseignez la clé de répartition (temps passé, chiffre d'affaires, volume…) dans chaque fiche produit.
+          </div>
+        </div>
+      </div>
+    </div>
     <!-- ════════ LEFT PANEL — LISTE PRODUITS (x-for) ════════ -->
     <div class="left-panel">
       <div class="panel-card" style="flex:1">
@@ -818,7 +833,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
               <input class="cle-input" type="number" placeholder="Ex: 5000" x-model.number="p.cfTotal"/>
             </div>
           </div>
-          <div class="cle-result" x-html="p.cle.total>0 && p.cle.produit>0 ? '✅ Quote-part : <b>'+((p.cle.produit||0)/(p.cle.total||1)*100).toFixed(1)+'%</b> → <b>'+fmtE(calc.cfImpute)+'</b> de charges fixes imputées par '+uLbl(p) : '⚠️ Renseignez les valeurs pour calculer la quote-part de charges fixes'"></div>
+          <div class="cle-result" x-html="p.cle.total>0 && p.cle.produit>0 ? '✅ Quote-part : <b>'+((p.cle.produit||0)/(p.cle.total||1)*100).toFixed(1)+'%</b> → <b>'+fmtE(calc.cfImpute)+'</b> de charges fixes imputées par '+uLbl(p) : (p.cfTotal>0 ? '⚠️ <b>Clé de répartition manquante</b> — vos charges fixes de '+fmtE(p.cfTotal)+' ne sont PAS imputées à ce produit. Renseignez les valeurs ci-dessus pour calculer votre vraie marge nette.' : '⚠️ Renseignez les valeurs pour calculer la quote-part de charges fixes')"></div>
         </div>
 
         <!-- SIMULATEUR -->
@@ -1131,11 +1146,19 @@ function _calcMB(p) {
 function _calcCleRep(p) {
   var cle = p.cle || {type:'temps', produit:0, total:0};
   var prod = parseFloat(cle.produit)||0;
-  var total = parseFloat(cle.total)||1;
+  var total = parseFloat(cle.total)||0;
   var ratio = total > 0 ? Math.min(prod/total, 1) : 0;
-  var cf = p.cfTotal > 0 ? p.cfTotal : 0;
+  var cf = parseFloat(p.cfTotal)||0;
   var mult = _saisonCFMultiplier(); // 12/moisEquivCA pour saisonniers, 1 sinon
-  var cfImpute = p.cfTotal > 0 && prod > 0 ? cf * mult * ratio / Math.max(parseFloat(p.qte)||1, 1) : cf * mult;
+  // Wave 4 — FIX bug #8 : quand la clé n'est pas renseignée (prod=0 ou total=0),
+  // on imputait AVANT cf*mult sur chaque unité, ce qui faisait exploser le
+  // coût unitaire et rendait toutes les marges nettes absurdement négatives.
+  // Désormais : si la clé n'est pas remplie, cfImpute = 0 et le client voit
+  // un warning dans l'UI pour l'inciter à remplir la clé de répartition.
+  var cfImpute = 0;
+  if (cf > 0 && prod > 0 && total > 0) {
+    cfImpute = cf * mult * ratio / Math.max(parseFloat(p.qte)||1, 1);
+  }
   return {ratio:ratio, cfImpute:cfImpute, saisonMult:mult};
 }
 
@@ -1163,7 +1186,13 @@ function _calcSim(p, sim) {
   var txMBSim = pvSim > 0 ? mbSim/pvSim*100 : 0;
   var rep = _calcCleRep(p);
   var mult = _saisonCFMultiplier();
-  var cfImputeSim = cfSim * mult * rep.ratio / Math.max(volSim, 1);
+  // Wave 4 — même fix qu'en _calcCleRep : pas de fallback à cf*mult quand
+  // la clé n'est pas remplie, sinon la simulation affiche des marges nettes
+  // absurdes.
+  var cfImputeSim = 0;
+  if (cfSim > 0 && rep.ratio > 0) {
+    cfImputeSim = cfSim * mult * rep.ratio / Math.max(volSim, 1);
+  }
   var mnSim = mbSim - cfImputeSim;
   var txMNSim = pvSim > 0 ? mnSim/pvSim*100 : 0;
   return {pvSim:pvSim, cvSim:cvSim, mbSim:mbSim, txMBSim:txMBSim,
@@ -1651,6 +1680,22 @@ function toggleFidNav(el){
   var open=sub.style.maxHeight&&sub.style.maxHeight!=='0px';
   sub.style.maxHeight=open?'0px':'300px';
   if(chev)chev.style.transform=open?'':'rotate(90deg)';
+}
+</script>
+<script>
+// Wave 4 — Gestion du bandeau info (affiché une fois, puis masqué définitivement)
+(function(){
+  try {
+    if (!localStorage.getItem('alt_wave4_marges_dismissed')) {
+      var b = document.getElementById('wave4-info-banner');
+      if (b) b.style.display = 'block';
+    }
+  } catch(e){}
+})();
+function dismissWave4Banner() {
+  try { localStorage.setItem('alt_wave4_marges_dismissed', '1'); } catch(e){}
+  var b = document.getElementById('wave4-info-banner');
+  if (b) b.style.display = 'none';
 }
 </script>
 <script src="nav.js"></script>
