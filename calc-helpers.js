@@ -414,9 +414,9 @@
     },
 
     cashflow: {
-      title: 'Cashflow',
-      short: 'Le mouvement net de votre trésorerie sur le mois.',
-      long: 'Cashflow = tout ce qui entre sur votre compte (CA TTC + rentrées diverses) − tout ce qui en sort (fournisseurs TTC + salaires + échéances de crédit). C\'est le meilleur indicateur de la santé réelle de votre trésorerie : si votre cashflow est positif, votre solde bancaire progresse sur le mois.'
+      title: 'Cashflow (mis à jour)',
+      short: 'Le mouvement net de votre compte bancaire sur le mois.',
+      long: 'Cashflow = tout ce qui entre sur votre compte (CA TTC + rentrées diverses) − tout ce qui en sort (fournisseurs TTC + salaires + échéances de crédit). Le calcul a été corrigé récemment pour utiliser les montants TTC (réalité bancaire) au lieu du HT — pour la plupart des clients, le cashflow affiché a augmenté. ⚠️ Ce chiffre n\'inclut pas le reversement de votre TVA à l\'État : pensez à la provisionner séparément en regardant votre "TVA due" chaque mois.'
     },
 
     masse_salariale: {
