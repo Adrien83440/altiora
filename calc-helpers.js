@@ -504,66 +504,61 @@
    * Chaque page peut ensuite appeler CalcHelpers.tooltipIcon('resultat_economique')
    * pour obtenir un span HTML à insérer à côté d'un libellé KPI.
    *
+   * ═══ IMPLÉMENTATION (corrigée post-déploiement Wave 2) ═══
+   * Le popover est un ÉLÉMENT GLOBAL unique attaché directement à document.body.
+   * Raison : les cartes KPI de pilotage (.sum-card) ont un `transform:translateY`
+   * au hover, ce qui casse `position:fixed` pour les descendants (le transform
+   * crée un nouveau containing block). En détachant le popover du .sum-card
+   * et en l'appendant au body, on contourne ce problème.
+   *
+   * Chaque bouton ℹ️ contient un <span class="ch-tt-pop"> caché (display:none)
+   * qui sert de "data carrier" : au hover/focus, son contenu est copié dans
+   * l'élément global #ch-tt-global-pop, qui est positionné en fixed par rapport
+   * au bouton déclencheur et affiché.
+   *
    * UX :
-   *   • Hover desktop → infobulle riche (titre + short + long en 3 niveaux)
-   *   • Focus clavier (Tab) → même infobulle
+   *   • Hover desktop → popover riche (titre + résumé + explication longue)
+   *   • Focus clavier (Tab) → même popover
    *   • Mobile → tap active :focus, retap ailleurs désactive
    * ─────────────────────────────────────────────────────────────────────── */
   H._injectTooltipCSS = function () {
     if (typeof document === 'undefined') return;
     if (document.getElementById('ch-tooltip-css')) return;
     var css = [
+      /* Bouton ℹ️ */
       '.ch-tt{display:inline-flex;align-items:center;justify-content:center;',
       'width:16px;height:16px;border-radius:50%;background:rgba(100,116,139,.15);',
       'color:#64748b;font-size:10px;font-weight:700;cursor:help;margin-left:6px;',
       'vertical-align:middle;position:relative;border:none;padding:0;',
       'font-family:inherit;line-height:1;transition:all .15s}',
       '.ch-tt:hover,.ch-tt:focus{background:rgba(37,99,235,.15);color:#2563eb;outline:none}',
-      '.ch-tt-pop{position:fixed;background:#0f172a;color:#f1f5f9;',
+      /* Span interne : caché, sert de data carrier */
+      '.ch-tt-pop{display:none}',
+      /* Popover global, attaché à body */
+      '#ch-tt-global-pop{position:fixed;background:#0f172a;color:#f1f5f9;',
       'padding:12px 14px;border-radius:10px;font-size:12px;font-weight:500;',
-      'white-space:normal;width:280px;max-width:90vw;z-index:99999;',
+      'white-space:normal;width:280px;max-width:90vw;z-index:2147483647;',
       'box-shadow:0 10px 40px rgba(0,0,0,.25),0 0 0 1px rgba(255,255,255,.06);',
       'line-height:1.5;text-align:left;text-transform:none;letter-spacing:normal;',
-      'opacity:0;pointer-events:none;transition:opacity .15s;left:-9999px;top:-9999px}',
-      '.ch-tt:hover .ch-tt-pop,.ch-tt:focus .ch-tt-pop{opacity:1}',
-      '.ch-tt-title{font-weight:700;font-size:12px;margin-bottom:4px;color:#fff}',
-      '.ch-tt-short{font-weight:500;color:#e2e8f0;margin-bottom:8px;font-size:11px}',
-      '.ch-tt-long{color:#cbd5e1;font-size:11px;font-weight:400}',
-      '@media(max-width:640px){.ch-tt-pop{width:240px;font-size:11px;padding:10px 12px}}'
+      'opacity:0;pointer-events:none;transition:opacity .12s;left:-9999px;top:-9999px}',
+      '#ch-tt-global-pop.show{opacity:1}',
+      '#ch-tt-global-pop .ch-tt-title{font-weight:700;font-size:12px;margin-bottom:4px;color:#fff}',
+      '#ch-tt-global-pop .ch-tt-short{font-weight:500;color:#e2e8f0;margin-bottom:8px;font-size:11px}',
+      '#ch-tt-global-pop .ch-tt-long{color:#cbd5e1;font-size:11px;font-weight:400}',
+      '@media(max-width:640px){#ch-tt-global-pop{width:240px;font-size:11px;padding:10px 12px}}'
     ].join('');
     var s = document.createElement('style');
     s.id = 'ch-tooltip-css';
     s.textContent = css;
     (document.head || document.documentElement).appendChild(s);
-    // Positionnement dynamique du popover au hover/focus pour contourner
-    // tout parent avec overflow:hidden (ex. .sum-card de pilotage).
-    document.addEventListener('mouseover', H._positionTooltip, true);
-    document.addEventListener('focusin', H._positionTooltip, true);
-  };
-
-  // Calcule position: fixed du popover pour qu'il apparaisse au-dessus du bouton
-  H._positionTooltip = function (evt) {
-    var btn = evt.target;
-    if (!btn || !btn.classList || !btn.classList.contains('ch-tt')) return;
-    var pop = btn.querySelector('.ch-tt-pop');
-    if (!pop) return;
-    var rect = btn.getBoundingClientRect();
-    // Placer au-dessus, centré sur le bouton, dans les limites de la viewport
-    var popWidth = 280;
-    var vw = window.innerWidth || document.documentElement.clientWidth;
-    var vh = window.innerHeight || document.documentElement.clientHeight;
-    var left = rect.left + rect.width / 2 - popWidth / 2;
-    if (left < 8) left = 8;
-    if (left + popWidth > vw - 8) left = vw - popWidth - 8;
-    // Afficher au-dessus si possible, sinon en-dessous
-    pop.style.left = left + 'px';
-    pop.style.top = rect.top - 10 + 'px';
-    pop.style.transform = 'translateY(-100%)';
-    // Si pas assez de place en haut, basculer en bas
-    if (rect.top < 180) {
-      pop.style.top = rect.bottom + 10 + 'px';
-      pop.style.transform = 'none';
-    }
+    // Listeners globaux (capture phase pour être sûr qu'ils soient atteints)
+    document.addEventListener('mouseover', H._showTooltip, true);
+    document.addEventListener('mouseout',  H._hideTooltip, true);
+    document.addEventListener('focusin',   H._showTooltip, true);
+    document.addEventListener('focusout',  H._hideTooltip, true);
+    // Cacher au scroll / resize pour éviter les positions obsolètes
+    window.addEventListener('scroll',  H._hideTooltip, true);
+    window.addEventListener('resize',  H._hideTooltip, true);
   };
 
   // Échappement HTML minimaliste pour les attributs
@@ -577,17 +572,82 @@
       .replace(/'/g, '&#39;');
   };
 
+  // Récupère (ou crée) l'élément popover global attaché à body
+  H._getGlobalPop = function () {
+    var p = document.getElementById('ch-tt-global-pop');
+    if (!p) {
+      p = document.createElement('div');
+      p.id = 'ch-tt-global-pop';
+      p.setAttribute('role', 'tooltip');
+      (document.body || document.documentElement).appendChild(p);
+    }
+    return p;
+  };
+
+  // Remonte dans les ancêtres jusqu'à trouver un .ch-tt (ou null)
+  H._findTooltipBtn = function (target) {
+    var el = target;
+    var max = 5; // safety
+    while (el && max-- > 0) {
+      if (el.classList && el.classList.contains('ch-tt')) return el;
+      el = el.parentNode;
+    }
+    return null;
+  };
+
+  H._showTooltip = function (evt) {
+    var btn = H._findTooltipBtn(evt.target);
+    if (!btn) return;
+    var inner = btn.querySelector('.ch-tt-pop');
+    if (!inner) return;
+    var pop = H._getGlobalPop();
+    // Copier le contenu du span interne (data carrier) dans le popover global
+    pop.innerHTML = inner.innerHTML;
+    // Mesurer à position provisoire (l'opacité 0 n'empêche pas la mesure)
+    pop.style.left = '0px';
+    pop.style.top = '0px';
+    var popW = pop.offsetWidth || 280;
+    var popH = pop.offsetHeight || 100;
+    // Calculer la position définitive par rapport au bouton
+    var rect = btn.getBoundingClientRect();
+    var vw = window.innerWidth || document.documentElement.clientWidth;
+    var vh = window.innerHeight || document.documentElement.clientHeight;
+    var left = rect.left + rect.width / 2 - popW / 2;
+    if (left < 8) left = 8;
+    if (left + popW > vw - 8) left = vw - popW - 8;
+    var top = rect.top - popH - 10;          // au-dessus par défaut
+    if (top < 8) top = rect.bottom + 10;     // sinon en-dessous
+    if (top + popH > vh - 8) top = Math.max(8, vh - popH - 8);
+    pop.style.left = left + 'px';
+    pop.style.top  = top + 'px';
+    pop.classList.add('show');
+  };
+
+  H._hideTooltip = function (evt) {
+    // Sur scroll/resize on masque systématiquement
+    if (!evt || evt.type === 'scroll' || evt.type === 'resize') {
+      var p0 = document.getElementById('ch-tt-global-pop');
+      if (p0) p0.classList.remove('show');
+      return;
+    }
+    var btn = H._findTooltipBtn(evt.target);
+    if (!btn) return;
+    var p = document.getElementById('ch-tt-global-pop');
+    if (p) p.classList.remove('show');
+  };
+
   /**
-   * Retourne un bouton ℹ️ avec popover contenant l'explication d'une clé.
+   * Retourne un bouton ℹ️ avec un span interne contenant l'explication d'une clé.
+   * Le span interne est caché (display:none) et sert de data carrier : son
+   * innerHTML est copié dans le popover global au moment du hover/focus.
    * Usage : element.innerHTML += CalcHelpers.tooltipIcon('resultat_economique');
-   * Ou dans un template : `${CalcHelpers.tooltipIcon('cle')}`
    */
   H.tooltipIcon = function (key) {
     var e = H.EXPLANATIONS[key];
     if (!e) return '';
     H._injectTooltipCSS();
     return '<button type="button" class="ch-tt" tabindex="0" aria-label="' +
-      H._esc(e.title) + '">i<span class="ch-tt-pop" role="tooltip">' +
+      H._esc(e.title) + '">i<span class="ch-tt-pop">' +
       '<div class="ch-tt-title">' + H._esc(e.title) + '</div>' +
       '<div class="ch-tt-short">' + H._esc(e.short) + '</div>' +
       '<div class="ch-tt-long">' + H._esc(e.long) + '</div>' +
