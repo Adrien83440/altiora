@@ -175,6 +175,7 @@ onAuthStateChanged(auth,async user=>{
 });
 </script>
 
+<script src="calc-helpers.js"></script>
 <script>
 // ── HELPERS ──
 function pf(v){return parseFloat(String(v||'0').replace(',','.'))||0}
@@ -215,6 +216,12 @@ var _levers = {
 // ── LOAD DATA ──
 /* ─── MASSE SALARIALE HELPER ─── */
 function _calcMS(d) {
+  // Wave 1 : délégation vers calc-helpers.js pour garantir la cohérence avec
+  // pilotage (gère auto-paie, primes, dirigeant en prélèvement privé, etc.)
+  if (window.CalcHelpers && window.CalcHelpers.calcMasseSalariale) {
+    return window.CalcHelpers.calcMasseSalariale(d).total;
+  }
+  // Fallback défensif si le helper n'est pas chargé
   var ms = d && d.masseSalariale;
   if (!ms) return 0;
   var total = 0;
@@ -271,16 +278,29 @@ async function loadBaseData(){
         caHT+=rentrees;
         var fixe=(d.chargesFixe||[]).reduce(function(s,r){return s+pf(r.montantHT)},0);
         var variable=(d.chargesVar||[]).reduce(function(s,r){return s+pf(r.montantHT)},0);
-        var leasing=(d.leasing||[]).reduce(function(s,r){return s+pf(r.montantHT)},0);
-        var credit=0;
-        (d.credits||[]).forEach(function(r){credit+=pf(r.montant)});
+        var leasing=(d.leasing||[]).reduce(function(s,r){
+          // Wave 1 : respecter la plage de dates dateDebut/dateFin des leasings
+          if (r.dateDebut && r.dateFin && window.CalcHelpers) {
+            var deb = window.CalcHelpers.parseYYYYMM(r.dateDebut);
+            var fin = window.CalcHelpers.parseYYYYMM(r.dateFin);
+            if (deb && fin && (key < deb || key > fin)) return s;
+          }
+          return s+pf(r.montantHT);
+        },0);
+        // Wave 1 : crédits via CalcHelpers.parseCredits (gère formats actuel + legacy,
+        // calcule les intérêts correctement, respecte le filtre de dates)
+        var creditsInfo = window.CalcHelpers
+          ? window.CalcHelpers.parseCredits(d.credits||[], key)
+          : { total: (d.credits||[]).reduce(function(s,r){return s+pf(r.montant)},0), principal: 0 };
+        var credit = creditsInfo.total;
+        var creditPrincipal = creditsInfo.principal || 0;
         var masseSal=_calcMS(d);
-        data.push({month:m, key:key, caHT:caHT, fixe:fixe, variable:variable, leasing:leasing, credit:credit, masseSal:masseSal, charges:fixe+variable+leasing+credit+masseSal, hasData:caHT>0||fixe>0});
+        data.push({month:m, key:key, caHT:caHT, fixe:fixe, variable:variable, leasing:leasing, credit:credit, creditPrincipal:creditPrincipal, masseSal:masseSal, charges:fixe+variable+leasing+credit+masseSal, hasData:caHT>0||fixe>0});
       } else {
-        data.push({month:m, key:key, caHT:0, fixe:0, variable:0, leasing:0, credit:0, masseSal:0, charges:0, hasData:false});
+        data.push({month:m, key:key, caHT:0, fixe:0, variable:0, leasing:0, credit:0, creditPrincipal:0, masseSal:0, charges:0, hasData:false});
       }
     }catch(e){
-      data.push({month:m, key:key, caHT:0, fixe:0, variable:0, leasing:0, credit:0, masseSal:0, charges:0, hasData:false});
+      data.push({month:m, key:key, caHT:0, fixe:0, variable:0, leasing:0, credit:0, creditPrincipal:0, masseSal:0, charges:0, hasData:false});
     }
   }
   return data;
@@ -300,17 +320,23 @@ function simulate(){
     var variable = d.variable * (1 + (_levers.chargesVar + _levers.perteFourn)/100);
     var charges = fixe + variable + d.leasing + d.credit + (d.masseSal||0);
     var resultat = ca - charges;
-    return {month:d.month, caBase:d.caHT, caSim:ca, chargesBase:d.charges, chargesSim:charges, fixeSim:fixe, varSim:variable, resultatBase:d.caHT-d.charges, resultatSim:resultat, hasData:d.hasData};
+    // Wave 2 — résultat économique : on retire le capital d'emprunt
+    var cp = d.creditPrincipal || 0;
+    var resultatEco = resultat + cp;
+    var resultatBaseEco = (d.caHT - d.charges) + cp;
+    return {month:d.month, caBase:d.caHT, caSim:ca, chargesBase:d.charges, chargesSim:charges, fixeSim:fixe, varSim:variable, resultatBase:d.caHT-d.charges, resultatSim:resultat, resultatBaseEco:resultatBaseEco, resultatSimEco:resultatEco, creditPrincipal:cp, hasData:d.hasData};
   });
 }
 
 function totals(simData){
-  var base={ca:0,charges:0,resultat:0}, sim={ca:0,charges:0,resultat:0};
+  var base={ca:0,charges:0,resultat:0,resultatEco:0}, sim={ca:0,charges:0,resultat:0,resultatEco:0};
   simData.forEach(function(d){
-    base.ca+=d.caBase; base.charges+=d.chargesBase; base.resultat+=d.resultatBase;
-    sim.ca+=d.caSim; sim.charges+=d.chargesSim; sim.resultat+=d.resultatSim;
+    base.ca+=d.caBase; base.charges+=d.chargesBase; base.resultat+=d.resultatBase; base.resultatEco+=d.resultatBaseEco;
+    sim.ca+=d.caSim; sim.charges+=d.chargesSim; sim.resultat+=d.resultatSim; sim.resultatEco+=d.resultatSimEco;
   });
-  return {base:base, sim:sim, deltaCA:sim.ca-base.ca, deltaCharges:sim.charges-base.charges, deltaResultat:sim.resultat-base.resultat};
+  return {base:base, sim:sim,
+    deltaCA:sim.ca-base.ca, deltaCharges:sim.charges-base.charges,
+    deltaResultat:sim.resultat-base.resultat, deltaResultatEco:sim.resultatEco-base.resultatEco};
 }
 
 // ── RENDER ──
@@ -346,8 +372,9 @@ function renderAll(){
       <div class="impact-row">
         ${impactCard('CA Annuel', t.base.ca, t.sim.ca, t.deltaCA)}
         ${impactCard('Charges Annuelles', t.base.charges, t.sim.charges, t.deltaCharges, true)}
-        ${impactCard('Résultat Annuel', t.base.resultat, t.sim.resultat, t.deltaResultat)}
-        ${impactCard('Marge nette', t.base.ca>0?t.base.resultat/t.base.ca*100:0, t.sim.ca>0?t.sim.resultat/t.sim.ca*100:0, (t.sim.ca>0?t.sim.resultat/t.sim.ca*100:0)-(t.base.ca>0?t.base.resultat/t.base.ca*100:0), false, true)}
+        ${impactCard('Résultat économique '+(window.CalcHelpers?window.CalcHelpers.tooltipIcon('resultat_economique'):''), t.base.resultatEco, t.sim.resultatEco, t.deltaResultatEco)}
+        ${impactCard('Résultat trésorerie '+(window.CalcHelpers?window.CalcHelpers.tooltipIcon('resultat_tresorerie'):''), t.base.resultat, t.sim.resultat, t.deltaResultat)}
+        ${impactCard('Marge nette éco.', t.base.ca>0?t.base.resultatEco/t.base.ca*100:0, t.sim.ca>0?t.sim.resultatEco/t.sim.ca*100:0, (t.sim.ca>0?t.sim.resultatEco/t.sim.ca*100:0)-(t.base.ca>0?t.base.resultatEco/t.base.ca*100:0), false, true)}
       </div>
 
       <!-- Chart -->

@@ -498,6 +498,112 @@
   };
 
   /* ───────────────────────────────────────────────────────────────────────
+   * TOOLTIP UI — injection CSS automatique + helper tooltipIcon()
+   * ───────────────────────────────────────────────────────────────────────
+   * Le CSS est injecté une seule fois par page, dès que le helper est chargé.
+   * Chaque page peut ensuite appeler CalcHelpers.tooltipIcon('resultat_economique')
+   * pour obtenir un span HTML à insérer à côté d'un libellé KPI.
+   *
+   * UX :
+   *   • Hover desktop → infobulle riche (titre + short + long en 3 niveaux)
+   *   • Focus clavier (Tab) → même infobulle
+   *   • Mobile → tap active :focus, retap ailleurs désactive
+   * ─────────────────────────────────────────────────────────────────────── */
+  H._injectTooltipCSS = function () {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('ch-tooltip-css')) return;
+    var css = [
+      '.ch-tt{display:inline-flex;align-items:center;justify-content:center;',
+      'width:16px;height:16px;border-radius:50%;background:rgba(100,116,139,.15);',
+      'color:#64748b;font-size:10px;font-weight:700;cursor:help;margin-left:6px;',
+      'vertical-align:middle;position:relative;border:none;padding:0;',
+      'font-family:inherit;line-height:1;transition:all .15s}',
+      '.ch-tt:hover,.ch-tt:focus{background:rgba(37,99,235,.15);color:#2563eb;outline:none}',
+      '.ch-tt-pop{position:fixed;background:#0f172a;color:#f1f5f9;',
+      'padding:12px 14px;border-radius:10px;font-size:12px;font-weight:500;',
+      'white-space:normal;width:280px;max-width:90vw;z-index:99999;',
+      'box-shadow:0 10px 40px rgba(0,0,0,.25),0 0 0 1px rgba(255,255,255,.06);',
+      'line-height:1.5;text-align:left;text-transform:none;letter-spacing:normal;',
+      'opacity:0;pointer-events:none;transition:opacity .15s;left:-9999px;top:-9999px}',
+      '.ch-tt:hover .ch-tt-pop,.ch-tt:focus .ch-tt-pop{opacity:1}',
+      '.ch-tt-title{font-weight:700;font-size:12px;margin-bottom:4px;color:#fff}',
+      '.ch-tt-short{font-weight:500;color:#e2e8f0;margin-bottom:8px;font-size:11px}',
+      '.ch-tt-long{color:#cbd5e1;font-size:11px;font-weight:400}',
+      '@media(max-width:640px){.ch-tt-pop{width:240px;font-size:11px;padding:10px 12px}}'
+    ].join('');
+    var s = document.createElement('style');
+    s.id = 'ch-tooltip-css';
+    s.textContent = css;
+    (document.head || document.documentElement).appendChild(s);
+    // Positionnement dynamique du popover au hover/focus pour contourner
+    // tout parent avec overflow:hidden (ex. .sum-card de pilotage).
+    document.addEventListener('mouseover', H._positionTooltip, true);
+    document.addEventListener('focusin', H._positionTooltip, true);
+  };
+
+  // Calcule position: fixed du popover pour qu'il apparaisse au-dessus du bouton
+  H._positionTooltip = function (evt) {
+    var btn = evt.target;
+    if (!btn || !btn.classList || !btn.classList.contains('ch-tt')) return;
+    var pop = btn.querySelector('.ch-tt-pop');
+    if (!pop) return;
+    var rect = btn.getBoundingClientRect();
+    // Placer au-dessus, centré sur le bouton, dans les limites de la viewport
+    var popWidth = 280;
+    var vw = window.innerWidth || document.documentElement.clientWidth;
+    var vh = window.innerHeight || document.documentElement.clientHeight;
+    var left = rect.left + rect.width / 2 - popWidth / 2;
+    if (left < 8) left = 8;
+    if (left + popWidth > vw - 8) left = vw - popWidth - 8;
+    // Afficher au-dessus si possible, sinon en-dessous
+    pop.style.left = left + 'px';
+    pop.style.top = rect.top - 10 + 'px';
+    pop.style.transform = 'translateY(-100%)';
+    // Si pas assez de place en haut, basculer en bas
+    if (rect.top < 180) {
+      pop.style.top = rect.bottom + 10 + 'px';
+      pop.style.transform = 'none';
+    }
+  };
+
+  // Échappement HTML minimaliste pour les attributs
+  H._esc = function (str) {
+    if (str == null) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+
+  /**
+   * Retourne un bouton ℹ️ avec popover contenant l'explication d'une clé.
+   * Usage : element.innerHTML += CalcHelpers.tooltipIcon('resultat_economique');
+   * Ou dans un template : `${CalcHelpers.tooltipIcon('cle')}`
+   */
+  H.tooltipIcon = function (key) {
+    var e = H.EXPLANATIONS[key];
+    if (!e) return '';
+    H._injectTooltipCSS();
+    return '<button type="button" class="ch-tt" tabindex="0" aria-label="' +
+      H._esc(e.title) + '">i<span class="ch-tt-pop" role="tooltip">' +
+      '<div class="ch-tt-title">' + H._esc(e.title) + '</div>' +
+      '<div class="ch-tt-short">' + H._esc(e.short) + '</div>' +
+      '<div class="ch-tt-long">' + H._esc(e.long) + '</div>' +
+      '</span></button>';
+  };
+
+  // Injecte le CSS dès que le DOM est prêt (si on est en contexte navigateur)
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', H._injectTooltipCSS);
+    } else {
+      H._injectTooltipCSS();
+    }
+  }
+
+  /* ───────────────────────────────────────────────────────────────────────
    * META
    * ─────────────────────────────────────────────────────────────────────── */
   H.version = '1.0.0'; // Wave 1

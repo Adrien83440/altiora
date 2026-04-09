@@ -643,6 +643,7 @@
 
 </script>
 
+<script src="calc-helpers.js"></script>
 <script>
 const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 const MONTHS_SHORT=['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
@@ -817,22 +818,19 @@ async function fetchNews(){
 
 /* ─── MASSE SALARIALE HELPER ─── */
 function _calcMS(d) {
+  // Wave 1 : délégation vers calc-helpers.js (gère auto-paie, primes, etc.)
+  if (window.CalcHelpers && window.CalcHelpers.calcMasseSalariale) {
+    return window.CalcHelpers.calcMasseSalariale(d).total;
+  }
+  // Fallback défensif
   var ms = d && d.masseSalariale;
   if (!ms) return 0;
   var total = 0;
-  if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
-    window._rhEmployes.forEach(function(e) {
-      var brut = parseFloat(e.salaireBrut) || 0;
-      var taux = (parseFloat(e.tauxCharges) || 42) / 100;
-      total += brut * (1 + taux);
-    });
-  } else {
-    (ms.lignes || []).forEach(function(l) {
-      var brut = parseFloat((l.brut || '').toString().replace(',', '.')) || 0;
-      var taux = (parseFloat(l.tauxCharges) || 42) / 100;
-      total += brut * (1 + taux);
-    });
-  }
+  (ms.lignes || []).forEach(function(l) {
+    var brut = parseFloat((l.brut || '').toString().replace(',', '.')) || 0;
+    var taux = (parseFloat(l.tauxCharges) || 42) / 100;
+    total += brut * (1 + taux);
+  });
   var dir = ms.dirigeant || {};
   if (dir.type !== 'prelevement') {
     var remDir = parseFloat((dir.remuneration || '').toString().replace(',', '.')) || 0;
@@ -846,7 +844,7 @@ function _calcMS(d) {
 }
 
 /* ─── EXTRACTION DONNÉES MOIS ─── */
-function extractMonthData(d,isFuture){
+function extractMonthData(d,isFuture,monthKey){
   if(!d)return{caHT:0,caTTC:0,tvaCollectee:0,rentrees:0,prevCA:0,fixesHT:0,varHT:0,creditsHT:0,leasingHT:0,masseSalHT:0,chargesHT:0,resultat:0,cashflow:0,prevCharges:0,isFuture:false,caJournalier:[]};
   const caHT_j=d.ca?d.ca.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0,hC=htCust(r);const multi=h055+h10+h20+hC;return s+(multi>0?multi:(parseFloat(r.montantHT)||0));},0):0;
   const caTTC_j=d.ca?d.ca.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0,hC=htCust(r);const multi=Math.round(h055*1.055*100)/100+Math.round(h10*1.10*100)/100+Math.round(h20*1.20*100)/100+ttcCust(r);if(h055+h10+h20+hC>0)return s+multi;const h=parseFloat(r.montantHT)||0;return s+Math.round(h*(1+(r.tvaRate||0)/100)*100)/100;},0):0;
@@ -864,20 +862,52 @@ function extractMonthData(d,isFuture){
   const fixesTTC=d.chargesFixe?d.chargesFixe.reduce((s,r)=>{var h=parseFloat(r.montantHT)||0;return s+Math.round(h*(1+(parseFloat(r.tvaRate)||0)/100)*100)/100;},0):0;
   const varHT=d.chargesVar?d.chargesVar.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
   const varTTC=d.chargesVar?d.chargesVar.reduce((s,r)=>{var h=parseFloat(r.montantHT)||0;return s+Math.round(h*(1+(parseFloat(r.tvaRate)||0)/100)*100)/100;},0):0;
-  const leasingHT=d.leasing?d.leasing.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
-  const leasingTTC=d.leasing?d.leasing.reduce((s,r)=>{var h=parseFloat(r.montantHT)||0;return s+Math.round(h*(1+(parseFloat(r.tvaRate)||0)/100)*100)/100;},0):0;
+  // Leasing — Wave 1 : respecte la plage dateDebut/dateFin
+  const leasingHT=d.leasing?d.leasing.reduce((s,r)=>{
+    if (monthKey && r.dateDebut && r.dateFin && window.CalcHelpers) {
+      const dbg=window.CalcHelpers.parseYYYYMM(r.dateDebut), fng=window.CalcHelpers.parseYYYYMM(r.dateFin);
+      if (dbg && fng && (monthKey<dbg||monthKey>fng)) return s;
+    }
+    return s+(parseFloat(r.montantHT)||0);
+  },0):0;
+  const leasingTTC=d.leasing?d.leasing.reduce((s,r)=>{
+    if (monthKey && r.dateDebut && r.dateFin && window.CalcHelpers) {
+      const dbg=window.CalcHelpers.parseYYYYMM(r.dateDebut), fng=window.CalcHelpers.parseYYYYMM(r.dateFin);
+      if (dbg && fng && (monthKey<dbg||monthKey>fng)) return s;
+    }
+    var h=parseFloat(r.montantHT)||0;
+    return s+Math.round(h*(1+(parseFloat(r.tvaRate)||0)/100)*100)/100;
+  },0):0;
+  // Crédits — Wave 1 : via CalcHelpers.parseCredits (corrige bug #3 : cette page
+  // ignorait les intérêts d'emprunt en format actuel)
   let creditsHT=0;
-  if(d.credits)d.credits.forEach((r,i)=>{
-    if(r.ligneType==='principal')creditsHT+=parseFloat(r.montant)||0;
-    else{let mt=parseFloat(r.montant)||0;if(r.tvaAuto&&parseFloat(r.tauxInteret)>0){const p=d.credits.slice(0,i).reverse().find(c=>c.fournisseur===r.fournisseur&&c.ligneType==='principal');if(p)mt=(parseFloat(p.montant)||0)*parseFloat(r.tauxInteret)/100/12;}creditsHT+=mt;}
+  if (window.CalcHelpers) {
+    const ci=window.CalcHelpers.parseCredits(d.credits||[], monthKey);
+    creditsHT = ci.total;
+  } else if(d.credits) d.credits.forEach((r,i)=>{
+    if(r.ligneType==='principal'||!r.ligneType){
+      creditsHT+=parseFloat(r.montant)||0;
+      const tx=parseFloat(r.tauxInteret)||0;
+      if((parseFloat(r.montant)||0)>0&&tx>0) creditsHT+=(parseFloat(r.montant)||0)*tx/100/12;
+    } else if(r.ligneType==='interet') {
+      let mt=parseFloat(r.montant)||0;
+      if(r.tvaAuto&&parseFloat(r.tauxInteret)>0){const p=d.credits.slice(0,i).reverse().find(c=>c.fournisseur===r.fournisseur&&c.ligneType==='principal');if(p)mt=(parseFloat(p.montant)||0)*parseFloat(r.tauxInteret)/100/12;}
+      creditsHT+=mt;
+    }
   });
   const masseSalHT=_calcMS(d);
   const chargesHT=fixesHT+varHT+creditsHT+leasingHT+masseSalHT;
+  // Wave 2 — séparer principal vs total pour pouvoir calculer resultatEconomique
+  const creditsPrincipalOnly = window.CalcHelpers
+    ? window.CalcHelpers.parseCredits(d.credits||[], monthKey).principal
+    : 0;
   const prevCharges=isFuture?chargesHT:0;
   const prevCAFutur=isFuture?(caHT||0):0;
   const caHTReel=isFuture?0:caHT;
   const chargesReel=isFuture?0:chargesHT;
   const resultat=isFuture?0:(caHT+rentrees-chargesHT);
+  // Wave 2 — résultat économique (vision comptable) = sans le capital d'emprunt
+  const resultatEconomique = isFuture ? 0 : (resultat + creditsPrincipalOnly);
   const cashflow=isFuture?0:(caTTC+rentrees-(fixesTTC+varTTC+creditsHT+leasingTTC+masseSalHT));
   const prevCAFinal=isFuture?(prevCA||prevCAFutur):prevCA;
   // Extraire les ventes journalières du mois
@@ -885,7 +915,8 @@ function extractMonthData(d,isFuture){
   return{caHT:caHTReel,caTTC:isFuture?0:caTTC,tvaCollectee:isFuture?0:tvaCollectee,
     rentrees:isFuture?0:rentrees,prevCA:prevCAFinal,
     fixesHT:isFuture?0:fixesHT,varHT:isFuture?0:varHT,creditsHT:isFuture?0:creditsHT,
-    leasingHT:isFuture?0:leasingHT,masseSalHT:isFuture?0:masseSalHT,chargesHT:chargesReel,resultat,cashflow,
+    creditsPrincipal:isFuture?0:creditsPrincipalOnly,
+    leasingHT:isFuture?0:leasingHT,masseSalHT:isFuture?0:masseSalHT,chargesHT:chargesReel,resultat,resultatEconomique,cashflow,
     prevCharges,isFuture:!!isFuture,caJournalier};
 }
 
@@ -965,7 +996,7 @@ async function loadData(_tries){
   const monthsData=allMonths.map((d,i)=>{
     const ym=fiscalMonths[i];
     const key=`${ym.year}-${String(ym.month+1).padStart(2,'0')}`;
-    return extractMonthData(d,key>nowKey2);
+    return extractMonthData(d,key>nowKey2,key);
   });
 
   // Données mois courant — trouver l'index du mois courant dans fiscalMonths
@@ -983,6 +1014,8 @@ async function loadData(_tries){
   const annualCA=monthsData.reduce((s,d)=>s+d.caHT,0);
   const annualCharges=monthsData.reduce((s,d)=>s+d.chargesHT,0);
   const annualResultat=monthsData.reduce((s,d)=>s+d.resultat,0);
+  const annualResultatEconomique=monthsData.reduce((s,d)=>s+(d.resultatEconomique||0),0);
+  const annualCreditsPrincipal=monthsData.reduce((s,d)=>s+(d.creditsPrincipal||0),0);
   const annualCashflow=monthsData.reduce((s,d)=>s+d.cashflow,0);
   const annualPrevCharges=monthsData.reduce((s,d)=>s+d.prevCharges,0);
   const annualPrevCA=monthsData.reduce((s,d)=>s+d.prevCA,0);
@@ -1286,11 +1319,17 @@ async function loadData(_tries){
           ${varCharges!==null?`<span class="${varCharges<=0?'up':'down'}">${varCharges<=0?'▼':'▲'} ${Math.abs(varCharges).toFixed(1)}% vs mois préc.</span>`:`<span class="neutral">Fixes ${fmtE(current.fixesHT)} · Var. ${fmtE(current.varHT)}${(current.masseSalHT||0)>0?' · Sal. '+fmtE(current.masseSalHT):''}</span>`}
         </div>
       </div>
-      <div class="kpi-card ${!hasCurrentData?'green':current.resultat>=0?'green':'red'}">
+      <div class="kpi-card ${!hasCurrentData?'green':current.resultatEconomique>=0?'green':'red'}">
         <div class="kpi-icon">📊</div>
-        <div class="kpi-label">Résultat HT</div>
+        <div class="kpi-label">Résultat économique ${window.CalcHelpers ? window.CalcHelpers.tooltipIcon('resultat_economique') : ''}</div>
+        <div class="kpi-value ${!hasCurrentData?'empty':current.resultatEconomique>=0?'positive':'negative'}">${hasCurrentData?fmtE(current.resultatEconomique):'— €'}</div>
+        <div class="kpi-sub"><span class="neutral">Vision comptable · hors capital emprunt</span></div>
+      </div>
+      <div class="kpi-card ${!hasCurrentData?'green':current.resultat>=0?'green':'red'}">
+        <div class="kpi-icon">💼</div>
+        <div class="kpi-label">Résultat trésorerie ${window.CalcHelpers ? window.CalcHelpers.tooltipIcon('resultat_tresorerie') : ''}</div>
         <div class="kpi-value ${!hasCurrentData?'empty':current.resultat>=0?'positive':'negative'}">${hasCurrentData?fmtE(current.resultat):'— €'}</div>
-        <div class="kpi-sub"><span class="neutral">CA − Dépenses du mois</span></div>
+        <div class="kpi-sub"><span class="neutral">${(current.creditsPrincipal||0)>0?'Après remb. capital '+fmtE(current.creditsPrincipal):'CA − Dépenses du mois'}</span></div>
       </div>
       <div class="kpi-card teal">
         <div class="kpi-icon">💸</div>
@@ -1334,11 +1373,17 @@ async function loadData(_tries){
         <div class="kpi-value ${!hasAnnualData?'empty':''}">${hasAnnualData?fmtE(annualCharges):'— €'}</div>
         <div class="kpi-sub"><span class="neutral">Fixes + Var + Crédits + Leasing${(current.masseSalHT||0)>0?' + Masse sal.':''}</span></div>
       </div>
-      <div class="kpi-card ${!hasAnnualData?'green':annualResultat>=0?'green':'red'}">
+      <div class="kpi-card ${!hasAnnualData?'green':annualResultatEconomique>=0?'green':'red'}">
         <div class="kpi-icon">🎯</div>
-        <div class="kpi-label">Résultat réel HT</div>
+        <div class="kpi-label">Résultat économique ${window.CalcHelpers ? window.CalcHelpers.tooltipIcon('resultat_economique') : ''}</div>
+        <div class="kpi-value ${!hasAnnualData?'empty':annualResultatEconomique>=0?'positive':'negative'}">${hasAnnualData?fmtE(annualResultatEconomique):'— €'}</div>
+        <div class="kpi-sub"><span class="neutral">Vision comptable annuelle · hors capital emprunt</span></div>
+      </div>
+      <div class="kpi-card ${!hasAnnualData?'green':annualResultat>=0?'green':'red'}">
+        <div class="kpi-icon">💼</div>
+        <div class="kpi-label">Résultat trésorerie ${window.CalcHelpers ? window.CalcHelpers.tooltipIcon('resultat_tresorerie') : ''}</div>
         <div class="kpi-value ${!hasAnnualData?'empty':annualResultat>=0?'positive':'negative'}">${hasAnnualData?fmtE(annualResultat):'— €'}</div>
-        <div class="kpi-sub"><span class="neutral">${annualPrevResultat!==0?`Total prévi : ${fmtE(annualTotalResultat)}`:'CA − Charges mois passés'}</span></div>
+        <div class="kpi-sub"><span class="neutral">${annualCreditsPrincipal>0?'Après remb. capital '+fmtE(annualCreditsPrincipal):(annualPrevResultat!==0?'Total prévi : '+fmtE(annualTotalResultat):'CA − Charges mois passés')}</span></div>
       </div>
       <div class="kpi-card teal">
         <div class="kpi-icon">💸</div>

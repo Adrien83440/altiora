@@ -81,7 +81,7 @@
   .btn-sm{padding:5px 11px;font-size:12px}
 
   /* ── CARDS ── */
-  .summary-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:20px}
+  .summary-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-bottom:20px}
   .sum-card{background:var(--glass-bg);backdrop-filter:var(--glass-blur);-webkit-backdrop-filter:var(--glass-blur);border:1px solid var(--glass-border);border-top:1px solid var(--glass-border-top);border-radius:var(--radius);padding:16px 18px;position:relative;overflow:hidden;transition:transform 0.3s cubic-bezier(.4,0,.2,1),box-shadow 0.3s;box-shadow:var(--glass-shadow),var(--glass-inset)}
   .sum-card:hover{box-shadow:var(--glass-shadow-hover),var(--glass-inset);transform:translateY(-3px)}
   .sum-card::after{content:'';position:absolute;top:0;left:0;right:0;height:55%;background:var(--glass-shine);pointer-events:none;border-radius:var(--radius) var(--radius) 0 0}
@@ -194,6 +194,9 @@
   .nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:90}
   .nav-overlay.show{display:block}
 
+  @media(max-width:1200px){
+    .summary-grid{grid-template-columns:repeat(3,1fr)}
+  }
   @media(max-width:900px){
     .summary-grid{grid-template-columns:repeat(2,1fr)}
     .sections-grid{grid-template-columns:1fr}
@@ -437,15 +440,21 @@
         <div class="sum-value" x-text="fmtSigned(t.chargesHT)" id="s-ch"></div>
         <div class="sum-sub" x-text="'Fixes ' + fmtE(t.fixesHT) + ' · Var. ' + fmtE(t.varHT) + (t.masseSalHT > 0 ? ' · Sal. ' + fmtE(t.masseSalHT) : '')"></div>
       </div>
-      <div class="sum-card" :class="t.resultat >= 0 ? 'green' : 'red'">
-        <div class="sum-label">Résultat HT</div>
-        <div class="sum-value" :class="t.resultat >= 0 ? 'positive' : 'negative'" x-text="fmtSigned(t.resultat)" id="s-res"></div>
-        <div class="sum-sub" x-show="t.prelevementPriveHT <= 0">CA − Dépenses</div>
+      <div class="sum-card" :class="t.resultatEconomique >= 0 ? 'green' : 'red'">
+        <div class="sum-label">Résultat économique <span x-html="window.CalcHelpers ? window.CalcHelpers.tooltipIcon('resultat_economique') : ''"></span></div>
+        <div class="sum-value" :class="t.resultatEconomique >= 0 ? 'positive' : 'negative'" x-text="fmtSigned(t.resultatEconomique)" id="s-res-eco"></div>
+        <div class="sum-sub" x-show="t.prelevementPriveHT <= 0">Vision comptable · hors capital emprunt</div>
         <div class="sum-sub" x-show="t.prelevementPriveHT > 0" style="font-size:10px;line-height:1.4">
-          <span>CA − Dépenses (hors prélèv. privé)</span><br>
+          <span>Vision comptable · hors capital emprunt</span><br>
           <span style="opacity:.7">Prélèv. dirigeant :</span> <span x-text="fmtE(t.prelevementPriveHT)" style="font-weight:600"></span>
-          <span style="opacity:.5">→ Après prélèv. :</span> <span :style="'font-weight:700;color:' + ((t.resultat - t.prelevementPriveHT) >= 0 ? '#10b981' : '#ef4444')" x-text="fmtSigned(t.resultat - t.prelevementPriveHT)"></span>
+          <span style="opacity:.5">→ Après prélèv. :</span> <span :style="'font-weight:700;color:' + ((t.resultatEconomique - t.prelevementPriveHT) >= 0 ? '#10b981' : '#ef4444')" x-text="fmtSigned(t.resultatEconomique - t.prelevementPriveHT)"></span>
         </div>
+      </div>
+      <div class="sum-card" :class="t.resultat >= 0 ? 'green' : 'red'">
+        <div class="sum-label">Résultat trésorerie <span x-html="window.CalcHelpers ? window.CalcHelpers.tooltipIcon('resultat_tresorerie') : ''"></span></div>
+        <div class="sum-value" :class="t.resultat >= 0 ? 'positive' : 'negative'" x-text="fmtSigned(t.resultat)" id="s-res"></div>
+        <div class="sum-sub" x-show="t.creditsPrincipal > 0" x-text="'Après remb. capital ' + fmtE(t.creditsPrincipal)"></div>
+        <div class="sum-sub" x-show="t.creditsPrincipal <= 0">Pas d'emprunt en cours</div>
       </div>
       <div class="sum-card purple">
         <div class="sum-label">TVA collectée</div>
@@ -814,6 +823,12 @@ onAuthStateChanged(auth, async function(user) {
 </script>
 
 <!-- ═══════════════════════════════════════════════
+     Wave 1 : source de vérité unique pour les calculs partagés
+     (crédits, masse salariale) — voir calc-helpers.js
+     ═══════════════════════════════════════════════ -->
+<script src="calc-helpers.js"></script>
+
+<!-- ═══════════════════════════════════════════════
      SCRIPT 2 : Application (script classique)
      Tout le code métier est ici — pas de Firebase direct
      ═══════════════════════════════════════════════ -->
@@ -824,7 +839,7 @@ function pilotageApp() {
     // État réactif des KPIs
     t: {
       caHT: 0, caHT_j: 0, caFP_HT: 0, chargesHT: 0, fixesHT: 0, varHT: 0, masseSalHT: 0, prelevementPriveHT: 0,
-      resultat: 0, tvaCollectee: 0, tvaDue: 0, tvaDed: 0,
+      resultat: 0, resultatEconomique: 0, tvaCollectee: 0, tvaDue: 0, tvaDed: 0,
       creditsPrincipal: 0, creditsInteret: 0, cashflow: 0, delta: 0, prevCA: 0
     },
     monthLabel: 'Chargement...',
@@ -2069,9 +2084,22 @@ function getEmployeMSLineAutoPaie(emp) {
 }
 
 function calcMasseSalariale(ms) {
+  // Wave 1 : délégation vers calc-helpers.js pour garantir la cohérence avec
+  // dashboard/rapport-annuel/cashflow/suivi-ca/scenarios.
+  //
+  // Le helper gère le mode 'auto-paie' via getEmployeMSLineAutoPaie (définie plus
+  // haut dans ce fichier), qui accède aux données rh-paie du mois courant.
+  // Sur les autres pages, le helper retombe proprement sur le salaireBrut statique.
+  //
+  // La signature historique de cette fonction reçoit `ms` directement (l'objet
+  // masseSalariale), alors que le helper attend le document complet. On wrappe.
+  if (window.CalcHelpers && window.CalcHelpers.calcMasseSalariale) {
+    return window.CalcHelpers.calcMasseSalariale({ masseSalariale: ms });
+  }
+
+  // ─── FALLBACK DÉFENSIF (si le helper n'est pas chargé) ───
   var totalSal = 0, totalDir = 0, totalPrimes = 0;
   if (ms.mode === 'auto-paie' && window._rhEmployes && window._rhEmployes.length > 0) {
-    // Wave 4 : mode auto-paie — somme des superbrut depuis rh-paie, avec fallback fiche statique
     window._rhEmployes.forEach(function(e) {
       var line = getEmployeMSLineAutoPaie(e);
       totalSal += line.cout || 0;
@@ -2089,7 +2117,6 @@ function calcMasseSalariale(ms) {
       totalSal += brut * (1 + taux / 100);
     });
   }
-  // Primes depuis module Objectifs
   if (window._rhObjectifs && window._rhObjectifs.length > 0) {
     window._rhObjectifs.forEach(function(obj) {
       if (obj.statut === 'annule' || obj.statut === 'brouillon') return;
@@ -2097,7 +2124,6 @@ function calcMasseSalariale(ms) {
       var montant = parseFloat(prime.montantBrut) || 0;
       if (montant <= 0) return;
       var taux = parseFloat(prime.tauxCharges) || 45;
-      // Calculer avancement
       var av = _calcObjAvancement(obj);
       var mode = prime.modePalier || 'tout_ou_rien';
       var brut = 0;
@@ -2110,13 +2136,11 @@ function calcMasseSalariale(ms) {
         }
       }
       if (brut > 0) {
-        // Pour objectifs équipe, multiplier par nb membres
         var vol = (obj.type === 'equipe' && obj.employeIds) ? obj.employeIds.length : 1;
         totalPrimes += brut * (1 + taux / 100) * vol;
       }
     });
   }
-  // Dirigeant (toujours manuel)
   var dir = ms.dirigeant || {};
   var remDir = pf(dir.remuneration);
   var tauxDir = parseFloat(dir.tauxCharges);
@@ -3724,18 +3748,25 @@ function calcTotals(data) {
   var creditsPrincipal=0,creditsInteret=0,creditsTVA=0;
   // Migrer si ancienne structure paires principal+interet
   var creditsToCalc = migrateCreditsToSingleLine ? migrateCreditsToSingleLine(data.credits.slice()) : data.credits;
-  creditsToCalc.forEach(function(r){
-    // Filtre dynamique : si dates renseignées, ne compter que si le mois est dans la plage
-    if (r.dateDebut && r.dateFin && curMonthKey) {
-      var _deb = parseYYYYMM(r.dateDebut), _fin = parseYYYYMM(r.dateFin);
-      if (_deb && _fin && (curMonthKey < _deb || curMonthKey > _fin)) return;
-    }
-    var parseVal = function(v){ return parseFloat((v||'').toString().replace(',','.')) || 0; };
-    var principal = parseVal(r.montant);
-    var interet   = (function(){ var p=principal, taux=parseVal(r.tauxInteret); return (p>0&&taux>0)?p*taux/100/12:0; })();
-    creditsPrincipal += principal;
-    creditsInteret   += interet;
-  });
+  // Wave 1 : délégation vers CalcHelpers.parseCredits (même calcul sur toutes les pages)
+  if (window.CalcHelpers) {
+    var ci = window.CalcHelpers.parseCredits(creditsToCalc, curMonthKey);
+    creditsPrincipal = ci.principal;
+    creditsInteret = ci.interet;
+  } else {
+    // Fallback défensif si le helper n'est pas chargé
+    creditsToCalc.forEach(function(r){
+      if (r.dateDebut && r.dateFin && curMonthKey) {
+        var _deb = parseYYYYMM(r.dateDebut), _fin = parseYYYYMM(r.dateFin);
+        if (_deb && _fin && (curMonthKey < _deb || curMonthKey > _fin)) return;
+      }
+      var parseVal = function(v){ return parseFloat((v||'').toString().replace(',','.')) || 0; };
+      var principal = parseVal(r.montant);
+      var interet   = (function(){ var p=principal, taux=parseVal(r.tauxInteret); return (p>0&&taux>0)?p*taux/100/12:0; })();
+      creditsPrincipal += principal;
+      creditsInteret   += interet;
+    });
+  }
   var chargesHT = fixesHT+varHT+creditsPrincipal+creditsInteret+leasingHT;
   // Masse salariale
   var msCalc = calcMasseSalariale(data.masseSalariale || {});
@@ -3744,10 +3775,18 @@ function calcTotals(data) {
   chargesHT += masseSalHT;
   var tvaDed = fixesTVA+varTVA+leasingTVA;
   var tvaDue = tvaCollectee-tvaDed;
+  // Wave 2 — DOUBLE KPI RÉSULTAT
+  // • resultat (historique) = résultat en trésorerie, inclut le remboursement
+  //   du capital d'emprunt comme une charge (= ce qui sort réellement du compte).
+  // • resultatEconomique = résultat au sens comptable (liasse fiscale). Le
+  //   capital d'emprunt n'est PAS une charge comptable — il ne fait que réduire
+  //   la dette au bilan. Seuls les intérêts le sont. C'est ce chiffre que
+  //   l'expert-comptable regarde.
   var resultat = caHT+rentreesSupp-chargesHT;
+  var resultatEconomique = resultat + creditsPrincipal;
   var cashflow = caHT+rentreesSupp-(fixesTTC+varTTC+creditsPrincipal+creditsInteret+leasingTTC+masseSalHT);
   var delta = resultat-(prevCA-chargesHT);
-  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caHTCust,caTTC,caTTC_j,caTTC_fp,tvaCollectee,tvaC_j,tvaC_fp,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,varHT_excep,varTTC_excep,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,cashflow,delta,caFP055,caFP10,caFP20,caFPCust,masseSalHT,prelevementPriveHT};
+  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caHTCust,caTTC,caTTC_j,caTTC_fp,tvaCollectee,tvaC_j,tvaC_fp,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,varHT_excep,varTTC_excep,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,resultatEconomique,cashflow,delta,caFP055,caFP10,caFP20,caFPCust,masseSalHT,prelevementPriveHT};
 }
 
 function refreshTotals() {

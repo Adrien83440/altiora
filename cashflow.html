@@ -355,6 +355,7 @@ main{margin-left:250px;flex:1;display:flex;flex-direction:column}
   });
 </script>
 
+<script src="calc-helpers.js"></script>
 <script>
 /* ── HELPERS ── */
 function fmt(n) {
@@ -506,7 +507,7 @@ async function loadYear(year) {
 
   var nowKeyCF = (new Date()).getFullYear() + '-' + String((new Date()).getMonth()+1).padStart(2,'0');
   const computed = months.map(function(mo) {
-    var r = calcMonth(mo.m, mo.raw, mo.key > nowKeyCF);
+    var r = calcMonth(mo.m, mo.raw, mo.key > nowKeyCF, mo.key);
     r.key = mo.key;
     return r;
   });
@@ -515,22 +516,19 @@ async function loadYear(year) {
 
 /* ─── MASSE SALARIALE HELPER ─── */
 function _calcMS(d) {
+  // Wave 1 : délégation vers calc-helpers.js (gère auto-paie, primes, etc.)
+  if (window.CalcHelpers && window.CalcHelpers.calcMasseSalariale) {
+    return window.CalcHelpers.calcMasseSalariale(d).total;
+  }
+  // Fallback défensif si le helper n'est pas chargé
   var ms = d && d.masseSalariale;
   if (!ms) return 0;
   var total = 0;
-  if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
-    window._rhEmployes.forEach(function(e) {
-      var brut = parseFloat(e.salaireBrut) || 0;
-      var taux = (parseFloat(e.tauxCharges) || 42) / 100;
-      total += brut * (1 + taux);
-    });
-  } else {
-    (ms.lignes || []).forEach(function(l) {
-      var brut = parseFloat((l.brut || '').toString().replace(',', '.')) || 0;
-      var taux = (parseFloat(l.tauxCharges) || 42) / 100;
-      total += brut * (1 + taux);
-    });
-  }
+  (ms.lignes || []).forEach(function(l) {
+    var brut = parseFloat((l.brut || '').toString().replace(',', '.')) || 0;
+    var taux = (parseFloat(l.tauxCharges) || 42) / 100;
+    total += brut * (1 + taux);
+  });
   var dir = ms.dirigeant || {};
   if (dir.type !== 'prelevement') {
     var remDir = parseFloat((dir.remuneration || '').toString().replace(',', '.')) || 0;
@@ -543,7 +541,7 @@ function _calcMS(d) {
   return total;
 }
 
-function calcMonth(m, raw, isFuture) {
+function calcMonth(m, raw, isFuture, monthKey) {
   if (!raw) return { m, hasData:false, caHT:0, caTotal:0, rentreeSupp:0, prevCA:0, chargesHT:0, fixesHT:0, varHT:0, leasingHT:0, masseSalHT:0, creditsPrincipal:0, creditsInteret:0, cashflow:0, tvaCollectee:0, tvaDed:0, tvaDue:0, prevCharges:0, isFuture:!!isFuture };
 
   // CA journalier
@@ -582,28 +580,38 @@ function calcMonth(m, raw, isFuture) {
     varHT += ht;
     if (r.deductible !== 'Non') tvaDedV += Math.round(ht*rate/100*100)/100;
   });
-  // Leasing
+  // Leasing — Wave 1 : respecte la plage dateDebut/dateFin comme pilotage
   let leasingHT=0, tvaDedL=0;
   (raw.leasing||[]).forEach(r => {
+    if (monthKey && r.dateDebut && r.dateFin && window.CalcHelpers) {
+      const deb = window.CalcHelpers.parseYYYYMM(r.dateDebut);
+      const fin = window.CalcHelpers.parseYYYYMM(r.dateFin);
+      if (deb && fin && (monthKey < deb || monthKey > fin)) return;
+    }
     const ht=pf(r.montantHT), rate=pf(r.tvaRate||20);
     leasingHT += ht;
     if (r.deductible !== 'Non') tvaDedL += Math.round(ht*rate/100*100)/100;
   });
-  // Crédits (pas de TVA sur les intérêts d'emprunt)
+  // Crédits — Wave 1 : via CalcHelpers.parseCredits (gère formats actuel + legacy,
+  // calcule les intérêts correctement, respecte le filtre dateDebut/dateFin).
+  // AVANT cette correction, cette page IGNORAIT les intérêts en format actuel (bug #3).
   let creditsPrincipal=0, creditsInteret=0;
-  (raw.credits||[]).forEach((r,i) => {
-    const arr = raw.credits;
-    if (r.ligneType === 'principal') {
-      creditsPrincipal += pf(r.montant);
-    } else {
-      let interet = pf(r.montant);
-      if (r.tvaAuto) {
-        const principal = arr.slice(0,i).reverse().find(c => c.fournisseur===r.fournisseur && c.ligneType==='principal');
-        if (principal) interet = pf(principal.montant) * pf(r.tauxInteret) / 100 / 12;
+  if (window.CalcHelpers) {
+    const ci = window.CalcHelpers.parseCredits(raw.credits||[], monthKey);
+    creditsPrincipal = ci.principal;
+    creditsInteret = ci.interet;
+  } else {
+    // Fallback défensif
+    (raw.credits||[]).forEach((r,i) => {
+      if (r.ligneType === 'principal' || !r.ligneType) {
+        creditsPrincipal += pf(r.montant);
+        const taux = pf(r.tauxInteret);
+        if (pf(r.montant) > 0 && taux > 0) creditsInteret += pf(r.montant) * taux / 100 / 12;
+      } else if (r.ligneType === 'interet') {
+        creditsInteret += pf(r.montant);
       }
-      creditsInteret += interet;
-    }
-  });
+    });
+  }
 
   const masseSalHT = _calcMS(raw);
   const chargesHT = fixesHT + varHT + leasingHT + creditsPrincipal + creditsInteret + masseSalHT;

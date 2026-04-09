@@ -258,6 +258,7 @@ onAuthStateChanged(auth, async user => {
   window.initRapport();
 });
 </script>
+<script src="calc-helpers.js"></script>
 <script>
 // ══════════════════════════════════════════════════════════
 // STOCK DATA HELPER — shared across dashboard/cashflow/suivi-ca/rapport
@@ -268,6 +269,12 @@ var _rhEmployes = []; // for masse salariale section
 
 /* ─── MASSE SALARIALE HELPER ─── */
 function _calcMS(d) {
+  // Wave 1 : délégation vers calc-helpers.js (gère auto-paie, primes, etc.)
+  // Avant Wave 1, cette fonction retournait 0 € en mode auto-paie (bug #4 de l'audit).
+  if (window.CalcHelpers && window.CalcHelpers.calcMasseSalariale) {
+    return window.CalcHelpers.calcMasseSalariale(d).total;
+  }
+  // Fallback défensif
   var ms = d && d.masseSalariale;
   if (!ms) return 0;
   var total = 0;
@@ -621,6 +628,14 @@ async function loadData(year){
     _rhEmployes = [];
     empSnap.forEach(function(d){ var e=d.data(); e.id=d.id; if(e.statut!=='inactif') _rhEmployes.push(e); });
   }catch(e){ _rhEmployes=[]; }
+  // Wave 1 : exposer à window pour que calc-helpers.js puisse y accéder
+  window._rhEmployes = _rhEmployes;
+  // Charger aussi les objectifs RH pour que les primes soient incluses dans la masse salariale
+  try{
+    var objSnap = await window._getDocs(window._collection(window._db,'rh',window._uid,'objectifs'));
+    window._rhObjectifs = [];
+    objSnap.forEach(function(d){ var o=d.data(); o.id=d.id; window._rhObjectifs.push(o); });
+  }catch(e){ window._rhObjectifs = []; }
   await loadStockData();
   renderRapport();
 }
@@ -664,14 +679,26 @@ function computeMonth(d,key,isFuture){
     variable+=h;
     if(r.deductible!=='Non')tvaDedVar+=Math.round(h*t/100*100)/100;
   });
-  // Crédits
+  // Crédits — Wave 1 : via CalcHelpers.parseCredits (robuste aux 2 formats)
+  // Wave 2 : on garde principal et intérêt séparés pour le résultat économique
   var credit=0;
-  (d.credits||[]).filter(function(r){return!r.ligneType||r.ligneType==='principal';}).forEach(function(r){
-    if(key&&r.dateDebut&&r.dateFin){var _d=parseYYYYMM(r.dateDebut),_f=parseYYYYMM(r.dateFin);if(_d&&_f&&(key<_d||key>_f))return;}
-    var p=pf(r.montant),t=pf(r.tauxInteret);
-    var inter=(p>0&&t>0?p*t/100/12:0);
-    credit+=p+inter;
-  });
+  var creditPrincipal=0;
+  var creditInteret=0;
+  if (window.CalcHelpers) {
+    var ci = window.CalcHelpers.parseCredits(d.credits||[], key);
+    credit = ci.total;
+    creditPrincipal = ci.principal;
+    creditInteret = ci.interet;
+  } else {
+    (d.credits||[]).filter(function(r){return!r.ligneType||r.ligneType==='principal';}).forEach(function(r){
+      if(key&&r.dateDebut&&r.dateFin){var _d=parseYYYYMM(r.dateDebut),_f=parseYYYYMM(r.dateFin);if(_d&&_f&&(key<_d||key>_f))return;}
+      var p=pf(r.montant),t=pf(r.tauxInteret);
+      var inter=(p>0&&t>0?p*t/100/12:0);
+      credit+=p+inter;
+      creditPrincipal+=p;
+      creditInteret+=inter;
+    });
+  }
   // Leasing
   var leasing=0,tvaDedLeas=0;
   (d.leasing||[]).forEach(function(r){
@@ -687,15 +714,24 @@ function computeMonth(d,key,isFuture){
   // Mois futur : charges et CA passent en prévisionnel, résultat réel = 0
   var prevCharges = isFuture ? charges : 0;
   var prevCA      = isFuture ? caHT    : 0;
-  if(isFuture){ charges=0; masseSal=0; fixe=0; variable=0; credit=0; leasing=0; caHT=0; caJ=0; caFP=0; caHT055=0; caHT10=0; caHT20=0; tvaCollectee=0; tvaDed=0; tvaDue=0; rentrees=0; }
+  if(isFuture){ charges=0; masseSal=0; fixe=0; variable=0; credit=0; creditPrincipal=0; creditInteret=0; leasing=0; caHT=0; caJ=0; caFP=0; caHT055=0; caHT10=0; caHT20=0; tvaCollectee=0; tvaDed=0; tvaDue=0; rentrees=0; }
   var resultat = caHT+rentrees-charges;
-  // Top charges for details
+  // Wave 2 — résultat économique (vision comptable) : on retire le capital d'emprunt
+  var resultatEconomique = resultat + creditPrincipal;
+  // Top charges for details — Wave 1 : fix de la catégorisation (avant, toutes
+  // les lignes sauf la première étaient taguées 'variable' par erreur)
   var topCharges=[];
-  (d.chargesFixe||[]).concat(d.chargesVar||[]).concat(d.leasing||[]).forEach(function(r){
-    if(pf(r.montantHT)>0)topCharges.push({fournisseur:r.fournisseur||'',type:r.type||'',montant:pf(r.montantHT),cat:r===((d.chargesFixe||[])[0])?'fixe':'variable'});
+  (d.chargesFixe||[]).forEach(function(r){
+    if(pf(r.montantHT)>0)topCharges.push({fournisseur:r.fournisseur||'',type:r.type||'',montant:pf(r.montantHT),cat:'fixe'});
+  });
+  (d.chargesVar||[]).forEach(function(r){
+    if(pf(r.montantHT)>0)topCharges.push({fournisseur:r.fournisseur||'',type:r.type||'',montant:pf(r.montantHT),cat:'variable'});
+  });
+  (d.leasing||[]).forEach(function(r){
+    if(pf(r.montantHT)>0)topCharges.push({fournisseur:r.fournisseur||'',type:r.type||'',montant:pf(r.montantHT),cat:'leasing'});
   });
   topCharges.sort(function(a,b){return b.montant-a.montant;});
-  return{caHT,caJ,caFP,caHT055,caHT10,caHT20,rentrees,fixe,variable,credit,leasing,masseSal,charges,resultat,
+  return{caHT,caJ,caFP,caHT055,caHT10,caHT20,rentrees,fixe,variable,credit,creditPrincipal,creditInteret,leasing,masseSal,charges,resultat,resultatEconomique,
     tvaCollectee,tvaDed,tvaDue,prevCharges,prevCA,isFuture:!!isFuture,topCharges,hasData:true};
 }
 
@@ -705,7 +741,7 @@ function aggregateKeys(keys){
   var _now=new Date();
   var nowKey=_now.getFullYear()+'-'+String(_now.getMonth()+1).padStart(2,'0');
 
-  var T={caHT:0,caJ:0,caFP:0,caHT055:0,caHT10:0,caHT20:0,rentrees:0,fixe:0,variable:0,credit:0,leasing:0,masseSal:0,charges:0,resultat:0,tvaCollectee:0,tvaDed:0,tvaDue:0,moisData:0,moisCA:0,prevCharges:0,prevCA:0};
+  var T={caHT:0,caJ:0,caFP:0,caHT055:0,caHT10:0,caHT20:0,rentrees:0,fixe:0,variable:0,credit:0,creditPrincipal:0,creditInteret:0,leasing:0,masseSal:0,charges:0,resultat:0,resultatEconomique:0,tvaCollectee:0,tvaDed:0,tvaDue:0,moisData:0,moisCA:0,prevCharges:0,prevCA:0};
   var monthly=[];
   var chargesMap={};
   keys.forEach(function(k){
@@ -729,7 +765,8 @@ function aggregateKeys(keys){
     T.caHT+=r.caHT;T.caJ+=r.caJ;T.caFP+=r.caFP;
     T.caHT055+=r.caHT055;T.caHT10+=r.caHT10;T.caHT20+=r.caHT20;
     T.rentrees+=r.rentrees;T.fixe+=r.fixe;T.variable+=r.variable;
-    T.credit+=r.credit;T.leasing+=r.leasing;T.masseSal+=(r.masseSal||0);T.charges+=r.charges;T.resultat+=r.resultat;
+    T.credit+=r.credit;T.creditPrincipal+=(r.creditPrincipal||0);T.creditInteret+=(r.creditInteret||0);
+    T.leasing+=r.leasing;T.masseSal+=(r.masseSal||0);T.charges+=r.charges;T.resultat+=r.resultat;T.resultatEconomique+=(r.resultatEconomique||0);
     T.tvaCollectee+=r.tvaCollectee;T.tvaDed+=r.tvaDed;T.tvaDue+=r.tvaDue;
     T.prevCharges+=r.prevCharges; T.prevCA+=r.prevCA;
   });
@@ -865,7 +902,12 @@ function renderRapport(){
   html+='<div class="kpi-row"><div class="band-title">Résultat annuel</div>';
   html+=kpi('blue','💰','CA Total HT',fmt(T.caHT),'Moy. '+fmt(caMens)+'/mois',null,evCA);
   html+=kpi('orange','💸','Total Charges',fmt(T.charges),fmtPct(txCharges,true)+' du CA',null,evCharges);
-  html+=kpi(T.resultat>=0?'green':'red',T.resultat>=0?'📈':'📉','Résultat réel',fmt(T.resultat),fmtPct(margeN,true)+' de marge',T.resultat>=0?'positive':'negative',evRes!==null?evRes:null,true);
+  // Wave 2 — double KPI Résultat économique / Résultat trésorerie
+  var _tooltipEco = window.CalcHelpers ? window.CalcHelpers.tooltipIcon('resultat_economique') : '';
+  var _tooltipTres = window.CalcHelpers ? window.CalcHelpers.tooltipIcon('resultat_tresorerie') : '';
+  var margeNEco = T.caHT>0 ? T.resultatEconomique/T.caHT*100 : 0;
+  html+=kpi(T.resultatEconomique>=0?'green':'red',T.resultatEconomique>=0?'📈':'📉','Résultat économique '+_tooltipEco,fmt(T.resultatEconomique),fmtPct(margeNEco,true)+' de marge',T.resultatEconomique>=0?'positive':'negative',null,true);
+  html+=kpi(T.resultat>=0?'green':'red','💼','Résultat trésorerie '+_tooltipTres,fmt(T.resultat),T.creditPrincipal>0?'Après remb. capital '+fmt(T.creditPrincipal):fmtPct(margeN,true)+' de marge',T.resultat>=0?'positive':'negative',evRes!==null?evRes:null,true);
   if(T.prevCharges>0){var prevRes=T.prevCA-T.prevCharges;html+=kpi(prevRes>=0?'teal':'orange','🔮','Prévisionnel (mois futurs)',fmt(prevRes),fmt(T.prevCharges)+' de charges prévi',prevRes>=0?'positive':'negative',null,false);}
   html+=kpi('purple','🏦','Encours dettes',fmt(totDettes),totMensDettes>0?fmt(totMensDettes)+'/mois':'Aucune échéance');
   html+=kpi('teal','🧾','TVA due (estimée)',fmt(Math.max(0,T.tvaDue)),T.tvaDue<0?'🟢 Crédit TVA '+fmt(Math.abs(T.tvaDue)):'Collectée : '+fmt(T.tvaCollectee));

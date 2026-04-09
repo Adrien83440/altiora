@@ -402,6 +402,7 @@
   });
 </script>
 
+<script src="calc-helpers.js"></script>
 <script>
 const MONTHS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
 const MONTHS_SHORT=['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Aoû','Sep','Oct','Nov','Déc'];
@@ -489,22 +490,19 @@ async function loadYear(_tries){
 
 /* ─── MASSE SALARIALE HELPER ─── */
 function _calcMS(d) {
+  // Wave 1 : délégation vers calc-helpers.js (gère auto-paie, primes, etc.)
+  if (window.CalcHelpers && window.CalcHelpers.calcMasseSalariale) {
+    return window.CalcHelpers.calcMasseSalariale(d).total;
+  }
+  // Fallback défensif
   var ms = d && d.masseSalariale;
   if (!ms) return 0;
   var total = 0;
-  if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
-    window._rhEmployes.forEach(function(e) {
-      var brut = parseFloat(e.salaireBrut) || 0;
-      var taux = (parseFloat(e.tauxCharges) || 42) / 100;
-      total += brut * (1 + taux);
-    });
-  } else {
-    (ms.lignes || []).forEach(function(l) {
-      var brut = parseFloat((l.brut || '').toString().replace(',', '.')) || 0;
-      var taux = (parseFloat(l.tauxCharges) || 42) / 100;
-      total += brut * (1 + taux);
-    });
-  }
+  (ms.lignes || []).forEach(function(l) {
+    var brut = parseFloat((l.brut || '').toString().replace(',', '.')) || 0;
+    var taux = (parseFloat(l.tauxCharges) || 42) / 100;
+    total += brut * (1 + taux);
+  });
   var dir = ms.dirigeant || {};
   if (dir.type !== 'prelevement') {
     var remDir = parseFloat((dir.remuneration || '').toString().replace(',', '.')) || 0;
@@ -557,20 +555,47 @@ function _calcMS(d) {
     const fixesTTC=d.chargesFixe?d.chargesFixe.reduce((s,r)=>{var h=parseFloat(r.montantHT)||0;return s+Math.round(h*(1+(parseFloat(r.tvaRate)||0)/100)*100)/100;},0):0;
     const varHT=d.chargesVar?d.chargesVar.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
     const varTTC=d.chargesVar?d.chargesVar.reduce((s,r)=>{var h=parseFloat(r.montantHT)||0;return s+Math.round(h*(1+(parseFloat(r.tvaRate)||0)/100)*100)/100;},0):0;
-    const leasingHT=d.leasing?d.leasing.reduce((s,r)=>s+(parseFloat(r.montantHT)||0),0):0;
-    const leasingTTC=d.leasing?d.leasing.reduce((s,r)=>{var h=parseFloat(r.montantHT)||0;return s+Math.round(h*(1+(parseFloat(r.tvaRate)||0)/100)*100)/100;},0):0;
-    let creditsHT=0;
-    if(d.credits)d.credits.forEach((r,i)=>{
-      if(r.ligneType==='principal')creditsHT+=parseFloat(r.montant)||0;
-      else{
-        let mt=parseFloat(r.montant)||0;
-        if(r.tvaAuto&&parseFloat(r.tauxInteret)>0){
-          const p=d.credits.slice(0,i).reverse().find(c=>c.fournisseur===r.fournisseur&&c.ligneType==='principal');
-          if(p)mt=(parseFloat(p.montant)||0)*parseFloat(r.tauxInteret)/100/12;
-        }
-        creditsHT+=mt;
+    // Leasing — Wave 1 : respecte la plage dateDebut/dateFin
+    const leasingHT=d.leasing?d.leasing.reduce((s,r)=>{
+      if (keyM && r.dateDebut && r.dateFin && window.CalcHelpers) {
+        const dbg=window.CalcHelpers.parseYYYYMM(r.dateDebut), fng=window.CalcHelpers.parseYYYYMM(r.dateFin);
+        if (dbg && fng && (keyM<dbg||keyM>fng)) return s;
       }
-    });
+      return s+(parseFloat(r.montantHT)||0);
+    },0):0;
+    const leasingTTC=d.leasing?d.leasing.reduce((s,r)=>{
+      if (keyM && r.dateDebut && r.dateFin && window.CalcHelpers) {
+        const dbg=window.CalcHelpers.parseYYYYMM(r.dateDebut), fng=window.CalcHelpers.parseYYYYMM(r.dateFin);
+        if (dbg && fng && (keyM<dbg||keyM>fng)) return s;
+      }
+      var h=parseFloat(r.montantHT)||0;
+      return s+Math.round(h*(1+(parseFloat(r.tvaRate)||0)/100)*100)/100;
+    },0):0;
+    // Crédits — Wave 1 : via CalcHelpers.parseCredits (corrige bug #3 : intérêts
+    // étaient ignorés en format actuel sur cette page)
+    let creditsHT=0;
+    let creditsPrincipalOnly=0;
+    if (window.CalcHelpers) {
+      const ci=window.CalcHelpers.parseCredits(d.credits||[], keyM);
+      creditsHT = ci.total;
+      creditsPrincipalOnly = ci.principal;
+    } else if (d.credits) {
+      d.credits.forEach((r,i)=>{
+        if(r.ligneType==='principal'||!r.ligneType){
+          creditsHT+=parseFloat(r.montant)||0;
+          creditsPrincipalOnly+=parseFloat(r.montant)||0;
+          const tx=parseFloat(r.tauxInteret)||0;
+          if((parseFloat(r.montant)||0)>0&&tx>0) creditsHT+=(parseFloat(r.montant)||0)*tx/100/12;
+        } else if(r.ligneType==='interet') {
+          let mt=parseFloat(r.montant)||0;
+          if(r.tvaAuto&&parseFloat(r.tauxInteret)>0){
+            const p=d.credits.slice(0,i).reverse().find(c=>c.fournisseur===r.fournisseur&&c.ligneType==='principal');
+            if(p)mt=(parseFloat(p.montant)||0)*parseFloat(r.tauxInteret)/100/12;
+          }
+          creditsHT+=mt;
+        }
+      });
+    }
     const masseSalHT=_calcMS(d);
     const chargesHT=fixesHT+varHT+creditsHT+leasingHT+masseSalHT;
     // Mois futur → tout en prévisionnel
@@ -580,11 +605,14 @@ function _calcMS(d) {
     const caHTReel    = isFuture ? 0 : caHT;
     const chargesReel = isFuture ? 0 : chargesHT;
     const resultat    = isFuture ? 0 : (caHT+rentrees-chargesHT);
+    // Wave 2 — résultat économique (sans le capital d'emprunt)
+    const resultatEconomique = isFuture ? 0 : (resultat + creditsPrincipalOnly);
     const cashflow    = isFuture ? 0 : (caTTC+rentrees-(fixesTTC+varTTC+creditsHT+leasingTTC+masseSalHT));
     return{caHT:caHTReel,caHT_j:isFuture?0:caHT_j,caFP_HT:isFuture?0:caFP_HT,
       caTTC:isFuture?0:caTTC,tvaCollectee:isFuture?0:tvaCollectee,
       fixesHT:isFuture?0:fixesHT,varHT:isFuture?0:varHT,creditsHT:isFuture?0:creditsHT,
-      leasingHT:isFuture?0:leasingHT,masseSalHT:isFuture?0:masseSalHT,chargesHT:chargesReel,resultat,cashflow,
+      creditsPrincipal:isFuture?0:creditsPrincipalOnly,
+      leasingHT:isFuture?0:leasingHT,masseSalHT:isFuture?0:masseSalHT,chargesHT:chargesReel,resultat,resultatEconomique,cashflow,
       prevCA:prevCAFinal,prevCharges,isFuture,rentrees:isFuture?0:rentrees};
   });
 
@@ -600,6 +628,9 @@ function _calcMS(d) {
   const totTTC=data.reduce((s,d)=>s+d.caTTC,0);
   const totCharges=data.reduce((s,d)=>s+d.chargesHT,0);
   const totResultat=data.reduce((s,d)=>s+d.resultat,0);
+  // Wave 2 — résultat économique annuel
+  const totResultatEconomique=data.reduce((s,d)=>s+(d.resultatEconomique||0),0);
+  const totCreditsPrincipal=data.reduce((s,d)=>s+(d.creditsPrincipal||0),0);
   const totPrevCharges=data.reduce((s,d)=>s+d.prevCharges,0);
   const totPrevCA=data.reduce((s,d)=>s+d.prevCA,0);
   const totPrevResultat=totPrevCA-totPrevCharges;
@@ -643,10 +674,15 @@ function _calcMS(d) {
         <div class="kpi-value">${fmtE(totCharges)}</div>
         <div class="kpi-sub">Fixes ${fmtE(totFixes)} · Var. ${fmtE(totVar)}${totMasseSal>0?' · Sal. '+fmtE(totMasseSal):''}</div>
       </div>
+      <div class="kpi-card ${totResultatEconomique>=0?'green':'red'}">
+        <div class="kpi-label">Résultat économique ${window.CalcHelpers ? window.CalcHelpers.tooltipIcon('resultat_economique') : ''}</div>
+        <div class="kpi-value ${totResultatEconomique>=0?'positive':'negative'}">${fmtE(totResultatEconomique)}</div>
+        <div class="kpi-sub">Vision comptable · hors capital emprunt</div>
+      </div>
       <div class="kpi-card ${totResultat>=0?'green':'red'}">
-        <div class="kpi-label">Résultat réel HT</div>
+        <div class="kpi-label">Résultat trésorerie ${window.CalcHelpers ? window.CalcHelpers.tooltipIcon('resultat_tresorerie') : ''}</div>
         <div class="kpi-value ${totResultat>=0?'positive':'negative'}">${fmtE(totResultat)}</div>
-        <div class="kpi-sub">${totPrevCharges>0?`<span style="color:#b45309">+ ${fmtE(totPrevResultat)} prévi → <b>${fmtE(totTotalResultat)}</b> projeté</span>`:'CA − Dépenses (mois passés)'}</div>
+        <div class="kpi-sub">${totCreditsPrincipal>0?'Après remb. capital '+fmtE(totCreditsPrincipal):(totPrevCharges>0?'<span style="color:#b45309">+ '+fmtE(totPrevResultat)+' prévi</span>':'CA − Dépenses (mois passés)')}</div>
       </div>
       <div class="kpi-card purple">
         <div class="kpi-label">Cashflow Total</div>
@@ -1159,7 +1195,7 @@ var _compChart = null;
 // Charger des données depuis d'autres années pour la comparaison inter-années
 var _compAllData = {}; // cache: 'YYYY-MM' → données calculées
 
-function getMonthDataComputed(d) {
+function getMonthDataComputed(d, monthKey) {
   if (!d) return {caHT:0,caTTC:0,tvaCollectee:0,fixesHT:0,varHT:0,creditsHT:0,leasingHT:0,chargesHT:0,resultat:0,cashflow:0,prevCA:0,rentrees:0,isFuture:false};
   // Même logique de calcul que loadYear
   var caHT_j=d.ca?d.ca.reduce(function(s,r){var h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0,hC=htCust(r);var multi=h055+h10+h20+hC;return s+(multi>0?multi:(parseFloat(r.montantHT)||0));},0):0;
@@ -1176,18 +1212,48 @@ function getMonthDataComputed(d) {
   var fixesTTC=d.chargesFixe?d.chargesFixe.reduce(function(s,r){var h=parseFloat(r.montantHT)||0;return s+Math.round(h*(1+(parseFloat(r.tvaRate)||0)/100)*100)/100;},0):0;
   var varHT=d.chargesVar?d.chargesVar.reduce(function(s,r){return s+(parseFloat(r.montantHT)||0);},0):0;
   var varTTC=d.chargesVar?d.chargesVar.reduce(function(s,r){var h=parseFloat(r.montantHT)||0;return s+Math.round(h*(1+(parseFloat(r.tvaRate)||0)/100)*100)/100;},0):0;
-  var leasingHT=d.leasing?d.leasing.reduce(function(s,r){return s+(parseFloat(r.montantHT)||0);},0):0;
-  var leasingTTC=d.leasing?d.leasing.reduce(function(s,r){var h=parseFloat(r.montantHT)||0;return s+Math.round(h*(1+(parseFloat(r.tvaRate)||0)/100)*100)/100;},0):0;
+  // Leasing — Wave 1 : respecte la plage dateDebut/dateFin si monthKey fourni
+  var leasingHT=d.leasing?d.leasing.reduce(function(s,r){
+    if (monthKey && r.dateDebut && r.dateFin && window.CalcHelpers) {
+      var dbg=window.CalcHelpers.parseYYYYMM(r.dateDebut), fng=window.CalcHelpers.parseYYYYMM(r.dateFin);
+      if (dbg && fng && (monthKey<dbg||monthKey>fng)) return s;
+    }
+    return s+(parseFloat(r.montantHT)||0);
+  },0):0;
+  var leasingTTC=d.leasing?d.leasing.reduce(function(s,r){
+    if (monthKey && r.dateDebut && r.dateFin && window.CalcHelpers) {
+      var dbg=window.CalcHelpers.parseYYYYMM(r.dateDebut), fng=window.CalcHelpers.parseYYYYMM(r.dateFin);
+      if (dbg && fng && (monthKey<dbg||monthKey>fng)) return s;
+    }
+    var h=parseFloat(r.montantHT)||0;
+    return s+Math.round(h*(1+(parseFloat(r.tvaRate)||0)/100)*100)/100;
+  },0):0;
+  // Crédits — Wave 1 : via helper (format actuel + legacy + filtre dates)
   var creditsHT=0;
-  if(d.credits)d.credits.forEach(function(r,i){
-    if(r.ligneType==='principal')creditsHT+=parseFloat(r.montant)||0;
-    else{var mt=parseFloat(r.montant)||0;if(r.tvaAuto&&parseFloat(r.tauxInteret)>0){var p=d.credits.slice(0,i).reverse().find(function(c){return c.fournisseur===r.fournisseur&&c.ligneType==='principal';});if(p)mt=(parseFloat(p.montant)||0)*parseFloat(r.tauxInteret)/100/12;}creditsHT+=mt;}
+  var creditsPrincipalOnly=0;
+  if (window.CalcHelpers) {
+    var ci=window.CalcHelpers.parseCredits(d.credits||[], monthKey);
+    creditsHT = ci.total;
+    creditsPrincipalOnly = ci.principal;
+  } else if(d.credits) d.credits.forEach(function(r,i){
+    if(r.ligneType==='principal'||!r.ligneType){
+      creditsHT+=parseFloat(r.montant)||0;
+      creditsPrincipalOnly+=parseFloat(r.montant)||0;
+      var tx=parseFloat(r.tauxInteret)||0;
+      if((parseFloat(r.montant)||0)>0&&tx>0) creditsHT+=(parseFloat(r.montant)||0)*tx/100/12;
+    } else if(r.ligneType==='interet') {
+      var mt=parseFloat(r.montant)||0;
+      if(r.tvaAuto&&parseFloat(r.tauxInteret)>0){var p=d.credits.slice(0,i).reverse().find(function(c){return c.fournisseur===r.fournisseur&&c.ligneType==='principal';});if(p)mt=(parseFloat(p.montant)||0)*parseFloat(r.tauxInteret)/100/12;}
+      creditsHT+=mt;
+    }
   });
   var masseSalHT=_calcMS(d);
   var chargesHT=fixesHT+varHT+creditsHT+leasingHT+masseSalHT;
   var resultat=caHT+rentrees-chargesHT;
   var cashflow=caTTC+rentrees-(fixesTTC+varTTC+creditsHT+leasingTTC+masseSalHT);
-  return{caHT,caTTC,tvaCollectee,fixesHT,varHT,creditsHT,leasingHT,masseSalHT,chargesHT,resultat,cashflow,prevCA,rentrees};
+  // Wave 2 — résultat économique
+  var resultatEconomique = resultat + creditsPrincipalOnly;
+  return{caHT,caTTC,tvaCollectee,fixesHT,varHT,creditsHT,creditsPrincipal:creditsPrincipalOnly,leasingHT,masseSalHT,chargesHT,resultat,resultatEconomique,cashflow,prevCA,rentrees};
 }
 
 function initCompMois(data, fiscalMonths, monthLabels, year) {
@@ -1241,7 +1307,7 @@ async function fetchCompMonthData(key) {
   try {
     var snap = await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
     var raw = snap.exists() ? snap.data() : null;
-    var computed = getMonthDataComputed(raw);
+    var computed = getMonthDataComputed(raw, key);
     var parts = key.split('-');
     var y = parseInt(parts[0]), m = parseInt(parts[1])-1;
     var label = MONTHS[m] + ' ' + y + _saisonBadge(m);
