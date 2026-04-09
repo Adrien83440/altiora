@@ -678,7 +678,7 @@ function fmt(n,d){d=d===undefined?2:d;return Number(n||0).toLocaleString('fr-FR'
 function fmtE(n){return fmt(n)+' €'}
 function fmtK(n){n=Number(n||0);return Math.abs(n)>=1000?fmt(n/1000,1)+' k€':fmt(n,0)+' €'}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function showToast(m,err){var t=document.getElementById('toast');t.textContent=m;t.className='toast '+(err?'toast-err':'toast-ok')+' show';clearTimeout(window._ttm);window._ttm=setTimeout(function(){t.classList.remove('show')},2800)}
+function showToast(m,err,duration){var t=document.getElementById('toast');t.textContent=m;t.className='toast '+(err?'toast-err':'toast-ok')+' show';clearTimeout(window._ttm);window._ttm=setTimeout(function(){t.classList.remove('show')},duration||2800)}
 function setSaveStatus(txt,color){var el=document.getElementById('save-status');if(el){el.textContent=txt;el.style.color=color||'#9ca3af'}}
 
 // ══════════════════════════════════════════════════════════
@@ -1947,11 +1947,11 @@ function analyzeImportPlan(){
     var sku, parentSlug=null;
     if(rawParentName && (rawTaille||rawCouleur)){
       parentSlug = _slug(rawParentName) || rawParentName;
-      var variantSuffixP = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_');
-      sku = (rawRef || parentSlug) + '-' + variantSuffixP;
+      var variantSuffixP = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_').toLowerCase();
+      sku = ((rawRef || parentSlug) + '-' + variantSuffixP).toLowerCase();
     } else if(hasVariants && rawRef && (rawTaille||rawCouleur)){
-      var variantSuffix = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_');
-      sku = rawRef + (variantSuffix?'-'+variantSuffix:'');
+      var variantSuffix = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_').toLowerCase();
+      sku = (rawRef + (variantSuffix?'-'+variantSuffix:'')).toLowerCase();
       parentSlug = rawRef;
     } else {
       sku = rawRef || rawName.slice(0,40).toUpperCase().replace(/\s+/g,'-');
@@ -2142,12 +2142,12 @@ function _buildProductsFromRows(){
     var sku, parentRef = null;
     if(rawParentName && (rawTaille||rawCouleur)){
       parentRef = _slug(rawParentName) || rawParentName;
-      var variantSuffix1 = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_');
-      sku = (rawRef || parentRef) + '-' + variantSuffix1;
+      var variantSuffix1 = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_').toLowerCase();
+      sku = ((rawRef || parentRef) + '-' + variantSuffix1).toLowerCase();
     } else if(hasVariants && rawRef && (rawTaille||rawCouleur)){
       // Variant without explicit parent column → fallback: use rawRef as parent
-      var variantSuffix = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_');
-      sku = rawRef + (variantSuffix?'-'+variantSuffix:'');
+      var variantSuffix = [rawTaille,rawCouleur].filter(Boolean).join('-').replace(/\s+/g,'_').toLowerCase();
+      sku = (rawRef + (variantSuffix?'-'+variantSuffix:'')).toLowerCase();
       parentRef = rawRef;
     } else {
       sku = rawRef || rawName.slice(0,40).toUpperCase().replace(/\s+/g,'-');
@@ -2546,6 +2546,16 @@ async function doImportFinal(){
     var famTotal = st.newFamRoots.length+st.newFamSubs.length+(st.newFamSubSubs?st.newFamSubSubs.length:0);
     if(famTotal) msg += ', '+famTotal+' famille(s) créée(s)';
     showToast(msg);
+
+    // Alerte pédagogique : produits sans famille renseignée dans le fichier source
+    var orphanCount = 0;
+    toWrite.forEach(function(p){ if(!p.familyId) orphanCount++ });
+    if(orphanCount > 0){
+      setTimeout(function(){
+        showToast('ℹ️ '+orphanCount+' produit(s) sans famille renseignée dans votre fichier → rangés dans "Non classés". Vous pouvez les déplacer en masse depuis l\'onglet Catalogue.', false, 8000);
+      }, 2500);
+    }
+
     _importState=null;
     renderAll();
   }catch(e){
@@ -3090,7 +3100,23 @@ function renderCatalogue(tc){
 
   // Orphan products (at root level only)
   if(orphans.length && _catPath.length===0){
-    html += '<div style="font-size:12px;font-weight:700;color:var(--muted);margin:20px 0 8px;text-transform:uppercase;letter-spacing:.5px">📦 Non classés ('+orphans.length+')</div>';
+    // Build family options for bulk move (flat list with indent)
+    var famOptsHtml = '<option value="">— Choisir une famille —</option>';
+    function _famOptsRec(parentId,indent){
+      _families.filter(function(f){return (f.parentId||null)===parentId}).sort(function(a,b){return (a.name||'').localeCompare(b.name||'')}).forEach(function(f){
+        famOptsHtml += '<option value="'+esc(f.id)+'">'+indent+(f.icon||'📁')+' '+esc(f.name)+'</option>';
+        _famOptsRec(f.id,indent+'— ');
+      });
+    }
+    _famOptsRec(null,'');
+
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin:20px 0 10px;gap:12px;flex-wrap:wrap">';
+    html += '<div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">📦 Non classés ('+orphans.length+')</div>';
+    html += '<div style="display:flex;align-items:center;gap:6px">';
+    html += '<select id="orphan-move-target" class="filter-sel" style="font-size:11px;min-width:180px">'+famOptsHtml+'</select>';
+    html += '<button class="btn btn-primary btn-sm" onclick="bulkMoveOrphans()">↪ Déplacer tout</button>';
+    html += '</div></div>';
+    html += '<div style="font-size:11px;color:var(--muted);margin:-4px 0 10px;line-height:1.5">ℹ️ Ces produits ont été importés sans famille renseignée dans votre fichier source. Choisissez une famille cible et cliquez "Déplacer tout" pour les ranger en masse, ou cliquez individuellement pour éditer chacun.</div>';
     html += '<div class="cat-prods-grid">';
     orphans.slice(0,20).forEach(function(p){
       html += '<div class="cat-prod-card" onclick="openProdModal(\''+p.id+'\')">';
@@ -3103,7 +3129,7 @@ function renderCatalogue(tc){
       html += '<span style="font-weight:700">'+fmt(p._qty,0)+' '+(p.unite||'u')+'</span>';
       html += '</div></div></div>';
     });
-    if(orphans.length>20) html += '<div style="padding:12px;text-align:center;font-size:12px;color:var(--muted)">'+(orphans.length-20)+' produits supplémentaires non affichés — classez-les dans une famille</div>';
+    if(orphans.length>20) html += '<div style="padding:12px;text-align:center;font-size:12px;color:var(--muted)">'+(orphans.length-20)+' produits supplémentaires non affichés</div>';
     html += '</div>';
   }
 
@@ -3127,6 +3153,51 @@ function navigateInto(famId, famName){
   renderTab();
 }
 window.navigateInto = navigateInto;
+
+// ── Bulk move orphan products (sans familyId) to a target family ──
+async function bulkMoveOrphans(){
+  var sel = document.getElementById('orphan-move-target');
+  if(!sel){showToast('Sélecteur introuvable',true);return}
+  var targetFamId = sel.value;
+  if(!targetFamId){showToast('Choisissez d\'abord une famille cible',true);return}
+  var targetFam = _families.find(function(f){return f.id===targetFamId});
+  if(!targetFam){showToast('Famille introuvable',true);return}
+
+  // Collect all orphans (no familyId OR with an obsolete familyId)
+  var orphans = _products.filter(function(p){
+    if(!p.familyId) return true;
+    return !_families.find(function(f){return f.id===p.familyId});
+  });
+  if(!orphans.length){showToast('Aucun produit non classé',true);return}
+
+  if(!confirm('Déplacer '+orphans.length+' produit(s) non classé(s) vers la famille "'+targetFam.name+'" ?')) return;
+
+  setSaveStatus('💾 Déplacement en cours...','#6366f1');
+  try{
+    var BATCH_SIZE = 400;
+    var updatedAt = new Date().toISOString();
+    for(var k=0;k<orphans.length;k+=BATCH_SIZE){
+      var chunk = orphans.slice(k,k+BATCH_SIZE);
+      var batch = window._writeBatch(window._db);
+      chunk.forEach(function(p){
+        p.familyId = targetFamId;
+        p.cat = targetFam.name;
+        p.updatedAt = updatedAt;
+        batch.set(window._doc(window._db,'stock',window._uid,'products',p.id), p);
+      });
+      await batch.commit();
+    }
+    setSaveStatus('✅ Déplacement terminé','#10b981');
+    setTimeout(function(){setSaveStatus('','')},2000);
+    showToast('✅ '+orphans.length+' produit(s) déplacé(s) vers "'+targetFam.name+'"');
+    renderAll();
+  }catch(e){
+    console.error('Bulk move error:',e);
+    setSaveStatus('❌ Erreur','#ef4444');
+    showToast('❌ Erreur: '+e.message,true);
+  }
+}
+window.bulkMoveOrphans = bulkMoveOrphans;
 
 // ── Family CRUD ──
 function openFamModal(id){
