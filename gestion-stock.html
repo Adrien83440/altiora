@@ -619,6 +619,91 @@ tr.row-alerte{background:#fffbeb}
   </div>
 </div>
 
+<!-- MODAL IMPORT MOUVEMENTS -->
+<div class="overlay" id="movImportOverlay">
+  <div class="modal modal-lg">
+    <div class="modal-head" style="background:linear-gradient(135deg,#0891b2,#06b6d4);color:white">
+      <h3 style="color:white">📥 Import de mouvements (ventes, réceptions...)</h3>
+      <button class="modal-close" onclick="closeMovImportModal()" style="color:white">✕</button>
+    </div>
+    <div class="modal-body" id="mov-import-body">
+      <!-- Step 1: Upload + config -->
+      <div id="mov-import-step-1">
+        <div style="text-align:center;padding:20px 0 10px">
+          <div style="font-size:44px;margin-bottom:10px">📊</div>
+          <h3 style="font-size:15px;margin-bottom:6px">Importez vos ventes, réceptions, ajustements ou pertes</h3>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:16px;max-width:480px;margin-left:auto;margin-right:auto">Les produits sont identifiés par SKU (référence) en priorité, puis par EAN. Les lignes non reconnues vous seront présentées à la fin pour décision.</p>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+          <div class="mfield">
+            <label>Type de mouvement par défaut *</label>
+            <select id="mov-import-type" style="width:100%">
+              <option value="OUT">📤 Vente (OUT)</option>
+              <option value="IN">📥 Réception fournisseur (IN)</option>
+              <option value="ADJUST">🔧 Ajustement d'inventaire</option>
+              <option value="LOSS">💔 Perte / Casse</option>
+              <option value="RETURN_IN">↩️ Retour client</option>
+              <option value="RETURN_OUT">↪️ Retour fournisseur</option>
+            </select>
+          </div>
+          <div class="mfield">
+            <label>Dates</label>
+            <select id="mov-import-date-mode" style="width:100%">
+              <option value="file">Dates du fichier (sinon aujourd'hui)</option>
+              <option value="today">Tout dater à aujourd'hui</option>
+            </select>
+          </div>
+        </div>
+        <div style="background:#f0f9ff;border:1.5px solid #bae6fd;border-radius:10px;padding:10px 12px;font-size:11px;color:#0369a1;line-height:1.6;margin-bottom:14px">
+          💡 <strong>Astuce :</strong> si votre fichier contient une colonne <code>type</code> avec les valeurs OUT/IN/ADJUST/LOSS, chaque ligne utilisera son propre type. Sinon, toutes les lignes prendront le type par défaut ci-dessus.
+        </div>
+        <div style="text-align:center">
+          <label style="display:inline-block;padding:14px 28px;background:linear-gradient(135deg,#0891b2,#06b6d4);color:white;border-radius:12px;font-weight:700;cursor:pointer;font-size:14px">
+            📁 Choisir un fichier (CSV, Excel, TSV...)
+            <input type="file" id="mov-import-file" accept=".csv,.xlsx,.xls,.ods,.tsv,.txt" style="display:none" onchange="handleMovImportFile(this.files[0])"/>
+          </label>
+        </div>
+      </div>
+
+      <!-- Step 2: Mapping + preview -->
+      <div id="mov-import-step-2" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+          <div><span style="font-weight:700;font-size:14px" id="mov-import-fname"></span><br><span style="font-size:11px;color:var(--muted)" id="mov-import-finfo"></span></div>
+          <button class="btn btn-outline btn-sm" onclick="movImportBack()">← Changer de fichier</button>
+        </div>
+        <div style="font-size:12px;font-weight:700;margin-bottom:8px">🔗 Mapping des colonnes :</div>
+        <div id="mov-import-mapping-zone"></div>
+        <div id="mov-import-dup-warning" style="display:none;background:#fef3c7;border:1.5px solid #fde68a;border-radius:10px;padding:10px 12px;margin-top:14px;font-size:12px;color:#78350f"></div>
+        <div id="mov-import-plan" style="margin-top:14px"></div>
+      </div>
+
+      <!-- Step 3: Unknown lines -->
+      <div id="mov-import-step-3" style="display:none">
+        <h3 style="font-size:14px;margin-bottom:6px">⚠ Lignes non reconnues</h3>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Ces lignes du fichier n'ont pas pu être associées à un produit existant (ni par SKU ni par EAN). Choisissez quoi en faire :</p>
+        <div id="mov-import-unknown-list" style="max-height:340px;overflow-y:auto;border:1.5px solid var(--border);border-radius:10px"></div>
+        <div style="display:flex;gap:10px;margin-top:12px;align-items:center;justify-content:space-between">
+          <div style="font-size:11px;color:var(--muted)">Les lignes "Ignorer" ne créeront aucun mouvement.</div>
+          <button class="btn btn-outline btn-sm" onclick="movImportUnknownIgnoreAll()">Tout ignorer</button>
+        </div>
+      </div>
+
+      <!-- Step 4: Progress -->
+      <div id="mov-import-step-4" style="display:none">
+        <div style="text-align:center;padding:30px 0">
+          <div class="spinner" style="margin:0 auto 16px"></div>
+          <div style="font-size:14px;font-weight:700;margin-bottom:6px" id="mov-import-progress-label">Création des mouvements...</div>
+          <div style="font-size:11px;color:var(--muted)" id="mov-import-progress-sub"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeMovImportModal()">Annuler</button>
+      <button class="btn btn-primary" id="mov-import-go-btn" style="display:none" onclick="executeMovImport()">📥 Importer <span id="mov-import-count">0</span> mouvement(s)</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL SCAN -->
 <div class="overlay" id="scanOverlay">
   <div class="modal modal-lg">
@@ -789,6 +874,19 @@ var _families = []; // {id, name, icon, color, desc, parentId, level}
 var _settings = { valoMethod:'cmup', perPage:50, snapshot:true, paDisplay:'cmup', catalogueView:'cards' };
 var _listSort = { col:'name', dir:'asc' }; // État du tri pour la vue liste
 var _catFilters = { search:'', taille:'', couleur:'', fournisseur:'', status:'' };
+var _importBatches = []; // Historique des imports de mouvements
+
+// État d'import mouvements
+var _movImport = {
+  fileName: '', fileHash: '',
+  headers: [], rows: [],
+  mapping: {},
+  defaultType: 'OUT',
+  dateMode: 'file',
+  built: [], // Lignes parsées prêtes à créer
+  unknown: [], // Lignes non matchées (SKU ni EAN)
+  unknownActions: {} // row index → 'ignore' | 'match:ref'
+};
 var _tab = 'catalogue';
 var _catPath = []; // navigation path [{id,name}]
 var _prodPage = 0;
@@ -947,6 +1045,13 @@ async function loadAll(){
       _families = [];
       fSnap.forEach(function(d){ _families.push(Object.assign({id:d.id}, d.data())); });
     }catch(e){ console.warn('Families load:',e); }
+
+    // Import batches (historique des imports de mouvements, pour rollback)
+    try{
+      var bSnap = await window._getDocs(window._collection(window._db,'stock',window._uid,'import_batches'));
+      _importBatches = [];
+      bSnap.forEach(function(d){ _importBatches.push(Object.assign({id:d.id}, d.data())); });
+    }catch(e){ console.warn('Batches load:',e); _importBatches = []; }
 
     // Migrate from old single-doc format if exists
     await migrateOldFormat();
@@ -1341,20 +1446,55 @@ function renderMovements(tc){
   var typeLabels = {IN:'📥 Entrée',OUT:'📤 Sortie',ADJUST:'🔧 Ajustement',LOSS:'💔 Perte',RETURN_IN:'↩️ Retour client',RETURN_OUT:'↪️ Retour fourn.'};
   var prodMap = {}; _products.forEach(function(p){prodMap[(p.ref||'').trim()]=p});
 
+  // Recent import batches section (last 10 with rollback button if <7 days)
+  var batchesHtml = '';
+  if(_importBatches && _importBatches.length){
+    var now = Date.now();
+    var SEVEN_DAYS = 7*24*60*60*1000;
+    var recent = _importBatches.slice().sort(function(a,b){return (b.createdAt||'').localeCompare(a.createdAt||'')}).slice(0, 5);
+    batchesHtml += '<div style="background:white;border:1.5px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">';
+    batchesHtml += '<div style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:10px">📦 Derniers imports de mouvements</div>';
+    batchesHtml += '<div style="display:flex;flex-direction:column;gap:8px">';
+    recent.forEach(function(b){
+      var dt = b.createdAt ? new Date(b.createdAt) : null;
+      var dtTxt = dt ? dt.toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '?';
+      var age = dt ? (now - dt.getTime()) : Infinity;
+      var canRollback = age < SEVEN_DAYS && !b.rolledBack;
+      var typeLabel = typeLabels[b.defaultType] || b.defaultType || '?';
+      batchesHtml += '<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#fafbff;border:1px solid #e5e7eb;border-radius:8px">';
+      batchesHtml += '<div style="flex:1;min-width:0">';
+      batchesHtml += '<div style="font-size:12px;font-weight:700;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(b.fileName||'Fichier inconnu')+'</div>';
+      batchesHtml += '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+dtTxt+' · '+typeLabel+' · '+(b.movementsCount||0)+' mouvements'+(b.rolledBack?' · <span style="color:var(--red);font-weight:700">ANNULÉ</span>':'')+'</div>';
+      batchesHtml += '</div>';
+      if(canRollback){
+        batchesHtml += '<button class="btn btn-danger btn-xs" onclick="rollbackMovBatch(\''+esc(b.id)+'\')">↩ Annuler</button>';
+      } else if(b.rolledBack){
+        batchesHtml += '<span style="font-size:10px;color:var(--muted);font-style:italic">Annulé</span>';
+      } else {
+        batchesHtml += '<span style="font-size:10px;color:var(--muted);font-style:italic" title="Rollback expiré (>7j)">🔒 Verrouillé</span>';
+      }
+      batchesHtml += '</div>';
+    });
+    batchesHtml += '</div></div>';
+  }
+
   tc.innerHTML = `
+    ${batchesHtml}
     <div class="card">
       <div class="card-head"><div class="filter-bar">
         <input class="search-in" id="fm-search" placeholder="🔍 Recherche ref, note..." value="${esc(search)}" oninput="renderMovements(document.getElementById('tab-content'))"/>
         <select class="filter-sel" id="fm-type" onchange="_movPage=0;renderMovements(document.getElementById('tab-content'))">
           <option value="">Tous types</option><option value="IN" ${fType==='IN'?'selected':''}>📥 Entrée</option><option value="OUT" ${fType==='OUT'?'selected':''}>📤 Sortie</option><option value="ADJUST" ${fType==='ADJUST'?'selected':''}>🔧 Ajustement</option><option value="LOSS" ${fType==='LOSS'?'selected':''}>💔 Perte</option>
         </select>
-        <span style="font-size:11px;color:var(--muted);margin-left:auto">${filtered.length} mouvement(s)</span>
+        <button class="btn btn-primary btn-sm" onclick="openMovImportModal()" style="margin-left:auto">📥 Import mouvements</button>
+        <span style="font-size:11px;color:var(--muted);margin-left:12px">${filtered.length} mouvement(s)</span>
       </div></div>
       <div class="tbl-wrap"><table>
         <thead><tr><th style="text-align:left">Date</th><th style="text-align:left">Type</th><th style="text-align:left">Produit</th><th>Qté</th><th>PU HT</th><th>Total HT</th><th style="text-align:left">Note</th><th></th></tr></thead>
         <tbody>${page.length ? page.map(function(m){
           var p = prodMap[(m.ref||'').trim()]||{};
-          return '<tr><td style="text-align:left">'+esc(m.date||'')+'</td><td style="text-align:left">'+(typeLabels[m.type]||m.type)+'</td><td style="text-align:left"><b>'+esc(m.ref)+'</b><span style="font-size:10px;color:var(--muted);margin-left:4px">'+esc(p.name||'')+'</span></td><td>'+fmt(pf(m.qty),0)+'</td><td>'+fmtE(pf(m.pa))+'</td><td style="font-weight:700">'+fmtE(pf(m.qty)*pf(m.pa))+'</td><td style="text-align:left;font-size:11px;color:var(--muted)">'+esc(m.note||'')+'</td><td><button class="btn btn-danger btn-xs" onclick="deleteMov(\''+m.id+'\')">🗑</button></td></tr>';
+          var batchTag = m.importBatchId ? '<span style="font-size:9px;background:#e0e7ff;color:#4338ca;padding:1px 6px;border-radius:8px;margin-left:4px" title="Import batch '+esc(m.importBatchId)+'">📥</span>' : '';
+          return '<tr><td style="text-align:left">'+esc(m.date||'')+'</td><td style="text-align:left">'+(typeLabels[m.type]||m.type)+batchTag+'</td><td style="text-align:left"><b>'+esc(m.ref)+'</b><span style="font-size:10px;color:var(--muted);margin-left:4px">'+esc(p.name||'')+'</span></td><td>'+fmt(pf(m.qty),0)+'</td><td>'+fmtE(pf(m.pa))+'</td><td style="font-weight:700">'+fmtE(pf(m.qty)*pf(m.pa))+'</td><td style="text-align:left;font-size:11px;color:var(--muted)">'+esc(m.note||'')+'</td><td><button class="btn btn-danger btn-xs" onclick="deleteMov(\''+m.id+'\')">🗑</button></td></tr>';
         }).join('') : '<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted)">Aucun mouvement enregistré.</td></tr>'}</tbody>
       </table></div>
       ${filtered.length > pp ? '<div class="pagi"><span>Page '+(_movPage+1)+'/'+totalPages+'</span><div class="pagi-btns"><button class="pagi-btn" onclick="_movPage=Math.max(0,_movPage-1);renderMovements(document.getElementById(\'tab-content\'))" '+(_movPage<=0?'disabled':'')+'>←</button><button class="pagi-btn" onclick="_movPage=Math.min('+(totalPages-1)+',_movPage+1);renderMovements(document.getElementById(\'tab-content\'))" '+(_movPage>=totalPages-1?'disabled':'')+'>→</button></div></div>' : ''}
@@ -2186,6 +2326,489 @@ async function deleteMov(id){
   renderAll();
 }
 window.deleteMov=deleteMov;
+
+// ══════════════════════════════════════════════════════════
+// IMPORT MOUVEMENTS (Wave 4.4)
+// ══════════════════════════════════════════════════════════
+function openMovImportModal(){
+  _movImport = {
+    fileName:'', fileHash:'',
+    headers:[], rows:[], mapping:{},
+    defaultType:'OUT', dateMode:'file',
+    built:[], unknown:[], unknownActions:{}
+  };
+  document.getElementById('mov-import-file').value='';
+  document.getElementById('mov-import-step-1').style.display='block';
+  document.getElementById('mov-import-step-2').style.display='none';
+  document.getElementById('mov-import-step-3').style.display='none';
+  document.getElementById('mov-import-step-4').style.display='none';
+  document.getElementById('mov-import-go-btn').style.display='none';
+  document.getElementById('mov-import-dup-warning').style.display='none';
+  document.getElementById('movImportOverlay').classList.add('show');
+}
+window.openMovImportModal = openMovImportModal;
+
+function closeMovImportModal(){
+  document.getElementById('movImportOverlay').classList.remove('show');
+}
+window.closeMovImportModal = closeMovImportModal;
+
+function movImportBack(){
+  document.getElementById('mov-import-step-2').style.display='none';
+  document.getElementById('mov-import-step-3').style.display='none';
+  document.getElementById('mov-import-step-1').style.display='block';
+  document.getElementById('mov-import-go-btn').style.display='none';
+  document.getElementById('mov-import-file').value='';
+}
+window.movImportBack = movImportBack;
+
+// Simple hash function for file content dedup detection
+function _simpleHash(str){
+  var h = 0;
+  for(var i=0;i<str.length;i++){
+    h = ((h<<5)-h) + str.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h).toString(36);
+}
+
+async function handleMovImportFile(file){
+  if(!file) return;
+  _movImport.fileName = file.name;
+  _movImport.defaultType = document.getElementById('mov-import-type').value || 'OUT';
+  _movImport.dateMode = document.getElementById('mov-import-date-mode').value || 'file';
+
+  try{
+    var headers, rows;
+    var name = (file.name||'').toLowerCase();
+    if(name.endsWith('.csv') || name.endsWith('.tsv') || name.endsWith('.txt')){
+      var text = await file.text();
+      _movImport.fileHash = _simpleHash(text.substring(0, 20000));
+      var lines = text.split(/\r?\n/).filter(function(l){return l.trim()});
+      if(!lines.length) throw new Error('Fichier vide');
+      var sep = lines[0].indexOf(';')>=0 ? ';' : (lines[0].indexOf('\t')>=0 ? '\t' : ',');
+      headers = lines[0].split(sep).map(function(h){return h.trim().replace(/^["']|["']$/g,'')});
+      rows = lines.slice(1).map(function(l){return l.split(sep).map(function(c){return c.trim().replace(/^["']|["']$/g,'')})});
+    } else {
+      var buf = await file.arrayBuffer();
+      var bytes = new Uint8Array(buf);
+      var hashStr = '';
+      for(var k=0;k<Math.min(bytes.length, 4000);k++) hashStr += bytes[k];
+      _movImport.fileHash = _simpleHash(hashStr);
+      var wb = XLSX.read(buf, {type:'array'});
+      var ws = wb.Sheets[wb.SheetNames[0]];
+      var data = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+      if(!data.length) throw new Error('Fichier vide');
+      headers = data[0].map(function(h){return String(h||'').trim()}).filter(Boolean);
+      rows = data.slice(1).filter(function(r){return r.some(function(c){return c!==''})});
+    }
+    _movImport.headers = headers;
+    _movImport.rows = rows;
+    console.log('[mov-import] headers:',headers);
+    console.log('[mov-import] rows:',rows.length);
+
+    // Auto-detect mapping (heuristic)
+    _movImport.mapping = _autoDetectMovMapping(headers);
+
+    // Check if this hash already exists in batches
+    var dup = _importBatches.find(function(b){return b.fileHash === _movImport.fileHash && !b.rolledBack});
+    var warn = document.getElementById('mov-import-dup-warning');
+    if(dup){
+      var dt = dup.createdAt ? new Date(dup.createdAt).toLocaleString('fr-FR') : '?';
+      warn.innerHTML = '⚠️ <strong>Attention :</strong> un fichier identique a déjà été importé le <strong>'+dt+'</strong> ('+(dup.movementsCount||0)+' mouvements). Vous pouvez continuer quand même, mais cela créera des mouvements en doublon.';
+      warn.style.display = 'block';
+    } else {
+      warn.style.display = 'none';
+    }
+
+    // Show step 2
+    document.getElementById('mov-import-step-1').style.display='none';
+    document.getElementById('mov-import-step-2').style.display='block';
+    document.getElementById('mov-import-fname').textContent = file.name;
+    document.getElementById('mov-import-finfo').textContent = rows.length + ' ligne(s) · ' + headers.length + ' colonne(s)';
+
+    _renderMovImportMapping();
+    _analyzeMovImport();
+  }catch(e){
+    console.error('[mov-import] file error:',e);
+    showToast('❌ Erreur lecture fichier : '+e.message, true);
+  }
+}
+window.handleMovImportFile = handleMovImportFile;
+
+// Auto-detect mapping using keyword heuristics
+function _autoDetectMovMapping(headers){
+  var map = {};
+  var keywords = {
+    ref: ['ref','référence','reference','sku','code','déclinaison','code article','idart'],
+    ean: ['ean','barcode','code barre','code-barres','multi code','gencod'],
+    qty: ['qte','qté','quantité','quantity','qty','nombre','vente','sold','stock','nb'],
+    pa: ['pa','prix achat','pmpa','cump','cost','achat','unit cost'],
+    pv: ['pv','prix vente','prix','ht','unit price','price','price ht'],
+    date: ['date','jour','vente date','sale date','day'],
+    type: ['type','mouvement','movement type','kind'],
+    note: ['note','remarque','commentaire','comment','libellé','libelle']
+  };
+  headers.forEach(function(h){
+    var lower = (h||'').toLowerCase().trim();
+    if(!lower) return;
+    for(var target in keywords){
+      if(keywords[target].some(function(kw){return lower === kw || lower.indexOf(kw)>=0})){
+        if(!map[target]) map[target] = h; // first match wins
+        break;
+      }
+    }
+  });
+  return map;
+}
+
+function _renderMovImportMapping(){
+  var MOV_FIELDS = [
+    {v:'_ignore', l:'— Ignorer —'},
+    {v:'ref', l:'🔑 Référence / SKU (prioritaire)'},
+    {v:'ean', l:'📊 Code EAN / Barcode (fallback)'},
+    {v:'qty', l:'🔢 Quantité *'},
+    {v:'pa', l:'💰 Prix d\'achat (HT)'},
+    {v:'pv', l:'🏷️ Prix de vente (HT)'},
+    {v:'date', l:'📅 Date'},
+    {v:'type', l:'🔄 Type (surcharge le défaut)'},
+    {v:'note', l:'📝 Note / Commentaire'}
+  ];
+  var zone = document.getElementById('mov-import-mapping-zone');
+  var html = '';
+  _movImport.headers.forEach(function(h, i){
+    var val = _movImport.mapping[_inverseMappingLookup(h)] || '_ignore';
+    // Actually we store mapping as {target: headerName}, so find the target for this header
+    var currentTarget = '_ignore';
+    Object.keys(_movImport.mapping).forEach(function(k){ if(_movImport.mapping[k]===h) currentTarget = k; });
+    var sample = _movImport.rows[0] ? (_movImport.rows[0][i]||'') : '';
+    html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f1f5f9">';
+    html += '<div style="flex:0 0 180px;font-size:12px;font-weight:700">'+esc(h)+'<div style="font-size:10px;color:var(--muted);font-weight:400;margin-top:2px">Ex: '+esc(String(sample).substring(0,40))+'</div></div>';
+    html += '<div style="flex:0 0 20px;text-align:center;color:var(--muted)">→</div>';
+    html += '<select class="filter-sel" style="flex:1" onchange="_setMovMapping(\''+esc(h).replace(/'/g,"\\'")+'\',this.value)">';
+    MOV_FIELDS.forEach(function(f){
+      html += '<option value="'+f.v+'"'+(currentTarget===f.v?' selected':'')+'>'+f.l+'</option>';
+    });
+    html += '</select>';
+    html += '</div>';
+  });
+  zone.innerHTML = html;
+}
+
+function _inverseMappingLookup(header){
+  // Helper (unused but kept for clarity) — returns the target mapped to this header
+  var res = null;
+  Object.keys(_movImport.mapping).forEach(function(k){ if(_movImport.mapping[k]===header) res = k; });
+  return res;
+}
+
+function _setMovMapping(header, target){
+  // Clear any existing mapping to this header, and set new one
+  Object.keys(_movImport.mapping).forEach(function(k){ if(_movImport.mapping[k]===header) delete _movImport.mapping[k]; });
+  if(target && target !== '_ignore'){
+    _movImport.mapping[target] = header;
+  }
+  _analyzeMovImport();
+}
+window._setMovMapping = _setMovMapping;
+
+// Analyze: match rows to products, build summary, show "unknown" if any
+function _analyzeMovImport(){
+  var m = _movImport.mapping;
+  var headers = _movImport.headers;
+  var rows = _movImport.rows;
+
+  if(!m.qty){
+    document.getElementById('mov-import-plan').innerHTML = '<div style="background:#fef2f2;border:1.5px solid #fecaca;color:#991b1b;padding:12px;border-radius:10px;font-size:12px">⚠ Vous devez au minimum mapper la colonne <strong>Quantité</strong> pour continuer.</div>';
+    document.getElementById('mov-import-go-btn').style.display='none';
+    return;
+  }
+  if(!m.ref && !m.ean){
+    document.getElementById('mov-import-plan').innerHTML = '<div style="background:#fef2f2;border:1.5px solid #fecaca;color:#991b1b;padding:12px;border-radius:10px;font-size:12px">⚠ Vous devez mapper au moins une colonne <strong>Référence/SKU</strong> ou <strong>EAN</strong> pour identifier les produits.</div>';
+    document.getElementById('mov-import-go-btn').style.display='none';
+    return;
+  }
+
+  var idxRef = m.ref ? headers.indexOf(m.ref) : -1;
+  var idxEan = m.ean ? headers.indexOf(m.ean) : -1;
+  var idxQty = headers.indexOf(m.qty);
+  var idxPa = m.pa ? headers.indexOf(m.pa) : -1;
+  var idxPv = m.pv ? headers.indexOf(m.pv) : -1;
+  var idxDate = m.date ? headers.indexOf(m.date) : -1;
+  var idxType = m.type ? headers.indexOf(m.type) : -1;
+  var idxNote = m.note ? headers.indexOf(m.note) : -1;
+
+  // Build product lookup maps for fast matching
+  var byRef = {}, byEan = {};
+  _products.forEach(function(p){
+    if(p.ref) byRef[p.ref.trim().toLowerCase()] = p;
+    if(p.ean) byEan[String(p.ean).trim()] = p;
+  });
+
+  var built = [];
+  var unknown = [];
+  var typeMap = {'vente':'OUT','sale':'OUT','out':'OUT','sortie':'OUT','réception':'IN','reception':'IN','in':'IN','entrée':'IN','entree':'IN','adjust':'ADJUST','ajust':'ADJUST','ajustement':'ADJUST','loss':'LOSS','perte':'LOSS','casse':'LOSS','return_in':'RETURN_IN','return_out':'RETURN_OUT'};
+
+  rows.forEach(function(row, rowIdx){
+    var rawRef = idxRef>=0 ? String(row[idxRef]||'').trim() : '';
+    var rawEan = idxEan>=0 ? String(row[idxEan]||'').trim() : '';
+    var rawQty = String(row[idxQty]||'').replace(',','.').trim();
+    if(!rawQty || isNaN(parseFloat(rawQty))) return; // skip rows without qty
+    var qty = Math.abs(parseFloat(rawQty));
+    if(qty === 0) return;
+
+    var product = null;
+    // Strategy: ref first, then ean
+    if(rawRef){
+      product = byRef[rawRef.toLowerCase()];
+    }
+    if(!product && rawEan){
+      product = byEan[rawEan];
+    }
+
+    var rowType = _movImport.defaultType;
+    if(idxType>=0){
+      var tRaw = String(row[idxType]||'').toLowerCase().trim();
+      if(tRaw && typeMap[tRaw]) rowType = typeMap[tRaw];
+      else if(tRaw && ['IN','OUT','ADJUST','LOSS','RETURN_IN','RETURN_OUT'].indexOf(tRaw.toUpperCase())>=0) rowType = tRaw.toUpperCase();
+    }
+
+    var mDate = '';
+    if(_movImport.dateMode === 'file' && idxDate>=0){
+      var d = String(row[idxDate]||'').trim();
+      if(d) mDate = _normalizeMovDate(d);
+    }
+    if(!mDate){
+      var now = new Date();
+      mDate = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+    }
+
+    var pa = idxPa>=0 ? parseFloat(String(row[idxPa]||'').replace(',','.'))||0 : 0;
+    var pv = idxPv>=0 ? parseFloat(String(row[idxPv]||'').replace(',','.'))||0 : 0;
+    var note = idxNote>=0 ? String(row[idxNote]||'').trim() : '';
+
+    if(product){
+      built.push({
+        ref: product.ref, productId: product.id, productName: product.name,
+        type: rowType, qty: qty, pa: pa || pf(product.pa), pv: pv,
+        date: mDate, note: note, rowIdx: rowIdx
+      });
+    } else {
+      unknown.push({
+        rowIdx: rowIdx, rawRef: rawRef, rawEan: rawEan, qty: qty,
+        type: rowType, date: mDate, pa: pa, pv: pv, note: note
+      });
+    }
+  });
+
+  _movImport.built = built;
+  _movImport.unknown = unknown;
+
+  // Render plan card
+  var plan = '<div style="background:#f0f9ff;border:1.5px solid #bae6fd;border-radius:10px;padding:12px 14px">';
+  plan += '<div style="font-size:12px;font-weight:800;color:#0369a1;margin-bottom:6px">📋 Analyse de l\'import</div>';
+  plan += '<div style="font-size:12px;color:#0f172a;line-height:1.8">';
+  plan += '✅ <strong>'+built.length+'</strong> ligne(s) reconnue(s) et prête(s) à importer<br>';
+  if(unknown.length){
+    plan += '⚠️ <strong>'+unknown.length+'</strong> ligne(s) non reconnue(s) — vous pourrez décider quoi en faire à l\'étape suivante<br>';
+  }
+  var typeCounts = {};
+  built.forEach(function(b){typeCounts[b.type]=(typeCounts[b.type]||0)+1});
+  plan += '🔄 Types : '+Object.keys(typeCounts).map(function(t){return typeCounts[t]+' '+t}).join(' · ');
+  plan += '</div></div>';
+  document.getElementById('mov-import-plan').innerHTML = plan;
+
+  document.getElementById('mov-import-count').textContent = built.length;
+  document.getElementById('mov-import-go-btn').style.display = built.length>0 ? 'inline-flex' : 'none';
+
+  // Change button label based on whether there are unknowns
+  var btn = document.getElementById('mov-import-go-btn');
+  if(unknown.length){
+    btn.innerHTML = '→ Continuer ('+unknown.length+' non reconnues à décider)';
+    btn.onclick = showMovImportUnknownStep;
+  } else {
+    btn.innerHTML = '📥 Importer <span id="mov-import-count">'+built.length+'</span> mouvement(s)';
+    btn.onclick = executeMovImport;
+  }
+}
+
+// Normalize various date formats to YYYY-MM-DD
+function _normalizeMovDate(str){
+  if(!str) return '';
+  // Already ISO
+  if(/^\d{4}-\d{2}-\d{2}/.test(str)) return str.substring(0,10);
+  // DD/MM/YYYY or DD-MM-YYYY
+  var m = str.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if(m){
+    var d=m[1].padStart(2,'0'), mo=m[2].padStart(2,'0'), y=m[3];
+    if(y.length===2) y = '20'+y;
+    return y+'-'+mo+'-'+d;
+  }
+  // MM/DD/YYYY (try as fallback if day > 12 doesn't match)
+  // Excel serial number
+  if(/^\d+$/.test(str) && parseInt(str,10)>25000 && parseInt(str,10)<60000){
+    var serial = parseInt(str,10);
+    var date = new Date((serial - 25569) * 86400 * 1000);
+    return date.toISOString().substring(0,10);
+  }
+  return '';
+}
+
+function showMovImportUnknownStep(){
+  document.getElementById('mov-import-step-2').style.display='none';
+  document.getElementById('mov-import-step-3').style.display='block';
+
+  var list = document.getElementById('mov-import-unknown-list');
+  var html = '';
+  _movImport.unknown.forEach(function(u, idx){
+    _movImport.unknownActions[idx] = _movImport.unknownActions[idx] || 'ignore';
+    html += '<div style="padding:10px 12px;border-bottom:1px solid #f1f5f9;display:flex;gap:10px;align-items:center;flex-wrap:wrap">';
+    html += '<div style="flex:1;min-width:200px">';
+    html += '<div style="font-size:12px;font-weight:700;color:#0f172a">';
+    if(u.rawRef) html += '🔑 '+esc(u.rawRef);
+    if(u.rawEan) html += (u.rawRef?' · ':'')+'📊 '+esc(u.rawEan);
+    if(!u.rawRef && !u.rawEan) html += '<em style="color:var(--muted)">Aucun identifiant</em>';
+    html += '</div>';
+    html += '<div style="font-size:10px;color:var(--muted);margin-top:2px">Qté '+u.qty+' · '+u.type+' · '+u.date+(u.note?' · '+esc(u.note):'')+'</div>';
+    html += '</div>';
+    html += '<select class="filter-sel" style="font-size:11px" onchange="_setMovUnknownAction('+idx+',this.value)">';
+    html += '<option value="ignore"'+(_movImport.unknownActions[idx]==='ignore'?' selected':'')+'>Ignorer cette ligne</option>';
+    // Optional: if there's a product with similar name/ref, suggest it
+    html += '</select>';
+    html += '</div>';
+  });
+  list.innerHTML = html;
+
+  var btn = document.getElementById('mov-import-go-btn');
+  btn.innerHTML = '📥 Importer '+_movImport.built.length+' mouvement(s)';
+  btn.onclick = executeMovImport;
+}
+window.showMovImportUnknownStep = showMovImportUnknownStep;
+
+function _setMovUnknownAction(idx, action){
+  _movImport.unknownActions[idx] = action;
+}
+window._setMovUnknownAction = _setMovUnknownAction;
+
+function movImportUnknownIgnoreAll(){
+  _movImport.unknown.forEach(function(u, idx){
+    _movImport.unknownActions[idx] = 'ignore';
+  });
+  showMovImportUnknownStep();
+  showToast('Toutes les lignes non reconnues seront ignorées');
+}
+window.movImportUnknownIgnoreAll = movImportUnknownIgnoreAll;
+
+async function executeMovImport(){
+  var built = _movImport.built;
+  if(!built.length){showToast('Aucun mouvement à créer',true);return}
+
+  // Show step 4 (progress)
+  document.getElementById('mov-import-step-2').style.display='none';
+  document.getElementById('mov-import-step-3').style.display='none';
+  document.getElementById('mov-import-step-4').style.display='block';
+  document.getElementById('mov-import-go-btn').style.display='none';
+
+  try{
+    var batchId = 'imp_' + Date.now() + '_' + Math.random().toString(36).substring(2,8);
+    var now = new Date().toISOString();
+    var BATCH_SIZE = 400;
+    var created = 0;
+
+    for(var i=0;i<built.length;i+=BATCH_SIZE){
+      var chunk = built.slice(i, i+BATCH_SIZE);
+      var fbBatch = window._writeBatch(window._db);
+      chunk.forEach(function(b){
+        var movId = uid();
+        var mov = {
+          id: movId,
+          ref: b.ref,
+          type: b.type,
+          qty: b.qty,
+          pa: b.pa,
+          pv: b.pv,
+          date: b.date,
+          note: b.note || '',
+          importBatchId: batchId,
+          createdAt: now
+        };
+        fbBatch.set(window._doc(window._db,'stock',window._uid,'movements',movId), mov);
+        _movements.unshift(mov);
+        created++;
+      });
+      await fbBatch.commit();
+
+      document.getElementById('mov-import-progress-label').textContent = 'Création des mouvements... '+created+'/'+built.length;
+    }
+
+    // Save the batch metadata for rollback capability
+    var typeCounts = {};
+    built.forEach(function(b){typeCounts[b.type]=(typeCounts[b.type]||0)+1});
+    var batchMeta = {
+      id: batchId,
+      fileName: _movImport.fileName,
+      fileHash: _movImport.fileHash,
+      defaultType: _movImport.defaultType,
+      movementsCount: created,
+      typeCounts: typeCounts,
+      createdAt: now,
+      rolledBack: false,
+      unknownCount: _movImport.unknown.length
+    };
+    await window._setDoc(window._doc(window._db,'stock',window._uid,'import_batches',batchId), batchMeta);
+    _importBatches.push(batchMeta);
+
+    closeMovImportModal();
+    showToast('✅ '+created+' mouvement(s) créé(s) · Stock mis à jour', false, 5000);
+    renderAll();
+  }catch(e){
+    console.error('[mov-import] execute error:',e);
+    document.getElementById('mov-import-progress-label').textContent = '❌ Erreur';
+    document.getElementById('mov-import-progress-sub').textContent = e.message || 'Erreur inconnue';
+    showToast('❌ Erreur import : '+e.message, true);
+  }
+}
+window.executeMovImport = executeMovImport;
+
+// Rollback a batch : delete all movements with importBatchId == batchId
+async function rollbackMovBatch(batchId){
+  var batch = _importBatches.find(function(b){return b.id===batchId});
+  if(!batch){showToast('Batch introuvable',true);return}
+  if(!confirm('Annuler cet import ?\n\nCela supprimera '+batch.movementsCount+' mouvement(s) créé(s) le '+new Date(batch.createdAt).toLocaleString('fr-FR')+'.\n\nLe stock sera recalculé automatiquement.')) return;
+
+  setSaveStatus('💾 Rollback en cours...','#6366f1');
+  try{
+    // Find all movements with this batchId
+    var toDelete = _movements.filter(function(m){return m.importBatchId === batchId});
+    var BATCH_SIZE = 400;
+    var deleted = 0;
+    for(var i=0;i<toDelete.length;i+=BATCH_SIZE){
+      var chunk = toDelete.slice(i, i+BATCH_SIZE);
+      var fbBatch = window._writeBatch(window._db);
+      chunk.forEach(function(m){
+        fbBatch.delete(window._doc(window._db,'stock',window._uid,'movements',m.id));
+        deleted++;
+      });
+      await fbBatch.commit();
+    }
+    _movements = _movements.filter(function(m){return m.importBatchId !== batchId});
+
+    // Mark batch as rolled back
+    batch.rolledBack = true;
+    batch.rolledBackAt = new Date().toISOString();
+    await window._setDoc(window._doc(window._db,'stock',window._uid,'import_batches',batchId), batch);
+
+    setSaveStatus('✅ Rollback terminé','#10b981');
+    setTimeout(function(){setSaveStatus('','')},2000);
+    showToast('✅ '+deleted+' mouvement(s) supprimé(s) · Stock recalculé', false, 5000);
+    renderAll();
+  }catch(e){
+    console.error('[rollback] error:',e);
+    setSaveStatus('❌ Erreur','#ef4444');
+    showToast('❌ Erreur rollback : '+e.message, true);
+  }
+}
+window.rollbackMovBatch = rollbackMovBatch;
 
 // ══════════════════════════════════════════════════════════
 // IMPORT IA
