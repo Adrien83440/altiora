@@ -766,6 +766,32 @@
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════
+     WAVE ADDITIVE : Popover date facture + Modal report
+     ═══════════════════════════════════════════════ -->
+<div id="invoiceDatePopover" style="display:none;position:fixed;z-index:9999;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:11px 13px;min-width:200px">
+  <div style="font-size:10px;font-weight:700;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">Date de facture</div>
+  <input id="invoiceDatePopoverInput" type="date" style="width:100%;font-size:13px;padding:6px 8px;border:1px solid #d1d5db;border-radius:5px;box-sizing:border-box;font-family:inherit"/>
+  <div style="display:flex;gap:6px;margin-top:9px;justify-content:space-between">
+    <button class="btn btn-outline btn-sm" style="font-size:10px;padding:4px 9px" onclick="clearInvoiceDate()">Effacer</button>
+    <button class="btn btn-primary btn-sm" style="font-size:10px;padding:4px 11px" onclick="saveInvoiceDate()">OK</button>
+  </div>
+</div>
+
+<div class="modal-overlay" id="reportChargeModal">
+  <div class="modal-box" style="max-width:460px;width:92%;background:#fff;border-radius:16px;box-shadow:0 24px 60px rgba(0,0,0,.2);overflow:hidden">
+    <div style="padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+      <h3 style="font-size:14px;font-weight:700">⏭️ Reporter au mois suivant</h3>
+      <button style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted)" onclick="closeReportChargeModal()">✕</button>
+    </div>
+    <div style="padding:16px 18px" id="reportChargeBody"></div>
+    <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-outline btn-sm" onclick="closeReportChargeModal()">Annuler</button>
+      <button class="btn btn-success btn-sm" id="btnReportChargeOk" onclick="confirmReportCharge()">✅ Confirmer le report</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"><div class="toast-inner" id="toast-inner"></div></div>
 
 <!-- ═══════════════════════════════════════════════
@@ -2808,6 +2834,234 @@ function bankLinkBadge(r){
   return ' <span class="bank-link-icon" title="'+tip+'" style="display:inline-block;font-size:11px;color:#4338ca;margin-left:3px;cursor:help;vertical-align:middle;user-select:none">🔗</span>';
 }
 
+/* ══════════════════════════════════════════════════════════
+   WAVE ADDITIVE : Date de facture + Report au mois suivant
+   - dateFacture : champ optionnel 'YYYY-MM-DD' sur chaque ligne
+   - reported    : metadata { fromMonth, fromLabel, date } si la ligne
+                   a été reportée depuis un autre mois
+   Les lignes existantes sans ces champs fonctionnent à l'identique.
+   ══════════════════════════════════════════════════════════ */
+
+function formatDateFr(ymd) {
+  if (!ymd) return '';
+  var m = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return ymd;
+  return m[3] + '/' + m[2] + '/' + m[1];
+}
+
+function invoiceDateBadge(key, i, r) {
+  var hasDate = !!(r && r.dateFacture);
+  var rawTip = hasDate
+    ? ('Date de facture : ' + formatDateFr(r.dateFacture) + ' (cliquer pour modifier)')
+    : 'Ajouter la date de la facture';
+  var tip = rawTip.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  var color = hasDate ? '#059669' : '#cbd5e1';
+  return ' <span id="invdate-' + key + '-' + i + '" class="invoice-date-icon" onclick="event.stopPropagation();openInvoiceDatePopover(\'' + key + '\',' + i + ',this)" title="' + tip + '" style="display:inline-block;font-size:12px;color:' + color + ';margin-left:2px;cursor:pointer;vertical-align:middle;user-select:none">📅</span>';
+}
+
+function reportedBadge(r) {
+  if (!r || !r.reported) return '';
+  var fromLabel = r.reported.fromLabel || r.reported.fromMonth || '';
+  var rawTip = 'Charge reportée depuis ' + fromLabel;
+  var tip = rawTip.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return ' <span title="' + tip + '" style="display:inline-block;font-size:11px;color:#d97706;margin-left:2px;cursor:help;vertical-align:middle;user-select:none">↪️</span>';
+}
+
+// ── Popover date facture ──
+var _invoiceDateCtx = null;
+
+function openInvoiceDatePopover(key, i, anchorEl) {
+  _invoiceDateCtx = { key: key, i: i };
+  var pop = document.getElementById('invoiceDatePopover');
+  var inp = document.getElementById('invoiceDatePopoverInput');
+  if (!pop || !inp) return;
+  var row = _data && _data[key] && _data[key][i];
+  inp.value = (row && row.dateFacture) ? row.dateFacture : '';
+  // Afficher d'abord pour calculer les dimensions réelles
+  pop.style.display = 'block';
+  pop.style.top = '-9999px';
+  pop.style.left = '-9999px';
+  var rect = anchorEl.getBoundingClientRect();
+  var popRect = pop.getBoundingClientRect();
+  var top = rect.bottom + 4;
+  var left = rect.left;
+  if (left + popRect.width > window.innerWidth - 8) left = window.innerWidth - popRect.width - 8;
+  if (top + popRect.height > window.innerHeight - 8) top = rect.top - popRect.height - 4;
+  pop.style.top = Math.max(8, top) + 'px';
+  pop.style.left = Math.max(8, left) + 'px';
+  setTimeout(function(){ try { inp.focus(); } catch(e){} }, 50);
+}
+
+function closeInvoiceDatePopover() {
+  var pop = document.getElementById('invoiceDatePopover');
+  if (pop) pop.style.display = 'none';
+  _invoiceDateCtx = null;
+}
+
+function saveInvoiceDate() {
+  if (!_invoiceDateCtx) return closeInvoiceDatePopover();
+  var inp = document.getElementById('invoiceDatePopoverInput');
+  var val = inp ? (inp.value || '') : '';
+  var key = _invoiceDateCtx.key, i = _invoiceDateCtx.i;
+  if (_data && _data[key] && _data[key][i]) {
+    if (val) _data[key][i].dateFacture = val;
+    else delete _data[key][i].dateFacture;
+  }
+  // Mettre à jour uniquement l'icône — pas de re-render complet (pour préserver le focus clavier)
+  var icon = document.getElementById('invdate-' + key + '-' + i);
+  if (icon) {
+    var hasDate = !!val;
+    icon.style.color = hasDate ? '#059669' : '#cbd5e1';
+    icon.title = hasDate
+      ? ('Date de facture : ' + formatDateFr(val) + ' (cliquer pour modifier)')
+      : 'Ajouter la date de la facture';
+  }
+  scheduleSave();
+  closeInvoiceDatePopover();
+}
+
+function clearInvoiceDate() {
+  var inp = document.getElementById('invoiceDatePopoverInput');
+  if (inp) inp.value = '';
+  saveInvoiceDate();
+}
+
+// Fermer le popover au clic extérieur / scroll
+document.addEventListener('mousedown', function(e) {
+  var pop = document.getElementById('invoiceDatePopover');
+  if (!pop || pop.style.display === 'none') return;
+  if (pop.contains(e.target)) return;
+  if (e.target && e.target.classList && e.target.classList.contains('invoice-date-icon')) return;
+  closeInvoiceDatePopover();
+});
+window.addEventListener('scroll', function(){
+  var pop = document.getElementById('invoiceDatePopover');
+  if (pop && pop.style.display !== 'none') closeInvoiceDatePopover();
+}, true);
+
+// ── Report d'une charge au mois suivant ──
+var _reportChargeCtx = null;
+
+function openReportChargeModal(key, i) {
+  var r = _data && _data[key] && _data[key][i];
+  if (!r) return;
+  // Validations strictes
+  if (r.pointe === 'Oui') {
+    showToast('Impossible : cette charge est déjà pointée (payée)', 'warning');
+    return;
+  }
+  if (r.bankLink && r.bankLink.bankTxId) {
+    showToast('Impossible : cette charge est liée à une transaction bancaire', 'warning');
+    return;
+  }
+  if (r.splitGroupId) {
+    showToast('Impossible : cette charge fait partie d\'une ventilation TVA. Supprimez la ventilation avant de reporter.', 'warning');
+    return;
+  }
+  var hasAnything = (r.fournisseur || '').trim() || (r.type || '').trim() || pf(r.montantHT) !== 0;
+  if (!hasAnything) {
+    showToast('Ligne vide — rien à reporter', 'warning');
+    return;
+  }
+  _reportChargeCtx = { key: key, i: i };
+  // Calculer le mois destination (rollover année)
+  var ms = document.getElementById('monthSelect');
+  var m = ms ? parseInt(ms.value) : new Date().getMonth();
+  var y = window._year;
+  var nm = m + 1, ny = y;
+  if (nm > 11) { nm = 0; ny = y + 1; }
+  var destLabel = MONTHS[nm] + ' ' + ny;
+  var currentLabel = MONTHS[m] + ' ' + y;
+  var ht = pf(r.montantHT);
+  var label = (r.fournisseur || '').trim() || (r.type || '').trim() || '(sans libellé)';
+  var body = document.getElementById('reportChargeBody');
+  if (body) {
+    body.innerHTML =
+      '<div style="font-size:13px;color:#374151;line-height:1.55">' +
+        'Reporter la charge <strong>' + esc(label) + '</strong>' +
+        (ht ? ' (<strong>' + fmtN(ht) + ' € HT</strong>)' : '') +
+        ' de <strong>' + currentLabel + '</strong> vers <strong>' + destLabel + '</strong> ?' +
+      '</div>' +
+      '<div style="font-size:11px;color:#6b7280;margin-top:12px;padding:9px 11px;background:#fffbeb;border-radius:6px;border-left:3px solid #f59e0b;line-height:1.5">' +
+        'La ligne sera <strong>supprimée</strong> du mois courant et <strong>ré-ajoutée</strong> en ' + destLabel + ' avec un badge ↪️ indiquant l\'origine. Le statut pointé sera remis à « Non ».' +
+      '</div>';
+  }
+  var btn = document.getElementById('btnReportChargeOk');
+  if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmer le report'; }
+  document.getElementById('reportChargeModal').classList.add('show');
+}
+
+function closeReportChargeModal() {
+  var mod = document.getElementById('reportChargeModal');
+  if (mod) mod.classList.remove('show');
+  _reportChargeCtx = null;
+}
+
+async function confirmReportCharge() {
+  if (!_reportChargeCtx) return closeReportChargeModal();
+  if (!window._uid || !window._getDoc || !window._setDoc || !window._db || !window._doc) {
+    showToast('Firebase non prêt — réessayez dans un instant', 'warning');
+    return;
+  }
+  var key = _reportChargeCtx.key, i = _reportChargeCtx.i;
+  var r = _data && _data[key] && _data[key][i];
+  if (!r) { closeReportChargeModal(); return; }
+
+  var btn = document.getElementById('btnReportChargeOk');
+  if (btn) { btn.disabled = true; btn.textContent = '...'; }
+
+  // Préparer la nouvelle ligne pour le mois destination
+  var srcKey = getMonthKey();
+  var srcLabel = getMonthLabel();
+  var newLine = JSON.parse(JSON.stringify(r));
+  newLine.pointe = 'Non';
+  if (newLine.bankLink) delete newLine.bankLink;
+  newLine.reported = {
+    fromMonth: srcKey,
+    fromLabel: srcLabel,
+    date: new Date().toISOString().slice(0, 10)
+  };
+
+  // Calculer la clé mois destination
+  var ms = document.getElementById('monthSelect');
+  var m = ms ? parseInt(ms.value) : new Date().getMonth();
+  var y = window._year;
+  var nm = m + 1, ny = y;
+  if (nm > 11) { nm = 0; ny = y + 1; }
+  var destKey = ny + '-' + String(nm + 1).padStart(2, '0');
+  var destLabel = MONTHS[nm] + ' ' + ny;
+
+  try {
+    // 1. Lire le doc mois destination
+    var destRef = window._doc(window._db, 'pilotage', window._uid, 'months', destKey);
+    var destSnap = await window._getDoc(destRef);
+    var destData = (destSnap && destSnap.exists && destSnap.exists()) ? destSnap.data() : {};
+    if (!destData[key] || !Array.isArray(destData[key])) destData[key] = [];
+    // Ligne distincte, pas de fusion
+    destData[key].push(newLine);
+    // 2. Écrire mois destination (clean via JSON round-trip)
+    await window._setDoc(destRef, JSON.parse(JSON.stringify(destData)));
+    // 3. Retirer la ligne du mois courant
+    _data[key].splice(i, 1);
+    // 4. Sauver mois courant
+    await window._setDoc(
+      window._doc(window._db, 'pilotage', window._uid, 'months', srcKey),
+      JSON.parse(JSON.stringify(_data))
+    );
+    // 5. Re-render tbody concerné + totaux
+    var tbId = key === 'chargesFixe' ? 'cf-tbody' : 'cv-tbody';
+    var tb = document.getElementById(tbId);
+    if (tb) tb.innerHTML = renderCharges(_data[key], key);
+    refreshTotals();
+    showToast('✓ Charge reportée vers ' + destLabel, 'success');
+    closeReportChargeModal();
+  } catch (e) {
+    console.warn('confirmReportCharge error:', e);
+    showToast('Erreur lors du report — aucune modification effectuée', 'warning');
+    if (btn) { btn.disabled = false; btn.textContent = '✅ Confirmer le report'; }
+  }
+}
+
 function renderCharges(rows, key) {
   var tbId = key==='chargesFixe' ? 'cf-tbody' : key==='chargesVar' ? 'cv-tbody' : 'leas-tbody';
   var isFixe = key === 'chargesFixe';
@@ -2828,7 +3082,7 @@ function renderCharges(rows, key) {
               : isSplitGroup ? 'background:rgba(59,130,246,0.04);' : '';
     return '<tr style="' + rowBg + '">' +
       '<td>' + pointeSelectHtml(key, i, r.pointe) + '</td>' +
-      '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + supplierInputHtml(key, i, r.fournisseur||'') + ficheBtn + bankLinkBadge(r) + splitGroupBadge(key, i) + '</div></td>' +
+      '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + supplierInputHtml(key, i, r.fournisseur||'') + ficheBtn + bankLinkBadge(r) + splitGroupBadge(key, i) + invoiceDateBadge(key, i, r) + reportedBadge(r) + '</div></td>' +
       '<td>' + catalogInputHtml('types', key+'-typ-'+i, r.type||'', 'width:95px', 'Type', '_data[\''+key+'\']['+i+'].type=this.value') + '</td>' +
       '<td><input class="cell-input" style="width:76px' + (!window._htMode?';color:var(--muted)':'') + '" type="text" inputmode="decimal" placeholder="' + (window._htMode?'HT':'auto') + '" value="' + (r.montantHT||'') + '" id="' + key + '-ht-' + i + '" oninput="updateChargeHT(\'' + key + '\',' + i + ',this.value)"/></td>' +
       '<td><select class="cell-input" style="width:55px" onchange="updateChargeTVARate(\'' + key + '\',' + i + ',this.value)">' + TVA_RATES.map(function(t) { return '<option value="' + t + '"' + (rate==t?' selected':'') + '>' + t + '%</option>'; }).join('') + '</select></td>' +
@@ -2852,6 +3106,7 @@ function renderCharges(rows, key) {
         (!isFixe && key==='leasing' ? '<button class="btn btn-orange btn-sm" style="font-size:10px;padding:3px 8px" onclick="propagateLeasing(' + i + ')">⚡ Propager</button>' : '') +
         (key==='leasing'||key==='chargesVar'||key==='chargesFixe' ? '<button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 8px" title="Modifier le prix sur plusieurs mois" onclick="openChargeScopeUpdate(\'' + key + '\',' + i + ')">✏️</button>' : '') +
         (key==='chargesVar'||key==='chargesFixe' ? '<button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 8px" title="Ventiler la TVA (plusieurs taux)" onclick="openSplitCharge(\'' + key + '\',' + i + ')">✂️</button>' : '') +
+        (key==='chargesVar'||key==='chargesFixe' ? '<button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 8px" title="Reporter cette charge au mois suivant (si non payée)" onclick="openReportChargeModal(\'' + key + '\',' + i + ')">⏭️</button>' : '') +
         '<button class="btn btn-danger btn-sm" onclick="delRow(\'' + key + '\',' + i + ',\'' + tbId + '\',function(r){return renderCharges(r,\'' + key + '\')})">✕</button>' +
       '</td>' +
     '</tr>';
