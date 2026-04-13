@@ -6,6 +6,8 @@
   <title>ALTEORE — Coût de revient</title>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -201,11 +203,53 @@
     .fourn-field input:focus,.fourn-field textarea:focus{border-color:var(--blue-main);}
     .fourn-field.full{grid-column:1/-1;}
 
-    /* TOAST */
-    .toast{position:fixed;bottom:24px;right:24px;background:#1a1f36;color:white;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;transform:translateY(80px);opacity:0;transition:all 0.3s;}
-    .toast.show{transform:translateY(0);opacity:1;}
-    .toast.success{background:#10b981;}
-    .toast.warning{background:#f59e0b;}
+    /* ── IMPORT FACTURE ── */
+    .imp-drop{border:2.5px dashed var(--border);border-radius:14px;padding:44px 24px;text-align:center;cursor:pointer;transition:all .2s;background:white;}
+    .imp-drop:hover,.imp-drop.dragging{border-color:var(--blue-main);background:var(--blue-ghost);}
+    .imp-drop-icon{font-size:42px;margin-bottom:10px;}
+    .imp-drop h3{font-size:15px;font-weight:700;margin-bottom:6px;}
+    .imp-drop p{font-size:12px;color:var(--muted);}
+    .imp-formats{display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:12px;}
+    .imp-fmt{font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;background:#f1f5f9;color:var(--muted);}
+    .imp-notice{display:flex;gap:10px;background:var(--blue-ghost);border:1.5px solid #bfdbfe;border-radius:10px;padding:12px 14px;margin-bottom:18px;font-size:12px;color:#1e40af;}
+    .imp-processing{text-align:center;padding:60px 24px;}
+    .imp-spin{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--blue-main);border-radius:50%;animation:impspin .8s linear infinite;margin:0 auto 14px;}
+    @keyframes impspin{to{transform:rotate(360deg);}}
+    .imp-supplier-bar{display:flex;align-items:center;gap:12px;background:var(--blue-ghost);border:1.5px solid #bfdbfe;border-radius:10px;padding:12px 16px;margin-bottom:14px;}
+    .imp-supplier-bar.low-conf{background:#fffbeb;border-color:#fde68a;}
+    .imp-sum-grid{display:flex;gap:10px;margin-bottom:14px;}
+    .imp-sum-pill{flex:1;background:white;border:1px solid var(--border);border-radius:10px;padding:10px 14px;text-align:center;}
+    .imp-sum-val{font-size:20px;font-weight:800;}
+    .imp-sum-lbl{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-top:2px;}
+    .imp-date-sec{background:#f8faff;border:1.5px solid #e0e7ff;border-radius:10px;padding:14px 16px;margin-bottom:14px;}
+    .imp-date-sec h4{font-size:12px;font-weight:700;color:var(--blue-main);margin-bottom:8px;}
+    .imp-radio-row{display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:6px;flex-wrap:wrap;}
+    .imp-radio-row input[type=radio]{accent-color:var(--blue-main);}
+    .imp-radio-row label{font-size:12px;font-weight:600;color:var(--text);cursor:pointer;}
+    .imp-mtable{width:100%;border-collapse:collapse;font-size:12px;}
+    .imp-mtable th{padding:7px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;background:#f8faff;border-bottom:2px solid var(--border);}
+    .imp-mtable td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle;}
+    .imp-mtable tr:hover td{background:#fafbff;}
+    .imp-mtable tr.imp-ignored td{opacity:.4;}
+    .imp-badge{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;}
+    .imp-badge-green{background:#f0fdf4;color:#059669;}
+    .imp-badge-orange{background:#fffbeb;color:#d97706;}
+    .imp-badge-blue{background:var(--blue-ghost);color:var(--blue-main);}
+    .imp-badge-gray{background:#f1f5f9;color:var(--muted);}
+    .imp-delta-up{color:var(--red);font-weight:700;font-size:11px;}
+    .imp-delta-down{color:var(--green);font-weight:700;font-size:11px;}
+    .imp-delta-eq{color:var(--muted);font-size:11px;}
+    .imp-sel{padding:5px 8px;border:1.5px solid var(--border);border-radius:7px;font-size:11px;font-weight:600;color:var(--text);outline:none;background:white;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;}
+    .imp-sel:focus{border-color:var(--blue-main);}
+    .imp-map-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    .imp-preview-table{width:100%;border-collapse:collapse;font-size:11px;margin-top:10px;}
+    .imp-preview-table th{background:#f8faff;padding:5px 8px;text-align:left;font-size:10px;color:var(--muted);border-bottom:1px solid var(--border);}
+    .imp-preview-table td{padding:5px 8px;border-bottom:1px solid var(--border);}
+    .imp-hist-table{width:100%;border-collapse:collapse;font-size:11px;}
+    .imp-hist-table th{padding:6px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border);}
+    .imp-hist-table td{padding:7px 8px;border-bottom:1px solid var(--border);}
+    .modal-overlay.show-imp{display:flex;}
+
     .loader{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--muted);gap:10px;}
     @keyframes spin{to{transform:rotate(360deg)}}
     .spin{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--blue-main);border-radius:50%;animation:spin .7s linear infinite;}
@@ -358,6 +402,7 @@
       <div class="lp-tabs">
         <button class="lp-tab" :class="{active:activeTab==='produits'}" @click="activeTab='produits';currentFournisseurId=null">📦 Produits</button>
         <button class="lp-tab" :class="{active:activeTab==='fournisseurs'}" @click="activeTab='fournisseurs';currentId=null">🏪 Fournisseurs</button>
+        <button class="lp-tab" :class="{active:activeTab==='import'}" @click="activeTab='import';currentId=null;currentFournisseurId=null;importActivateScheduled()">📥 Import</button>
       </div>
 
       <!-- TAB PRODUITS -->
@@ -426,7 +471,7 @@
     <div class="right-panel">
 
       <!-- EMPTY STATE -->
-      <div x-show="!p && !f" class="fiche-empty">
+      <div x-show="!p && !f && activeTab!=='import'" class="fiche-empty">
         <div class="fiche-empty-icon">🧮</div>
         <h3>Sélectionnez un élément</h3>
         <p>Choisissez un produit ou un fournisseur dans le panneau de gauche pour commencer.</p>
@@ -764,6 +809,247 @@
       </template>
 
     </div><!-- /right-panel -->
+
+      <!-- ════ IMPORT FACTURE FOURNISSEUR ════ -->
+      <!-- Right panel — affiché quand activeTab==='import' -->
+      <div x-show="activeTab==='import'" style="flex:1">
+
+        <!-- Notice -->
+        <div class="imp-notice">
+          <span style="font-size:16px;flex-shrink:0">💡</span>
+          <span>Pour un matching optimal, les noms de vos articles dans Alteore doivent correspondre aux libellés de vos factures. En cas de non-correspondance vous pourrez faire le lien manuellement.</span>
+        </div>
+
+        <!-- UPLOAD -->
+        <template x-if="importStep==='upload'">
+          <div class="fiche" style="padding:24px;">
+            <div style="font-size:14px;font-weight:800;margin-bottom:16px;">📄 Importer une facture fournisseur</div>
+            <div class="imp-drop"
+              :class="{dragging:importIsDragging}"
+              @dragover.prevent="importIsDragging=true"
+              @dragleave="importIsDragging=false"
+              @drop="importHandleDrop($event)"
+              @click="$refs.impFileInput.click()">
+              <div class="imp-drop-icon">📋</div>
+              <h3>Glissez votre facture ici ou cliquez pour parcourir</h3>
+              <p>Facture fournisseur, bon de livraison, tarif</p>
+              <div class="imp-formats">
+                <span class="imp-fmt">PDF</span><span class="imp-fmt">PNG</span>
+                <span class="imp-fmt">JPG</span><span class="imp-fmt">XLSX</span><span class="imp-fmt">CSV</span>
+              </div>
+            </div>
+            <input type="file" x-ref="impFileInput" style="display:none" accept=".pdf,.png,.jpg,.jpeg,.webp,.xlsx,.xls,.csv" @change="importHandleFileInput($event)"/>
+          </div>
+        </template>
+
+        <!-- PROCESSING -->
+        <template x-if="importStep==='processing'">
+          <div class="fiche"><div class="imp-processing">
+            <div class="imp-spin"></div>
+            <div style="font-size:15px;font-weight:800;margin-bottom:6px;">Analyse en cours...</div>
+            <div style="font-size:12px;color:var(--muted)">L'IA extrait les produits et prix de votre facture.</div>
+          </div></div>
+        </template>
+
+        <!-- XLSX COLUMN MAPPING -->
+        <template x-if="importStep==='mapping'">
+          <div class="fiche">
+            <div class="fiche-head"><h3 style="font-size:14px;font-weight:800">🗂 Correspondance des colonnes</h3><button class="btn btn-outline btn-sm" @click="importStep='upload'">✕ Annuler</button></div>
+            <div style="padding:16px 22px;">
+              <p style="font-size:12px;color:var(--muted);margin-bottom:14px;">Indiquez quelle colonne correspond à chaque information.</p>
+              <div class="imp-map-grid">
+                <div>
+                  <label class="modal-label">Nom de l'article *</label>
+                  <select class="imp-sel" style="width:100%" x-model="xlsxImpMapping.name">
+                    <option value="">— Choisir —</option>
+                    <template x-for="(h,i) in xlsxImpHeaders" :key="i"><option :value="i" x-text="h"></option></template>
+                  </select>
+                </div>
+                <div>
+                  <label class="modal-label">Prix unitaire HT *</label>
+                  <select class="imp-sel" style="width:100%" x-model="xlsxImpMapping.unitPrice">
+                    <option value="">— Choisir —</option>
+                    <template x-for="(h,i) in xlsxImpHeaders" :key="i"><option :value="i" x-text="h"></option></template>
+                  </select>
+                </div>
+                <div>
+                  <label class="modal-label">Quantité (optionnel)</label>
+                  <select class="imp-sel" style="width:100%" x-model="xlsxImpMapping.qty">
+                    <option value="">— Ignorer —</option>
+                    <template x-for="(h,i) in xlsxImpHeaders" :key="i"><option :value="i" x-text="h"></option></template>
+                  </select>
+                </div>
+                <div>
+                  <label class="modal-label">Unité (optionnel)</label>
+                  <select class="imp-sel" style="width:100%" x-model="xlsxImpMapping.unit">
+                    <option value="">— Ignorer —</option>
+                    <template x-for="(h,i) in xlsxImpHeaders" :key="i"><option :value="i" x-text="h"></option></template>
+                  </select>
+                </div>
+              </div>
+              <div style="overflow-x:auto;margin-top:10px;">
+                <table class="imp-preview-table">
+                  <thead><tr><template x-for="h in xlsxImpHeaders" :key="h"><th x-text="h"></th></template></tr></thead>
+                  <tbody>
+                    <template x-for="(row,ri) in xlsxImpPreview" :key="ri">
+                      <tr><template x-for="(cell,ci) in row" :key="ci"><td x-text="cell" :style="(ci==xlsxImpMapping.name||ci==xlsxImpMapping.unitPrice)?'font-weight:700;color:var(--blue-main)':''"></td></template></tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+              <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px;">
+                <button class="btn btn-outline btn-sm" @click="importStep='upload'">Annuler</button>
+                <button class="btn btn-primary btn-sm" @click="importConfirmXlsxMapping()">Continuer →</button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- RESULTS -->
+        <template x-if="importStep==='results'">
+          <div>
+            <!-- Supplier bar -->
+            <div class="imp-supplier-bar" :class="{'low-conf': importSupplierConfidence==='low' || !importSelectedFid}">
+              <span style="font-size:22px;">🏪</span>
+              <div style="flex:1;">
+                <div x-show="importDetectedSupplier" style="font-size:10px;font-weight:600;color:var(--muted);margin-bottom:1px;">Fournisseur détecté</div>
+                <div style="font-size:15px;font-weight:800;" x-text="importDetectedSupplier || 'Fournisseur non détecté'"></div>
+              </div>
+              <div style="min-width:200px;">
+                <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:3px;">Associer à</div>
+                <select class="imp-sel" style="width:100%" x-model="importSelectedFid" @change="importUpdateFournisseurFilter()">
+                  <option value="">⚠ Sélectionner</option>
+                  <template x-for="item in filteredFournisseursList" :key="item.id">
+                    <option :value="item.id" x-text="item.f.nom+' ('+(item.f.articles||[]).length+' articles)'"></option>
+                  </template>
+                </select>
+              </div>
+              <div x-show="importInvoiceDate||importInvoiceNumber" style="font-size:11px;color:var(--muted);text-align:right;min-width:90px;">
+                <div x-show="importInvoiceDate" x-text="'📅 '+importInvoiceDate"></div>
+                <div x-show="importInvoiceNumber" x-text="'N° '+importInvoiceNumber" style="margin-top:2px;"></div>
+              </div>
+            </div>
+
+            <!-- Summary -->
+            <div class="imp-sum-grid">
+              <div class="imp-sum-pill"><div class="imp-sum-val" style="color:var(--green)" x-text="importMatchedCount"></div><div class="imp-sum-lbl">À mettre à jour</div></div>
+              <div class="imp-sum-pill"><div class="imp-sum-val" style="color:var(--orange)" x-text="importUnmatchedCount"></div><div class="imp-sum-lbl">Non liées</div></div>
+              <div class="imp-sum-pill"><div class="imp-sum-val" x-text="importMatchedLines.length"></div><div class="imp-sum-lbl">Lignes extraites</div></div>
+            </div>
+
+            <!-- Date application -->
+            <div class="imp-date-sec">
+              <h4>📅 Date d'application des nouveaux prix</h4>
+              <label class="imp-radio-row">
+                <input type="radio" name="impEffDate" value="now" x-model="importGlobalEffDate"/>
+                <label>Immédiatement</label>
+              </label>
+              <label class="imp-radio-row">
+                <input type="radio" name="impEffDate" value="custom" x-model="importGlobalEffDate"/>
+                <label>À partir du</label>
+                <template x-if="importGlobalEffDate==='custom'">
+                  <span style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">
+                    <select class="imp-sel" x-model="importCustomDay" @change="importRebuildDate()" style="width:55px">
+                      <template x-for="d in importDays31" :key="d"><option :value="d" x-text="String(d).padStart(2,'0')"></option></template>
+                    </select>
+                    <select class="imp-sel" x-model="importCustomMonth" @change="importRebuildDate()" style="width:105px">
+                      <template x-for="m in importMonths12" :key="m.v"><option :value="m.v" x-text="m.l"></option></template>
+                    </select>
+                    <select class="imp-sel" x-model="importCustomYear" @change="importRebuildDate()" style="width:75px">
+                      <template x-for="y in importYears3" :key="y"><option :value="y" x-text="y"></option></template>
+                    </select>
+                  </span>
+                </template>
+              </label>
+              <p x-show="importGlobalEffDate==='custom'" style="font-size:11px;color:var(--muted);margin-top:4px;margin-left:20px;">💡 Si vous avez encore du stock à l'ancien prix, les coûts de revient continueront sur l'ancien tarif jusqu'à cette date, puis basculeront automatiquement.</p>
+            </div>
+
+            <!-- Match table -->
+            <div class="fiche" style="margin-bottom:12px;overflow-x:auto;">
+              <table class="imp-mtable">
+                <thead><tr>
+                  <th>Ligne facture</th><th>Article Alteore</th>
+                  <th style="text-align:right">Prix actuel</th><th style="text-align:right">Nouveau prix</th>
+                  <th style="text-align:center">∆</th><th style="text-align:center">Statut</th><th style="text-align:center">Action</th>
+                </tr></thead>
+                <tbody>
+                  <template x-for="(line,idx) in importMatchedLines" :key="idx">
+                    <tr :class="{'imp-ignored':line.ignore}">
+                      <td>
+                        <div style="font-weight:700;font-size:12px" x-text="line.invoiceName"></div>
+                        <div x-show="line.invoiceUnit||line.invoiceRef" style="font-size:10px;color:var(--muted)">
+                          <span x-show="line.invoiceRef" x-text="'Réf: '+line.invoiceRef"></span>
+                          <span x-show="line.invoiceRef&&line.invoiceUnit"> · </span>
+                          <span x-show="line.invoiceUnit" x-text="line.invoiceQty+' '+line.invoiceUnit"></span>
+                        </div>
+                      </td>
+                      <td>
+                        <template x-if="line.createNew"><span class="imp-badge imp-badge-blue">✨ Nouvel article</span></template>
+                        <template x-if="!line.createNew">
+                          <select class="imp-sel" style="width:190px"
+                            @change="importHandleArticleSelect(idx,$event.target.value)"
+                            :value="line.matchedArticle?(line.matchedArticle.fournisseurId+'|'+line.matchedArticle.articleId):''">
+                            <option value="">— Non lié —</option>
+                            <template x-for="item in filteredFournisseursList" :key="item.id">
+                              <optgroup :label="item.f.nom">
+                                <template x-for="a in importGetArticlesByFid(item.id)" :key="a.articleId">
+                                  <option :value="a.fournisseurId+'|'+a.articleId" x-text="a.nom"></option>
+                                </template>
+                              </optgroup>
+                            </template>
+                          </select>
+                        </template>
+                      </td>
+                      <td style="text-align:right;font-weight:600;color:var(--muted)">
+                        <span x-text="line.matchedArticle?fmtE(line.matchedArticle.prixAchat):'—'"></span>
+                      </td>
+                      <td style="text-align:right;font-weight:800;color:var(--blue-main)" x-text="fmtE(line.invoicePriceHT)"></td>
+                      <td style="text-align:center">
+                        <template x-if="line.matchedArticle&&line.matchedArticle.prixAchat>0">
+                          <span :class="importDeltaClass(line.matchedArticle.prixAchat,line.invoicePriceHT)"
+                            x-text="importFmtDelta(line.matchedArticle.prixAchat,line.invoicePriceHT)"></span>
+                        </template>
+                        <template x-if="!line.matchedArticle||line.matchedArticle.prixAchat===0"><span style="color:var(--muted)">—</span></template>
+                      </td>
+                      <td style="text-align:center">
+                        <span x-show="line.ignore" class="imp-badge imp-badge-gray">Ignorée</span>
+                        <span x-show="!line.ignore&&line.createNew" class="imp-badge imp-badge-blue">Créer</span>
+                        <span x-show="!line.ignore&&!line.createNew&&line.matchedArticle" class="imp-badge imp-badge-green">✓ Liée</span>
+                        <span x-show="!line.ignore&&!line.createNew&&!line.matchedArticle" class="imp-badge imp-badge-orange">Non liée</span>
+                      </td>
+                      <td style="text-align:center">
+                        <div style="display:flex;gap:4px;justify-content:center;flex-wrap:wrap;">
+                          <template x-if="!line.ignore&&!line.createNew&&!line.matchedArticle">
+                            <button class="btn btn-xs" style="background:#f0fdf4;color:#059669;border:1px solid #a7f3d0" @click="importOpenCreateModal(line,idx)">+ Créer</button>
+                          </template>
+                          <button class="btn btn-xs btn-outline" x-text="line.ignore?'Restaurer':'Ignorer'" @click="line.ignore=!line.ignore"></button>
+                        </div>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Ref + actions -->
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:space-between;">
+              <div>
+                <label class="modal-label">Référence facture (pour l'historique)</label>
+                <input class="modal-input" type="text" x-model="importInvoiceRef" placeholder="ex: METRO_avril2026.pdf" style="width:280px"/>
+              </div>
+              <div style="display:flex;gap:10px;">
+                <button class="btn btn-outline btn-sm" @click="importReset()">← Nouvelle facture</button>
+                <button class="btn btn-primary btn-sm"
+                  :disabled="importMatchedCount===0&&importMatchedLines.filter(function(l){return l.createNew;}).length===0"
+                  @click="importApplyAll()">
+                  ✅ Appliquer <span x-text="importMatchedCount+importMatchedLines.filter(function(l){return l.createNew;}).length"></span> mise(s) à jour
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
+
+      </div><!-- /import panel -->
   </div><!-- /content -->
 
   <!-- ════ MODAL NOUVEAU PRODUIT ════ -->
@@ -837,6 +1123,75 @@
             Aucun article trouvé.<br>Créez d'abord des articles dans vos fiches fournisseurs.
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════ MODAL HISTORIQUE PRIX ════ -->
+  <div class="modal-overlay" id="impHistModal" @click.self="showImpHistorique=false" :class="{'show':showImpHistorique}">
+    <div class="modal" style="max-width:640px">
+      <div class="modal-head"><h3>📊 Historique des prix — <span x-text="impHistArticle&&impHistArticle.nom||''"></span></h3><button class="modal-close" @click="showImpHistorique=false">✕</button></div>
+      <div class="modal-body" style="padding:12px 20px">
+        <table class="imp-hist-table">
+          <thead><tr><th>Date</th><th>Ancien</th><th>Nouveau</th><th>∆</th><th>Applicable le</th><th>Source</th><th>Statut</th></tr></thead>
+          <tbody>
+            <template x-if="impHistArticle&&impHistArticle.priceHistory&&impHistArticle.priceHistory.length>0">
+              <template x-for="(h,i) in [...(impHistArticle.priceHistory)].reverse()" :key="i">
+                <tr>
+                  <td x-text="importFmtDate(h.date)"></td>
+                  <td x-text="fmtE(h.oldPrice)"></td>
+                  <td style="font-weight:700" x-text="fmtE(h.newPrice)"></td>
+                  <td :class="importDeltaClass(h.oldPrice,h.newPrice)" x-text="h.oldPrice>0?importFmtDelta(h.oldPrice,h.newPrice):'Nouveau'"></td>
+                  <td x-text="importFmtDate(h.effectiveDate)"></td>
+                  <td x-text="h.source==='import'?'📥 Import':'✏️ Manuel'"></td>
+                  <td :style="h.status==='applied'?'color:var(--green)':'color:var(--orange)'" x-text="h.status==='applied'?'✓ Appliqué':'⏳ Planifié'"></td>
+                </tr>
+              </template>
+            </template>
+            <template x-if="!impHistArticle||!impHistArticle.priceHistory||impHistArticle.priceHistory.length===0">
+              <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:16px">Aucun historique</td></tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-foot"><button class="btn btn-outline" @click="showImpHistorique=false">Fermer</button></div>
+    </div>
+  </div>
+
+  <!-- ════ MODAL CRÉER ARTICLE (non-matchés import) ════ -->
+  <div class="modal-overlay" :class="{'show':showImpCreateModal}" @click.self="showImpCreateModal=false">
+    <div class="modal" style="max-width:500px">
+      <div class="modal-head"><h3>✨ Créer un article</h3><button class="modal-close" @click="showImpCreateModal=false">✕</button></div>
+      <div class="modal-body">
+        <div style="font-size:11px;color:#1e40af;background:var(--blue-ghost);padding:8px 12px;border-radius:8px;margin-bottom:14px">Cet article sera créé dans votre fiche fournisseur avec le prix de la facture.</div>
+        <div class="modal-field">
+          <label class="modal-label">Fournisseur *</label>
+          <select class="modal-input" x-model="impCreateFid">
+            <option value="">— Sélectionner —</option>
+            <template x-for="item in filteredFournisseursList" :key="item.id"><option :value="item.id" x-text="item.f.nom"></option></template>
+          </select>
+        </div>
+        <div class="modal-field"><label class="modal-label">Nom de l'article *</label><input class="modal-input" type="text" x-model="impCreateNom"/></div>
+        <div class="modal-row">
+          <div class="modal-field"><label class="modal-label">Prix d'achat HT (€) *</label><input class="modal-input" type="text" inputmode="decimal" x-model="impCreatePrix"/></div>
+          <div class="modal-field">
+            <label class="modal-label">Type</label>
+            <select class="modal-input" x-model="impCreateType">
+              <option value="ingredient">🧪 Ingrédient</option>
+              <option value="emballage">📦 Emballage</option>
+              <option value="livraison">🚚 Livraison</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-row">
+          <div class="modal-field"><label class="modal-label">Qté colis</label><input class="modal-input" type="text" inputmode="decimal" x-model="impCreateColisQte"/></div>
+          <div class="modal-field"><label class="modal-label">Unité colis</label><input class="modal-input" type="text" x-model="impCreateColisUnite" placeholder="kg, L..."/></div>
+          <div class="modal-field"><label class="modal-label">Unité travail</label><input class="modal-input" type="text" x-model="impCreateUnite" placeholder="g, ml..."/></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-outline" @click="showImpCreateModal=false">Annuler</button>
+        <button class="btn btn-primary" @click="impConfirmCreate()">Créer l'article</button>
       </div>
     </div>
   </div>
@@ -948,6 +1303,24 @@ function coutRevientApp(){
     units:['g','kg','ml','l','m','cm','pièce','portion','heure','forfait','unité'],
     emojiList:['🍰','🎂','🧁','🍩','🍪','🥐','🥖','🍞','🥗','🍕','🍔','🍟','🌮','🍣','🍱','🥩','🍗','🥚','🧀','🍷','🍺','🥤','☕','🫖','📦','🏷️','🛠️','⚙️','🔧','💼','📋','🎯','🌿','🌸','🍓','🍋','🍇','🍫','🍯','🧂','🫙'],
     fournEmojiList:['🏪','🏬','🏭','🚛','🧑‍🌾','🐟','🥩','🧀','🍞','🥕','🫒','🍷','📦','🏗️','⚡','🔧','💊','🧪','🧹','🖨️','📐','🎨'],
+
+    // ── IMPORT STATE ──
+    importStep:'upload',
+    importIsDragging:false,
+    xlsxImpHeaders:[],xlsxImpPreview:[],xlsxImpRawData:[],
+    xlsxImpMapping:{name:'',qty:'',unit:'',unitPrice:''},
+    importDetectedSupplier:'',importSupplierConfidence:'low',
+    importSelectedFid:'',importInvoiceDate:'',importInvoiceNumber:'',importInvoiceRef:'',
+    importMatchedLines:[],
+    importGlobalEffDate:'now',
+    importCustomDay:new Date().getDate(),
+    importCustomMonth:new Date().getMonth()+1,
+    importCustomYear:new Date().getFullYear(),
+    importGlobalCustomDate:'',
+    showImpHistorique:false,impHistArticle:null,
+    showImpCreateModal:false,impCreateForIdx:null,
+    impCreateFid:'',impCreateNom:'',impCreatePrix:'',
+    impCreateColisQte:'1',impCreateColisUnite:'kg',impCreateUnite:'g',impCreateType:'ingredient',
 
     // ── COMPUTED ──
     get p(){return this.currentId&&this.products[this.currentId]?this.products[this.currentId]:null;},
@@ -1138,6 +1511,345 @@ function coutRevientApp(){
         delete this.products[id];this.products=Object.assign({},this.products);
         this.currentId=null;showToast('Produit supprimé','ok');
       }catch(e){showToast('Erreur : '+e.message,'err');console.error(e);}
+    },
+
+    get importMatchedCount(){return this.importMatchedLines.filter(function(l){return !l.ignore&&l.matchedArticle;}).length;},
+    get importUnmatchedCount(){return this.importMatchedLines.filter(function(l){return !l.ignore&&!l.matchedArticle&&!l.createNew;}).length;},
+    get importDays31(){var d=[];for(var i=1;i<=31;i++)d.push(i);return d;},
+    get importMonths12(){return[{v:1,l:'Janvier'},{v:2,l:'Février'},{v:3,l:'Mars'},{v:4,l:'Avril'},{v:5,l:'Mai'},{v:6,l:'Juin'},{v:7,l:'Juillet'},{v:8,l:'Août'},{v:9,l:'Septembre'},{v:10,l:'Octobre'},{v:11,l:'Novembre'},{v:12,l:'Décembre'}];},
+    get importYears3(){var y=new Date().getFullYear();return[y,y+1,y+2];},
+
+    // ── IMPORT METHODS ──
+    importRebuildDate(){
+      var d=this.importCustomDay,m=this.importCustomMonth,y=this.importCustomYear;
+      this.importGlobalCustomDate=y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+    },
+
+    // Activate scheduled prices at tab switch
+    async importActivateScheduled(){
+      var self=this;
+      var today=new Date().toISOString().split('T')[0];
+      for(var fid in self.fournisseurs){
+        var fourn=self.fournisseurs[fid];
+        var changed=false;
+        (fourn.articles||[]).forEach(function(art){
+          if(art.scheduledPrice&&art.scheduledPrice.effectiveDate<=today){
+            console.log('[scheduled] activating '+art.nom+': '+art.prixAchat+'→'+art.scheduledPrice.price);
+            art.prixAchat=art.scheduledPrice.price;
+            if(art.priceHistory){
+              var h=art.priceHistory.find(function(x){return x.status==='pending'&&Math.abs(x.newPrice-art.scheduledPrice.price)<0.0001;});
+              if(h)h.status='applied';
+            }
+            delete art.scheduledPrice;
+            changed=true;
+          }
+        });
+        if(changed){
+          try{await window._setDoc(window._doc(window._db,'fiches',window._uid,'items',fid),JSON.parse(JSON.stringify(fourn)));}
+          catch(e){console.error('[scheduled] save error',e);}
+        }
+      }
+      self.fournisseurs=Object.assign({},self.fournisseurs);
+    },
+
+    // Fuzzy match
+    importMatchLine(lineName,fournisseurId){
+      var name=(lineName||'').toLowerCase().trim();
+      if(!name)return null;
+      var candidates=fournisseurId
+        ?this.allArticlesFlat.filter(function(a){return a.fournisseurId===fournisseurId;})
+        :this.allArticlesFlat;
+      var best=null,bestScore=0;
+      candidates.forEach(function(a){
+        var aName=(a.nom||'').toLowerCase().trim();
+        var score=0;
+        if(aName===name)score=1.0;
+        else if(aName.includes(name)||name.includes(aName))score=0.8;
+        else{
+          var w1=name.split(/\s+/).filter(function(w){return w.length>2;});
+          var w2=aName.split(/\s+/).filter(function(w){return w.length>2;});
+          var common=w1.filter(function(w){return w2.includes(w);}).length;
+          if(w1.length>0&&w2.length>0)score=(common/Math.max(w1.length,w2.length))*0.9;
+        }
+        if(score>bestScore){bestScore=score;best=a;}
+      });
+      return bestScore>=0.4?{article:best,score:bestScore}:null;
+    },
+    importMatchSupplier(supplierName){
+      if(!supplierName)return null;
+      var name=supplierName.toLowerCase().trim();
+      var self=this,best=null,bestScore=0;
+      Object.entries(self.fournisseurs).forEach(function(e){
+        var fName=(e[1].nom||'').toLowerCase().trim();
+        var score=0;
+        if(fName===name)score=1.0;
+        else if(fName.includes(name)||name.includes(fName))score=0.8;
+        else{
+          var w1=name.split(/\s+/).filter(function(w){return w.length>2;});
+          var w2=fName.split(/\s+/).filter(function(w){return w.length>2;});
+          var common=w1.filter(function(w){return w2.includes(w);}).length;
+          if(w1.length>0&&w2.length>0)score=common/Math.max(w1.length,w2.length);
+        }
+        if(score>bestScore){bestScore=score;best={id:e[0],nom:e[1].nom};}
+      });
+      return bestScore>=0.4?best:null;
+    },
+
+    importGetArticlesByFid(fid){
+      return this.allArticlesFlat.filter(function(a){return a.fournisseurId===fid;});
+    },
+
+    importHandleDrop(e){
+      e.preventDefault();this.importIsDragging=false;
+      var f=e.dataTransfer.files[0];if(f)this.importProcessFile(f);
+    },
+    importHandleFileInput(e){
+      var f=e.target.files[0];if(f)this.importProcessFile(f);
+      e.target.value='';
+    },
+    async importProcessFile(file){
+      var ext=file.name.split('.').pop().toLowerCase();
+      if(['xlsx','xls','csv'].includes(ext))await this.importProcessTableur(file);
+      else if(['pdf','png','jpg','jpeg','webp'].includes(ext))await this.importProcessIA(file);
+      else showToast('Format non supporté: PDF, PNG, JPG, XLSX, CSV','err');
+    },
+
+    async importProcessTableur(file){
+      var self=this;self.importStep='processing';
+      try{
+        var ab=await file.arrayBuffer();
+        var wb=XLSX.read(ab,{type:'array'});
+        var ws=wb.Sheets[wb.SheetNames[0]];
+        var data=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
+        if(data.length<2){showToast('Tableur vide ou invalide','err');self.importStep='upload';return;}
+        self.xlsxImpHeaders=(data[0]||[]).map(function(h){return String(h);});
+        self.xlsxImpRawData=data.slice(1).filter(function(row){return row.some(function(c){return c!=='';});});
+        self.xlsxImpPreview=self.xlsxImpRawData.slice(0,5);
+        self.xlsxImpMapping={name:'',qty:'',unit:'',unitPrice:''};
+        self.xlsxImpHeaders.forEach(function(h,i){
+          var hl=h.toLowerCase();
+          if(self.xlsxImpMapping.name===''&&(hl.includes('nom')||hl.includes('libel')||hl.includes('désign')||hl.includes('article')||hl.includes('produit')))self.xlsxImpMapping.name=i;
+          if(self.xlsxImpMapping.qty===''&&(hl.includes('qté')||hl.includes('qty')||hl.includes('quant')))self.xlsxImpMapping.qty=i;
+          if(self.xlsxImpMapping.unit===''&&(hl.includes('unité')||hl.includes('unit')))self.xlsxImpMapping.unit=i;
+          if(self.xlsxImpMapping.unitPrice===''&&(hl.includes('prix')||hl.includes('tarif')||hl.includes(' ht')||hl.includes('p.u.')))self.xlsxImpMapping.unitPrice=i;
+        });
+        self.importStep='mapping';
+      }catch(e){showToast('Erreur tableur: '+e.message,'err');self.importStep='upload';}
+    },
+    importConfirmXlsxMapping(){
+      var self=this;
+      if(self.xlsxImpMapping.name===''||self.xlsxImpMapping.unitPrice===''){showToast('Sélectionnez le Nom et le Prix unitaire HT','err');return;}
+      var lines=[];
+      self.xlsxImpRawData.forEach(function(row){
+        var name=String(row[self.xlsxImpMapping.name]||'').trim();
+        var up=pf(row[self.xlsxImpMapping.unitPrice]);
+        if(!name||!up)return;
+        lines.push({name:name,reference:'',
+          qty:self.xlsxImpMapping.qty!==''?pf(row[self.xlsxImpMapping.qty])||1:1,
+          unit:self.xlsxImpMapping.unit!==''?String(row[self.xlsxImpMapping.unit]||'').trim():'',
+          unitPriceHT:up,totalHT:0,tvaRate:20});
+      });
+      self.importDetectedSupplier='';self.importSupplierConfidence='low';
+      self.importInvoiceDate='';self.importInvoiceNumber='';
+      self.importInvoiceRef=self._impCurrentFileName||'';
+      self.importBuildLines(lines,null);
+    },
+
+    async importProcessIA(file){
+      var self=this;self.importStep='processing';
+      self._impCurrentFileName=file.name;
+      try{
+        var token=await window._auth.currentUser.getIdToken();
+        var body={fileName:file.name};
+        var ext=file.name.split('.').pop().toLowerCase();
+        if(ext==='pdf'){
+          try{
+            var ab=await file.arrayBuffer();
+            var pdf=await pdfjsLib.getDocument({data:new Uint8Array(ab)}).promise;
+            var allText='',imgs=[];
+            for(var p2=1;p2<=Math.min(pdf.numPages,8);p2++){
+              var page=await pdf.getPage(p2);
+              var tc=await page.getTextContent();
+              allText+=tc.items.map(function(i){return i.str;}).join(' ')+'\n';
+            }
+            if(allText.replace(/\s/g,'').length<100){
+              for(var pi=1;pi<=Math.min(pdf.numPages,8);pi++){
+                var pg=await pdf.getPage(pi);
+                var vp=pg.getViewport({scale:1.5});
+                var cv=document.createElement('canvas');
+                cv.width=vp.width;cv.height=vp.height;
+                await pg.render({canvasContext:cv.getContext('2d'),viewport:vp}).promise;
+                imgs.push(cv.toDataURL('image/jpeg',0.85).split(',')[1]);
+              }
+              body.pages=imgs;body.pdfText='';
+            }else{body.pdfText=allText.slice(0,60000);body.pages=[];}
+          }catch(pdfErr){
+            console.warn('[import-cr] PDF.js fallback',pdfErr);
+            var b64f=await self.impToBase64(file);
+            body.pages=[b64f];body.pdfText='';
+          }
+        }else{
+          var b64i=await self.impToBase64(file);
+          body.pages=[b64i];body.pdfText='';
+        }
+        var resp=await fetch('/api/parse-invoice',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},body:JSON.stringify(body)});
+        if(!resp.ok){var er=await resp.json().catch(function(){return{};});throw new Error(er.error||'Erreur API '+resp.status);}
+        var result=await resp.json();
+        if(result.parseError)showToast('Extraction partielle — vérifiez les résultats','warning');
+        self.importDetectedSupplier=result.supplier||'';
+        self.importSupplierConfidence=result.supplierConfidence||'low';
+        self.importInvoiceDate=result.invoiceDate||'';
+        self.importInvoiceNumber=result.invoiceNumber||'';
+        self.importInvoiceRef=file.name;
+        var supplierMatch=self.importMatchSupplier(self.importDetectedSupplier);
+        var autoFid=(supplierMatch&&self.importSupplierConfidence==='high')?supplierMatch.id:null;
+        self.importBuildLines(result.lines||[],autoFid);
+      }catch(e){console.error('[import-cr] processIA:',e);showToast('Erreur: '+(e.message||'inconnue'),'err');self.importStep='upload';}
+    },
+
+    impToBase64(file){
+      return new Promise(function(resolve,reject){
+        var reader=new FileReader();
+        reader.onload=function(e){resolve(e.target.result.split(',')[1]);};
+        reader.onerror=reject;
+        reader.readAsDataURL(file);
+      });
+    },
+
+    importBuildLines(lines,preselectedFid){
+      var self=this;
+      self.importSelectedFid=preselectedFid||'';
+      self.importMatchedLines=lines.map(function(l){
+        var match=self.importMatchLine(l.name,preselectedFid||null);
+        return{
+          invoiceName:l.name,invoiceRef:l.reference||'',
+          invoiceQty:l.qty||1,invoiceUnit:l.unit||'',
+          invoicePriceHT:l.unitPriceHT,
+          matchedArticle:match?match.article:null,
+          ignore:false,createNew:false,impCreateFid:''
+        };
+      });
+      self.importGlobalEffDate='now';self.importGlobalCustomDate='';
+      self.importStep='results';
+    },
+
+    importUpdateFournisseurFilter(){
+      var self=this;
+      var fid=self.importSelectedFid||null;
+      self.importMatchedLines=self.importMatchedLines.map(function(l){
+        if(l.createNew)return l;
+        var match=self.importMatchLine(l.invoiceName,fid);
+        return Object.assign({},l,{matchedArticle:match?match.article:null});
+      });
+    },
+
+    importHandleArticleSelect(idx,value){
+      var line=this.importMatchedLines[idx];
+      if(!value){line.matchedArticle=null;return;}
+      var parts=value.split('|');
+      var art=this.allArticlesFlat.find(function(a){return a.fournisseurId===parts[0]&&a.articleId===parts[1];});
+      line.matchedArticle=art||null;
+    },
+
+    importFmtDelta(oldP,newP){
+      if(!oldP||oldP===0)return '+∞';
+      var d=(newP-oldP)/oldP*100;
+      return(d>0?'+':'')+d.toFixed(1)+'%';
+    },
+    importDeltaClass(oldP,newP){
+      if(!oldP||oldP===0)return'imp-delta-eq';
+      var d=newP-oldP;
+      return d>0?'imp-delta-up':d<0?'imp-delta-down':'imp-delta-eq';
+    },
+    importFmtDate(iso){
+      if(!iso)return'';
+      var d=new Date(iso.length===10?iso+'T12:00:00':iso);
+      if(isNaN(d.getTime()))return iso;
+      return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'});
+    },
+
+    // Apply price update with history
+    async importSavePriceUpdate(fournisseurId,articleId,newPrice,effectiveDate,source,invoiceRef){
+      var fourn=this.fournisseurs[fournisseurId];
+      if(!fourn)throw new Error('Fournisseur introuvable');
+      var art=(fourn.articles||[]).find(function(a){return a.id===articleId;});
+      if(!art)throw new Error('Article introuvable');
+      var today=new Date().toISOString().split('T')[0];
+      var isNow=!effectiveDate||effectiveDate<=today;
+      var histEntry={date:new Date().toISOString(),oldPrice:parseFloat(art.prixAchat)||0,newPrice:newPrice,source:source||'import',invoiceRef:invoiceRef||'',effectiveDate:effectiveDate||today,status:isNow?'applied':'pending'};
+      if(!art.priceHistory)art.priceHistory=[];
+      art.priceHistory.push(histEntry);
+      art.priceHistory=art.priceHistory.slice(-30);
+      if(isNow){art.prixAchat=newPrice;if(art.scheduledPrice)delete art.scheduledPrice;}
+      else{art.scheduledPrice={price:newPrice,effectiveDate:effectiveDate,createdAt:new Date().toISOString()};}
+      await window._setDoc(window._doc(window._db,'fiches',window._uid,'items',fournisseurId),JSON.parse(JSON.stringify(fourn)));
+      this.fournisseurs=Object.assign({},this.fournisseurs);
+    },
+
+    async importCreateNewArticle(fournisseurId,nom,prixAchat,colisQte,colisUnite,unite,type){
+      var fourn=this.fournisseurs[fournisseurId];
+      if(!fourn)throw new Error('Fournisseur introuvable');
+      var newArt={id:'art_'+Date.now(),nom:nom,type:type||'ingredient',categorie:'',prixAchat:parseFloat(prixAchat)||0,colisQte:parseFloat(colisQte)||1,colisUnite:colisUnite||'kg',unite:unite||'g',updatedAt:Date.now(),priceHistory:[{date:new Date().toISOString(),oldPrice:0,newPrice:parseFloat(prixAchat)||0,source:'import',invoiceRef:'',effectiveDate:new Date().toISOString().split('T')[0],status:'applied'}]};
+      if(!fourn.articles)fourn.articles=[];
+      fourn.articles.push(newArt);
+      await window._setDoc(window._doc(window._db,'fiches',window._uid,'items',fournisseurId),JSON.parse(JSON.stringify(fourn)));
+      this.fournisseurs=Object.assign({},this.fournisseurs);
+    },
+
+    async importApplyAll(){
+      var self=this;
+      var toApply=self.importMatchedLines.filter(function(l){return !l.ignore&&l.matchedArticle;});
+      var toCreate=self.importMatchedLines.filter(function(l){return !l.ignore&&l.createNew&&l.impCreateFid;});
+      if(toApply.length===0&&toCreate.length===0){showToast('Aucune mise à jour à appliquer','warning');return;}
+      if(self.importGlobalEffDate==='custom'&&!self.importGlobalCustomDate){self.importRebuildDate();if(!self.importGlobalCustomDate){showToast('Sélectionnez une date d\'application','err');return;}}
+      var effectiveDate=self.importGlobalEffDate==='custom'?self.importGlobalCustomDate:null;
+      var errors=0;
+      for(var i=0;i<toApply.length;i++){
+        var l=toApply[i];
+        try{await self.importSavePriceUpdate(l.matchedArticle.fournisseurId,l.matchedArticle.articleId,l.invoicePriceHT,effectiveDate,'import',self.importInvoiceRef||'Facture');}
+        catch(e){console.error('[import-cr] applyUpdate:',e);errors++;}
+      }
+      for(var j=0;j<toCreate.length;j++){
+        var lc=toCreate[j];
+        try{await self.importCreateNewArticle(lc.impCreateFid,lc.invoiceName,lc.invoicePriceHT,1,lc.invoiceUnit||'kg','g','ingredient');}
+        catch(e){console.error('[import-cr] createArticle:',e);errors++;}
+      }
+      if(errors>0)showToast((toApply.length-errors)+' OK, '+errors+' erreur(s)','warning');
+      else{
+        var msg='✅ '+toApply.length+' prix mis à jour';
+        if(toCreate.length>0)msg+=' + '+toCreate.length+' articles créés';
+        if(effectiveDate)msg+=' (applicable le '+self.importFmtDate(effectiveDate)+')';
+        showToast(msg,'success');
+      }
+      var self2=self;
+      setTimeout(function(){self2.importStep='upload';self2.importMatchedLines=[];},2000);
+    },
+
+    importOpenCreateModal(line,idx){
+      this.impCreateForIdx=idx;
+      this.impCreateNom=line.invoiceName;
+      this.impCreatePrix=String(line.invoicePriceHT);
+      this.impCreateColisQte='1';this.impCreateColisUnite=line.invoiceUnit||'kg';this.impCreateUnite='g';this.impCreateType='ingredient';
+      this.impCreateFid=this.importSelectedFid||(Object.keys(this.fournisseurs)[0]||'');
+      this.showImpCreateModal=true;
+    },
+    impConfirmCreate(){
+      if(!this.impCreateNom||!this.impCreatePrix||!this.impCreateFid){showToast('Nom, prix et fournisseur obligatoires','err');return;}
+      var line=this.importMatchedLines[this.impCreateForIdx];
+      line.createNew=true;line.impCreateFid=this.impCreateFid;
+      line.invoiceName=this.impCreateNom;line.invoicePriceHT=pf(this.impCreatePrix);
+      line.matchedArticle=null;line.ignore=false;
+      this.showImpCreateModal=false;
+      showToast('Article ajouté — sera créé lors de l\'application','success');
+    },
+
+    importReset(){this.importStep='upload';this.importMatchedLines=[];},
+
+    importOpenHistorique(fid,aid){
+      var fourn=this.fournisseurs[fid];
+      var art=fourn&&(fourn.articles||[]).find(function(a){return a.id===aid;});
+      this.impHistArticle=art||null;
+      this.showImpHistorique=true;
     },
 
     // ── INIT ──
