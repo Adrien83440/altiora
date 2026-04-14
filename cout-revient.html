@@ -2203,12 +2203,37 @@ function coutRevientApp(){
         var wb=XLSX.read(ab,{type:'array'});
         var ws=wb.Sheets[wb.SheetNames[0]];
         var data=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
-        // Detect header row (row with "Nom" in col 1)
-        var headerIdx=-1;
-        for(var i=0;i<data.length;i++){
-          if(data[i]&&(data[i][1]==='Nom'||data[i][1]==='nom')){headerIdx=i;break;}
+
+        // ── Détection robuste de la ligne d'en-tête ──
+        // Cherche "Nom" (insensible à la casse, trim) dans n'importe quelle colonne
+        var headerIdx=-1, nomCol=1;
+        for(var i=0;i<Math.min(data.length,25);i++){
+          if(!data[i])continue;
+          for(var ci=0;ci<data[i].length;ci++){
+            var cell=String(data[i][ci]||'').trim().toLowerCase();
+            if(cell==='nom'){headerIdx=i;nomCol=ci;break;}
+          }
+          if(headerIdx>=0)break;
         }
         if(headerIdx<0){showToast('Format Otami non reconnu — vérifiez le fichier','err');self.otamiStep='upload';return;}
+
+        // ── Détection dynamique des colonnes depuis la ligne d'en-tête ──
+        var hRow=data[headerIdx]||[];
+        var cols={nom:nomCol,poids:-1,cout:-1,pvTTC:-1,coutEmb:-1,coutMo:-1};
+        for(var hc=0;hc<hRow.length;hc++){
+          var h=String(hRow[hc]||'').trim().toLowerCase();
+          if(h.includes('poids'))cols.poids=hc;
+          else if(h==='coût'||h==='cout'||h==='coüt'||h==='co\u00fbt')cols.cout=hc;
+          else if(h.includes('prix de vente'))cols.pvTTC=hc;
+          else if(h.includes('emballage'))cols.coutEmb=hc;
+          else if(h.includes("main d'o")||h.includes('main d\u2019o')||h.includes('main oeuvre')||h.includes('main d\'o'))cols.coutMo=hc;
+        }
+        // Fallback sur les positions relatives connues si la détection échoue
+        if(cols.poids<0)cols.poids=nomCol+2;
+        if(cols.cout<0)cols.cout=nomCol+3;
+        if(cols.pvTTC<0)cols.pvTTC=nomCol+5;
+        if(cols.coutEmb<0)cols.coutEmb=nomCol+13;
+        if(cols.coutMo<0)cols.coutMo=nomCol+14;
         // Build existing product names map for duplicate detection
         var existingNames={};
         Object.values(self.products).forEach(function(p){
@@ -2217,14 +2242,18 @@ function coutRevientApp(){
         var rows=[];
         for(var j=headerIdx+1;j<data.length;j++){
           var row=data[j];
-          if(!row||row[1]===null||row[1]===undefined) continue;
-          var nom=String(row[1]||'').trim();
-          if(!nom||nom.toLowerCase().includes('moyenne')) continue;
-          var cout=parseFloat(row[4])||0;
-          var pvTTC=parseFloat(row[6])||0;
-          var coutEmb=parseFloat(row[14])||0;
-          var coutMo=parseFloat(row[15])||0;
-          var poids=parseFloat(row[3])||0;
+          if(!row)continue;
+          var nom=String(row[cols.nom]||'').trim();
+          if(!nom||nom.toLowerCase().includes('moyenne'))continue;
+          // Ignorer les lignes entièrement vides
+          var hasData=false;
+          for(var rc=0;rc<row.length;rc++){if(row[rc]!==null&&row[rc]!==undefined&&row[rc]!==''){hasData=true;break;}}
+          if(!hasData)continue;
+          var cout=parseFloat(row[cols.cout])||0;
+          var pvTTC=parseFloat(row[cols.pvTTC])||0;
+          var coutEmb=parseFloat(row[cols.coutEmb])||0;
+          var coutMo=parseFloat(row[cols.coutMo])||0;
+          var poids=parseFloat(row[cols.poids])||0;
           rows.push({
             nom:nom,
             poids:poids,
