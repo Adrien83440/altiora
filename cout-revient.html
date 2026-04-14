@@ -482,11 +482,20 @@
       <div class="catalogue-card" style="flex:1" x-show="activeTab==='produits'">
         <div class="catalogue-head">
           <div class="catalogue-title">📦 Catalogue</div>
-          <button class="btn btn-primary btn-xs" @click="openModal()">+ Nouveau</button>
+          <div style="display:flex;gap:6px;align-items:center">
+            <button class="btn btn-outline btn-xs" title="Nouvelle catégorie" @click="showNewCatInput=!showNewCatInput;newCatName=''" style="padding:4px 8px;font-size:12px">📁+</button>
+            <button class="btn btn-primary btn-xs" @click="openModal()">+ Nouveau</button>
+          </div>
+        </div>
+        <!-- Saisie inline nouvelle catégorie -->
+        <div x-show="showNewCatInput" style="display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border);background:#f8faff" @keydown.escape.window="showNewCatInput=false">
+          <input class="search-input" style="flex:1;margin:0;font-size:12px" placeholder="Nom de la catégorie..." x-model="newCatName" @keydown.enter="createManualCategorie()" x-ref="newCatInput" x-init="$el.focus()" />
+          <button class="btn btn-primary btn-xs" @click="createManualCategorie()" :disabled="!newCatName.trim()">✓</button>
+          <button class="btn btn-outline btn-xs" @click="showNewCatInput=false">✕</button>
         </div>
         <input class="search-input" placeholder="🔍 Rechercher un produit..." x-model="search" @input="cataloguePage=1"/>
         <div x-show="loading" class="loader"><div class="spin"></div></div>
-        <div x-show="!loading && Object.keys(products).length === 0" style="padding:24px;text-align:center;color:var(--muted);font-size:12px">
+        <div x-show="!loading && Object.keys(products).length === 0 && manualCategories.length === 0" style="padding:24px;text-align:center;color:var(--muted);font-size:12px">
           <div style="font-size:32px;margin-bottom:8px">📦</div>Aucun produit encore.<br>Créez votre premier produit !
         </div>
         <div id="prodListScroll" class="cat-list-scroll">
@@ -494,7 +503,10 @@
           <div class="cat-group" :class="{ open: cat._open }">
             <div class="cat-header" @click="cat._open = !cat._open">
               <div class="cat-name">📁 <span x-text="cat.name"></span> <span class="cat-count" x-text="cat.items.length"></span></div>
-              <span class="cat-chevron">›</span>
+              <div style="display:flex;align-items:center;gap:4px">
+                <button x-show="cat.manual && cat.items.length===0" @click.stop="deleteManualCategorie(cat.name)" title="Supprimer cette catégorie vide" style="background:none;border:none;cursor:pointer;color:#ef4444;font-size:13px;padding:2px 4px;border-radius:4px;line-height:1" onmouseover="this.style.background='#fef2f2'" onmouseout="this.style.background='none'">🗑</button>
+                <span class="cat-chevron">›</span>
+              </div>
             </div>
             <div class="cat-products">
               <template x-for="item in cat.items" :key="item.id">
@@ -1397,22 +1409,44 @@
 
   <!-- ════ MODAL ARTICLE PICKER ════ -->
   <div class="modal-overlay" :class="{show: showArticlePicker}" @click.self="showArticlePicker=false">
-    <div class="modal" style="max-width:620px">
+    <div class="modal" style="max-width:640px">
       <div class="modal-head">
         <h3>📥 Choisir depuis le catalogue fournisseur</h3>
         <button class="modal-close" @click="showArticlePicker=false">✕</button>
       </div>
       <div class="modal-body" style="padding:12px 24px">
-        <input class="modal-input" placeholder="🔍 Rechercher un article..." x-model="articlePickerSearch" style="margin-bottom:12px"/>
-        <div style="display:flex;gap:6px;margin-bottom:12px">
+        <!-- Recherche -->
+        <input class="modal-input" placeholder="🔍 Rechercher un article..." x-model="articlePickerSearch" style="margin-bottom:10px"/>
+        <!-- Ligne 1 : Filtre type -->
+        <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
           <button class="btn btn-xs" :class="articlePickerFilter===''?'btn-primary':'btn-outline'" @click="articlePickerFilter=''">Tous</button>
           <button class="btn btn-xs" :class="articlePickerFilter==='ingredient'?'btn-primary':'btn-outline'" @click="articlePickerFilter='ingredient'">🧪 Ingrédients</button>
           <button class="btn btn-xs" :class="articlePickerFilter==='emballage'?'btn-primary':'btn-outline'" @click="articlePickerFilter='emballage'">📦 Emballages</button>
           <button class="btn btn-xs" :class="articlePickerFilter==='livraison'?'btn-primary':'btn-outline'" @click="articlePickerFilter='livraison'">🚚 Livraison</button>
         </div>
-        <div style="max-height:400px;overflow-y:auto">
+        <!-- Ligne 2 : Filtre fournisseur + tri + vue groupée -->
+        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
+          <select x-model="articlePickerFournFilter" style="flex:1;min-width:140px;border:1px solid var(--border);border-radius:8px;padding:5px 8px;font-size:12px;color:var(--text)">
+            <option value="">🏪 Tous les fournisseurs</option>
+            <template x-for="(f,fid) in fournisseurs" :key="fid">
+              <option :value="fid" x-text="f.nom"></option>
+            </template>
+          </select>
+          <select x-model="articlePickerSort" style="border:1px solid var(--border);border-radius:8px;padding:5px 8px;font-size:12px;color:var(--text)">
+            <option value="az">A → Z</option>
+            <option value="za">Z → A</option>
+            <option value="prix_asc">Prix ↑</option>
+            <option value="prix_desc">Prix ↓</option>
+            <option value="fourn">Par fournisseur</option>
+          </select>
+          <button class="btn btn-xs" :class="articlePickerGrouped?'btn-primary':'btn-outline'" @click="articlePickerGrouped=!articlePickerGrouped" title="Grouper par fournisseur">⊞ Groupé</button>
+        </div>
+        <!-- Compteur résultats -->
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px" x-text="filteredPickerArticles.length+(filteredPickerArticles.length>1?' articles trouvés':' article trouvé')+(articlePickerFournFilter||articlePickerSearch?' (filtres actifs)':'')" ></div>
+        <!-- Liste flat -->
+        <div x-show="!articlePickerGrouped" style="max-height:380px;overflow-y:auto">
           <template x-for="item in filteredPickerArticles" :key="item.fournisseurId+'_'+item.articleId">
-            <div class="product-item" style="border-left:none;padding:10px 12px" @click="pickArticle(item)">
+            <div class="product-item" style="border-left:none;padding:10px 12px;cursor:pointer" @click="pickArticle(item)">
               <span class="product-emoji" x-text="{'ingredient':'🧪','emballage':'📦','livraison':'🚚'}[item.type]||'📦'"></span>
               <div class="product-info">
                 <div class="product-name" x-text="item.nom"></div>
@@ -1424,6 +1458,28 @@
           <div x-show="filteredPickerArticles.length===0" style="text-align:center;padding:30px;color:var(--muted);font-size:12px">
             <div style="font-size:28px;margin-bottom:8px">🔍</div>
             Aucun article trouvé.<br>Créez d'abord des articles dans vos fiches fournisseurs.
+          </div>
+        </div>
+        <!-- Vue groupée par fournisseur -->
+        <div x-show="articlePickerGrouped" style="max-height:380px;overflow-y:auto">
+          <template x-for="group in pickerGroupedByFourn" :key="group.nom">
+            <div style="margin-bottom:4px">
+              <div style="font-size:11px;font-weight:700;color:var(--muted);padding:6px 12px;background:#f8faff;border-radius:6px;margin-bottom:2px;letter-spacing:.03em;text-transform:uppercase">🏪 <span x-text="group.nom"></span> <span style="font-weight:400" x-text="'('+group.items.length+')'"></span></div>
+              <template x-for="item in group.items" :key="item.fournisseurId+'_'+item.articleId">
+                <div class="product-item" style="border-left:3px solid #e0e7ff;padding:9px 12px;cursor:pointer" @click="pickArticle(item)">
+                  <span class="product-emoji" x-text="{'ingredient':'🧪','emballage':'📦','livraison':'🚚'}[item.type]||'📦'"></span>
+                  <div class="product-info">
+                    <div class="product-name" x-text="item.nom"></div>
+                    <div class="product-type-badge" x-text="item.colisQte+' '+item.colisUnite+' à '+fmtE(item.prixAchat)"></div>
+                  </div>
+                  <div class="product-cr" x-text="fmtE(item.prixAchat)"></div>
+                </div>
+              </template>
+            </div>
+          </template>
+          <div x-show="pickerGroupedByFourn.length===0" style="text-align:center;padding:30px;color:var(--muted);font-size:12px">
+            <div style="font-size:28px;margin-bottom:8px">🔍</div>
+            Aucun article trouvé.
           </div>
         </div>
       </div>
@@ -1605,8 +1661,14 @@ async function loadCatalogue(){
     snap2.forEach(function(d){fournisseurs[d.id]=d.data();});
   }catch(e){console.warn(e);}
 
-  if(window._alpineSetData) window._alpineSetData(products, fournisseurs);
-  else { window._pendingProducts=products; window._pendingFournisseurs=fournisseurs; }
+  var manualCategories=[];
+  try{
+    var snapCat=await window._getDoc(window._doc(window._db,'produits',window._uid,'meta','categories'));
+    if(snapCat.exists()){manualCategories=snapCat.data().list||[];}
+  }catch(e){console.warn('loadCategories',e);}
+
+  if(window._alpineSetData) window._alpineSetData(products, fournisseurs, manualCategories);
+  else { window._pendingProducts=products; window._pendingFournisseurs=fournisseurs; window._pendingManualCategories=manualCategories; }
 }
 window.loadCatalogue=loadCatalogue;
 
@@ -1621,6 +1683,8 @@ function coutRevientApp(){
     showModal:false,showEmoji:false,showFournEmoji:false,
     showFournModal:false,showArticlePicker:false,
     articlePickerType:'ingredient',articlePickerSearch:'',articlePickerFilter:'',
+    articlePickerFournFilter:'',articlePickerSort:'az',articlePickerGrouped:false,
+    manualCategories:[],showNewCatInput:false,newCatName:'',
     newProd:{nom:'',categorie:'',type:'recette'},
     newFourn:{nom:'',adresse:'',siret:'',telephone:'',email:'',notes:''},
     sections:{prod:true,ingr:true,mo:false,cf:false,emb:false,liv:false,pv:true,notes:false,alg:false},
@@ -1690,11 +1754,20 @@ function coutRevientApp(){
         return e[1].nom.toLowerCase().includes(q)||(e[1].categorie||'').toLowerCase().includes(q);
       });
       var grouped={};
+      // Pré-créer les catégories manuelles vides
+      self.manualCategories.forEach(function(c){
+        if(!grouped[c])grouped[c]={name:c,items:[],_open:true,manual:true};
+      });
       filtered.forEach(function(e){var id=e[0],p=e[1],cat=p.categorie||'Sans catégorie';
         if(!grouped[cat])grouped[cat]={name:cat,items:[],_open:true};
         grouped[cat].items.push({id:id,p:p});
       });
-      return Object.values(grouped);
+      // Trier : catégories manuelles vides en fin, le reste alphabétique
+      return Object.values(grouped).sort(function(a,b){
+        if(a.name==='Sans catégorie') return 1;
+        if(b.name==='Sans catégorie') return -1;
+        return a.name.localeCompare(b.name,'fr',{sensitivity:'base'});
+      });
     },
     get totalFilteredProducts(){
       var total=0;
@@ -1746,12 +1819,31 @@ function coutRevientApp(){
       var self=this;
       var typeFilter=this.articlePickerFilter||this.articlePickerType;
       if(this.articlePickerFilter==='') typeFilter='';
-      return this.allArticlesFlat.filter(function(a){
+      var result=this.allArticlesFlat.filter(function(a){
         if(typeFilter && a.type!==typeFilter) return false;
+        if(self.articlePickerFournFilter && a.fournisseurId!==self.articlePickerFournFilter) return false;
         if(!self.articlePickerSearch) return true;
         var q=self.articlePickerSearch.toLowerCase();
         return a.nom.toLowerCase().includes(q)||a.fournisseurNom.toLowerCase().includes(q)||(a.categorie||'').toLowerCase().includes(q);
       });
+      var sort=this.articlePickerSort;
+      result.sort(function(a,b){
+        if(sort==='az') return a.nom.localeCompare(b.nom,'fr',{sensitivity:'base'});
+        if(sort==='za') return b.nom.localeCompare(a.nom,'fr',{sensitivity:'base'});
+        if(sort==='prix_asc') return a.prixAchat-b.prixAchat;
+        if(sort==='prix_desc') return b.prixAchat-a.prixAchat;
+        if(sort==='fourn') return a.fournisseurNom.localeCompare(b.fournisseurNom,'fr',{sensitivity:'base'});
+        return 0;
+      });
+      return result;
+    },
+    get pickerGroupedByFourn(){
+      var groups={},order=[];
+      this.filteredPickerArticles.forEach(function(a){
+        if(!groups[a.fournisseurId]){groups[a.fournisseurId]={nom:a.fournisseurNom,items:[]};order.push(a.fournisseurId);}
+        groups[a.fournisseurId].items.push(a);
+      });
+      return order.map(function(fid){return groups[fid];});
     },
     get otamiFilteredRows(){
       var self=this;
@@ -1835,7 +1927,25 @@ function coutRevientApp(){
       this.articlePickerType=type;
       this.articlePickerFilter=type;
       this.articlePickerSearch='';
+      this.articlePickerFournFilter='';
+      this.articlePickerSort='az';
+      this.articlePickerGrouped=false;
       this.showArticlePicker=true;
+    },
+    async createManualCategorie(){
+      var nom=(this.newCatName||'').trim();
+      if(!nom)return;
+      if(this.manualCategories.includes(nom)){showToast('Cette catégorie existe déjà','err');return;}
+      this.manualCategories=this.manualCategories.concat([nom]);
+      this.newCatName='';this.showNewCatInput=false;
+      try{await window._setDoc(window._doc(window._db,'produits',window._uid,'meta','categories'),{list:this.manualCategories});}
+      catch(e){console.warn('saveCategories',e);}
+      showToast('📁 Catégorie "'+nom+'" créée','success');
+    },
+    async deleteManualCategorie(nom){
+      this.manualCategories=this.manualCategories.filter(function(c){return c!==nom;});
+      try{await window._setDoc(window._doc(window._db,'produits',window._uid,'meta','categories'),{list:this.manualCategories});}
+      catch(e){console.warn('saveCategories',e);}
     },
     pickArticle:function(item){
       var ref={fournisseurId:item.fournisseurId,articleId:item.articleId,prixSnapshot:item.prixAchat};
@@ -2459,9 +2569,10 @@ function coutRevientApp(){
       var self=this;
       this._saveTimer=null;
       this._fournSaveTimer=null;
-      window._alpineSetData=function(prods,fourns){self.products=prods;self.fournisseurs=fourns;self.loading=false;};
+      window._alpineSetData=function(prods,fourns,manualCats){self.products=prods;self.fournisseurs=fourns;self.manualCategories=manualCats||[];self.loading=false;};
       if(window._pendingProducts){this.products=window._pendingProducts;delete window._pendingProducts;}
       if(window._pendingFournisseurs){this.fournisseurs=window._pendingFournisseurs;delete window._pendingFournisseurs;}
+      if(window._pendingManualCategories){this.manualCategories=window._pendingManualCategories;delete window._pendingManualCategories;}
       if(window._pendingProducts||window._pendingFournisseurs) this.loading=false;
 
       // Auto-save products (debounce 1.5s)
