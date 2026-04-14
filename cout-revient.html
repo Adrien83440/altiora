@@ -70,8 +70,18 @@
     .btn-xs{padding:3px 8px;font-size:11px;}
 
     .content{padding:22px 28px;flex:1;display:flex;gap:20px;}
-    .left-panel{width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:0;}
-    .right-panel{flex:1;min-width:0;}
+    .left-panel{width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:0;transition:width .25s ease;}
+    .right-panel{flex:1;min-width:0;transition:opacity .2s ease;}
+    /* Mode étendu : aucun produit/fournisseur sélectionné */
+    .content.no-sel .left-panel{width:100%;}
+    .content.no-sel .right-panel{display:none;}
+    .content.no-sel .lp-tabs{border-radius:var(--radius) var(--radius) 0 0;}
+    .content.no-sel .catalogue-card{border-radius:0 0 var(--radius) var(--radius);}
+    .content.no-sel .product-item{padding:10px 20px;}
+    .content.no-sel .product-name{font-size:13px;}
+    .content.no-sel .product-cr{font-size:13px;font-weight:800;}
+    .content.no-sel .catalogue-head{padding:16px 20px;}
+    .content.no-sel .search-input{font-size:13px;padding:9px 14px;}
 
     /* TAB BAR */
     .lp-tabs{display:flex;background:var(--glass-bg-heavy);backdrop-filter:var(--glass-blur);border:1px solid var(--glass-border);border-top:1px solid var(--glass-border-top);border-radius:var(--radius);box-shadow:var(--glass-shadow),var(--glass-inset) var(--radius) 0 0;border-bottom:none;overflow:hidden;}
@@ -381,7 +391,7 @@
     </div>
   </div>
 
-  <div class="content">
+  <div class="content" :class="{'no-sel': !currentId && !currentFournisseurId && activeTab==='produits'}">
     <!-- Wave 4 — Bandeau info dismissible : mise à jour du calcul des charges fixes -->
     <div id="wave4-info-banner" style="display:none;grid-column:1/-1;margin:0 0 16px;padding:14px 18px;background:linear-gradient(135deg,rgba(59,130,246,0.08),rgba(16,185,129,0.06));border:1px solid rgba(59,130,246,0.25);border-left:4px solid #3b82f6;border-radius:12px;position:relative;font-size:13px;line-height:1.55">
       <button type="button" onclick="dismissWave4Banner()" aria-label="Fermer" style="position:absolute;top:10px;right:12px;background:transparent;border:none;color:#64748b;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:6px;line-height:1">×</button>
@@ -1205,6 +1215,18 @@
                     <button class="btn btn-xs btn-outline" @click="otamiToggleAll(false)">Tout décocher</button>
                   </div>
                 </div>
+                <!-- Catégorie globale -->
+                <div style="display:flex;align-items:center;gap:10px;padding-top:10px;border-top:1px solid var(--border);margin-top:10px;">
+                  <label style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;white-space:nowrap;">Catégorie pour tous</label>
+                  <input class="modal-input" type="text" list="otamiCatList" x-model="otamiBatchCat"
+                    placeholder="ex: Pâtisserie, Boulangerie, Snacking..."
+                    style="flex:1;max-width:300px;font-size:12px;padding:5px 10px;"
+                    @input="otamiApplyBatchCat()"/>
+                  <datalist id="otamiCatList">
+                    <template x-for="c in categories" :key="c"><option :value="c"></option></template>
+                  </datalist>
+                  <span style="font-size:11px;color:var(--muted)">ou modifiez ligne par ligne →</span>
+                </div>
               </div>
 
               <!-- Filter tabs -->
@@ -1221,6 +1243,7 @@
                   <thead><tr>
                     <th style="width:28px"><input type="checkbox" @change="otamiToggleAll($event.target.checked)"/></th>
                     <th>Nom</th>
+                    <th>Catégorie</th>
                     <th style="text-align:right">Coût MP</th>
                     <th style="text-align:right">Emballage</th>
                     <th style="text-align:right">Main d'œuvre</th>
@@ -1236,6 +1259,12 @@
                         <td>
                           <span style="font-weight:600;font-size:12px" x-text="row.nom"></span>
                           <span x-show="row.isDup" class="otami-dup-badge">⚠ doublon</span>
+                        </td>
+                        <td>
+                          <input type="text" list="otamiCatList" x-model="row.categorie"
+                            placeholder="Sans catégorie"
+                            style="width:130px;padding:3px 7px;border:1.5px solid var(--border);border-radius:6px;font-family:'Plus Jakarta Sans',sans-serif;font-size:11px;outline:none;"
+                            @focus="$el.style.borderColor='var(--blue-main)'" @blur="$el.style.borderColor='var(--border)'"/>
                         </td>
                         <td style="text-align:right;color:var(--muted)" x-text="row.cout>0?fmtE(row.cout):'—'"></td>
                         <td style="text-align:right;color:var(--muted)" x-text="row.coutEmb>0?fmtE(row.coutEmb):'—'"></td>
@@ -1589,6 +1618,7 @@ function coutRevientApp(){
     otamiSearch:'',
     otamiTva:'5.5',
     otamiDupMode:'skip',
+    otamiBatchCat:'',
     otamiImportResult:{created:0,updated:0,skipped:0},
 
     // ── IMPORT STATE ──
@@ -2261,6 +2291,7 @@ function coutRevientApp(){
             pvTTC:pvTTC,
             coutEmb:coutEmb,
             coutMo:coutMo,
+            categorie:'',
             hasPv:pvTTC>0,
             isDup:!!existingNames[nom.toLowerCase().trim()],
             selected:true,
@@ -2275,6 +2306,10 @@ function coutRevientApp(){
     },
     otamiToggleAll(val){
       this.otamiFilteredRows.forEach(function(r){r.selected=!!val;});
+    },
+    otamiApplyBatchCat(){
+      var cat=this.otamiBatchCat;
+      this.otamiRows.forEach(function(r){r.categorie=cat;});
     },
     async otamiApplyImport(){
       var self=this;
@@ -2300,7 +2335,7 @@ function coutRevientApp(){
           var embs=r.coutEmb>0?[{description:'Emballage (Otami)',qte:1,prixUnit:r.coutEmb}]:[];
           var mos=r.coutMo>0?[{description:"Main d'œuvre (Otami)",heures:1,tauxHoraire:r.coutMo}]:[];
           var prod={
-            nom:r.nom,categorie:'',type:'recette',
+            nom:r.nom,categorie:r.categorie||'',type:'recette',
             quantiteProduites:1,uniteProduction:'pièce',
             prixVente:pvHT,tvaRate:tva,
             ingredients:ingrs,emballages:embs,mainOeuvre:mos,
