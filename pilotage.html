@@ -516,6 +516,62 @@
 </div>
 
 <!-- MODAL PORTÉE (suppr / modif prix) -->
+<!-- ══ MODAL AJOUTER CARTE CADEAU ══ -->
+<div class="modal-overlay" id="ccAddModal">
+  <div class="modal" style="max-width:400px;width:92%">
+    <h3>🎁 Nouvelle carte cadeau</h3>
+    <p style="font-size:13px;color:var(--muted);margin-bottom:16px">La vente d'une carte cadeau n'est pas du CA — elle sera suivie jusqu'à son utilisation.</p>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <label style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px">Label / Client (optionnel)</label>
+        <input id="ccAdd-label" type="text" placeholder="ex. Mme Dupont" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box"/>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px">Montant de la carte (€)</label>
+        <input id="ccAdd-montant" type="text" inputmode="decimal" placeholder="0.00" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box"/>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px">Date de vente</label>
+        <input id="ccAdd-date" type="date" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box"/>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeCcAddModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="saveCcAdd()">Ajouter la carte</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MODAL UTILISER CARTE CADEAU ══ -->
+<div class="modal-overlay" id="ccUseModal">
+  <div class="modal" style="max-width:400px;width:92%">
+    <h3>✅ Utilisation carte cadeau</h3>
+    <p id="ccUse-info" style="font-size:13px;color:var(--muted);margin-bottom:16px">Solde disponible : — €</p>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <label style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px">Montant utilisé (€)</label>
+        <input id="ccUse-montant" type="text" inputmode="decimal" placeholder="0.00" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;box-sizing:border-box"/>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Partiel possible — le solde restant sera conservé.</div>
+      </div>
+      <div>
+        <label style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px">Taux de TVA applicable</label>
+        <select id="ccUse-tva" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;background:#fff">
+          <option value="5.5">5,5 %</option>
+          <option value="10">10 %</option>
+          <option value="20" selected>20 %</option>
+        </select>
+      </div>
+    </div>
+    <div style="background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-top:14px;font-size:12px;color:#92400e;line-height:1.5">
+      ⚠️ Après validation, un rappel s'affichera pour ajouter le CA HT correspondant à votre saisie mensuelle.
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeCcUseModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="saveCcUse()">Valider l'utilisation</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="scopeModal">
   <div class="modal">
     <h3 id="scope-title">Action sur plusieurs mois</h3>
@@ -922,7 +978,7 @@ document.addEventListener('DOMContentLoaded', function() {
 var _data = {};
 
 /* ─── SECTIONS REPLIABLES (lazy render) ─── */
-var _SEC_DEFAULTS = { ca:true, rsupp:true, prev:true, fp:false, cf:false, cv:false, ms:false, cred:false, leas:false, tva:true, cash:true };
+var _SEC_DEFAULTS = { ca:true, rsupp:true, prev:true, cc:false, fp:false, cf:false, cv:false, ms:false, cred:false, leas:false, tva:true, cash:true };
 var _lazyRendered = {};
 var _lazyRenderers = {};
 
@@ -1158,6 +1214,10 @@ async function loadMonth() {
     if (!window._rhTempsByMonth[key] && window._getDocs && window._collection) {
       promises.temps = window._getDocs(window._collection(window._db,'rh',window._uid,'temps')).catch(function(){ return null; });
     }
+    // Cartes cadeaux : charger une seule fois par session
+    if (!window._cartesCCLoaded && window._getDoc) {
+      promises.cartesCC = window._getDoc(window._doc(window._db,'pilotage',window._uid,'cartes_cadeaux','all')).catch(function(){ return null; });
+    }
 
     // Attendre TOUT en parallèle
     var keys = Object.keys(promises);
@@ -1286,6 +1346,15 @@ async function loadMonth() {
       }
     }
     window._rhTempsCurrentMonth = (window._rhTempsByMonth && window._rhTempsByMonth[key]) || {};
+
+    // ── Cartes cadeaux (premier chargement) ──
+    if (!window._cartesCCLoaded) {
+      window._cartesCCLoaded = true;
+      window._cartesCC = [];
+      if (results.cartesCC && results.cartesCC.exists && results.cartesCC.exists()) {
+        window._cartesCC = results.cartesCC.data().cartes || [];
+      }
+    }
 
     // ── Traiter Dettes sync (résultat déjà chargé) ──
     _syncDettesFromSnap(data, key, results.dettes);
@@ -1450,6 +1519,212 @@ async function syncDettesToMonth(data, monthKey) {
 }
 
 /* ─── SAUVEGARDE ─── */
+/* ─────────────────────────────────────────────────────────────────
+   CARTES CADEAUX
+   Stockage : pilotage/{uid}/cartes_cadeaux/all  → { cartes: [...] }
+   Cross-month : chargé une fois, affiché sur tous les mois.
+   TVA = 0 à la vente. À l'utilisation : CA HT à déclarer manuellement.
+───────────────────────────────────────────────────────────────── */
+
+window._cartesCC       = window._cartesCC || [];
+window._cartesCCLoaded = window._cartesCCLoaded || false;
+var _ccEditId = null; // id de la carte en cours d'utilisation dans la modale
+
+/* ── Render section complète ── */
+function renderCartesCadeauxSection() {
+  var cartes   = window._cartesCC || [];
+  var actives  = cartes.filter(function(c){ return c.statut !== 'soldee'; });
+  var totalDif = actives.reduce(function(s,c){ return s + (parseFloat(c.solde)||0); }, 0);
+  var badge    = actives.length > 0
+    ? ' <span class="sec-badge-count">' + actives.length + ' active' + (actives.length>1?'s':'') + ' — ' + fmtN(totalDif) + ' € différé</span>'
+    : '';
+
+  return '<div class="section-card full' + secColClass('cc') + '" id="sec-cc" style="margin-bottom:16px;">' +
+    '<div class="section-head">' +
+      '<div class="section-title section-toggle" onclick="toggleSection(\'cc\')">' +
+        '<span class="chevron">▸</span> 🎁 Cartes Cadeaux' +
+        badge +
+      '</div>' +
+      '<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();ensureSectionOpen(\'cc\');openCcAddModal()">+ Carte</button>' +
+    '</div>' +
+    '<div class="section-body">' +
+      renderCartesTableHtml(cartes) +
+    '</div>' +
+  '</div>';
+}
+
+/* ── Table HTML ── */
+function renderCartesTableHtml(cartes) {
+  if (!cartes || cartes.length === 0) {
+    return '<div class="info-box">💡 Les ventes de cartes cadeaux ne sont pas du CA immédiat — TVA à 0 lors de la vente. ' +
+           'Ajoutez-les ici pour suivre votre passif. Au moment de l\'utilisation, vous serez rappelé(e) d\'ajouter le montant HT à votre CA du mois.</div>';
+  }
+
+  // Trier : actives en premier, soldées ensuite (30 derniers jours max)
+  var now = new Date();
+  var actives  = cartes.filter(function(c){ return c.statut !== 'soldee'; });
+  var soldees  = cartes.filter(function(c){ return c.statut === 'soldee'; }).filter(function(c){
+    // Garder seulement les 30 derniers jours
+    var lastUse = (c.utilisations||[]).slice(-1)[0];
+    if (!lastUse || !lastUse.date) return false;
+    var d = new Date(lastUse.date);
+    return (now - d) < 30 * 24 * 3600 * 1000;
+  });
+  var liste = actives.concat(soldees);
+
+  if (liste.length === 0) {
+    return '<div class="info-box">💡 Les ventes de cartes cadeaux ne sont pas du CA immédiat — TVA à 0 lors de la vente. ' +
+           'Ajoutez-les ici pour suivre votre passif. Au moment de l\'utilisation, vous serez rappelé(e) d\'ajouter le montant HT à votre CA du mois.</div>';
+  }
+
+  var rows = liste.map(function(c) {
+    var isActive   = c.statut !== 'soldee';
+    var nbUtil     = (c.utilisations||[]).length;
+    var utilLabel  = nbUtil === 0 ? '—' : nbUtil + ' utilisation' + (nbUtil>1?'s':'');
+    var statutBadge = isActive
+      ? '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600">Actif</span>'
+      : '<span style="background:#f3f4f6;color:#6b7280;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600">Soldée</span>';
+    var actions = isActive
+      ? '<button class="btn btn-outline btn-sm" style="margin-right:4px" onclick="openCcUseModal(\'' + c.id + '\')">Utiliser</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="deleteCarte(\'' + c.id + '\')">✕</button>'
+      : '';
+    return '<tr>' +
+      '<td>' + esc(c.label||'—') + '</td>' +
+      '<td style="text-align:right;font-weight:600">' + fmtN(c.montantInitial) + ' €</td>' +
+      '<td style="text-align:right;font-weight:700;color:' + (isActive?'var(--blue-main)':'var(--muted)') + '">' + fmtN(c.solde) + ' €</td>' +
+      '<td>' + esc(c.dateVente||'') + '</td>' +
+      '<td style="color:var(--muted)">' + utilLabel + '</td>' +
+      '<td>' + statutBadge + '</td>' +
+      '<td>' + actions + '</td>' +
+    '</tr>';
+  }).join('');
+
+  return '<table class="data-table">' +
+    '<thead><tr>' +
+      '<th>Label</th>' +
+      '<th style="text-align:right">Montant initial</th>' +
+      '<th style="text-align:right">Solde restant</th>' +
+      '<th>Date vente</th>' +
+      '<th>Utilisations</th>' +
+      '<th>Statut</th>' +
+      '<th></th>' +
+    '</tr></thead>' +
+    '<tbody>' + rows + '</tbody>' +
+  '</table>';
+}
+
+/* ── Sauvegarder cartes dans Firestore ── */
+async function saveCartesCC() {
+  if (!window._uid || !window._setDoc || !window._db) return;
+  try {
+    await window._setDoc(
+      window._doc(window._db, 'pilotage', window._uid, 'cartes_cadeaux', 'all'),
+      { cartes: window._cartesCC }
+    );
+  } catch(e) {
+    console.error('[cc] saveCartesCC error:', e);
+    showToast('Erreur sauvegarde carte cadeau', 'warning');
+  }
+}
+
+/* ── Rafraîchir la section sans toucher au reste du DOM ── */
+function refreshCcSection() {
+  var sec = document.getElementById('sec-cc');
+  if (!sec) return;
+  sec.outerHTML = renderCartesCadeauxSection();
+}
+
+/* ── Modal AJOUTER ── */
+function openCcAddModal() {
+  document.getElementById('ccAdd-label').value    = '';
+  document.getElementById('ccAdd-montant').value  = '';
+  var today = new Date(); today.setHours(12,0,0,0);
+  var yy = today.getFullYear(), mm = String(today.getMonth()+1).padStart(2,'0'), dd = String(today.getDate()).padStart(2,'0');
+  document.getElementById('ccAdd-date').value = yy + '-' + mm + '-' + dd;
+  document.getElementById('ccAddModal').classList.add('show');
+}
+function closeCcAddModal() {
+  document.getElementById('ccAddModal').classList.remove('show');
+}
+async function saveCcAdd() {
+  var label   = document.getElementById('ccAdd-label').value.trim();
+  var montant = parseFloat((document.getElementById('ccAdd-montant').value||'').replace(',','.'));
+  var date    = document.getElementById('ccAdd-date').value;
+  if (!montant || montant <= 0) { showToast('Montant invalide', 'warning'); return; }
+  if (!date) { showToast('Date obligatoire', 'warning'); return; }
+  // Formater en JJ/MM/AAAA pour cohérence avec le reste de l'app
+  var parts = date.split('-');
+  var dateLabel = parts[2] + '/' + parts[1] + '/' + parts[0];
+  var carte = {
+    id: 'cc_' + Date.now(),
+    label: label,
+    montantInitial: montant,
+    solde: montant,
+    dateVente: dateLabel,
+    statut: 'active',
+    utilisations: []
+  };
+  window._cartesCC.push(carte);
+  closeCcAddModal();
+  await saveCartesCC();
+  refreshCcSection();
+  showToast('🎁 Carte cadeau ajoutée', 'success');
+}
+
+/* ── Modal UTILISER ── */
+function openCcUseModal(id) {
+  var carte = (window._cartesCC||[]).find(function(c){ return c.id === id; });
+  if (!carte) return;
+  _ccEditId = id;
+  document.getElementById('ccUse-info').textContent   = 'Solde disponible : ' + fmtN(carte.solde) + ' €';
+  document.getElementById('ccUse-montant').value      = '';
+  document.getElementById('ccUse-montant').max        = carte.solde;
+  document.getElementById('ccUse-tva').value          = '20';
+  document.getElementById('ccUseModal').classList.add('show');
+}
+function closeCcUseModal() {
+  document.getElementById('ccUseModal').classList.remove('show');
+  _ccEditId = null;
+}
+async function saveCcUse() {
+  if (!_ccEditId) return;
+  var carte   = (window._cartesCC||[]).find(function(c){ return c.id === _ccEditId; });
+  if (!carte) return;
+  var montant = parseFloat((document.getElementById('ccUse-montant').value||'').replace(',','.'));
+  var tva     = parseFloat(document.getElementById('ccUse-tva').value) || 20;
+  if (!montant || montant <= 0) { showToast('Montant invalide', 'warning'); return; }
+  if (montant > carte.solde + 0.001) { showToast('Montant supérieur au solde (' + fmtN(carte.solde) + ' €)', 'warning'); return; }
+
+  // Calculer le CA HT correspondant (montant sur carte = montant TTC car TVA encaissée lors de l'utilisation)
+  var caHT = montant / (1 + tva / 100);
+
+  // Enregistrer l'utilisation
+  var today = new Date(); today.setHours(12,0,0,0);
+  var yy = today.getFullYear(), mm = String(today.getMonth()+1).padStart(2,'0'), dd = String(today.getDate()).padStart(2,'0');
+  carte.utilisations.push({ date: dd+'/'+mm+'/'+yy, montant: montant, tvaRate: tva });
+  carte.solde = Math.round((carte.solde - montant) * 100) / 100;
+  if (carte.solde <= 0.01) { carte.solde = 0; carte.statut = 'soldee'; }
+
+  closeCcUseModal();
+  await saveCartesCC();
+  refreshCcSection();
+
+  // Rappel CA — message important
+  var moisLabel = getMonthLabel ? getMonthLabel() : 'ce mois';
+  showToast('✅ Utilisation enregistrée — N\'oubliez pas d\'ajouter ' + fmtN(caHT) + ' € HT à votre CA de ' + moisLabel + ' (TVA ' + tva + '%)', 'success');
+}
+
+/* ── Supprimer une carte active ── */
+async function deleteCarte(id) {
+  if (!confirm('Supprimer cette carte cadeau ?')) return;
+  window._cartesCC = (window._cartesCC||[]).filter(function(c){ return c.id !== id; });
+  await saveCartesCC();
+  refreshCcSection();
+  showToast('Carte supprimée', 'success');
+}
+
+/* ─── FIN CARTES CADEAUX ─── */
+
 async function saveAll() {
   if (!window._uid) { showToast('Non connecté', 'warning'); return; }
   try {
@@ -1674,6 +1949,8 @@ function renderPage(data, month) {
         '</div>' +
       '</div>' +
     '</div>' +
+
+    renderCartesCadeauxSection() +
 
     '<div class="section-card full' + secColClass('fp') + '" id="sec-fp" style="margin-bottom:16px;">' +
       '<div class="section-head">' +
@@ -3581,6 +3858,8 @@ async function submitAddCL(propagate) {
 }
 
 document.getElementById('addCreditLeasModal').addEventListener('click', function(e){ if(e.target===this) closeAddCLModal(); });
+document.getElementById('ccAddModal').addEventListener('click', function(e){ if(e.target===this) closeCcAddModal(); });
+document.getElementById('ccUseModal').addEventListener('click', function(e){ if(e.target===this) closeCcUseModal(); });
 function delCredit(i) {
   var r = _data.credits[i];
   // Si la ligne a des dates (propagée), proposer la suppression multi-mois
