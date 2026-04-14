@@ -360,15 +360,42 @@ function renderReport(data) {
 
   // Pilotage
   if (fs.pilotage) {
-    let pHtml = '<pre>' + escapeHtml(JSON.stringify(fs.pilotage, null, 2)) + '</pre>';
+    let pHtml = '';
     if (mods.pilotage) {
-      pHtml = renderKV({
+      pHtml += renderKV({
         'Mois scannés': mods.pilotage.monthsScanned,
         'Mois avec données': mods.pilotage.monthsWithData,
-        'CA total HT (6 mois)': mods.pilotage.totalCaHT + ' €'
-      }) + '<h4 style="font-size:11px;font-weight:700;margin:12px 0 6px;color:#475569">Détail par mois :</h4>' + pHtml;
+        'CA total HT': mods.pilotage.totalCaHT + ' €'
+      });
     }
-    html += renderSection('4. 📊 Pilotage récent (6 derniers mois)', pHtml);
+    const months = Object.keys(fs.pilotage).sort().reverse();
+    pHtml += '<table style="width:100%;border-collapse:collapse;margin-top:12px;font-size:12px">';
+    pHtml += '<thead><tr style="background:#f1f5f9"><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb">Mois</th><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb">CA HT</th><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb">CF</th><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb">CV</th><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb">Leasing</th><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb">Crédits</th><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb">📄 PDF import</th><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb">🏦 Bank sync</th><th style="padding:6px 10px;text-align:left;border-bottom:1px solid #e5e7eb">🔗 Bank lié</th></tr></thead><tbody>';
+    months.forEach(function(m) {
+      const d = fs.pilotage[m];
+      if (!d) {
+        pHtml += '<tr style="background:#fafafa"><td style="padding:5px 10px;font-family:monospace;font-weight:700">' + escapeHtml(m) + '</td><td colspan="8" style="padding:5px 10px;color:#94a3b8;font-style:italic">— aucune donnée —</td></tr>';
+        return;
+      }
+      const hasPdf = d.pdf_import_lines > 0;
+      const rowBg = hasPdf ? '#f0fdf4' : 'white';
+      const caColor = d.ca_sum_HT > 0 ? '#059669' : '#94a3b8';
+      const pdfColor = d.pdf_import_lines > 0 ? '#059669' : (d.pdf_import_lines === 0 ? '#ef4444' : '#94a3b8');
+      const cvColor = d.chargesVar_count === 0 ? '#ef4444' : '#0f172a';
+      pHtml += '<tr style="background:' + rowBg + ';border-bottom:1px solid #f1f5f9">';
+      pHtml += '<td style="padding:5px 10px;font-family:monospace;font-weight:700">' + escapeHtml(m) + '</td>';
+      pHtml += '<td style="padding:5px 10px;color:' + caColor + ';font-weight:600">' + (d.ca_sum_HT > 0 ? d.ca_sum_HT.toLocaleString('fr-FR') + ' €' : '—') + '</td>';
+      pHtml += '<td style="padding:5px 10px">' + (d.chargesFixe_count || '0') + '</td>';
+      pHtml += '<td style="padding:5px 10px;color:' + cvColor + ';font-weight:' + (d.chargesVar_count === 0 ? '700' : '400') + '">' + d.chargesVar_count + '</td>';
+      pHtml += '<td style="padding:5px 10px">' + (d.leasing_count || '0') + '</td>';
+      pHtml += '<td style="padding:5px 10px">' + (d.credits_count || '0') + '</td>';
+      pHtml += '<td style="padding:5px 10px;color:' + pdfColor + ';font-weight:700">' + (d.pdf_import_lines !== undefined ? d.pdf_import_lines : '—') + '</td>';
+      pHtml += '<td style="padding:5px 10px">' + (d.bank_sync_lines || '0') + '</td>';
+      pHtml += '<td style="padding:5px 10px">' + (d.bank_linked_lines || '0') + '</td>';
+      pHtml += '</tr>';
+    });
+    pHtml += '</tbody></table>';
+    html += renderSection('4. 📊 Pilotage (18 derniers mois)', pHtml);
   }
 
   // ════════════ NOUVEAUX MODULES (Wave 4) ════════════
