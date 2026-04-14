@@ -3721,15 +3721,13 @@ function openAddCLModal(type) {
   document.getElementById('aclm-montant').value = '';
   document.getElementById('aclm-taux').value = '';
   document.getElementById('aclm-amort').value = 'constant';
-  // Peupler les selects année (10 ans en arrière → 10 ans en avant, couvre tous les crédits historiques)
+  // Peupler les selects année (2000 → 10 ans en avant, couvre tous les crédits y compris immobiliers)
   var cy = window._year || new Date().getFullYear();
-  var realY = new Date().getFullYear();
-  var startY = Math.min(cy - 2, realY - 10); // toujours au moins 10 ans avant l'année réelle
   ['aclm-debut-y','aclm-fin-y'].forEach(function(id) {
     var sel = document.getElementById(id);
     if (!sel) return;
     sel.innerHTML = '<option value="">Année</option>';
-    for (var y = startY; y <= cy + 15; y++) {
+    for (var y = 2000; y <= cy + 15; y++) {
       sel.innerHTML += '<option value="' + y + '">' + y + '</option>';
     }
   });
@@ -4718,14 +4716,24 @@ function mpOpen(wrapperId, field, rowType, rowIdx) {
   popup.dataset.field    = field;
   popup.dataset.rowType  = rowType;
   popup.dataset.rowIdx   = rowIdx;
-  // Positionner le popup sous le trigger
-  var display = wrap.querySelector('.mp-display');
-  var rect = display.getBoundingClientRect();
-  // position:fixed => coordonnées viewport (pas besoin de scrollY)
-  popup.style.top  = (rect.bottom + 4) + 'px';
-  popup.style.left = rect.left + 'px';
+  // Rendre d'abord pour pouvoir mesurer la largeur réelle
   mpRender(popup, curYear, curMonth, rowType, rowIdx, field);
   popup.classList.add('open');
+  // Positionner intelligemment (position:fixed, coordonnées viewport)
+  var display = wrap.querySelector('.mp-display');
+  var rect = display.getBoundingClientRect();
+  var popW = popup.offsetWidth || 240;
+  var popH = popup.offsetHeight || 200;
+  var vw   = window.innerWidth;
+  var vh   = window.innerHeight;
+  // Horizontal : aligner à gauche du trigger, reculer si ça déborde à droite
+  var leftPos = rect.left;
+  if (leftPos + popW > vw - 8) leftPos = Math.max(8, rect.right - popW);
+  // Vertical : sous le trigger, au-dessus si ça déborde en bas
+  var topPos = rect.bottom + 4;
+  if (topPos + popH > vh - 8) topPos = Math.max(8, rect.top - popH - 4);
+  popup.style.top  = topPos + 'px';
+  popup.style.left = leftPos + 'px';
   _mpActive = wrapperId;
   // Stopper la propagation pour éviter que le document click handler referme immédiatement
   event.stopPropagation();
