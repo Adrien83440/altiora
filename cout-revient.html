@@ -277,7 +277,12 @@
     .imp-hist-table th{padding:6px 8px;text-align:left;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border);}
     .imp-hist-table td{padding:7px 8px;border-bottom:1px solid var(--border);}
     .modal-overlay.show-imp{display:flex;}
-    /* ── ALLERGÈNES ── */
+    /* ── PAGINATION ── */
+    .pag-bar{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;border-top:1px solid var(--border);background:#fafbff;flex-shrink:0;}
+    .pag-info{font-size:11px;font-weight:600;color:var(--muted);}
+    .pag-btn{background:none;border:1.5px solid var(--border);border-radius:7px;padding:4px 10px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;color:var(--text);transition:all .15s;}
+    .pag-btn:hover:not(:disabled){border-color:var(--blue-main);color:var(--blue-main);background:var(--blue-ghost);}
+    .pag-btn:disabled{opacity:.35;cursor:not-allowed;}
     .alg-grid{display:flex;flex-wrap:wrap;gap:8px;padding:4px 0;}
     .alg-chip{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:20px;border:2px solid var(--border);background:white;cursor:pointer;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;color:var(--muted);transition:all .15s;user-select:none;}
     .alg-chip:hover{border-color:#94a3b8;background:#f8faff;}
@@ -473,13 +478,13 @@
           <div class="catalogue-title">📦 Catalogue</div>
           <button class="btn btn-primary btn-xs" @click="openModal()">+ Nouveau</button>
         </div>
-        <input class="search-input" placeholder="🔍 Rechercher un produit..." x-model="search"/>
+        <input class="search-input" placeholder="🔍 Rechercher un produit..." x-model="search" @input="cataloguePage=1"/>
         <div x-show="loading" class="loader"><div class="spin"></div></div>
         <div x-show="!loading && Object.keys(products).length === 0" style="padding:24px;text-align:center;color:var(--muted);font-size:12px">
           <div style="font-size:32px;margin-bottom:8px">📦</div>Aucun produit encore.<br>Créez votre premier produit !
         </div>
         <div style="flex:1;overflow-y:auto">
-        <template x-for="cat in groupedCategories" :key="cat.name">
+        <template x-for="cat in paginatedGroupedCategories" :key="cat.name">
           <div class="cat-group" :class="{ open: cat._open }">
             <div class="cat-header" @click="cat._open = !cat._open">
               <div class="cat-name">📁 <span x-text="cat.name"></span> <span class="cat-count" x-text="cat.items.length"></span></div>
@@ -502,6 +507,12 @@
             </div>
           </div>
         </template>
+        </div>
+        <!-- Pagination -->
+        <div class="pag-bar" x-show="totalCataloguePages > 1">
+          <button class="pag-btn" @click="cataloguePage--" :disabled="cataloguePage<=1">← Préc.</button>
+          <span class="pag-info" x-text="'Page '+cataloguePage+' / '+totalCataloguePages+' ('+totalFilteredProducts+' produits)'"></span>
+          <button class="pag-btn" @click="cataloguePage++" :disabled="cataloguePage>=totalCataloguePages">Suiv. →</button>
         </div>
       </div>
 
@@ -1600,6 +1611,7 @@ function coutRevientApp(){
     products:{},currentId:null,search:'',loading:true,
     fournisseurs:{},currentFournisseurId:null,fournSearch:'',
     activeTab:'produits',
+    cataloguePage:1,
     showModal:false,showEmoji:false,showFournEmoji:false,
     showFournModal:false,showArticlePicker:false,
     articlePickerType:'ingredient',articlePickerSearch:'',articlePickerFilter:'',
@@ -1677,6 +1689,34 @@ function coutRevientApp(){
         grouped[cat].items.push({id:id,p:p});
       });
       return Object.values(grouped);
+    },
+    get totalFilteredProducts(){
+      var total=0;
+      this.groupedCategories.forEach(function(c){total+=c.items.length;});
+      return total;
+    },
+    get totalCataloguePages(){
+      return Math.max(1, Math.ceil(this.totalFilteredProducts/30));
+    },
+    get paginatedGroupedCategories(){
+      var self=this;
+      var perPage=30;
+      var start=(self.cataloguePage-1)*perPage;
+      var end=start+perPage;
+      // Flatten
+      var allItems=[];
+      self.groupedCategories.forEach(function(cat){
+        cat.items.forEach(function(item){allItems.push({cat:cat.name,item:item});});
+      });
+      // Slice to page
+      var pageItems=allItems.slice(start,end);
+      // Re-group preserving order
+      var grouped={},order=[];
+      pageItems.forEach(function(pi){
+        if(!grouped[pi.cat]){grouped[pi.cat]={name:pi.cat,items:[],_open:true};order.push(pi.cat);}
+        grouped[pi.cat].items.push(pi.item);
+      });
+      return order.map(function(k){return grouped[k];});
     },
     get filteredFournisseursList(){
       var self=this;
