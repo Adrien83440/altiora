@@ -76,69 +76,105 @@ module.exports = async function handler(req, res) {
     const content = [];
 
     if (hasText) {
-      // Text mode — PDF with extractable text
-      const truncated = pdfText.length > 60000 ? pdfText.slice(0, 60000) + '\n[tronqué]' : pdfText;
+      // Text mode — PDF with extractable text — send up to 100k chars for multi-page invoices
+      const truncated = pdfText.length > 100000 ? pdfText.slice(0, 100000) + '\n[tronqué]' : pdfText;
       content.push({ type: 'text', text: 'Facture fournisseur (texte extrait du PDF, fichier: ' + (fileName || 'inconnu') + ') :\n\n' + truncated });
     } else {
       // Vision mode — scanned PDF or image
-      const pagesToSend = pages.slice(0, 8); // max 8 pages for an invoice
+      const pagesToSend = pages.slice(0, 10); // up to 10 pages for multi-page invoices
       for (let i = 0; i < pagesToSend.length; i++) {
         content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: pagesToSend[i] } });
       }
     }
 
-    const PROMPT = `Tu es un expert en analyse de factures fournisseurs françaises (alimentaire, CHR, épicerie, matières premières).
+    const PROMPT = `Tu es un expert en analyse de factures fournisseurs françaises pour boulangeries, pâtisseries et restauration (meuneries, grossistes alimentaires, épiceries CHR).
 
-Analyse cette facture fournisseur et extrais :
-1. Le nom du fournisseur (en-tête de la facture — ex : METRO, TRANSGOURMET, POMONA, PROMOCASH...)
-2. La date de la facture
-3. Le numéro de facture
-4. Toutes les lignes de produits avec leur prix unitaire HT
+Tu dois extraire les lignes de produits achetés avec leur PRIX PAR COLIS (unité de commande habituelle).
 
-RÈGLES D'EXTRACTION IMPORTANTES :
-- Extrais le PRIX UNITAIRE HT de chaque article (pas le total ligne, pas le prix TTC)
-- Si seul le prix TTC est visible : HT = TTC / 1.055 (TVA 5,5% aliments), 1.10 (TVA 10% restauration), ou 1.20 (TVA 20% autres)
-- Ignore les lignes de totaux généraux, remises globales et lignes de TVA
-- Les frais de port peuvent être inclus si c'est une ligne récurrente nommée
-- Pour chaque ligne, garde le nom COMPLET du produit tel qu'il apparaît (avec conditionnement si mentionné)
-- Référence fournisseur = code article/SKU si présent sur la facture
-- Quantité = quantité commandée sur la facture
-- Unité = unité du prix unitaire (kg, L, pièce, carton, sac, bidon...)
+═══════════════════════════════════════
+ÉTAPE 1 — IDENTIFIER LE FORMAT DE LA FACTURE
+═══════════════════════════════════════
 
-DÉTECTION DU FOURNISSEUR :
-- "supplierConfidence" = "high" si le nom est clairement lisible dans l'en-tête de la page
-- "supplierConfidence" = "low" si tu n'es pas certain ou si la facture est illisible
+FORMAT A — MEUNERIE (ex: Moulins Joseph Nicot, moulin, minoterie)
+Colonnes : Code Produit | Désignation | Quantité Facturée (en QL) | Nbre Unité (nombre de sacs) | Prix HT Brut | Prix HT Net | Montant HT | TVA
+• QL = quintal = 100 kg
+• Prix HT Net = prix après remises (c'est le bon prix)
+• Prix HT Brut = prix avant remises (à ignorer)
+• PRIX PAR SAC = Montant HT ÷ Nbre Unité
+• Unité = le conditionnement décrit dans la désignation (ex: "Sacs 25 Kgs", "Sacs 10 Kgs", "Sacs 5 Kgs")
+• Exemple : BANETTE T65, 16.750 QL, 67 sacs, Montant HT 1321.24 → prix par sac = 1321.24 ÷ 67 = 19.72€
 
-Réponds UNIQUEMENT en JSON brut sans markdown ni backticks :
+FORMAT B — GROSSISTE/ÉPICERIE (ex: Ducreux, Metro, Transgourmet, Pomona, Promocash)
+Colonnes : ARTICLE | DESIGNATION | Qté UC (nombre de colis commandés) | QUANTITE (poids/volume total) | P.U. BRUT | Remise | P.U. NET | Montant HT | T | V
+• P.U. NET = prix unitaire net après remise par unité de QUANTITE (kg, L, pièce...)
+• PRIX PAR COLIS = Montant HT ÷ Qté UC
+• Exemple : BEURRE DOUX 82% MG 25KG, Qté UC=2 CRT, Quantité=50.000 KG, Montant HT=262.00 → prix par CRT = 262.00 ÷ 2 = 131.00€
+
+═══════════════════════════════════════
+ÉTAPE 2 — LIGNES À EXTRAIRE
+═══════════════════════════════════════
+
+EXTRAIRE uniquement les lignes de produits ACHETÉS avec un prix > 0 :
+• Code/référence article si présent
+• Nom complet de la désignation (avec conditionnement : sac 25kg, bidon 5L, CRT...)
+• qty = nombre de colis/unités commandés (Nbre Unité pour Format A, Qté UC pour Format B)
+• unit = description du colis (ex: "sac 25kg", "CRT 10kg", "bidon 5L", "pièce", "carton")
+• unitPriceHT = prix d'UN colis (calculé comme indiqué ci-dessus)
+• totalHT = Montant HT de la ligne
+• tvaRate = taux de TVA (5.5 pour aliments standard, 20 pour emballages/matériel)
+
+═══════════════════════════════════════
+ÉTAPE 3 — LIGNES À IGNORER ABSOLUMENT
+═══════════════════════════════════════
+
+• Lignes avec mention GRATUIT ou prix = 0
+• Lignes de remises séparées (Rem.parten, Rem.QTE, R.paiement)
+• Lignes de descriptions longues sous un article (certifications bio, numéros de lot, DLC)
+• Lignes "Taxe" (CVO INAPORC FR, INTERBEV BOVIN FR, INTERBEV VEAU FR, FG DUCREUX, etc.)
+• Lignes de totaux : Montant net HT, Taux TVA, Montant TVA, Montant TTC, Net à payer
+• Pages entières de CONDITIONS GÉNÉRALES DE VENTE
+• Pages de RELEVÉ (tableau de cumul des factures précédentes)
+• Lignes vides ou séparateurs
+
+═══════════════════════════════════════
+RÉPONSE — JSON UNIQUEMENT
+═══════════════════════════════════════
+
+Réponds UNIQUEMENT en JSON brut, sans markdown, sans backticks, sans texte avant ou après :
 {
-  "supplier": "NOM_FOURNISSEUR",
+  "supplier": "NOM DU FOURNISSEUR en majuscules",
   "supplierConfidence": "high",
   "invoiceDate": "JJ/MM/AAAA",
-  "invoiceNumber": "NUM123",
+  "invoiceNumber": "E561476",
   "lines": [
     {
-      "name": "Farine T55 sac 25kg",
-      "reference": "REF123",
-      "qty": 2,
-      "unit": "sac",
-      "unitPriceHT": 18.50,
-      "totalHT": 37.00,
+      "name": "BANETTE 1900 TRAD.T65 NF V30-001 SI - Sacs 25 Kgs",
+      "reference": "10020025",
+      "qty": 67,
+      "unit": "sac 25kg",
+      "unitPriceHT": 19.72,
+      "totalHT": 1321.24,
       "tvaRate": 5.5
     }
   ]
 }
 
-Si aucune ligne n'est trouvée ou si le document n'est pas une facture fournisseur, renvoie lines: [].`;
+RÈGLES FINALES :
+• supplierConfidence = "high" si nom du fournisseur clairement visible en en-tête, "low" sinon
+• Ne jamais inclure les lignes GRATUIT ni les Taxe dans lines[]
+• Si le document n'est pas une facture fournisseur : retourner lines: []
+• Pour le Format A (meunerie) : unitPriceHT = Montant HT ÷ Nbre Unité (arrondi 4 décimales)
+• Pour le Format B (grossiste) : unitPriceHT = Montant HT ÷ Qté UC (arrondi 4 décimales)`;
 
     content.push({ type: 'text', text: PROMPT });
 
-    // Use Haiku for text (cheaper), Sonnet for vision (better accuracy on images)
+    // Haiku for text (cheaper + sufficient for structured tables), Sonnet for vision
     const model = hasText ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-20250514';
     console.log('[parse-invoice] model=' + model + ' mode=' + (hasText ? 'text' : 'vision') + ' file=' + (fileName || '?'));
 
     const response = await callWithRetry({
       model: model,
-      max_tokens: 8000,
+      max_tokens: 12000,
       messages: [{ role: 'user', content: content }]
     });
 
