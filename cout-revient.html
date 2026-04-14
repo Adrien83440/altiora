@@ -923,6 +923,11 @@
                     <option :value="item.id" x-text="item.f.nom+' ('+(item.f.articles||[]).length+' articles)'"></option>
                   </template>
                 </select>
+                <button x-show="!importSelectedFid && importDetectedSupplier"
+                  class="btn btn-xs" style="margin-top:6px;background:#f0fdf4;color:#059669;border:1px solid #a7f3d0;width:100%;justify-content:center"
+                  @click="impCreateFournNom=importDetectedSupplier;showImpCreateFournModal=true">
+                  + Créer ce fournisseur
+                </button>
               </div>
               <div x-show="importInvoiceDate||importInvoiceNumber" style="font-size:11px;color:var(--muted);text-align:right;min-width:90px;">
                 <div x-show="importInvoiceDate" x-text="'📅 '+importInvoiceDate"></div>
@@ -1127,6 +1132,27 @@
     </div>
   </div>
 
+  <!-- ════ MODAL CRÉER FOURNISSEUR (depuis import) ════ -->
+  <div class="modal-overlay" :class="{'show':showImpCreateFournModal}" @click.self="showImpCreateFournModal=false">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-head"><h3>🏪 Créer un fournisseur</h3><button class="modal-close" @click="showImpCreateFournModal=false">✕</button></div>
+      <div class="modal-body">
+        <div style="font-size:11px;color:#1e40af;background:var(--blue-ghost);padding:8px 12px;border-radius:8px;margin-bottom:14px">
+          Ce fournisseur sera créé dans votre coût de revient. Vous pourrez ensuite lui ajouter des articles depuis sa fiche.
+        </div>
+        <div class="modal-field"><label class="modal-label">Nom du fournisseur *</label><input class="modal-input" type="text" x-model="impCreateFournNom" placeholder="ex: Metro, Ducreux, Nicot..."/></div>
+        <div class="modal-row">
+          <div class="modal-field"><label class="modal-label">Téléphone</label><input class="modal-input" x-model="impCreateFournTel" placeholder="04 78..."/></div>
+          <div class="modal-field"><label class="modal-label">Email</label><input class="modal-input" x-model="impCreateFournEmail" placeholder="contact@..."/></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-outline" @click="showImpCreateFournModal=false">Annuler</button>
+        <button class="btn btn-primary" @click="impConfirmCreateFourn()">Créer le fournisseur →</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ════ MODAL HISTORIQUE PRIX ════ -->
   <div class="modal-overlay" id="impHistModal" @click.self="showImpHistorique=false" :class="{'show':showImpHistorique}">
     <div class="modal" style="max-width:640px">
@@ -1321,6 +1347,7 @@ function coutRevientApp(){
     showImpCreateModal:false,impCreateForIdx:null,
     impCreateFid:'',impCreateNom:'',impCreatePrix:'',
     impCreateColisQte:'1',impCreateColisUnite:'kg',impCreateUnite:'g',impCreateType:'ingredient',
+    showImpCreateFournModal:false,impCreateFournNom:'',impCreateFournTel:'',impCreateFournEmail:'',
 
     // ── COMPUTED ──
     get p(){return this.currentId&&this.products[this.currentId]?this.products[this.currentId]:null;},
@@ -1725,6 +1752,7 @@ function coutRevientApp(){
           invoiceName:l.name,invoiceRef:l.reference||'',
           invoiceQty:l.qty||1,invoiceUnit:l.unit||'',
           invoicePriceHT:l.unitPriceHT,
+          invoiceColisQte:l.colisQte||1,invoiceColisUnite:l.colisUnite||'pièce',
           matchedArticle:match?match.article:null,
           ignore:false,createNew:false,impCreateFid:''
         };
@@ -1811,7 +1839,7 @@ function coutRevientApp(){
       }
       for(var j=0;j<toCreate.length;j++){
         var lc=toCreate[j];
-        try{await self.importCreateNewArticle(lc.impCreateFid,lc.invoiceName,lc.invoicePriceHT,1,lc.invoiceUnit||'kg','g','ingredient');}
+        try{await self.importCreateNewArticle(lc.impCreateFid,lc.invoiceName,lc.invoicePriceHT,lc.invoiceColisQte||self.impCreateColisQte||1,lc.invoiceColisUnite||'kg',self._guessWorkingUnit(lc.invoiceColisUnite||''),'ingredient');}
         catch(e){console.error('[import-cr] createArticle:',e);errors++;}
       }
       if(errors>0)showToast((toApply.length-errors)+' OK, '+errors+' erreur(s)','warning');
@@ -1829,9 +1857,16 @@ function coutRevientApp(){
       this.impCreateForIdx=idx;
       this.impCreateNom=line.invoiceName;
       this.impCreatePrix=String(line.invoicePriceHT);
-      this.impCreateColisQte='1';this.impCreateColisUnite=line.invoiceUnit||'kg';this.impCreateUnite='g';this.impCreateType='ingredient';
+      this.impCreateColisQte=String(line.invoiceColisQte||1);
+      this.impCreateColisUnite=line.invoiceColisUnite||line.invoiceUnit||'kg';
+      this.impCreateUnite=this._guessWorkingUnit(line.invoiceColisUnite||'');
+      this.impCreateType='ingredient';
       this.impCreateFid=this.importSelectedFid||(Object.keys(this.fournisseurs)[0]||'');
       this.showImpCreateModal=true;
+    },
+    _guessWorkingUnit(colisUnite){
+      var map={'kg':'g','l':'ml','g':'g','ml':'ml','pièce':'pièce','unité':'pièce','portion':'portion'};
+      return map[(colisUnite||'').toLowerCase()]||'g';
     },
     impConfirmCreate(){
       if(!this.impCreateNom||!this.impCreatePrix||!this.impCreateFid){showToast('Nom, prix et fournisseur obligatoires','err');return;}
@@ -1844,6 +1879,23 @@ function coutRevientApp(){
     },
 
     importReset(){this.importStep='upload';this.importMatchedLines=[];},
+
+    async impConfirmCreateFourn(){
+      var self=this;
+      var nom=(self.impCreateFournNom||'').trim();
+      if(!nom){showToast('Le nom du fournisseur est obligatoire','err');return;}
+      var newFid='fourn_'+Date.now();
+      var newFourn={id:newFid,nom:nom,telephone:self.impCreateFournTel||'',email:self.impCreateFournEmail||'',adresse:'',siret:'',notes:'',articles:[],emoji:'🏪',updatedAt:Date.now()};
+      try{
+        await window._setDoc(window._doc(window._db,'fiches',window._uid,'items',newFid),JSON.parse(JSON.stringify(newFourn)));
+        self.fournisseurs=Object.assign({},self.fournisseurs,{[newFid]:newFourn});
+        self.importSelectedFid=newFid;
+        self.importUpdateFournisseurFilter();
+        self.showImpCreateFournModal=false;
+        self.impCreateFournNom='';self.impCreateFournTel='';self.impCreateFournEmail='';
+        showToast('✅ Fournisseur "'+nom+'" créé','success');
+      }catch(e){showToast('Erreur création fournisseur: '+e.message,'err');}
+    },
 
     importOpenHistorique(fid,aid){
       var fourn=this.fournisseurs[fid];
