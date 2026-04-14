@@ -316,9 +316,14 @@
       for (var m = 0; m < lignes.length; m++) {
         var l = lignes[m];
         var brutM = H.pf(l.brut);
-        var tauxM = H.pf(l.tauxCharges);
-        if (tauxM <= 0) tauxM = 42;
-        result.salaries += brutM * (1 + tauxM / 100);
+        if (l.saisieMode === 'net') {
+          // Mode net : montant saisi = net, les charges patronales sont en charges variables
+          result.salaries += brutM;
+        } else {
+          var tauxM = H.pf(l.tauxCharges);
+          if (tauxM <= 0) tauxM = 42;
+          result.salaries += brutM * (1 + tauxM / 100);
+        }
       }
     }
 

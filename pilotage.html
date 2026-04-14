@@ -2497,8 +2497,8 @@ function renderMasseSalariale(data, t, forceRender) {
   // Tableau salariés
   html += '<table class="data-table"><thead><tr>' +
     '<th>Salarié</th>' +
-    (isAuto || isAutoPaie ? '<th>Poste</th><th>Contrat</th>' : '') +
-    '<th>Brut mensuel (€)</th>' +
+    (isAuto || isAutoPaie ? '<th>Poste</th><th>Contrat</th>' : '<th style="width:75px">Type</th>') +
+    '<th>' + (isAuto || isAutoPaie ? 'Brut mensuel' : 'Salaire') + ' (€)</th>' +
     '<th>Taux charges (%)</th>' +
     '<th>Coût employeur (€)</th>' +
     (isAutoPaie ? '<th>Source</th>' : '') +
@@ -2554,13 +2554,21 @@ function renderMasseSalariale(data, t, forceRender) {
     });
   } else {
     (ms.lignes || []).forEach(function(l, i) {
+      var saisieMode = l.saisieMode || 'brut';
       var brut = pf(l.brut);
       var taux = parseFloat(l.tauxCharges) || 42;
-      var cout = brut * (1 + taux / 100);
+      var cout = saisieMode === 'net' ? brut : brut * (1 + taux / 100);
+      var tauxCell = saisieMode === 'net'
+        ? '<td style="text-align:center;color:var(--muted);font-size:10px;vertical-align:middle" title="Les charges patronales sont à saisir manuellement dans vos Charges variables">→ Chg. var.</td>'
+        : '<td style="text-align:center"><input class="cell-input" style="width:55px;text-align:center" type="number" value="' + taux + '" min="0" max="100" step="1" oninput="_data.masseSalariale.lignes[' + i + '].tauxCharges=parseFloat(this.value)||42;refreshTotals()"/></td>';
       html += '<tr>' +
-        '<td><input class="cell-input" style="width:140px" value="' + (l.label || '') + '" placeholder="Nom salarié" oninput="_data.masseSalariale.lignes[' + i + '].label=this.value;refreshTotals()"/></td>' +
+        '<td><input class="cell-input" style="width:130px" value="' + (l.label || '') + '" placeholder="Nom salarié" oninput="_data.masseSalariale.lignes[' + i + '].label=this.value;refreshTotals()"/></td>' +
+        '<td style="text-align:center"><select class="cell-input" style="width:68px;font-size:11px;padding:3px 5px;cursor:pointer" title="Saisir en Brut (calcul charges auto) ou Net (charges en Charges variables)" onchange="_data.masseSalariale.lignes[' + i + '].saisieMode=this.value;refreshTotals()">' +
+          '<option value="brut"' + (saisieMode === 'brut' ? ' selected' : '') + '>Brut</option>' +
+          '<option value="net"' + (saisieMode === 'net' ? ' selected' : '') + '>Net</option>' +
+        '</select></td>' +
         '<td><input class="cell-input" style="width:80px;text-align:right" type="text" inputmode="decimal" value="' + (l.brut || '') + '" placeholder="0.00" oninput="_data.masseSalariale.lignes[' + i + '].brut=this.value;refreshTotals()"/></td>' +
-        '<td style="text-align:center"><input class="cell-input" style="width:55px;text-align:center" type="number" value="' + taux + '" min="0" max="100" step="1" oninput="_data.masseSalariale.lignes[' + i + '].tauxCharges=parseFloat(this.value)||42;refreshTotals()"/></td>' +
+        tauxCell +
         '<td style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(cout) + '</td>' +
         '<td><button class="btn-del" onclick="delMSLigne(' + i + ')" title="Supprimer">✕</button></td>' +
         '</tr>';
@@ -2568,7 +2576,7 @@ function renderMasseSalariale(data, t, forceRender) {
   }
 
   html += '</tbody>' +
-    '<tfoot><tr><td colspan="' + ((isAuto || isAutoPaie) ? 3 : 1) + '">TOTAL SALARIÉS</td>' +
+    '<tfoot><tr><td colspan="' + ((isAuto || isAutoPaie) ? 3 : 2) + '">TOTAL SALARIÉS</td>' +
     '<td></td><td></td>' +
     '<td style="text-align:right;font-weight:800;color:#f59e0b"><span id="tot-msSal">' + fmtN(msCalc.salaries) + '</span> €</td>' +
     (isAutoPaie ? '<td></td>' : (!isAuto ? '<td></td>' : '')) +
