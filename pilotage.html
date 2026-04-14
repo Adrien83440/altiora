@@ -3625,7 +3625,8 @@ async function propagateCredit(i) {
     try {
       var snap = await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
       var md = defaultData(curY, curM);
-      if (snap.exists()) { var ex=snap.data(); Object.keys(ex).forEach(function(k){md[k]=ex[k];}); }
+      var snapExists = snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists);
+      if (snapExists) { var ex=snap.data(); Object.keys(ex).forEach(function(k){md[k]=ex[k];}); }
       if (!md.credits) md.credits = [];
       linesToPropagate.forEach(function(line) {
         var lineWithDates = Object.assign({}, line);
@@ -3678,7 +3679,8 @@ async function propagateLeasing(i) {
     try {
       var snap = await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
       var md = defaultData(curY, curM);
-      if (snap.exists()) { var ex=snap.data(); Object.keys(ex).forEach(function(k){md[k]=ex[k];}); }
+      var snapExists2 = snap && (typeof snap.exists === 'function' ? snap.exists() : snap.exists);
+      if (snapExists2) { var ex=snap.data(); Object.keys(ex).forEach(function(k){md[k]=ex[k];}); }
       if (!md.leasing) md.leasing = [];
       var lineToSave = Object.assign({}, r);
       var exists = md.leasing.some(function(l){return l.fournisseur===r.fournisseur && l.type===r.type;});
@@ -3719,13 +3721,15 @@ function openAddCLModal(type) {
   document.getElementById('aclm-montant').value = '';
   document.getElementById('aclm-taux').value = '';
   document.getElementById('aclm-amort').value = 'constant';
-  // Peupler les selects année (année courante -2 → +10)
+  // Peupler les selects année (10 ans en arrière → 10 ans en avant, couvre tous les crédits historiques)
   var cy = window._year || new Date().getFullYear();
+  var realY = new Date().getFullYear();
+  var startY = Math.min(cy - 2, realY - 10); // toujours au moins 10 ans avant l'année réelle
   ['aclm-debut-y','aclm-fin-y'].forEach(function(id) {
     var sel = document.getElementById(id);
     if (!sel) return;
     sel.innerHTML = '<option value="">Année</option>';
-    for (var y = cy - 2; y <= cy + 10; y++) {
+    for (var y = startY; y <= cy + 15; y++) {
       sel.innerHTML += '<option value="' + y + '">' + y + '</option>';
     }
   });
@@ -3771,27 +3775,32 @@ async function submitAddCL(propagate) {
     var amort = document.getElementById('aclm-amort').value || 'constant';
     var line = { fournisseur: nom, nom: nom, ligneType: 'principal', montant: String(montant), tvaRate: 20, tvaAuto: false, tauxInteret: taux, pointe: 'Non', dateDebut: debut, dateFin: fin, amort: amort };
     // Remplacer la ligne vide si c'est la seule
+    var creditIdx;
     if (_data.credits.length === 1 && !_data.credits[0].fournisseur && !parseFloat(_data.credits[0].montant)) {
       _data.credits[0] = line;
+      creditIdx = 0;
     } else {
       _data.credits.push(line);
+      creditIdx = _data.credits.length - 1;
     }
-    refreshCredits();
+    refreshCredits(); // peut réindexer via migrateCreditsToSingleLine — on a déjà capturé l'index
     scheduleSave();
     if (propagate && debut && fin) {
       showToast('⏳ Propagation en cours...','success');
-      var idx = _data.credits.length - 1;
-      await propagateCredit(idx);
+      await propagateCredit(creditIdx);
     } else {
       showToast('✅ Crédit ajouté','success');
     }
   } else {
     var subtype = (document.getElementById('aclm-subtype').value || '').trim();
     var line2 = { fournisseur: nom, type: subtype, montantHT: String(montant), tvaRate: 20, deductible: 'Oui', pointe: 'Non', dateDebut: debut, dateFin: fin };
+    var leasIdx;
     if (_data.leasing.length === 1 && !_data.leasing[0].fournisseur && !parseFloat(_data.leasing[0].montantHT)) {
       _data.leasing[0] = line2;
+      leasIdx = 0;
     } else {
       _data.leasing.push(line2);
+      leasIdx = _data.leasing.length - 1;
     }
     var tb = document.getElementById('leas-tbody');
     if (tb) tb.innerHTML = renderCharges(_data.leasing, 'leasing');
@@ -3799,8 +3808,7 @@ async function submitAddCL(propagate) {
     scheduleSave();
     if (propagate && debut && fin) {
       showToast('⏳ Propagation en cours...','success');
-      var idx2 = _data.leasing.length - 1;
-      await propagateLeasing(idx2);
+      await propagateLeasing(leasIdx);
     } else {
       showToast('✅ Leasing ajouté','success');
     }
