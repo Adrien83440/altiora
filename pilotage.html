@@ -4701,53 +4701,48 @@ var _mpActive = null; // {wrapperId, field, rowType, rowIdx}
 var MP_MONTHS = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
 
 function mpOpen(wrapperId, field, rowType, rowIdx) {
-  // Fermer l'éventuel picker ouvert
   if (_mpActive) mpClose();
   var wrap = document.getElementById(wrapperId);
   if (!wrap) return;
-  var popup = wrap.querySelector('.mp-popup');
+  // Popup global dans <body>, hors des section-card (évite backdrop-filter/transform stacking context)
+  var popup = document.getElementById('mpGlobalPopup');
   if (!popup) return;
-  // Lire valeur courante
-  var val = _mpGetVal(rowType, rowIdx, field); // 'YYYY-MM' ou ''
+  var val = _mpGetVal(rowType, rowIdx, field);
   var curYear  = val ? parseInt(val.split('-')[0]) : new Date().getFullYear();
-  var curMonth = val ? parseInt(val.split('-')[1]) - 1 : -1; // 0-based ou -1
-  popup.dataset.year  = curYear;
-  popup.dataset.month = curMonth;
-  popup.dataset.field    = field;
-  popup.dataset.rowType  = rowType;
-  popup.dataset.rowIdx   = rowIdx;
-  // Rendre d'abord pour pouvoir mesurer la largeur réelle
+  var curMonth = val ? parseInt(val.split('-')[1]) - 1 : -1;
+  popup.dataset.year    = curYear;
+  popup.dataset.month   = curMonth;
+  popup.dataset.field   = field;
+  popup.dataset.rowType = rowType;
+  popup.dataset.rowIdx  = rowIdx;
+  popup.dataset.wrapId  = wrapperId;
   mpRender(popup, curYear, curMonth, rowType, rowIdx, field);
   popup.classList.add('open');
-  // Positionner intelligemment (position:fixed, coordonnées viewport)
+  // Positionnement smart (position:fixed relatif au vrai viewport)
   var display = wrap.querySelector('.mp-display');
   var rect = display.getBoundingClientRect();
   var popW = popup.offsetWidth || 240;
   var popH = popup.offsetHeight || 200;
-  var vw   = window.innerWidth;
-  var vh   = window.innerHeight;
-  // Horizontal : aligner à gauche du trigger, reculer si ça déborde à droite
+  var vw = window.innerWidth;
+  var vh = window.innerHeight;
   var leftPos = rect.left;
   if (leftPos + popW > vw - 8) leftPos = Math.max(8, rect.right - popW);
-  // Vertical : sous le trigger, au-dessus si ça déborde en bas
   var topPos = rect.bottom + 4;
   if (topPos + popH > vh - 8) topPos = Math.max(8, rect.top - popH - 4);
   popup.style.top  = topPos + 'px';
   popup.style.left = leftPos + 'px';
   _mpActive = wrapperId;
-  // Stopper la propagation pour éviter que le document click handler referme immédiatement
   event.stopPropagation();
 }
 
 function mpClose() {
   if (!_mpActive) return;
-  var wrap = document.getElementById(_mpActive);
-  if (wrap) { var p = wrap.querySelector('.mp-popup'); if(p) p.classList.remove('open'); }
+  var popup = document.getElementById('mpGlobalPopup');
+  if (popup) popup.classList.remove('open');
   _mpActive = null;
 }
 
 function mpRender(popup, year, selMonth, rowType, rowIdx, field) {
-  // Récupérer la plage pour colorier in-range
   var startVal = _mpGetVal(rowType, rowIdx, 'dateDebut');
   var endVal   = _mpGetVal(rowType, rowIdx, 'dateFin');
   var startY = startVal ? parseInt(startVal.split('-')[0]) : null;
@@ -4772,12 +4767,11 @@ function mpRender(popup, year, selMonth, rowType, rowIdx, field) {
     html += '<button class="' + cls + '" onclick="event.stopPropagation();mpSelect(' + year + ',' + m + ',this)">' + MP_MONTHS[m] + '</button>';
   }
   html += '</div><button class="mp-clear" onclick="event.stopPropagation();mpClear(this)">✕ Effacer</button>';
-  // Vider sauf le trigger display et le popup lui-même
   popup.innerHTML = html;
 }
 
 function mpChangeYear(newYear, btn) {
-  var popup = btn.closest('.mp-popup');
+  var popup = document.getElementById('mpGlobalPopup');
   var selMonth = parseInt(popup.dataset.month);
   var field   = popup.dataset.field;
   var rowType = popup.dataset.rowType;
@@ -4787,15 +4781,15 @@ function mpChangeYear(newYear, btn) {
 }
 
 function mpSelect(year, month, btn) {
-  var popup = btn.closest('.mp-popup');
+  var popup = document.getElementById('mpGlobalPopup');
   var field   = popup.dataset.field;
   var rowType = popup.dataset.rowType;
   var rowIdx  = parseInt(popup.dataset.rowIdx);
   var val = year + '-' + String(month+1).padStart(2,'0');
   popup.dataset.month = month;
   _mpSetVal(rowType, rowIdx, field, val);
-  // Mettre à jour le display
-  var wrap = popup.closest('.mp-wrap');
+  // Mettre à jour le display dans le wrap d'origine
+  var wrap = document.getElementById(popup.dataset.wrapId);
   if (wrap) {
     var disp = wrap.querySelector('.mp-display');
     if (disp) {
@@ -4811,15 +4805,18 @@ function mpSelect(year, month, btn) {
 }
 
 function mpClear(btn) {
-  var popup = btn.closest('.mp-popup');
+  var popup = document.getElementById('mpGlobalPopup');
   var field   = popup.dataset.field;
   var rowType = popup.dataset.rowType;
   var rowIdx  = parseInt(popup.dataset.rowIdx);
   _mpSetVal(rowType, rowIdx, field, '');
-  var wrap = popup.closest('.mp-wrap');
+  var wrap = document.getElementById(popup.dataset.wrapId);
   if (wrap) {
     var disp = wrap.querySelector('.mp-display');
-    if (disp) { disp.classList.add('empty'); disp.innerHTML = '<span class="mp-icon">📅</span>' + (field==='dateDebut'?'Début':'Fin'); }
+    if (disp) {
+      disp.classList.add('empty');
+      disp.innerHTML = '<span class="mp-icon">📅</span>' + (field==='dateDebut'?'Début':'Fin');
+    }
   }
   popup.dataset.month = -1;
   mpRender(popup, parseInt(popup.dataset.year), -1, rowType, rowIdx, field);
@@ -4839,14 +4836,15 @@ function _mpSetVal(rowType, rowIdx, field, val) {
   if (rowType === 'leasing') { if(_data.leasing[rowIdx])  _data.leasing[rowIdx][field]  = val; }
 }
 
-// Fermer si clic extérieur
+// Fermer si clic extérieur (ni dans un mp-wrap, ni dans le popup global)
 document.addEventListener('click', function(e) {
   if (!_mpActive) return;
-  // Ne fermer que si le clic est en dehors du popup ET du trigger
   if (e.target.closest && e.target.closest('.mp-wrap')) return;
+  if (e.target.closest && e.target.closest('#mpGlobalPopup')) return;
   mpClose();
 });
 
+// mpHtml : plus de popup inline, le popup global est dans <body>
 function mpHtml(wrapperId, rowType, rowIdx, field, val) {
   var parsed = parseYYYYMM(val);
   var label;
@@ -4862,7 +4860,6 @@ function mpHtml(wrapperId, rowType, rowIdx, field, val) {
     '<div class="mp-display' + (isEmpty?' empty':'') + '" onclick="mpOpen(\'' + wrapperId + '\',\'' + field + '\',\'' + rowType + '\',' + rowIdx + ')">' +
       '<span class="mp-icon">📅</span>' + label +
     '</div>' +
-    '<div class="mp-popup"></div>' +
   '</div>';
 }
 
@@ -5556,6 +5553,9 @@ document.addEventListener('click', function(e) {
   if (modal && e.target === modal) closeFicheModal();
 });
 </script>
+
+<!-- Popup date picker global (portal — hors section-card pour éviter backdrop-filter/transform stacking) -->
+<div id="mpGlobalPopup" class="mp-popup"></div>
 
 </body>
 </html>
