@@ -611,7 +611,22 @@ async function loadEmps() {
   _emps = [];
   try {
     const snap = await window._getDocs(window._collection(window._db, 'rh', window._uid, 'employes'));
-    snap.forEach(function(d) { _emps.push({ id:d.id, ...d.data() }); });
+    // ── Filtre : exclure les employés archivés dont la date de sortie est
+    // antérieure au mois affiché. Les archivés restent visibles sur les
+    // mois où ils travaillaient encore (utile pour consulter/valider les
+    // fiches de paie passées). Un archivé sans dateSortie est caché par
+    // défaut (pas d'info → on ne peut pas décider qu'il doit apparaître).
+    // Format moisKey = "YYYY-MM" et dateSortie = "YYYY-MM-DD" → comparaison
+    // lexicographique sûre après slice(0,7).
+    var moisKey = getMoisKey();
+    snap.forEach(function(d) {
+      var data = d.data();
+      if (data.statut === 'archive') {
+        if (!data.dateSortie) return;                         // archivé sans date → on cache
+        if (moisKey > String(data.dateSortie).slice(0,7)) return; // mois postérieur à la sortie → on cache
+      }
+      _emps.push({ id:d.id, ...data });
+    });
   } catch(e) { console.error('loadEmps:', e); }
 }
 
