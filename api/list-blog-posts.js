@@ -62,11 +62,33 @@ async function listCollection(collection, idToken) {
   return data.documents.map((d) => firestoreDocToObject(d, d.name));
 }
 
+const ADMIN_EMAIL = (process.env.BLOG_ADMIN_EMAIL || 'contact@adrienemily.com').toLowerCase();
+
+async function requireHumanAdminAuth(req) {
+  const authHeader = req.headers.authorization || '';
+  const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  if (!idToken) return { ok: false, status: 401, error: 'Missing Bearer idToken' };
+  const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.FIREBASE_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken }),
+  });
+  if (!r.ok) return { ok: false, status: 401, error: 'Invalid idToken' };
+  const data = await r.json();
+  const email = ((data.users || [])[0]?.email || '').toLowerCase();
+  if (email !== ADMIN_EMAIL) return { ok: false, status: 403, error: 'Forbidden' };
+  return { ok: true, email };
+}
+
 module.exports = async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    // 🔐 Auth check
+    const auth = await requireHumanAdminAuth(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
     const status = (req.query?.status || 'all').toLowerCase();
     const idToken = await getAdminToken();
 
