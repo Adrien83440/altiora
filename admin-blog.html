@@ -89,6 +89,8 @@
   .art-btn.publish:disabled{opacity:.5;cursor:not-allowed;}
   .art-btn.del{color:var(--red);border-color:var(--red-ghost);}
   .art-btn.del:hover{background:var(--red-ghost);}
+  .art-btn.unpublish{color:var(--red);border-color:var(--red-ghost);}
+  .art-btn.unpublish:hover{background:var(--red-ghost);}
   @media (max-width:620px){.art-row{flex-direction:column;align-items:stretch;}.art-actions{flex-wrap:wrap;}}
 
   /* Empty */
@@ -229,7 +231,10 @@
   <section class="section">
     <div class="section-h">
       <div class="section-t">✅ Articles publiés</div>
-      <div class="section-c"><span id="publishedCount">0</span></div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="btn-ghost" id="btnSync" type="button" title="Synchroniser Firestore avec le repo GitHub (nettoie les orphelins si tu as supprimé des fichiers manuellement)">🔄 Sync repo</button>
+        <div class="section-c"><span id="publishedCount">0</span></div>
+      </div>
     </div>
     <div id="publishedList"></div>
   </section>
@@ -333,7 +338,9 @@ window.initAdminBlog = async function() {
         '<button class="art-btn publish" data-slug="' + a.slug + '" type="button">Publier</button>' +
         '<button class="art-btn del" data-slug="' + a.slug + '" type="button">Supprimer</button>';
     } else {
-      actions = '<a class="art-btn" href="' + (a.url || '/blog/' + a.slug) + '" target="_blank" rel="noopener">Voir en ligne →</a>';
+      actions = '' +
+        '<a class="art-btn" href="' + (a.url || '/blog/' + a.slug) + '" target="_blank" rel="noopener">Voir en ligne →</a>' +
+        '<button class="art-btn unpublish" data-slug="' + a.slug + '" type="button" title="Retirer du site (supprime le fichier, la carte et l\'URL du sitemap)">Dépublier</button>';
     }
 
     row.innerHTML =
@@ -353,6 +360,9 @@ window.initAdminBlog = async function() {
       row.querySelector('.preview').addEventListener('click', function() { previewDraft(a.slug); });
       row.querySelector('.publish').addEventListener('click', function() { publishDraft(a.slug, row); });
       row.querySelector('.del').addEventListener('click', function() { deleteDraft(a.slug, row); });
+    } else {
+      const unpubBtn = row.querySelector('.unpublish');
+      if (unpubBtn) unpubBtn.addEventListener('click', function() { unpublishArticle(a.slug, a.title, row); });
     }
     return row;
   }
@@ -511,8 +521,56 @@ window.initAdminBlog = async function() {
     }
   }
 
+  async function unpublishArticle(slug, title, row) {
+    const label = title || slug;
+    if (!confirm('Dépublier « ' + label + ' » ?\n\nCeci va :\n- Supprimer le fichier HTML du site\n- Retirer la carte de la page /blog\n- Retirer l\'URL du sitemap\n- Supprimer la référence Firestore\n\nL\'article ne sera plus accessible en ligne.\nAction irréversible (mais tu peux republier un autre article avec le même sujet ensuite).')) return;
+    const btn = row.querySelector('.unpublish');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin"></span>Dépublication…';
+    showBanner('⏳ Dépublication sur GitHub… 10-30 s', 'warn');
+    try {
+      const data = await apiCall('/api/github-unpublish', { method: 'POST', body: { slug } });
+      if (data.commitSha) {
+        showBanner('✅ Dépublié. Vercel rebuild en cours (~45 s). <a href="' + data.commitUrl + '" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;">Voir le commit →</a>', 'ok');
+      } else {
+        showBanner('✅ Firestore nettoyé (fichiers déjà absents du repo)', 'ok');
+      }
+      await loadList();
+    } catch (err) {
+      showBanner('❌ Erreur dépublication : ' + err.message, 'err');
+      btn.disabled = false;
+      btn.textContent = 'Dépublier';
+    }
+  }
+
+  async function syncPublished() {
+    if (!confirm('Lancer la synchronisation ?\n\nCeci compare Firestore avec les fichiers réellement présents dans le repo GitHub, et nettoie les orphelins (articles listés comme publiés mais dont le fichier HTML a été supprimé manuellement).\n\nRecommandé si tu as édité le repo directement.')) return;
+    const btn = document.getElementById('btnSync');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.innerHTML = '<span class="spin"></span>Sync…';
+    showBanner('⏳ Synchronisation Firestore ↔ GitHub…', 'warn');
+    try {
+      const data = await apiCall('/api/sync-blog-published', { method: 'POST' });
+      if (data.orphans_cleaned === 0) {
+        showBanner('✅ Tout est déjà synchronisé (' + data.firestore_count + ' articles dans Firestore, ' + data.repo_count + ' fichiers dans le repo)', 'ok');
+      } else {
+        let msg = '✅ ' + data.orphans_cleaned + ' orphelin(s) nettoyé(s) : ' + data.orphans_slugs.join(', ');
+        if (data.commitUrl) msg += '. <a href="' + data.commitUrl + '" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline;">Voir le commit →</a>';
+        showBanner(msg, 'ok');
+      }
+      await loadList();
+    } catch (err) {
+      showBanner('❌ Erreur sync : ' + err.message, 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+
   // Bind form
   document.getElementById('genForm').addEventListener('submit', generateDraft);
+  document.getElementById('btnSync').addEventListener('click', syncPublished);
 
   // Initial load
   await loadList();
