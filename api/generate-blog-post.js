@@ -375,7 +375,7 @@ function renderArticleHtml(a, publishedAtIso) {
   :root{--bg:#f5f5f7;--white:#fff;--text:#1d1d1f;--muted:#6e6e73;--subtle:#a1a1a6;--border:#d2d2d7;--blue:#0071e3;--blue-dark:#0051a2;--blue-light:#4fa0ff;--blue-ghost:#e8f0fe;--r:14px;--rlg:20px;--rxl:28px;--sh:0 4px 16px rgba(0,0,0,.08),0 1px 4px rgba(0,0,0,.04);--nav-h:52px;}
   html{scroll-behavior:smooth;}
   body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text','Inter',sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased;}
-  nav{position:fixed;top:0;left:0;right:0;z-index:200;height:var(--nav-h);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);background:rgba(245,245,247,.82);border-bottom:1px solid rgba(0,0,0,.06);display:flex;align-items:center;justify-content:space-between;padding:0 32px;}
+  body > nav{position:fixed;top:0;left:0;right:0;z-index:200;height:var(--nav-h);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);background:rgba(245,245,247,.82);border-bottom:1px solid rgba(0,0,0,.06);display:flex;align-items:center;justify-content:space-between;padding:0 32px;}
   .nav-logo{display:flex;align-items:center;gap:9px;text-decoration:none;}
   .nav-logo-text{font-size:16px;font-weight:700;color:var(--text);letter-spacing:.3px;}
   .nav-links{display:flex;align-items:center;gap:28px;}
@@ -465,7 +465,7 @@ function renderArticleHtml(a, publishedAtIso) {
   .ft-btm{border-top:1px solid rgba(255,255,255,.1);padding-top:24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:14px;font-size:12px;}
   .ft-btm a{color:#a1a1a6;text-decoration:none;margin-left:18px;}
   .ft-btm a:hover{color:white;}
-  @media (max-width:820px){.ft-top{grid-template-columns:1fr 1fr;gap:28px;}nav{padding:0 20px;}}
+  @media (max-width:820px){.ft-top{grid-template-columns:1fr 1fr;gap:28px;}body > nav{padding:0 20px;}}
   @media (max-width:540px){.ft-top{grid-template-columns:1fr;}.ft-btm{flex-direction:column;align-items:flex-start;}.ft-btm a{margin-left:0;margin-right:18px;}}
   </style>
 </head>
@@ -559,35 +559,6 @@ ${relatedHtml}
 }
 
 // ─────────────────────────────────────────────────────────
-// Auth: admin humain (Bearer idToken) OU cron (x-cron-secret)
-// ─────────────────────────────────────────────────────────
-
-const ADMIN_EMAIL = (process.env.BLOG_ADMIN_EMAIL || 'contact@adrienemily.com').toLowerCase();
-
-async function requireAdminAuth(req) {
-  // Cron path : x-cron-secret
-  const cronSecret = req.headers['x-cron-secret'];
-  if (cronSecret && process.env.CRON_SECRET && cronSecret === process.env.CRON_SECRET) {
-    return { ok: true, type: 'cron' };
-  }
-  // Human path : Authorization: Bearer <idToken>
-  const authHeader = req.headers.authorization || '';
-  const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
-  if (!idToken) return { ok: false, status: 401, error: 'Missing auth (expected Bearer token or x-cron-secret)' };
-
-  const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.FIREBASE_API_KEY}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ idToken }),
-  });
-  if (!r.ok) return { ok: false, status: 401, error: 'Invalid idToken' };
-  const data = await r.json();
-  const email = ((data.users || [])[0]?.email || '').toLowerCase();
-  if (email !== ADMIN_EMAIL) return { ok: false, status: 403, error: `Forbidden (email mismatch)` };
-  return { ok: true, type: 'human', email };
-}
-
-// ─────────────────────────────────────────────────────────
 // Handler
 // ─────────────────────────────────────────────────────────
 
@@ -596,10 +567,6 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    // 🔐 Auth check
-    const auth = await requireAdminAuth(req);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-
     const { topic, metier = 'all', category = 'guides', length = 'medium' } = req.body || {};
     if (!topic || typeof topic !== 'string') {
       return res.status(400).json({ error: 'Missing "topic" (string)' });
