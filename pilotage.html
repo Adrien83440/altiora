@@ -2507,7 +2507,7 @@ function renderMasseSalariale(data, t, forceRender) {
 
   if (isAutoPaie) {
     // Wave 4 : mode "auto fiches de paie" — lit window._rhPaiesCurrentMonth
-    window._rhEmployes.forEach(function(e) {
+    window._rhEmployes.forEach(function(e, i) {
       var line = getEmployeMSLineAutoPaie(e);
       // Couleurs et badge selon la source
       var srcBadge, rowBg;
@@ -2534,12 +2534,12 @@ function renderMasseSalariale(data, t, forceRender) {
         '<td>' + (e.typeContrat || 'CDI') + ' ' + (e.heuresHebdo || 35) + 'h</td>' +
         '<td style="text-align:right">' + fmtN(line.brut) + '</td>' +
         '<td style="text-align:center;color:var(--muted);font-size:11px">' + (line.isFallback ? '~' + (line.taux || 42) + '%' : 'inclus') + '</td>' +
-        '<td style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(line.cout) + '</td>' +
+        '<td id="ms-line-cout-' + i + '" style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(line.cout) + '</td>' +
         '<td>' + srcBadge + '</td>' +
         '</tr>';
     });
   } else if (isAuto) {
-    window._rhEmployes.forEach(function(e) {
+    window._rhEmployes.forEach(function(e, i) {
       var brut = parseFloat(e.salaireBrut) || 0;
       var taux = getMSTaux(e);
       var cout = brut * (1 + taux / 100);
@@ -2549,7 +2549,7 @@ function renderMasseSalariale(data, t, forceRender) {
         '<td>' + (e.typeContrat || 'CDI') + ' ' + (e.heuresHebdo || 35) + 'h</td>' +
         '<td style="text-align:right">' + fmtN(brut) + '</td>' +
         '<td style="text-align:center"><input class="cell-input" style="width:55px;text-align:center" type="number" value="' + taux + '" min="0" max="100" step="1" oninput="updateMSTaux(\'' + e.id + '\',this.value)" onchange="updateMSTaux(\'' + e.id + '\',this.value)"/></td>' +
-        '<td style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(cout) + '</td>' +
+        '<td id="ms-line-cout-' + i + '" style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(cout) + '</td>' +
         '</tr>';
     });
   } else {
@@ -2571,7 +2571,7 @@ function renderMasseSalariale(data, t, forceRender) {
         '</select></td>' +
         '<td><input class="cell-input" style="width:80px;text-align:right" type="text" inputmode="decimal" value="' + (l.brut || '') + '" placeholder="0.00" oninput="_data.masseSalariale.lignes[' + i + '].brut=this.value;refreshTotals()"/></td>' +
         tauxCell +
-        '<td style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(cout) + '</td>' +
+        '<td id="ms-line-cout-' + i + '" style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(cout) + '</td>' +
         '<td><button class="btn-del" onclick="delMSLigne(' + i + ')" title="Supprimer">\u2715</button></td>' +
         '</tr>';
     });
@@ -2632,7 +2632,7 @@ function renderMasseSalariale(data, t, forceRender) {
       '<span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.15);color:#059669;padding:2px 7px;border-radius:20px">Module Objectifs</span>' +
       '<a href="rh-objectifs.html" style="margin-left:auto;font-size:11px;color:#059669;text-decoration:none;font-weight:600">Gérer →</a></div>';
     html += '<table class="data-table"><thead><tr><th>Objectif</th><th>Salarié(s)</th><th>Atteinte</th><th>Prime brute (€)</th><th>Coût chargé (€)</th></tr></thead><tbody>';
-    primesObjs.forEach(function(obj) {
+    primesObjs.forEach(function(obj, pi) {
       var prime = obj.prime || {};
       var montant = parseFloat(prime.montantBrut) || 0;
       var taux = parseFloat(prime.tauxCharges) || 45;
@@ -2660,8 +2660,8 @@ function renderMasseSalariale(data, t, forceRender) {
         '<td style="font-weight:600">' + (obj.titre || '—') + '</td>' +
         '<td>' + empNom + '</td>' +
         '<td style="text-align:center;font-weight:700;color:' + avColor + '">' + av.toFixed(0) + '%</td>' +
-        '<td style="text-align:right">' + fmtN(brut * vol) + '</td>' +
-        '<td style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(cout) + '</td>' +
+        '<td id="ms-prime-brut-' + pi + '" style="text-align:right">' + fmtN(brut * vol) + '</td>' +
+        '<td id="ms-prime-cout-' + pi + '" style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(cout) + '</td>' +
         '</tr>';
     });
     html += '<tr style="border-top:2px solid var(--border);font-weight:800"><td colspan="3">TOTAL PRIMES</td><td></td><td style="text-align:right;color:#f59e0b"><span id="tot-msPrimes">' + fmtN(msCalc.primes) + '</span> €</td></tr>';
@@ -4308,6 +4308,83 @@ function calcTotals(data) {
   return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caHTCust,caTTC,caTTC_j,caTTC_fp,tvaCollectee,tvaC_j,tvaC_fp,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,varHT_excep,varTTC_excep,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,resultatEconomique,cashflow,delta,caFP055,caFP10,caFP20,caFP0,caFPCust,masseSalHT,prelevementPriveHT};
 }
 
+// ═══════════════════════════════════════════
+// FIX BUG AFFICHAGE — Rafraîchissement des coûts par ligne MS
+// ═══════════════════════════════════════════
+// Problème : le rendu de renderMasseSalariale fige les coûts dans le HTML
+// (texte brut dans un <td>). Quand refreshTotals() est appelé après un
+// oninput, seul le total tot-msSal se met à jour ; les coûts individuels
+// restent figés tant qu'il n'y a pas de re-render complet.
+//
+// Ce helper relit _data.masseSalariale + window._rhEmployes + window._rhObjectifs
+// et met à jour les cellules ms-line-cout-{i} et ms-prime-cout-{pi} selon le
+// mode courant. Utilise EXACTEMENT les mêmes formules que le rendu (copiées
+// depuis renderMasseSalariale) pour garantir la cohérence. Strictement additif.
+function _refreshMSLineCosts() {
+  var ms = (_data && _data.masseSalariale) || {};
+  var hasRH = window._rhEmployes && window._rhEmployes.length > 0;
+  var isAutoPaie = ms.mode === 'auto-paie' && hasRH;
+  var isAuto = ms.mode === 'auto' && hasRH;
+
+  // ─── Coût par ligne salarié ───
+  if (isAutoPaie && typeof getEmployeMSLineAutoPaie === 'function') {
+    window._rhEmployes.forEach(function(e, i) {
+      var el = document.getElementById('ms-line-cout-' + i);
+      if (!el) return;
+      var line = getEmployeMSLineAutoPaie(e);
+      el.textContent = fmtN((line && line.cout) || 0);
+    });
+  } else if (isAuto) {
+    window._rhEmployes.forEach(function(e, i) {
+      var el = document.getElementById('ms-line-cout-' + i);
+      if (!el) return;
+      var brut = parseFloat(e.salaireBrut) || 0;
+      var taux = getMSTaux(e);
+      el.textContent = fmtN(brut * (1 + taux / 100));
+    });
+  } else {
+    // Mode manuel
+    (ms.lignes || []).forEach(function(l, i) {
+      var el = document.getElementById('ms-line-cout-' + i);
+      if (!el) return;
+      var saisieMode = l.saisieMode || 'brut';
+      var brut = pf(l.brut);
+      var taux = parseFloat(l.tauxCharges) || 42;
+      var cout = saisieMode === 'net' ? brut : brut * (1 + taux / 100);
+      el.textContent = fmtN(cout);
+    });
+  }
+
+  // ─── Coût par prime d'objectif (si la section est rendue) ───
+  if (window._rhObjectifs && window._rhObjectifs.length > 0) {
+    var primesObjs = window._rhObjectifs.filter(function(obj) {
+      return obj && obj.statut !== 'annule' && obj.statut !== 'brouillon' && (obj.prime || {}).montantBrut;
+    });
+    primesObjs.forEach(function(obj, pi) {
+      var brutEl = document.getElementById('ms-prime-brut-' + pi);
+      var coutEl = document.getElementById('ms-prime-cout-' + pi);
+      if (!brutEl && !coutEl) return;
+      var prime = obj.prime || {};
+      var montant = parseFloat(prime.montantBrut) || 0;
+      var tauxP = parseFloat(prime.tauxCharges) || 45;
+      var av = _calcObjAvancement(obj);
+      var modeP = prime.modePalier || 'tout_ou_rien';
+      var brutP = 0;
+      if (modeP === 'tout_ou_rien') brutP = av >= 100 ? montant : 0;
+      else if (modeP === 'proportionnel') brutP = montant * Math.min(av, 100) / 100;
+      else if (modeP === 'paliers') {
+        var paliers = (prime.paliers || []).slice().sort(function(a,b){ return (parseFloat(b.seuil)||0) - (parseFloat(a.seuil)||0); });
+        for (var j = 0; j < paliers.length; j++) {
+          if (av >= (parseFloat(paliers[j].seuil) || 0)) { brutP = montant * (parseFloat(paliers[j].primePct) || 0) / 100; break; }
+        }
+      }
+      var vol = (obj.type === 'equipe' && obj.employeIds) ? obj.employeIds.length : 1;
+      if (brutEl) brutEl.textContent = fmtN(brutP * vol);
+      if (coutEl) coutEl.textContent = fmtN(brutP * (1 + tauxP / 100) * vol);
+    });
+  }
+}
+
 function refreshTotals() {
   var t = calcTotals(_data);
 
@@ -4315,6 +4392,14 @@ function refreshTotals() {
   if (window._alpineUpdateKPIs) window._alpineUpdateKPIs(t);
 
   function s(id,v,cls){var el=document.getElementById(id);if(!el)return;el.textContent=typeof v==='string'?v:fmtN(v);if(cls){el.className=el.className.replace(/positive|negative/g,'').trim();el.classList.add(cls);}}
+
+  // ── FIX : rafraîchir les coûts par ligne de la section Masse salariale ──
+  // Sans cela, seul le total (tot-msSal) se met à jour après un oninput ; les
+  // cellules ms-line-cout-{i} restent figées à leur valeur initiale et il faut
+  // un re-render complet (changement de mois, + Salarié, etc.) pour les voir
+  // se recalculer. Strictement additif : si les éléments n'existent pas
+  // (section repliée, autre mode), la fonction ne fait rien.
+  try { _refreshMSLineCosts(); } catch(e) { console.warn('_refreshMSLineCosts:', e); }
   s('tot-ca055',colTotal(t.caHT055,'ht055'));s('tot-ca10',colTotal(t.caHT10,'ht10'));s('tot-ca20',colTotal(t.caHT20,'ht20'));
   if(_customTvaField) s('tot-caCust',colTotal(t.caHTCust,_customTvaField));
   // Footer tableau CA journalier = journalier SEULEMENT (sans factures pro)
@@ -4387,6 +4472,37 @@ function refreshTotals() {
   // Masse salariale
   var msC = calcMasseSalariale(_data.masseSalariale || {});
   s('tot-msSal',msC.salaries);
+  // Refresh des coûts employeur par ligne (sinon seule la somme se met à jour et pas les lignes).
+  // Reproduit la même logique que renderMasseSalariale pour rester cohérent selon le mode.
+  try {
+    var _msData = _data.masseSalariale || {};
+    var _hasRH = window._rhEmployes && window._rhEmployes.length > 0;
+    var _isAutoPaie = _msData.mode === 'auto-paie' && _hasRH;
+    var _isAuto = _msData.mode === 'auto' && _hasRH;
+    if (_isAutoPaie && typeof getEmployeMSLineAutoPaie === 'function') {
+      window._rhEmployes.forEach(function(e, idx){
+        var _line = getEmployeMSLineAutoPaie(e);
+        var _el = document.getElementById('ms-line-cout-' + idx);
+        if (_el) _el.textContent = fmtN((_line && _line.cout) || 0);
+      });
+    } else if (_isAuto) {
+      window._rhEmployes.forEach(function(e, idx){
+        var _brut = parseFloat(e.salaireBrut) || 0;
+        var _taux = getMSTaux(e);
+        var _el = document.getElementById('ms-line-cout-' + idx);
+        if (_el) _el.textContent = fmtN(_brut * (1 + _taux / 100));
+      });
+    } else {
+      (_msData.lignes || []).forEach(function(l, idx){
+        var _saisieMode = l.saisieMode || 'brut';
+        var _brut = pf(l.brut);
+        var _taux = parseFloat(l.tauxCharges) || 42;
+        var _cout = _saisieMode === 'net' ? _brut : _brut * (1 + _taux / 100);
+        var _el = document.getElementById('ms-line-cout-' + idx);
+        if (_el) _el.textContent = fmtN(_cout);
+      });
+    }
+  } catch(e) { /* défensif : ne jamais casser refreshTotals */ }
   // Afficher le montant dirigeant même en mode prélèvement (informatif)
   s('tot-msDir', msC.dirigeant + (msC.prelevementPriveHT || 0));
   s('tot-msTotal',msC.total);
