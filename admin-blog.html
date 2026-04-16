@@ -329,7 +329,7 @@ window.initAdminBlog = async function() {
     let actions = '';
     if (isDraft) {
       actions = '' +
-        '<a class="art-btn" href="/blog/' + a.slug + '" target="_blank" rel="noopener" title="Prévisualiser (non publié)">Preview</a>' +
+        '<button class="art-btn preview" data-slug="' + a.slug + '" type="button" title="Prévisualiser le brouillon dans un nouvel onglet">Preview</button>' +
         '<button class="art-btn publish" data-slug="' + a.slug + '" type="button">Publier</button>' +
         '<button class="art-btn del" data-slug="' + a.slug + '" type="button">Supprimer</button>';
     } else {
@@ -350,6 +350,7 @@ window.initAdminBlog = async function() {
 
     // Bind actions (only drafts)
     if (isDraft) {
+      row.querySelector('.preview').addEventListener('click', function() { previewDraft(a.slug); });
       row.querySelector('.publish').addEventListener('click', function() { publishDraft(a.slug, row); });
       row.querySelector('.del').addEventListener('click', function() { deleteDraft(a.slug, row); });
     }
@@ -410,6 +411,38 @@ window.initAdminBlog = async function() {
       draftsL.innerHTML = '';
       pubL.innerHTML = '';
       showBanner('❌ Erreur chargement : ' + err.message, 'err');
+    }
+  }
+
+  async function previewDraft(slug) {
+    // Ouvre immédiatement une fenêtre (avant await) pour ne pas être bloqué par le popup blocker
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.write('<!DOCTYPE html><html><head><title>Chargement preview…</title><style>body{font-family:-apple-system,sans-serif;background:#f5f5f7;color:#6e6e73;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:14px;}</style></head><body>⏳ Chargement du brouillon…</body></html>');
+    }
+    try {
+      const data = await apiCall('/api/get-blog-draft-html?slug=' + encodeURIComponent(slug));
+      // Injecter <base> pour que les liens relatifs (/pricing, /login, etc.) résolvent vers alteore.com
+      // + noindex pour éviter toute indexation accidentelle si l'URL blob leak
+      // + bandeau visible en haut pour rappeler que c'est un brouillon
+      const banner = '<div style="position:fixed;top:0;left:0;right:0;background:#c48a1a;color:white;padding:10px 20px;font-family:-apple-system,sans-serif;font-size:13px;font-weight:600;text-align:center;z-index:99999;box-shadow:0 2px 8px rgba(0,0,0,.15);">⚠️ PREVIEW BROUILLON — non publié · slug : ' + slug + '</div>';
+      const injectHead = '<base href="https://alteore.com/"/>\n<meta name="robots" content="noindex,nofollow"/>';
+      let previewHtml = data.html
+        .replace(/<head>/i, '<head>\n' + injectHead)
+        .replace(/<body([^>]*)>/i, '<body$1>\n' + banner + '\n<div style="height:42px;"></div>');
+      const blob = new Blob([previewHtml], { type: 'text/html;charset=utf-8' });
+      const blobUrl = URL.createObjectURL(blob);
+      if (win) {
+        win.location.href = blobUrl;
+      } else {
+        // Popup bloqué : fallback dans l'onglet courant
+        window.open(blobUrl, '_blank');
+      }
+      // Libère la mémoire après 2 min (largement le temps de lire l'article)
+      setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 120000);
+    } catch (err) {
+      if (win) { try { win.close(); } catch (e) {} }
+      showBanner('❌ Erreur preview : ' + err.message, 'err');
     }
   }
 
