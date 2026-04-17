@@ -394,6 +394,227 @@
   };
 
   /* ───────────────────────────────────────────────────────────────────────
+   * HEURES SUPPLÉMENTAIRES — majorations par CCN
+   * ───────────────────────────────────────────────────────────────────────
+   * Règles de majoration des heures supplémentaires selon la Convention
+   * Collective. Format d'une tranche :
+   *   { seuil: <heures_par_semaine>, taux: <% majoration> }
+   * Les tranches sont cumulatives. Le taux est un pourcentage (pas un
+   * coefficient) — ex: { seuil: 8, taux: 25 } = +25% pour les 8 premières
+   * heures sup hebdo, puis passage à la tranche suivante.
+   *
+   * La dernière tranche doit avoir seuil: Infinity (= au-delà).
+   *
+   * RÈGLES CÂBLÉES :
+   *   • HCR (IDCC 1979)     : +10% (36e→39e) / +20% (40e→43e) / +50% (44e+)
+   *   • default (droit commun) : +25% (36e→43e) / +50% (44e+)
+   *
+   * PRIORITÉ DE RÉSOLUTION pour un employé :
+   *   1. emp.majorationCustom.tranches (override manuel)
+   *   2. CCN_OVERTIME_RULES[IDCC]       (CCN pré-câblée)
+   *   3. CCN_OVERTIME_RULES.default     (fallback droit commun)
+   * ─────────────────────────────────────────────────────────────────────── */
+
+  H.CCN_OVERTIME_RULES = {
+    // IDCC 1979 — Hôtels Cafés Restaurants
+    '1979': [
+      { seuil: 4, taux: 10 },         // 36e → 39e : +10%
+      { seuil: 4, taux: 20 },         // 40e → 43e : +20%
+      { seuil: Infinity, taux: 50 }   // 44e+     : +50%
+    ],
+    // Droit commun (Code du travail, L.3121-36)
+    default: [
+      { seuil: 8, taux: 25 },         // 36e → 43e : +25%
+      { seuil: Infinity, taux: 50 }   // 44e+     : +50%
+    ]
+  };
+
+  /* Retourne les tranches applicables pour un employé.
+     Ordre : custom > CCN pré-câblée > default */
+  H.getOvertimeTranches = function (emp) {
+    if (!emp) return H.CCN_OVERTIME_RULES.default;
+
+    // 1) Override manuel ?
+    if (emp.majorationCustom &&
+        Array.isArray(emp.majorationCustom.tranches) &&
+        emp.majorationCustom.tranches.length > 0) {
+      // Protection : s'assurer que la dernière tranche est Infinity
+      var tr = emp.majorationCustom.tranches.slice();
+      var last = tr[tr.length - 1];
+      if (last && isFinite(last.seuil)) {
+        tr.push({ seuil: Infinity, taux: H.pf(last.taux) });
+      }
+      return tr;
+    }
+
+    // 2) CCN pré-câblée : on accepte un IDCC passé soit dans emp.ccnData.idcc,
+    //    soit directement dans emp.ccn si c'est un nombre, soit via la clé.
+    var idcc = null;
+    if (emp.ccnData && emp.ccnData.idcc != null) idcc = String(emp.ccnData.idcc);
+    if (!idcc && emp.ccn && /^\d+$/.test(String(emp.ccn))) idcc = String(emp.ccn);
+    if (idcc && H.CCN_OVERTIME_RULES[idcc]) return H.CCN_OVERTIME_RULES[idcc];
+
+    // 3) Fallback
+    return H.CCN_OVERTIME_RULES.default;
+  };
+
+  /* Décrit les tranches sous forme lisible pour l'UI.
+     Ex: "+10% (36e→39e) · +20% (40e→43e) · +50% au-delà" */
+  H.describeOvertimeTranches = function (tranches) {
+    if (!Array.isArray(tranches) || tranches.length === 0) return '';
+    var parts = [];
+    var cumul = 35;
+    for (var i = 0; i < tranches.length; i++) {
+      var t = tranches[i];
+      var taux = H.pf(t.taux);
+      if (!isFinite(t.seuil)) {
+        parts.push('+' + taux + '% au-delà');
+      } else {
+        parts.push('+' + taux + '% (' + (cumul + 1) + 'e→' + (cumul + t.seuil) + 'e)');
+        cumul += t.seuil;
+      }
+    }
+    return parts.join(' · ');
+  };
+
+  /* Calcule le brut mensuel contractuel à partir d'un taux horaire de base.
+     - tauxH       : taux horaire brut de base (€/h) — celui de la 1ère heure
+     - heuresHebdo : nb heures contractuelles par semaine (ex: 39)
+     - tranches    : tableau de majorations
+     Retourne le brut mensuel mensualisé (52/12).
+     
+     Ex HCR 39h à 12€/h :
+       35h × 12 + 4h × 12 × 1.10 = 420 + 52.80 = 472.80 €/sem
+       × 52/12 = 2049.20 €/mois */
+  H.calcBrutFromTauxHoraire = function (tauxH, heuresHebdo, tranches) {
+    var th = H.pf(tauxH);
+    var hh = H.pf(heuresHebdo);
+    if (th <= 0 || hh <= 0) return 0;
+    if (!Array.isArray(tranches) || tranches.length === 0) {
+      tranches = H.CCN_OVERTIME_RULES.default;
+    }
+
+    var base = Math.min(hh, 35);
+    var heuresEqSem = base;
+    var reste = Math.max(hh - 35, 0);
+
+    for (var i = 0; i < tranches.length && reste > 0; i++) {
+      var t = tranches[i];
+      var seuil = isFinite(t.seuil) ? t.seuil : reste;
+      var inTr = Math.min(reste, seuil);
+      heuresEqSem += inTr * (1 + H.pf(t.taux) / 100);
+      reste -= inTr;
+    }
+
+    return Math.round(th * heuresEqSem * 52 / 12 * 100) / 100;
+  };
+
+  /* Fonction inverse : déduit le taux horaire de base depuis le brut mensuel.
+     Utile pour "auto-fill" informatif dans le formulaire à partir d'un brut
+     déjà saisi. */
+  H.calcTauxHoraireFromBrut = function (brut, heuresHebdo, tranches) {
+    var b = H.pf(brut);
+    var hh = H.pf(heuresHebdo);
+    if (b <= 0 || hh <= 0) return 0;
+    if (!Array.isArray(tranches) || tranches.length === 0) {
+      tranches = H.CCN_OVERTIME_RULES.default;
+    }
+
+    var base = Math.min(hh, 35);
+    var heuresEqSem = base;
+    var reste = Math.max(hh - 35, 0);
+
+    for (var i = 0; i < tranches.length && reste > 0; i++) {
+      var t = tranches[i];
+      var seuil = isFinite(t.seuil) ? t.seuil : reste;
+      var inTr = Math.min(reste, seuil);
+      heuresEqSem += inTr * (1 + H.pf(t.taux) / 100);
+      reste -= inTr;
+    }
+
+    var heuresEqMois = heuresEqSem * 52 / 12;
+    if (heuresEqMois <= 0) return 0;
+    return Math.round(b / heuresEqMois * 10000) / 10000; // 4 décimales
+  };
+
+  /* Calcul du brut mensuel réel à partir des heures travaillées réelles
+     + heures sup exceptionnelles (utilisé par rh-paie.html).
+
+     Sémantique des paramètres (comme actuellement dans rh-paie) :
+     - heuresReelles   : total des heures travaillées dans le mois
+                         (INCLUT les heures structurelles du contrat)
+     - heuresSupExcept : heures sup EXCEPTIONNELLES au-delà du contrat
+
+     Logique :
+     1. On fait d'abord un prorata du brut contractuel selon heuresReelles
+        vs heures contractuelles mensualisées. Cela gère correctement les
+        absences et les temps partiels.
+     2. Si heuresReelles dépasse le contrat, on bascule l'excédent dans
+        les heures sup exceptionnelles.
+     3. Les heures sup exceptionnelles sont payées aux tranches qui SUIVENT
+        les heures sup structurelles du contrat.
+        Ex: HCR 39h (tranche +10% déjà "consommée" par le contrat) —
+        la 1ère heure exceptionnelle tombe dans la tranche +20%.
+  */
+  H.calcBrutFromHeuresReelles = function (emp, heuresReelles, heuresSupExcept) {
+    if (!emp) return 0;
+    var tauxHBase = H.pf(emp.tauxHoraireBase);
+    if (tauxHBase <= 0) return 0; // Appelant doit gérer le fallback
+
+    var hHebdo = H.pf(emp.heuresHebdo) || 35;
+    var hReelles = H.pf(heuresReelles);
+    var hSupExcept = H.pf(heuresSupExcept);
+    if (hReelles <= 0 && hSupExcept <= 0) return 0;
+
+    var tranches = H.getOvertimeTranches(emp);
+    var moisEq = 52 / 12;
+    var heuresContratMensuel = hHebdo * moisEq;
+
+    // Étape 1 : prorata du brut contrat selon heures réelles
+    var brutContratPlein = H.calcBrutFromTauxHoraire(tauxHBase, hHebdo, tranches);
+    var brutProrata, heuresAuDela;
+    if (hReelles <= heuresContratMensuel) {
+      brutProrata = brutContratPlein * (hReelles / heuresContratMensuel);
+      heuresAuDela = 0;
+    } else {
+      brutProrata = brutContratPlein;
+      heuresAuDela = hReelles - heuresContratMensuel;
+    }
+
+    // Étape 2 : heures sup exceptionnelles totales (implicites + explicites)
+    var hSupTotalMois = heuresAuDela + hSupExcept;
+    if (hSupTotalMois <= 0) return Math.round(brutProrata * 100) / 100;
+
+    // Étape 3 : appliquer les tranches, en skipant ce qui est déjà consommé
+    // par le contrat (heures sup structurelles hebdo).
+    var hSupContratSem = Math.max(hHebdo - 35, 0);
+    var hSupExceptSem = hSupTotalMois / moisEq;
+
+    var consomme = hSupContratSem;
+    var reste = hSupExceptSem;
+    var montantSupExcept = 0;
+
+    for (var i = 0; i < tranches.length && reste > 0; i++) {
+      var t = tranches[i];
+      var seuilTr = isFinite(t.seuil) ? t.seuil : reste + consomme;
+
+      if (consomme >= seuilTr) {
+        // Tranche déjà entièrement consommée par le contrat
+        consomme -= seuilTr;
+        continue;
+      }
+
+      var dispo = seuilTr - consomme;
+      var inTr = Math.min(reste, dispo);
+      montantSupExcept += tauxHBase * (1 + H.pf(t.taux) / 100) * inTr * moisEq;
+      reste -= inTr;
+      consomme = 0; // le reste des tranches est "frais"
+    }
+
+    return Math.round((brutProrata + montantSupExcept) * 100) / 100;
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
    * EXPLANATIONS — libellés clients
    * ───────────────────────────────────────────────────────────────────────
    * Utilisées pour afficher des tooltips pédagogiques sur les KPI.

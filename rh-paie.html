@@ -464,6 +464,9 @@
 </style>
 <div id="printArea" style="display:none"></div>
 
+<!-- CALC HELPERS — source de vérité pour le taux horaire et les majorations -->
+<script src="calc-helpers.js"></script>
+
 <!-- FIREBASE -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -557,7 +560,15 @@ function calcCotisations(brut, estCadre) {
 }
 
 // Calcul brut depuis heures réelles
+// Si emp.tauxHoraireBase est renseigné → utilise calc-helpers avec les tranches de majoration
+// de l'employé (CCN ou custom). Sinon : fallback sur l'ancien calcul linéaire (zéro régression).
 function calcBrutFromHeures(emp, heuresReelles, heuresSup) {
+  // Chemin préférentiel : taux horaire explicite + helpers
+  if (emp && parseFloat(emp.tauxHoraireBase) > 0 && window.CalcHelpers && typeof window.CalcHelpers.calcBrutFromHeuresReelles === 'function') {
+    const v = window.CalcHelpers.calcBrutFromHeuresReelles(emp, heuresReelles, heuresSup);
+    if (v > 0) return v;
+  }
+  // Fallback historique (linéaire, peut sur-estimer ~2-3% en >35h mais stable)
   const tauxH  = parseFloat(emp.salaireBrut || 0) / parseFloat(emp.heuresHebdo || 35) / (52/12);
   const brutBase = tauxH * heuresReelles;
   // Heures sup : majoration 25% pour les 8 premières, 50% au-delà
@@ -565,6 +576,26 @@ function calcBrutFromHeures(emp, heuresReelles, heuresSup) {
   const supPlus = Math.max(heuresSup - 8, 0);
   const brutSup = tauxH * (sup8 * 1.25 + supPlus * 1.50);
   return Math.round((brutBase + brutSup) * 100) / 100;
+}
+
+/* Helper : retourne le taux horaire de base affiché pour un employé.
+   - Priorité au champ explicite emp.tauxHoraireBase
+   - Sinon : déduit du brut + heures via calc-helpers (en tenant compte de la CCN)
+   - Sinon : fallback linéaire
+   Retourne 0 si rien de calculable. */
+function getTauxHoraireAffiche(emp) {
+  if (!emp) return 0;
+  const explicite = parseFloat(emp.tauxHoraireBase) || 0;
+  if (explicite > 0) return explicite;
+  const brut = parseFloat(emp.salaireBrut) || 0;
+  const hHebdo = parseFloat(emp.heuresHebdo) || 35;
+  if (brut <= 0 || hHebdo <= 0) return 0;
+  if (window.CalcHelpers && typeof window.CalcHelpers.calcTauxHoraireFromBrut === 'function') {
+    const tranches = window.CalcHelpers.getOvertimeTranches(emp);
+    const v = window.CalcHelpers.calcTauxHoraireFromBrut(brut, hHebdo, tranches);
+    if (v > 0) return v;
+  }
+  return brut / (hHebdo * 52/12);
 }
 
 // ══ STATE ══
@@ -1010,7 +1041,7 @@ function openFiche(empId) {
         </div>
         <div class="field">
           <label>Taux horaire (brut)</label>
-          <input type="text" readonly id="fi-taux" value="${brutContrat && emp.heuresHebdo ? (brutContrat / (emp.heuresHebdo * 52/12)).toFixed(4).replace('.',',') : '—'}"/>
+          <input type="text" readonly id="fi-taux" value="${(function(){ var t=getTauxHoraireAffiche(emp); return t>0 ? t.toFixed(4).replace('.',',') : '—'; })()}"/>
           <div class="field-hint">Calculé depuis fiche employé</div>
         </div>
       </div>
@@ -1658,8 +1689,8 @@ function openPdfPreview(empId) {
         <thead><tr><th style="text-align:left">Désignation</th><th>Base</th><th>Taux</th><th>Montant</th></tr></thead>
         <tbody>
           <tr class="section-head"><td colspan="4">RÉMUNÉRATION</td></tr>
-          <tr><td>Salaire de base</td><td style="text-align:right">${fmtH(hContrat)}</td><td style="text-align:right">${emp.salaireBrut && emp.heuresHebdo ? (emp.salaireBrut/(emp.heuresHebdo*52/12)).toFixed(4)+' €/h' : '—'}</td><td style="text-align:right">${fmtE(brut - prime - (hSup > 0 && emp.salaireBrut && emp.heuresHebdo ? calcBrutFromHeures(emp, 0, hSup) - calcBrutFromHeures(emp, 0, 0) : 0))}</td></tr>
-          ${hSup > 0 ? `<tr><td>Heures supplémentaires (×${Math.min(hSup,8).toFixed(1)}h à 25% + ${Math.max(hSup-8,0).toFixed(1)}h à 50%)</td><td style="text-align:right">${fmtH(hSup)}</td><td style="text-align:right">+25%/50%</td><td style="text-align:right;color:var(--rh-main)">+${fmtE(emp.salaireBrut&&emp.heuresHebdo ? (emp.salaireBrut/(emp.heuresHebdo*52/12))*(Math.min(hSup,8)*0.25+Math.max(hSup-8,0)*0.50) : 0)}</td></tr>` : ''}
+          <tr><td>Salaire de base</td><td style="text-align:right">${fmtH(hContrat)}</td><td style="text-align:right">${(function(){ var t=getTauxHoraireAffiche(emp); return t>0 ? t.toFixed(4)+' €/h' : '—'; })()}</td><td style="text-align:right">${fmtE(brut - prime - (hSup > 0 && emp.salaireBrut && emp.heuresHebdo ? calcBrutFromHeures(emp, 0, hSup) - calcBrutFromHeures(emp, 0, 0) : 0))}</td></tr>
+          ${hSup > 0 ? `<tr><td>Heures supplémentaires (${(function(){ if(!window.CalcHelpers) return '×25%/50%'; var tr=window.CalcHelpers.getOvertimeTranches(emp); return window.CalcHelpers.describeOvertimeTranches(tr).replace(/\\(\\d+e→\\d+e\\)/g,'').replace(/\\s+/g,' ').trim(); })()})</td><td style="text-align:right">${fmtH(hSup)}</td><td style="text-align:right">majo.</td><td style="text-align:right;color:var(--rh-main)">+${fmtE(emp.salaireBrut&&emp.heuresHebdo ? calcBrutFromHeures(emp, 0, hSup) - calcBrutFromHeures(emp, 0, 0) : 0)}</td></tr>` : ''}
           ${(function(){
             var primes = paie.primes || [];
             if (!primes.length && prime > 0) {

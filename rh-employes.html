@@ -389,10 +389,11 @@
       <div class="msep">💶 Rémunération <span style="font-size:10px;font-weight:400;color:var(--muted)">— Saisissez l'un des montants, les autres se calculent automatiquement</span></div>
 
       <!-- Sélecteur mode de saisie -->
-      <div style="display:flex;gap:6px;margin-bottom:12px" id="sal-mode-btns">
+      <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap" id="sal-mode-btns">
         <button type="button" class="sal-mode-btn active" data-mode="brut" onclick="setSalMode('brut')">💰 Brut → Net</button>
         <button type="button" class="sal-mode-btn" data-mode="net" onclick="setSalMode('net')">💳 Net → Brut</button>
         <button type="button" class="sal-mode-btn" data-mode="superbrut" onclick="setSalMode('superbrut')">🏢 Super-brut → Brut</button>
+        <button type="button" class="sal-mode-btn" data-mode="tauxhoraire" onclick="setSalMode('tauxhoraire')">⏱️ Taux horaire → Brut</button>
       </div>
 
       <!-- Les 3 cases toujours visibles -->
@@ -425,6 +426,52 @@
           <div style="position:relative">
             <input class="minput" id="f-net" type="text" inputmode="decimal" placeholder="1 925" oninput="calcSalaire('net')"/>
             <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--muted);pointer-events:none">€</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ligne : Taux horaire de base + Majorations heures sup -->
+      <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:10px;margin-bottom:10px">
+        <div class="mfield">
+          <label style="display:flex;align-items:center;justify-content:space-between">
+            <span>⏱️ Taux horaire de base</span>
+            <span id="f-tauxhoraire-badge" style="font-size:9px;background:#f1f5f9;color:#64748b;padding:1px 5px;border-radius:4px;font-weight:600">Calculé</span>
+          </label>
+          <div style="position:relative">
+            <input class="minput" id="f-tauxhoraire" type="text" inputmode="decimal" placeholder="12,00" oninput="calcSalaire('tauxhoraire')"/>
+            <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--muted);pointer-events:none">€/h</span>
+          </div>
+          <div id="f-tauxhoraire-help" style="font-size:10px;color:var(--muted);margin-top:4px;line-height:1.4">
+            Taux payé pour la 1ère heure. Le brut se calcule avec les majorations ci-contre.
+          </div>
+        </div>
+        <div class="mfield">
+          <label style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+            <span>Majorations heures sup.</span>
+            <button type="button" id="majoration-toggle-btn" onclick="toggleMajorationMode()" style="font-size:9px;background:#e0f2fe;color:#075985;border:1px solid #bae6fd;padding:2px 7px;border-radius:4px;font-weight:600;cursor:pointer;font-family:inherit">✏️ Personnaliser</button>
+          </label>
+          <!-- Affichage auto (CCN ou droit commun) -->
+          <div id="majoration-auto" style="padding:8px 10px;background:#f0fdf4;border:1px solid #d1fae5;border-radius:7px;font-size:11px;color:#065f46;line-height:1.4;min-height:38px">
+            <span id="majoration-auto-text">—</span>
+            <div id="majoration-auto-source" style="font-size:9px;color:#16a34a;margin-top:2px;font-weight:600"></div>
+          </div>
+          <!-- Mode personnalisé : 3 inputs -->
+          <div id="majoration-custom" style="display:none;padding:8px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:5px">
+              <div>
+                <label style="font-size:9px;color:#92400e;font-weight:600">Seuil 1 (h)</label>
+                <input class="minput" id="f-maj-seuil1" type="text" inputmode="decimal" placeholder="8" value="8" oninput="onMajorationCustomChange()" style="font-size:12px;padding:5px 7px"/>
+              </div>
+              <div>
+                <label style="font-size:9px;color:#92400e;font-weight:600">Taux 1 (%)</label>
+                <input class="minput" id="f-maj-taux1" type="text" inputmode="decimal" placeholder="25" value="25" oninput="onMajorationCustomChange()" style="font-size:12px;padding:5px 7px"/>
+              </div>
+              <div>
+                <label style="font-size:9px;color:#92400e;font-weight:600">Taux 2 (%)</label>
+                <input class="minput" id="f-maj-taux2" type="text" inputmode="decimal" placeholder="50" value="50" oninput="onMajorationCustomChange()" style="font-size:12px;padding:5px 7px"/>
+              </div>
+            </div>
+            <div style="font-size:9px;color:#92400e">+<span id="maj-t1-prev">25</span>% pendant les <span id="maj-s1-prev">8</span> premières heures sup, puis +<span id="maj-t2-prev">50</span>% au-delà</div>
           </div>
         </div>
       </div>
@@ -464,7 +511,7 @@
             <option value="horaire">Horaire</option>
           </select>
         </div>
-        <div class="mfield"><label>Heures / semaine</label><input class="minput" id="f-heures" type="text" inputmode="decimal" placeholder="35"/></div>
+        <div class="mfield"><label>Heures / semaine</label><input class="minput" id="f-heures" type="text" inputmode="decimal" placeholder="35" oninput="_onHeuresHebdoChange()"/></div>
         <div class="mfield"><label>IBAN</label><input class="minput" id="f-iban" placeholder="FR76 ..."/></div>
       </div>
 
@@ -719,6 +766,11 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- ═══════════════════════════════════════ CALC HELPERS ═══
+     Source de vérité unique pour les calculs partagés
+     (heures sup, majorations par CCN, taux horaire → brut) -->
+<script src="calc-helpers.js"></script>
 
 <!-- ═══════════════════════════════════════ FIREBASE ═══ -->
 <script type="module">
@@ -1506,7 +1558,17 @@ function onCCNChange() {
     </div>
   `;
 }
-window.onCCNChange = onCCNChange;
+window.onCCNChange = function() {
+  onCCNChange();
+  // Majorations : si mode auto, refresh selon la nouvelle CCN
+  if (_majorationMode === 'auto') updateMajorationDisplay();
+  // Si mode taux horaire actif, recalculer le brut
+  if (_salMode === 'tauxhoraire') calcSalaire('tauxhoraire');
+  else {
+    const b = parseFloat((document.getElementById('f-brut')?.value||'').replace(',','.')) || 0;
+    if (b > 0) refreshTauxHoraireDerive(b);
+  }
+};
 
 // ══════════════════════════════════════════════════
 // RECHERCHE IA — Convention Collective
@@ -1758,10 +1820,16 @@ window.openModalNouvelEmploye = function() {
   document.getElementById('modal-emp-title').textContent = '👤 Nouvel employé';
   populateCCNSelect('f-ccn', '');
   ['prenom','nom','naissance','nationalite','adresse','tel','email','nss',
-   'poste','dept','entree','fin','brut','net','heures','iban','note','superbrut','pin'].forEach(k => {
+   'poste','dept','entree','fin','brut','net','heures','iban','note','superbrut','pin','tauxhoraire'].forEach(k => {
     const el = document.getElementById('f-'+k);
     if (el) el.value = '';
   });
+  // Reset majorations (mode auto)
+  _majorationMode = 'auto';
+  const s1El = document.getElementById('f-maj-seuil1'); if (s1El) s1El.value = '8';
+  const t1El = document.getElementById('f-maj-taux1');  if (t1El) t1El.value = '25';
+  const t2El = document.getElementById('f-maj-taux2');  if (t2El) t2El.value = '50';
+  setTimeout(() => { onMajorationCustomChange(); updateMajorationDisplay(); setSalMode('brut'); }, 50);
   document.getElementById('f-contrat').value   = 'CDI';
   document.getElementById('f-categorie').value  = 'employe';
   document.getElementById('f-statut').value    = 'actif';
@@ -1836,6 +1904,31 @@ window.openModalEdit = function(id) {
   }
   // Afficher recap salaire si brut renseigné
   if (e.salaireBrut) setTimeout(()=>calcSalaire('brut'), 50);
+  // Taux horaire : charger si renseigné + majoration custom
+  _majorationMode = 'auto';
+  if (e.majorationCustom && Array.isArray(e.majorationCustom.tranches) && e.majorationCustom.tranches.length > 0) {
+    _majorationMode = 'custom';
+    const tr = e.majorationCustom.tranches;
+    const t1 = tr[0] || { seuil: 8, taux: 25 };
+    const t2 = tr[1] || { seuil: Infinity, taux: 50 };
+    const s1El = document.getElementById('f-maj-seuil1'); if (s1El) s1El.value = t1.seuil || 8;
+    const t1El = document.getElementById('f-maj-taux1');  if (t1El) t1El.value = t1.taux  || 25;
+    const t2El = document.getElementById('f-maj-taux2');  if (t2El) t2El.value = t2.taux  || 50;
+  }
+  const thEl = document.getElementById('f-tauxhoraire');
+  if (thEl) thEl.value = (e.tauxHoraireBase != null && e.tauxHoraireBase > 0) ? parseFloat(e.tauxHoraireBase).toFixed(2) : '';
+  setTimeout(() => {
+    onMajorationCustomChange();
+    updateMajorationDisplay();
+    // Si taux horaire renseigné mais pas de brut → mode taux horaire
+    if (e.tauxHoraireBase && !e.salaireBrut) {
+      setSalMode('tauxhoraire');
+      calcSalaire('tauxhoraire');
+    } else if (e.salaireBrut && !_salMode) {
+      // Par défaut brut
+      setSalMode('brut');
+    }
+  }, 60);
   // Déclencher recalcul PE + toggle blocs
   setTimeout(()=>onContratChange(), 50);
   // Charger compétences
@@ -1872,6 +1965,20 @@ window.saveEmploye = async function() {
     salaireBrut:     parseFloat(document.getElementById('f-brut').value.replace(',','.'))||null,
     salaireNet:      parseFloat(document.getElementById('f-net').value.replace(',','.'))||null,
     salaireSuperBrut:parseFloat(document.getElementById('f-superbrut').value.replace(',','.'))||null,
+    tauxHoraireBase: parseFloat((document.getElementById('f-tauxhoraire')?.value||'').replace(',','.'))||null,
+    majorationCustom: (function(){
+      if (_majorationMode !== 'custom') return null;
+      const s1 = parseFloat((document.getElementById('f-maj-seuil1')?.value||'').replace(',','.'));
+      const t1 = parseFloat((document.getElementById('f-maj-taux1')?.value||'').replace(',','.'));
+      const t2 = parseFloat((document.getElementById('f-maj-taux2')?.value||'').replace(',','.'));
+      if (!isFinite(s1) || !isFinite(t1) || !isFinite(t2)) return null;
+      // Pas de tranche Infinity ici : calc-helpers l'ajoutera automatiquement si manquante.
+      // On stocke Number.MAX_SAFE_INTEGER car Firestore ne supporte pas Infinity.
+      return { tranches: [
+        { seuil: s1, taux: t1 },
+        { seuil: Number.MAX_SAFE_INTEGER, taux: t2 }
+      ]};
+    })(),
     tauxCharges:     window._currentTauxCharges || null,
     frequence:       document.getElementById('f-freq').value,
     heuresHebdo:     parseFloat(document.getElementById('f-heures').value)||35,
@@ -1979,6 +2086,18 @@ function _collectFormData() {
     salaireBrut:     pf(document.getElementById('f-brut').value),
     salaireNet:      pf(document.getElementById('f-net').value),
     salaireSuperBrut:pf(document.getElementById('f-superbrut').value),
+    tauxHoraireBase: pf(document.getElementById('f-tauxhoraire')?.value),
+    majorationCustom: (function(){
+      if (_majorationMode !== 'custom') return null;
+      const s1 = parseFloat((document.getElementById('f-maj-seuil1')?.value||'').replace(',','.'));
+      const t1 = parseFloat((document.getElementById('f-maj-taux1')?.value||'').replace(',','.'));
+      const t2 = parseFloat((document.getElementById('f-maj-taux2')?.value||'').replace(',','.'));
+      if (!isFinite(s1) || !isFinite(t1) || !isFinite(t2)) return null;
+      return { tranches: [
+        { seuil: s1, taux: t1 },
+        { seuil: Number.MAX_SAFE_INTEGER, taux: t2 }
+      ]};
+    })(),
     tauxCharges:     window._currentTauxCharges || null,
     frequence:       document.getElementById('f-freq').value,
     heuresHebdo:     parseFloat(document.getElementById('f-heures').value)||35,
@@ -2993,15 +3112,31 @@ window.setSalMode = function(mode) {
     b.classList.toggle('active', b.dataset.mode === mode);
   });
   // Highlight le champ principal
-  ['f-brut','f-net','f-superbrut'].forEach(id => {
+  ['f-brut','f-net','f-superbrut','f-tauxhoraire'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
     el.style.borderColor = '';
     el.style.background  = '';
   });
-  const mainId = mode === 'brut' ? 'f-brut' : mode === 'net' ? 'f-net' : 'f-superbrut';
+  const mainId = mode === 'brut' ? 'f-brut'
+             : mode === 'net' ? 'f-net'
+             : mode === 'superbrut' ? 'f-superbrut'
+             : 'f-tauxhoraire';
   const mainEl = document.getElementById(mainId);
   if (mainEl) { mainEl.style.borderColor='#059669'; mainEl.style.background='#f0fdf4'; }
+  // Le badge "Calculé" devient "Référence" quand le mode est tauxhoraire
+  const badge = document.getElementById('f-tauxhoraire-badge');
+  if (badge) {
+    if (mode === 'tauxhoraire') {
+      badge.textContent = 'Référence';
+      badge.style.background = '#d1fae5';
+      badge.style.color = '#065f46';
+    } else {
+      badge.textContent = 'Calculé';
+      badge.style.background = '#f1f5f9';
+      badge.style.color = '#64748b';
+    }
+  }
 };
 
 window.calcSalaire = function(source) {
@@ -3037,6 +3172,21 @@ window.calcSalaire = function(source) {
     brut = Math.round(brut * 100) / 100;
     const brutEl = document.getElementById('f-brut');
     if (brutEl) brutEl.value = brut.toFixed(2);
+  } else if (source === 'tauxhoraire') {
+    // Taux horaire de base → brut via calc-helpers (majorations par tranches)
+    const tauxH = parseFloat((document.getElementById('f-tauxhoraire').value||'').replace(',','.')) || 0;
+    if (!tauxH) { clearSalRecap(); return; }
+    const hHebdo = parseFloat((document.getElementById('f-heures').value||'').replace(',','.')) || 35;
+    const tranches = getCurrentTranches();
+    if (!window.CalcHelpers) {
+      console.warn('[rh-employes] CalcHelpers non disponible — fallback linéaire');
+      brut = tauxH * hHebdo * 52/12;
+    } else {
+      brut = window.CalcHelpers.calcBrutFromTauxHoraire(tauxH, hHebdo, tranches);
+    }
+    brut = Math.round(brut * 100) / 100;
+    const brutEl = document.getElementById('f-brut');
+    if (brutEl) brutEl.value = brut.toFixed(2);
   }
 
   if (!brut) { clearSalRecap(); return; }
@@ -3055,6 +3205,10 @@ window.calcSalaire = function(source) {
   if (source !== 'brut') {
     const bEl = document.getElementById('f-brut');
     if (bEl) bEl.value = brut.toFixed(2);
+  }
+  // Taux horaire : toujours recalculer le "dérivé" sauf si c'est la source
+  if (source !== 'tauxhoraire') {
+    refreshTauxHoraireDerive(brut);
   }
 
   // Afficher le récap
@@ -3076,6 +3230,131 @@ window.calcSalaire = function(source) {
     _scheduleURSSAF(brut, estCadre);
   }
 };
+
+// ══════════════════════════════════════════════════════════════════
+// MAJORATIONS HEURES SUP — mode auto (CCN) / personnalisé
+// ══════════════════════════════════════════════════════════════════
+let _majorationMode = 'auto'; // 'auto' | 'custom'
+
+/* Retourne les tranches actuellement en vigueur dans le formulaire
+   (soit personnalisées, soit déduites de la CCN sélectionnée) */
+function getCurrentTranches() {
+  if (!window.CalcHelpers) {
+    // Fallback minimal : +25/+50
+    return [{seuil:8, taux:25}, {seuil:Infinity, taux:50}];
+  }
+  if (_majorationMode === 'custom') {
+    const s1 = parseFloat((document.getElementById('f-maj-seuil1')?.value||'').replace(',','.')) || 8;
+    const t1 = parseFloat((document.getElementById('f-maj-taux1')?.value||'').replace(',','.')) || 25;
+    const t2 = parseFloat((document.getElementById('f-maj-taux2')?.value||'').replace(',','.')) || 50;
+    return [
+      { seuil: s1,       taux: t1 },
+      { seuil: Infinity, taux: t2 }
+    ];
+  }
+  // Mode auto : lire la CCN
+  const ccnKey = document.getElementById('f-ccn')?.value || '';
+  const ccnRule = CCN_RULES[ccnKey] || null;
+  const pseudoEmp = {
+    ccn: ccnKey,
+    ccnData: ccnRule ? { idcc: ccnRule.idcc } : null
+  };
+  return window.CalcHelpers.getOvertimeTranches(pseudoEmp);
+}
+
+/* Met à jour l'affichage du panneau "Majorations" (auto ou custom) */
+function updateMajorationDisplay() {
+  const autoBox   = document.getElementById('majoration-auto');
+  const customBox = document.getElementById('majoration-custom');
+  const toggleBtn = document.getElementById('majoration-toggle-btn');
+  if (!autoBox || !customBox || !toggleBtn) return;
+
+  if (_majorationMode === 'custom') {
+    autoBox.style.display = 'none';
+    customBox.style.display = '';
+    toggleBtn.textContent = '↶ Auto CCN';
+    toggleBtn.style.background = '#fef3c7';
+    toggleBtn.style.color = '#92400e';
+    toggleBtn.style.borderColor = '#fde68a';
+  } else {
+    autoBox.style.display = '';
+    customBox.style.display = 'none';
+    toggleBtn.textContent = '✏️ Personnaliser';
+    toggleBtn.style.background = '#e0f2fe';
+    toggleBtn.style.color = '#075985';
+    toggleBtn.style.borderColor = '#bae6fd';
+
+    // Remplir l'affichage auto
+    const tranches = getCurrentTranches();
+    const text = window.CalcHelpers ? window.CalcHelpers.describeOvertimeTranches(tranches) : '';
+    const autoText = document.getElementById('majoration-auto-text');
+    if (autoText) autoText.textContent = text || '—';
+
+    // Source (CCN ou droit commun)
+    const ccnKey = document.getElementById('f-ccn')?.value || '';
+    const ccnRule = CCN_RULES[ccnKey] || null;
+    const src = document.getElementById('majoration-auto-source');
+    if (src) {
+      if (ccnRule && window.CalcHelpers &&
+          window.CalcHelpers.CCN_OVERTIME_RULES[String(ccnRule.idcc)]) {
+        src.textContent = '📋 Règle CCN : ' + (ccnRule.label || ccnKey);
+      } else {
+        src.textContent = '⚖️ Droit commun (Code du travail)';
+      }
+    }
+  }
+}
+
+window.toggleMajorationMode = function() {
+  _majorationMode = _majorationMode === 'custom' ? 'auto' : 'custom';
+  updateMajorationDisplay();
+  // Si mode taux horaire actif, recalculer le brut
+  if (_salMode === 'tauxhoraire') calcSalaire('tauxhoraire');
+  else {
+    // Sinon, recalculer le taux horaire dérivé pour l'info
+    const b = parseFloat((document.getElementById('f-brut')?.value||'').replace(',','.')) || 0;
+    if (b > 0) refreshTauxHoraireDerive(b);
+  }
+};
+
+window.onMajorationCustomChange = function() {
+  // Mettre à jour les previews
+  const s1 = parseFloat((document.getElementById('f-maj-seuil1')?.value||'').replace(',','.')) || 8;
+  const t1 = parseFloat((document.getElementById('f-maj-taux1')?.value||'').replace(',','.')) || 25;
+  const t2 = parseFloat((document.getElementById('f-maj-taux2')?.value||'').replace(',','.')) || 50;
+  const e1 = document.getElementById('maj-s1-prev'); if (e1) e1.textContent = s1;
+  const e2 = document.getElementById('maj-t1-prev'); if (e2) e2.textContent = t1;
+  const e3 = document.getElementById('maj-t2-prev'); if (e3) e3.textContent = t2;
+  // Recalcul
+  if (_salMode === 'tauxhoraire') calcSalaire('tauxhoraire');
+  else {
+    const b = parseFloat((document.getElementById('f-brut')?.value||'').replace(',','.')) || 0;
+    if (b > 0) refreshTauxHoraireDerive(b);
+  }
+};
+
+/* Affiche le taux horaire DÉRIVÉ (info) à partir d'un brut mensuel.
+   Ne touche pas au champ si c'est le mode source. */
+function refreshTauxHoraireDerive(brut) {
+  const el = document.getElementById('f-tauxhoraire');
+  if (!el) return;
+  if (_salMode === 'tauxhoraire') return; // ne pas écraser la saisie utilisateur
+  if (!window.CalcHelpers) return;
+  const hHebdo = parseFloat((document.getElementById('f-heures')?.value||'').replace(',','.')) || 35;
+  const tranches = getCurrentTranches();
+  const taux = window.CalcHelpers.calcTauxHoraireFromBrut(brut, hHebdo, tranches);
+  el.value = taux > 0 ? taux.toFixed(2) : '';
+}
+
+/* Listener heures/semaine → recalcul du mode actif */
+function _onHeuresHebdoChange() {
+  if (_salMode === 'tauxhoraire') {
+    calcSalaire('tauxhoraire');
+  } else {
+    const b = parseFloat((document.getElementById('f-brut')?.value||'').replace(',','.')) || 0;
+    if (b > 0) refreshTauxHoraireDerive(b);
+  }
+}
 
 // ── AUTO URSSAF — Debounced ──
 var _urssafTimer = null;
