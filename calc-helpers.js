@@ -627,6 +627,18 @@
    * ─────────────────────────────────────────────────────────────────────── */
   H.EXPLANATIONS = {
 
+    heures_hebdo_contrat: {
+      title: 'Heures par semaine — durée contractuelle',
+      short: 'Saisissez le TOTAL d\'heures par semaine inscrit au contrat — pas la base légale 35h.',
+      long: 'Pour un temps plein classique : 35h. Pour un temps plein restauration (CCN HCR) : 39h = 35h de base + 4h supplémentaires structurelles. Pour un temps partiel : votre durée réelle (ex: 24h, 30h). Le système décompose ensuite automatiquement la base 35h et les heures sup avec les majorations de votre CCN (par ex. +10% HCR ou +25% droit commun).'
+    },
+
+    taux_horaire_base: {
+      title: 'Taux horaire de base',
+      short: 'Le taux payé pour la 1ère heure, AVANT toute majoration.',
+      long: 'Saisissez le taux brut de base (celui qui figure au contrat, avant majoration des heures sup). Le système calcule le brut mensuel en appliquant les majorations de votre CCN : pour un 39h HCR à 12€/h, le brut mensuel sera 35h×12€ + 4h×12€×1.10 mensualisé = 2 049€. Personnalisez les majorations via le bouton à droite si votre accord d\'entreprise déroge à la CCN.'
+    },
+
     resultat_economique: {
       title: 'Résultat économique',
       short: 'Ce que vous gagnez réellement en exploitant votre activité.',
