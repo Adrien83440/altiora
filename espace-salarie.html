@@ -780,6 +780,360 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- ═══════════════════════════════════════════════════════════════
+     MODALE LOGIN PIN (Phase 2)
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="pin-login-overlay" style="display:none;position:fixed;inset:0;background:linear-gradient(135deg,#0f1f5c,#1e3a8a);z-index:10000;align-items:center;justify-content:center;padding:20px">
+  <div style="background:white;border-radius:18px;max-width:380px;width:100%;padding:26px 22px;box-shadow:0 24px 60px rgba(0,0,0,.35)">
+    <div style="text-align:center;margin-bottom:22px">
+      <div style="font-size:44px;margin-bottom:8px">🔒</div>
+      <div style="font-size:17px;font-weight:800;color:#0f1f5c;margin-bottom:4px">Accès protégé</div>
+      <div id="pin-login-sub" style="font-size:12px;color:#6b7280;line-height:1.5">Saisissez votre code à 4 chiffres</div>
+    </div>
+
+    <div id="pin-dots" style="display:flex;justify-content:center;gap:12px;margin-bottom:20px">
+      <div class="pd" style="width:16px;height:16px;border-radius:50%;border:2px solid #d1d5db;transition:all .15s"></div>
+      <div class="pd" style="width:16px;height:16px;border-radius:50%;border:2px solid #d1d5db;transition:all .15s"></div>
+      <div class="pd" style="width:16px;height:16px;border-radius:50%;border:2px solid #d1d5db;transition:all .15s"></div>
+      <div class="pd" style="width:16px;height:16px;border-radius:50%;border:2px solid #d1d5db;transition:all .15s"></div>
+    </div>
+
+    <input id="pin-login-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4"
+           autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+           style="position:absolute;opacity:0;pointer-events:none;left:-9999px"/>
+
+    <!-- Pavé numérique tactile -->
+    <div id="pin-keypad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">
+      <button class="pin-key" data-k="1" style="padding:16px 0;font-size:22px;font-weight:600;background:#f3f4f6;border:none;border-radius:12px;cursor:pointer;color:#111;transition:all .12s">1</button>
+      <button class="pin-key" data-k="2" style="padding:16px 0;font-size:22px;font-weight:600;background:#f3f4f6;border:none;border-radius:12px;cursor:pointer;color:#111">2</button>
+      <button class="pin-key" data-k="3" style="padding:16px 0;font-size:22px;font-weight:600;background:#f3f4f6;border:none;border-radius:12px;cursor:pointer;color:#111">3</button>
+      <button class="pin-key" data-k="4" style="padding:16px 0;font-size:22px;font-weight:600;background:#f3f4f6;border:none;border-radius:12px;cursor:pointer;color:#111">4</button>
+      <button class="pin-key" data-k="5" style="padding:16px 0;font-size:22px;font-weight:600;background:#f3f4f6;border:none;border-radius:12px;cursor:pointer;color:#111">5</button>
+      <button class="pin-key" data-k="6" style="padding:16px 0;font-size:22px;font-weight:600;background:#f3f4f6;border:none;border-radius:12px;cursor:pointer;color:#111">6</button>
+      <button class="pin-key" data-k="7" style="padding:16px 0;font-size:22px;font-weight:600;background:#f3f4f6;border:none;border-radius:12px;cursor:pointer;color:#111">7</button>
+      <button class="pin-key" data-k="8" style="padding:16px 0;font-size:22px;font-weight:600;background:#f3f4f6;border:none;border-radius:12px;cursor:pointer;color:#111">8</button>
+      <button class="pin-key" data-k="9" style="padding:16px 0;font-size:22px;font-weight:600;background:#f3f4f6;border:none;border-radius:12px;cursor:pointer;color:#111">9</button>
+      <button class="pin-key" data-k="clear" style="padding:16px 0;font-size:13px;font-weight:600;background:transparent;border:none;border-radius:12px;cursor:pointer;color:#6b7280">Effacer</button>
+      <button class="pin-key" data-k="0" style="padding:16px 0;font-size:22px;font-weight:600;background:#f3f4f6;border:none;border-radius:12px;cursor:pointer;color:#111">0</button>
+      <button class="pin-key" data-k="back" style="padding:16px 0;font-size:20px;font-weight:600;background:transparent;border:none;border-radius:12px;cursor:pointer;color:#6b7280">⌫</button>
+    </div>
+
+    <div id="pin-login-error" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:9px 12px;border-radius:10px;font-size:11.5px;line-height:1.4;margin-bottom:12px"></div>
+
+    <div style="text-align:center;margin-top:6px">
+      <button id="pin-forgot-btn" style="background:transparent;border:none;color:#059669;font-size:12px;font-weight:600;cursor:pointer;padding:6px 10px">J'ai oublié mon code</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     LOGIC PIN LOGIN (execute AVANT le script Firebase module)
+     ═══════════════════════════════════════════════════════════════ -->
+<script>
+(function() {
+  'use strict';
+  // Ce bloc tourne AVANT le script module Firebase.
+  // Il intercepte window.startApp pour demander le PIN si necessaire.
+
+  var TOKEN_TTL_MS = 8 * 3600 * 1000;
+  var _pinBuffer = '';
+  var _pinBusy = false;
+  var _pinPublicId = '';
+  var _pinAuthOk = false;
+  var _pendingStartApp = null;
+
+  function getPublicIdFromURL() {
+    var p = new URLSearchParams(window.location.search);
+    return p.get('id') || '';
+  }
+
+  function tokenKey(publicId) { return 'alteore_salarie_token_' + publicId; }
+  function tokenExpiresKey(publicId) { return 'alteore_salarie_exp_' + publicId; }
+
+  function getValidToken(publicId) {
+    try {
+      var t = localStorage.getItem(tokenKey(publicId));
+      var e = localStorage.getItem(tokenExpiresKey(publicId));
+      if (!t || !e) return null;
+      if (Date.now() > parseInt(e)) {
+        localStorage.removeItem(tokenKey(publicId));
+        localStorage.removeItem(tokenExpiresKey(publicId));
+        return null;
+      }
+      return t;
+    } catch(e) { return null; }
+  }
+
+  function saveToken(publicId, token, expiresAt) {
+    try {
+      localStorage.setItem(tokenKey(publicId), token);
+      localStorage.setItem(tokenExpiresKey(publicId), String(new Date(expiresAt).getTime()));
+    } catch(e) {}
+  }
+
+  function clearToken(publicId) {
+    try {
+      localStorage.removeItem(tokenKey(publicId));
+      localStorage.removeItem(tokenExpiresKey(publicId));
+    } catch(e) {}
+  }
+
+  function updateDots() {
+    var dots = document.querySelectorAll('#pin-dots .pd');
+    for (var i = 0; i < dots.length; i++) {
+      if (i < _pinBuffer.length) {
+        dots[i].style.background = '#059669';
+        dots[i].style.borderColor = '#059669';
+      } else {
+        dots[i].style.background = 'transparent';
+        dots[i].style.borderColor = '#d1d5db';
+      }
+    }
+  }
+
+  function showError(msg) {
+    var el = document.getElementById('pin-login-error');
+    if (el) { el.textContent = msg; el.style.display = ''; }
+  }
+  function clearError() {
+    var el = document.getElementById('pin-login-error');
+    if (el) el.style.display = 'none';
+  }
+
+  function shake() {
+    var box = document.getElementById('pin-dots');
+    if (!box) return;
+    box.style.animation = 'none';
+    setTimeout(function() {
+      box.style.animation = 'pinShake .4s ease';
+    }, 10);
+  }
+
+  async function submitPin() {
+    if (_pinBuffer.length !== 4 || _pinBusy) return;
+    _pinBusy = true;
+    clearError();
+    try {
+      var r = await fetch('/api/salarie-verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publicId: _pinPublicId, pin: _pinBuffer })
+      });
+      var data = await r.json();
+      if (data.success) {
+        saveToken(_pinPublicId, data.token, data.expiresAt);
+        _pinAuthOk = true;
+        hideLoginModal();
+        // Lancer l'app
+        if (_pendingStartApp) { _pendingStartApp(); _pendingStartApp = null; }
+        return;
+      }
+      // Echec
+      _pinBuffer = '';
+      updateDots();
+      shake();
+      if (data.error === 'locked') {
+        var mins = Math.ceil((new Date(data.lockedUntil).getTime() - Date.now()) / 60000);
+        showError('⛔ Trop de tentatives. Reessayez dans ~' + mins + ' min.');
+        // Desactiver le keypad
+        document.querySelectorAll('.pin-key').forEach(function(b){ b.disabled = true; b.style.opacity = '.4'; });
+      } else if (data.error === 'wrong_pin') {
+        var rem = data.attemptsRemaining;
+        showError('❌ Code incorrect. ' + (rem > 0 ? rem + ' tentative' + (rem > 1 ? 's' : '') + ' restante' + (rem > 1 ? 's' : '') : ''));
+      } else if (data.error === 'no_pin_set') {
+        // Grandfathered ou pas de PIN : bypass
+        _pinAuthOk = true;
+        hideLoginModal();
+        if (_pendingStartApp) { _pendingStartApp(); _pendingStartApp = null; }
+      } else {
+        showError('Erreur : ' + (data.error || 'inconnue'));
+      }
+    } catch(e) {
+      showError('Erreur reseau : ' + e.message);
+    } finally {
+      _pinBusy = false;
+    }
+  }
+
+  function pressKey(k) {
+    if (_pinBusy) return;
+    clearError();
+    if (k === 'clear') { _pinBuffer = ''; updateDots(); return; }
+    if (k === 'back')  { _pinBuffer = _pinBuffer.slice(0, -1); updateDots(); return; }
+    if (_pinBuffer.length >= 4) return;
+    _pinBuffer += k;
+    updateDots();
+    if (_pinBuffer.length === 4) {
+      setTimeout(submitPin, 120);
+    }
+  }
+
+  function bindKeypad() {
+    document.querySelectorAll('.pin-key').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        pressKey(btn.getAttribute('data-k'));
+      });
+    });
+    // Clavier physique (desktop)
+    document.addEventListener('keydown', function(e) {
+      if (!document.getElementById('pin-login-overlay') || document.getElementById('pin-login-overlay').style.display === 'none') return;
+      if (_pinBusy) return;
+      if (e.key >= '0' && e.key <= '9') pressKey(e.key);
+      else if (e.key === 'Backspace') pressKey('back');
+      else if (e.key === 'Enter' && _pinBuffer.length === 4) submitPin();
+    });
+    // Bouton "J'ai oublie"
+    var fb = document.getElementById('pin-forgot-btn');
+    if (fb) fb.addEventListener('click', requestReset);
+  }
+
+  async function requestReset() {
+    if (!confirm('Envoyer une demande de reinitialisation a votre employeur ?\n\nIl pourra vous generer un nouveau code.')) return;
+    try {
+      var r = await fetch('/api/salarie-reset-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publicId: _pinPublicId })
+      });
+      var data = await r.json();
+      if (data.success) {
+        showError('✅ Demande envoyee. Votre employeur va vous transmettre un nouveau code.');
+      } else {
+        showError('Erreur : ' + (data.error || 'inconnue'));
+      }
+    } catch(e) {
+      showError('Erreur reseau : ' + e.message);
+    }
+  }
+
+  function showLoginModal() {
+    var ov = document.getElementById('pin-login-overlay');
+    if (ov) ov.style.display = 'flex';
+    // Masquer le loading pendant la saisie
+    var lw = document.getElementById('loading-wrap');
+    if (lw) lw.style.display = 'none';
+  }
+
+  function hideLoginModal() {
+    var ov = document.getElementById('pin-login-overlay');
+    if (ov) ov.style.display = 'none';
+    // Re-afficher le loading wrap le temps que l'app demarre
+    var lw = document.getElementById('loading-wrap');
+    if (lw) lw.style.display = '';
+  }
+
+  async function checkAuthAndGate() {
+    _pinPublicId = getPublicIdFromURL();
+    if (!_pinPublicId) {
+      // Pas de publicId = lien invalide. On laisse l'app normale gerer (not-found)
+      _pinAuthOk = true;
+      if (_pendingStartApp) { _pendingStartApp(); _pendingStartApp = null; }
+      return;
+    }
+
+    // Token deja valide en localStorage ? Bypass
+    if (getValidToken(_pinPublicId)) {
+      _pinAuthOk = true;
+      if (_pendingStartApp) { _pendingStartApp(); _pendingStartApp = null; }
+      return;
+    }
+
+    // Check status avec l'API
+    try {
+      var r = await fetch('/api/salarie-check-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publicId: _pinPublicId })
+      });
+      var data = await r.json();
+
+      if (!data.exists) {
+        // Pas trouve : lancer l'app normalement, elle affichera "not found"
+        _pinAuthOk = true;
+        if (_pendingStartApp) { _pendingStartApp(); _pendingStartApp = null; }
+        return;
+      }
+
+      if (data.grandfathered || !data.hasPin) {
+        // Ancien salarie sans PIN : bypass, lancer l'app directement
+        _pinAuthOk = true;
+        if (_pendingStartApp) { _pendingStartApp(); _pendingStartApp = null; }
+        return;
+      }
+
+      if (data.locked) {
+        var mins = Math.ceil((new Date(data.lockedUntil).getTime() - Date.now()) / 60000);
+        var sub = document.getElementById('pin-login-sub');
+        if (sub) sub.textContent = 'Acces verrouille';
+        showLoginModal();
+        showError('⛔ Trop de tentatives erronees. Reessayez dans ~' + mins + ' min.');
+        document.querySelectorAll('.pin-key').forEach(function(b){ b.disabled = true; b.style.opacity = '.4'; });
+        return;
+      }
+
+      // PIN requis : afficher la modale
+      if (data.attemptsRemaining < 5 && data.attemptsRemaining > 0) {
+        var sub2 = document.getElementById('pin-login-sub');
+        if (sub2) sub2.textContent = data.attemptsRemaining + ' tentative' + (data.attemptsRemaining > 1 ? 's' : '') + ' restante' + (data.attemptsRemaining > 1 ? 's' : '') + ' avant verrouillage';
+      }
+      showLoginModal();
+    } catch(e) {
+      console.warn('[pin-login] check-status failed:', e.message);
+      // En cas d'erreur reseau : laisser passer (failsafe pour ne pas bloquer les salaries)
+      _pinAuthOk = true;
+      if (_pendingStartApp) { _pendingStartApp(); _pendingStartApp = null; }
+    }
+  }
+
+  // Intercepter window.startApp : le mettre en attente tant que le PIN n'est pas valide
+  var _realStartApp = null;
+  Object.defineProperty(window, 'startApp', {
+    configurable: true,
+    get: function() { return _gatedStartApp; },
+    set: function(v) { _realStartApp = v; }
+  });
+
+  function _gatedStartApp() {
+    if (_pinAuthOk) {
+      if (_realStartApp) _realStartApp();
+      return;
+    }
+    // Differer l'execution de l'app jusqu'a auth
+    _pendingStartApp = function() { if (_realStartApp) _realStartApp(); };
+  }
+
+  // Exposer un helper au reste du code pour inclure le token dans les appels sensibles futurs
+  window._salarieGetToken = function() {
+    return getValidToken(_pinPublicId);
+  };
+  // Logout helper (utile dans le profil)
+  window._salarieLogout = function() {
+    clearToken(_pinPublicId);
+    window.location.reload();
+  };
+
+  // Binding et kick-off
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+      bindKeypad();
+      checkAuthAndGate();
+    });
+  } else {
+    bindKeypad();
+    checkAuthAndGate();
+  }
+
+  // Styles d'animation shake (ajoutes dynamiquement pour eviter de polluer <style>)
+  var st = document.createElement('style');
+  st.textContent = '@keyframes pinShake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 50%{transform:translateX(6px)} 75%{transform:translateX(-4px)} }'
+                 + '.pin-key:active { transform: scale(0.94); background: #e5e7eb; }'
+                 + '.pin-key:hover { background: #e5e7eb; }';
+  document.head.appendChild(st);
+
+  console.log('[pin-login] Module charge');
+})();
+</script>
+
 <!-- ══ FIREBASE ══ -->
 <script type="module">  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { initializeFirestore, doc, getDoc, setDoc, addDoc, getDocs, collection, query, where }
