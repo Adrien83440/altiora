@@ -54,43 +54,120 @@ function parseAmount(val) {
   return parseFloat(String(val).replace(',', '.')) || 0;
 }
 
+// Catégories et types d'opération Qonto (et autres banques) à exclure des libellés.
+// Qonto met ces codes dans remittanceInformationUnstructuredArray À CÔTÉ du vrai libellé,
+// ce qui polluait l'affichage (ex: "other_expense · Transfer" au lieu du vrai destinataire).
+const BANK_CATEGORY_CODES = new Set([
+  // Catégories de dépenses Qonto
+  'atm','bank_fees','business_entertainment','commercial_activity',
+  'equipment','fees','food_and_grocery','gas_station','gifts',
+  'hotel_and_lodging','insurance','internet','legal_and_accounting',
+  'logistics','maintenance_and_repairs','marketing','office_rental',
+  'office_supplies','online_service','other_expense','other_service',
+  'refund','restaurant_and_bar','salary','sales','subscription',
+  'tax','telecom','training','transport','utility','voucher',
+  // Catégories de revenus
+  'other_income','sales_income',
+  // Types d'opération
+  'card','transfer','income','direct_debit','check','cheque',
+  // Mots génériques isolés
+  'expense','payment','debit','credit'
+]);
+
+// true si la chaîne ressemble à un code technique (catégorie, type d'op) plutôt qu'à un libellé humain
+function isCategoryCode(s) {
+  const norm = String(s || '').toLowerCase().trim();
+  if (!norm) return true;
+  if (BANK_CATEGORY_CODES.has(norm)) return true;
+  // snake_case pur type "bank_fees", "other_expense" = code technique
+  if (/^[a-z]+(_[a-z]+)+$/.test(norm)) return true;
+  return false;
+}
+
+function cleanLine(s) {
+  return String(s || '').trim().replace(/\s+/g, ' ');
+}
+
+// true si la chaîne `s` est contenue (en minuscules) dans `other`, et strictement plus courte
+function isSubsetOf(s, other) {
+  if (!s || !other || s === other) return false;
+  if (other.length <= s.length) return false;
+  return other.toLowerCase().includes(s.toLowerCase());
+}
+
 function extractLabel(tx) {
-  // 1) Cas Banque Populaire / Crédit Mutuel / Caisse d'Épargne et autres :
-  //    le vrai libellé est dans remittanceInformationUnstructuredArray (tableau de strings).
-  //    On filtre les lignes qui ne sont QUE numériques (codes parasites type "200326 CB****6273")
-  //    et on concatène les lignes lisibles.
-  if (Array.isArray(tx.remittanceInformationUnstructuredArray) && tx.remittanceInformationUnstructuredArray.length > 0) {
-    const lines = tx.remittanceInformationUnstructuredArray
-      .map(function(s){ return String(s || '').trim().replace(/\s+/g, ' '); })
-      .filter(function(s){
-        if (s.length < 2) return false;
-        // Garder seulement les lignes contenant au moins UN mot de 3 lettres consécutives.
-        // Cela élimine "200326 CB****6273" (CB = 2 lettres), "ID:1234567", etc.
-        // mais garde "EDF FRANCE", "SUPER U 94UNGIS", "CARREFOUR MARKET", etc.
-        return /[A-Za-zÀ-ÿ]{3,}/.test(s);
-      });
-    if (lines.length > 0) {
-      return lines.join(' · ').substring(0, 120);
+  // Sens de la transaction pour choisir la bonne contrepartie.
+  // Débit (montant négatif) : contrepartie = creditorName (celui qui reçoit).
+  // Crédit (montant positif) : contrepartie = debtorName (celui qui envoie).
+  const amt = parseFloat(String((tx.transactionAmount && tx.transactionAmount.amount) || '0').replace(',', '.'));
+  const isDebit = amt < 0;
+  const counterparty = isDebit ? tx.creditorName : tx.debtorName;
+
+  // Collecter TOUS les candidats dans l'ordre de priorité de lecture
+  // (on ne s'arrête pas au premier non-vide : on veut concaténer le meilleur)
+  const rawCandidates = [];
+  rawCandidates.push(counterparty);                                     // creditorName/debtorName
+  rawCandidates.push(tx.remittanceInformationUnstructured);             // motif/référence scalaire
+  if (Array.isArray(tx.remittanceInformationUnstructuredArray)) {
+    for (let i = 0; i < tx.remittanceInformationUnstructuredArray.length; i++) {
+      rawCandidates.push(tx.remittanceInformationUnstructuredArray[i]); // toutes les lignes du tableau
     }
-    // Fallback : si toutes les lignes ont été filtrées, on prend la plus longue brute
-    const longest = tx.remittanceInformationUnstructuredArray
-      .map(function(s){ return String(s || '').trim(); })
-      .sort(function(a,b){ return b.length - a.length; })[0];
-    if (longest && longest.length > 1) return longest.substring(0, 120);
+  }
+  rawCandidates.push(tx.merchantName);
+  rawCandidates.push(tx.remittanceInformationStructured);
+  if (Array.isArray(tx.remittanceInformationStructuredArray) && tx.remittanceInformationStructuredArray[0]) {
+    rawCandidates.push(tx.remittanceInformationStructuredArray[0].reference);
   }
 
-  // 2) Champs scalaires classiques (ordre = priorité)
-  const c = [
-    tx.creditorName, tx.debtorName,
-    tx.remittanceInformationUnstructured,
-    tx.remittanceInformationStructuredArray && tx.remittanceInformationStructuredArray[0] && tx.remittanceInformationStructuredArray[0].reference,
-    tx.remittanceInformationStructured,
-    tx.additionalInformation, tx.merchantName,
-    tx.entryReference,                       // ← AJOUTÉ : utilisé par certaines banques
-    tx.proprietaryBankTransactionCode,
+  // Filtrer : nettoyer, jeter les codes techniques, garder seulement les vrais libellés
+  const filtered = [];
+  const seen = new Set();
+  for (let i = 0; i < rawCandidates.length; i++) {
+    const clean = cleanLine(rawCandidates[i]);
+    if (!clean || clean.length < 2) continue;
+    if (isCategoryCode(clean)) continue;
+    // Doit contenir au moins un mot de 3+ lettres (exclut "CB 1234", "ID:99", etc.)
+    if (!/[A-Za-zÀ-ÿ]{3,}/.test(clean)) continue;
+    const key = clean.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    filtered.push(clean);
+  }
+
+  // Retirer les sous-chaînes : si "PAYPAL" ET "PAYPAL *NETFLIX" sont présents,
+  // on ne garde que "PAYPAL *NETFLIX" (plus informatif).
+  const deduped = filtered.filter(function(p){
+    return !filtered.some(function(other){ return isSubsetOf(p, other); });
+  });
+
+  if (deduped.length > 0) {
+    // Limiter à 3 pièces max pour ne pas surcharger l'affichage
+    return deduped.slice(0, 3).join(' · ').substring(0, 120);
+  }
+
+  // Ultimes fallbacks si tout est filtré (cas rare)
+  const lastResort = [
+    tx.entryReference,
+    tx.additionalInformation,
+    tx.proprietaryBankTransactionCode
   ];
-  const found = c.find(function(v){ return v && String(v).trim().length > 1; });
-  return found ? String(found).trim().substring(0, 120) : 'Transaction bancaire';
+  for (let i = 0; i < lastResort.length; i++) {
+    const clean = cleanLine(lastResort[i]);
+    if (clean && !isCategoryCode(clean) && clean.length > 1) {
+      return clean.substring(0, 120);
+    }
+  }
+
+  // Vraiment rien d'exploitable : on retourne la ligne brute la plus longue du tableau
+  if (Array.isArray(tx.remittanceInformationUnstructuredArray)) {
+    const longest = tx.remittanceInformationUnstructuredArray
+      .map(cleanLine)
+      .filter(function(s){ return s.length > 1; })
+      .sort(function(a,b){ return b.length - a.length; })[0];
+    if (longest) return longest.substring(0, 120);
+  }
+
+  return 'Transaction bancaire';
 }
 
 export default async function handler(req, res) {
