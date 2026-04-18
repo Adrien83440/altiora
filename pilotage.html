@@ -825,9 +825,12 @@
 <!-- ═══════════════════════════════════════════════
      WAVE ADDITIVE : Popover date facture + Modal report
      ═══════════════════════════════════════════════ -->
-<div id="invoiceDatePopover" style="display:none;position:fixed;z-index:9999;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:11px 13px;min-width:200px">
-  <div style="font-size:10px;font-weight:700;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">Date de facture</div>
+<div id="invoiceDatePopover" style="display:none;position:fixed;z-index:9999;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:11px 13px;min-width:220px">
+  <div style="font-size:10px;font-weight:700;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.4px">📄 Date de facture</div>
   <input id="invoiceDatePopoverInput" type="date" style="width:100%;font-size:13px;padding:6px 8px;border:1px solid #d1d5db;border-radius:5px;box-sizing:border-box;font-family:inherit"/>
+  <div style="font-size:10px;font-weight:700;color:#6b7280;margin:10px 0 6px;text-transform:uppercase;letter-spacing:.4px">⏰ Date d'échéance (à payer le)</div>
+  <input id="invoiceDueDatePopoverInput" type="date" style="width:100%;font-size:13px;padding:6px 8px;border:1px solid #d1d5db;border-radius:5px;box-sizing:border-box;font-family:inherit"/>
+  <div id="invoiceDueHint" style="font-size:10px;color:#6b7280;margin-top:5px;min-height:13px;line-height:1.3"></div>
   <div style="display:flex;gap:6px;margin-top:9px;justify-content:space-between">
     <button class="btn btn-outline btn-sm" style="font-size:10px;padding:4px 9px" onclick="clearInvoiceDate()">Effacer</button>
     <button class="btn btn-primary btn-sm" style="font-size:10px;padding:4px 11px" onclick="saveInvoiceDate()">OK</button>
@@ -3251,14 +3254,81 @@ function formatDateFr(ymd) {
   return m[3] + '/' + m[2] + '/' + m[1];
 }
 
+/* ══════════════════════════════════════════════════════════
+   Statut d'échéance d'une ligne — single source of truth
+   Retourne :
+     { status: 'none' | 'paid' | 'overdue' | 'soon' | 'scheduled' | 'info',
+       daysUntil: Number|null,  // négatif si dépassée
+       label: String,            // libellé court pour tooltip / widget
+       color: String,            // couleur du badge
+       pointeeText: String }     // 'Pay\xE9e' / 'Non pay\xE9e' / ''
+   Règles :
+     - pointe === 'Oui'  → paid (gris rayé)
+     - pas de dateEcheance, mais dateFacture → info (vert doux)
+     - dateEcheance passée + non pointée → overdue (rouge)
+     - dateEcheance ≤ 7j + non pointée → soon (orange)
+     - dateEcheance future > 7j + non pointée → scheduled (vert)
+     - rien du tout → none (gris)
+   ══════════════════════════════════════════════════════════ */
+function invoiceDateStatus(r) {
+  var out = { status:'none', daysUntil:null, label:'Ajouter la date de la facture', color:'#cbd5e1', pointeeText:'' };
+  if (!r) return out;
+  var hasFact = !!r.dateFacture;
+  var hasEch  = !!r.dateEcheance;
+  var isPaid  = (r.pointe === 'Oui');
+  if (isPaid) {
+    out.status = 'paid';
+    out.color  = '#9ca3af';
+    out.pointeeText = 'Pay\xE9e';
+    if (hasEch)      out.label = 'Pay\xE9e \xB7 \xE9ch\xE9ance : ' + formatDateFr(r.dateEcheance);
+    else if (hasFact) out.label = 'Pay\xE9e \xB7 facture : ' + formatDateFr(r.dateFacture);
+    else              out.label = 'Pay\xE9e';
+    return out;
+  }
+  out.pointeeText = 'Non pay\xE9e';
+  if (hasEch) {
+    var m = String(r.dateEcheance).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) {
+      var now = new Date(); now.setHours(0,0,0,0);
+      var due = new Date(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10));
+      due.setHours(0,0,0,0);
+      var diffMs = due.getTime() - now.getTime();
+      var days   = Math.round(diffMs / 86400000);
+      out.daysUntil = days;
+      if (days < 0) {
+        out.status = 'overdue';
+        out.color  = '#dc2626';
+        out.label  = 'EN RETARD : \xE9ch\xE9ance du ' + formatDateFr(r.dateEcheance) + ' (' + Math.abs(days) + ' j)';
+      } else if (days <= 7) {
+        out.status = 'soon';
+        out.color  = '#ea580c';
+        out.label  = '\xC9ch\xE9ance ' + (days===0 ? "aujourd'hui" : (days===1 ? 'demain' : 'dans ' + days + ' jours')) + ' : ' + formatDateFr(r.dateEcheance);
+      } else {
+        out.status = 'scheduled';
+        out.color  = '#059669';
+        out.label  = '\xC9ch\xE9ance le ' + formatDateFr(r.dateEcheance);
+      }
+      return out;
+    }
+  }
+  if (hasFact) {
+    out.status = 'info';
+    out.color  = '#059669';
+    out.label  = 'Date de facture : ' + formatDateFr(r.dateFacture);
+    return out;
+  }
+  return out;
+}
+
 function invoiceDateBadge(key, i, r) {
-  var hasDate = !!(r && r.dateFacture);
-  var rawTip = hasDate
-    ? ('Date de facture : ' + formatDateFr(r.dateFacture) + ' (cliquer pour modifier)')
-    : 'Ajouter la date de la facture';
-  var tip = rawTip.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  var color = hasDate ? '#059669' : '#cbd5e1';
-  return ' <span id="invdate-' + key + '-' + i + '" class="invoice-date-icon" onclick="event.stopPropagation();openInvoiceDatePopover(\'' + key + '\',' + i + ',this)" title="' + tip + '" style="display:inline-block;font-size:12px;color:' + color + ';margin-left:2px;cursor:pointer;vertical-align:middle;user-select:none">📅</span>';
+  var st  = invoiceDateStatus(r);
+  var tip = (st.label + (st.status==='none' ? '' : ' (cliquer pour modifier)'))
+            .replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  // Pulse discret pour overdue/soon non pointées — sans dépendance CSS externe
+  var extra = '';
+  if (st.status === 'overdue') extra = ';font-weight:800';
+  else if (st.status === 'soon') extra = ';font-weight:700';
+  return ' <span id="invdate-' + key + '-' + i + '" class="invoice-date-icon" data-status="' + st.status + '" onclick="event.stopPropagation();openInvoiceDatePopover(\'' + key + '\',' + i + ',this)" title="' + tip + '" style="display:inline-block;font-size:12px;color:' + st.color + ';margin-left:2px;cursor:pointer;vertical-align:middle;user-select:none' + extra + '">📅</span>';
 }
 
 function reportedBadge(r) {
@@ -3269,16 +3339,46 @@ function reportedBadge(r) {
   return ' <span title="' + tip + '" style="display:inline-block;font-size:11px;color:#d97706;margin-left:2px;cursor:help;vertical-align:middle;user-select:none">↪️</span>';
 }
 
-// ── Popover date facture ──
+// ── Popover date facture + date d'échéance ──
 var _invoiceDateCtx = null;
+
+// Générateur d'ID stable sur une ligne (utilisé dès qu'une dateEcheance est posée,
+// pour permettre le deep-link depuis le widget dashboard). Strictement additif.
+function ensureRowId(row) {
+  if (row && !row.__id) {
+    row.__id = 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+  return row ? row.__id : '';
+}
+
+function _updateInvoiceDueHint() {
+  var hint = document.getElementById('invoiceDueHint');
+  var due  = document.getElementById('invoiceDueDatePopoverInput');
+  if (!hint || !due) return;
+  if (!due.value) { hint.textContent = ''; return; }
+  var m = due.value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) { hint.textContent = ''; return; }
+  var now = new Date(); now.setHours(0,0,0,0);
+  var d = new Date(parseInt(m[1],10), parseInt(m[2],10)-1, parseInt(m[3],10)); d.setHours(0,0,0,0);
+  var days = Math.round((d - now) / 86400000);
+  if (days < 0)        hint.innerHTML = '<span style="color:#dc2626;font-weight:700">⚠️ En retard de ' + Math.abs(days) + ' jour(s)</span>';
+  else if (days === 0) hint.innerHTML = '<span style="color:#ea580c;font-weight:700">⏰ À payer aujourd\'hui</span>';
+  else if (days <= 7)  hint.innerHTML = '<span style="color:#ea580c;font-weight:700">⏰ À payer dans ' + days + ' jour(s)</span>';
+  else                 hint.innerHTML = '<span style="color:#059669">✅ À payer dans ' + days + ' jour(s)</span>';
+}
 
 function openInvoiceDatePopover(key, i, anchorEl) {
   _invoiceDateCtx = { key: key, i: i };
   var pop = document.getElementById('invoiceDatePopover');
   var inp = document.getElementById('invoiceDatePopoverInput');
+  var due = document.getElementById('invoiceDueDatePopoverInput');
   if (!pop || !inp) return;
   var row = _data && _data[key] && _data[key][i];
-  inp.value = (row && row.dateFacture) ? row.dateFacture : '';
+  inp.value = (row && row.dateFacture)  ? row.dateFacture  : '';
+  if (due) due.value = (row && row.dateEcheance) ? row.dateEcheance : '';
+  _updateInvoiceDueHint();
+  // Listener oninput (ré-installé à chaque ouverture, innocent car même cible)
+  if (due && !due._hintBound) { due.addEventListener('input', _updateInvoiceDueHint); due._hintBound = true; }
   // Afficher d'abord pour calculer les dimensions réelles
   pop.style.display = 'block';
   pop.style.top = '-9999px';
@@ -3303,20 +3403,24 @@ function closeInvoiceDatePopover() {
 function saveInvoiceDate() {
   if (!_invoiceDateCtx) return closeInvoiceDatePopover();
   var inp = document.getElementById('invoiceDatePopoverInput');
-  var val = inp ? (inp.value || '') : '';
+  var due = document.getElementById('invoiceDueDatePopoverInput');
+  var valFact = inp ? (inp.value || '') : '';
+  var valEch  = due ? (due.value || '') : '';
   var key = _invoiceDateCtx.key, i = _invoiceDateCtx.i;
-  if (_data && _data[key] && _data[key][i]) {
-    if (val) _data[key][i].dateFacture = val;
-    else delete _data[key][i].dateFacture;
+  var row = _data && _data[key] && _data[key][i];
+  if (row) {
+    if (valFact) row.dateFacture  = valFact; else delete row.dateFacture;
+    if (valEch)  { row.dateEcheance = valEch; ensureRowId(row); }
+    else delete row.dateEcheance;
   }
   // Mettre à jour uniquement l'icône — pas de re-render complet (pour préserver le focus clavier)
   var icon = document.getElementById('invdate-' + key + '-' + i);
-  if (icon) {
-    var hasDate = !!val;
-    icon.style.color = hasDate ? '#059669' : '#cbd5e1';
-    icon.title = hasDate
-      ? ('Date de facture : ' + formatDateFr(val) + ' (cliquer pour modifier)')
-      : 'Ajouter la date de la facture';
+  if (icon && row) {
+    var st = invoiceDateStatus(row);
+    icon.style.color = st.color;
+    icon.style.fontWeight = (st.status === 'overdue') ? '800' : (st.status === 'soon' ? '700' : '');
+    icon.setAttribute('data-status', st.status);
+    icon.title = st.label + (st.status==='none' ? '' : ' (cliquer pour modifier)');
   }
   scheduleSave();
   closeInvoiceDatePopover();
@@ -3324,7 +3428,10 @@ function saveInvoiceDate() {
 
 function clearInvoiceDate() {
   var inp = document.getElementById('invoiceDatePopoverInput');
+  var due = document.getElementById('invoiceDueDatePopoverInput');
   if (inp) inp.value = '';
+  if (due) due.value = '';
+  _updateInvoiceDueHint();
   saveInvoiceDate();
 }
 
@@ -3722,7 +3829,7 @@ function renderCredits(rows) {
     var trAttr = ' class="row-principal" id="cred-row-' + i + '"' + (isBankLinkedC ? ' style="background:rgba(99,102,241,0.05)"' : '');
     return '<tr' + trAttr + '>' +
       '<td>' + pointeSelectHtml('credits', i, r.pointe) + '</td>' +
-      '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + catalogInputHtml('clients', 'credN-'+i, r.fournisseur||'', 'width:120px', 'Nom crédit', 'updateCreditField('+i+',\'fournisseur\',this.value)') + bankLinkBadge(r) + '</div></td>' +
+      '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + catalogInputHtml('clients', 'credN-'+i, r.fournisseur||'', 'width:120px', 'Nom crédit', 'updateCreditField('+i+',\'fournisseur\',this.value)') + bankLinkBadge(r) + invoiceDateBadge('credits', i, r) + '</div></td>' +
       '<td><input class="cell-input" style="width:85px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="updateCreditMontant(' + i + ',this.value)"/></td>' +
       '<td><input class="cell-input" style="width:65px" type="text" inputmode="decimal" placeholder="%" value="' + (r.tauxInteret||'') + '" oninput="updateCreditTaux(' + i + ',this.value)"/></td>' +
       '<td><select class="cell-input" style="width:110px" onchange="_data.credits[' + i + '].amort=this.value;scheduleSave()">' +
