@@ -615,6 +615,108 @@
   };
 
   /* ───────────────────────────────────────────────────────────────────────
+   * AVANTAGES EN NATURE (AEN)
+   * ───────────────────────────────────────────────────────────────────────
+   * Les AEN s'ajoutent au brut pour le calcul des cotisations. Ils sont
+   * ensuite déduits du net imposable pour obtenir le net à payer
+   * (car déjà consommés en nature).
+   *
+   * Structure stockée sur emp.avantagesNature :
+   *   {
+   *     repas:     { actif: bool, nbMois: number, unitaire: number, total: number },
+   *     logement:  { actif: bool, montantMensuel: number },
+   *     vehicule:  { actif: bool, montantMensuel: number },
+   *     transport: { actif: bool, montantMensuel: number }
+   *   }
+   *
+   * Montant URSSAF 2026 pour le repas : 5,50€ (barème général, éditable).
+   * ─────────────────────────────────────────────────────────────────────── */
+
+  H.AEN_REPAS_UNITAIRE_DEFAULT = 5.50;
+  H.AEN_REPAS_NB_MOIS_DEFAULT = 20;
+
+  /* Retourne le détail des AEN actifs d'un employé.
+     Sortie :
+       {
+         total:   number   — somme mensuelle de tous les AEN actifs
+         lignes:  [...]    — lignes prêtes à afficher dans un bulletin
+         detail:  {...}    — montants par type (pour calculs ciblés)
+       }
+     Si aucun AEN actif : total = 0, lignes vides. */
+  H.getAvantagesNatureEffectif = function (emp) {
+    var out = { total: 0, lignes: [], detail: {} };
+    if (!emp || !emp.avantagesNature) return out;
+    var a = emp.avantagesNature;
+
+    // Repas
+    if (a.repas && a.repas.actif) {
+      var nb = H.pf(a.repas.nbMois);
+      var u  = H.pf(a.repas.unitaire);
+      var tR = Math.round(nb * u * 100) / 100;
+      if (tR > 0) {
+        out.total += tR;
+        out.detail.repas = tR;
+        out.lignes.push({
+          type: 'repas',
+          label: 'Avantage en nature — repas',
+          base: nb,
+          tauxOuUnitaire: u,
+          details: nb + ' × ' + u.toFixed(2).replace('.',',') + ' €',
+          montant: tR
+        });
+      }
+    }
+
+    // Logement
+    if (a.logement && a.logement.actif) {
+      var lv = H.pf(a.logement.montantMensuel);
+      if (lv > 0) {
+        out.total += lv;
+        out.detail.logement = lv;
+        out.lignes.push({
+          type: 'logement',
+          label: 'Avantage en nature — logement',
+          details: '',
+          montant: lv
+        });
+      }
+    }
+
+    // Véhicule
+    if (a.vehicule && a.vehicule.actif) {
+      var vv = H.pf(a.vehicule.montantMensuel);
+      if (vv > 0) {
+        out.total += vv;
+        out.detail.vehicule = vv;
+        out.lignes.push({
+          type: 'vehicule',
+          label: 'Avantage en nature — véhicule',
+          details: '',
+          montant: vv
+        });
+      }
+    }
+
+    // Transport
+    if (a.transport && a.transport.actif) {
+      var tv = H.pf(a.transport.montantMensuel);
+      if (tv > 0) {
+        out.total += tv;
+        out.detail.transport = tv;
+        out.lignes.push({
+          type: 'transport',
+          label: 'Avantage en nature — transport',
+          details: '',
+          montant: tv
+        });
+      }
+    }
+
+    out.total = Math.round(out.total * 100) / 100;
+    return out;
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
    * EXPLANATIONS — libellés clients
    * ───────────────────────────────────────────────────────────────────────
    * Utilisées pour afficher des tooltips pédagogiques sur les KPI.
@@ -631,6 +733,12 @@
       title: 'Heures par semaine — durée contractuelle',
       short: 'Saisissez le TOTAL d\'heures par semaine inscrit au contrat — pas la base légale 35h.',
       long: 'Pour un temps plein classique : 35h. Pour un temps plein restauration (CCN HCR) : 39h = 35h de base + 4h supplémentaires structurelles. Pour un temps partiel : votre durée réelle (ex: 24h, 30h). Le système décompose ensuite automatiquement la base 35h et les heures sup avec les majorations de votre CCN (par ex. +10% HCR ou +25% droit commun).'
+    },
+
+    avantages_nature: {
+      title: 'Avantages en nature',
+      short: 'Ce que l\'employé reçoit au-delà du salaire cash (repas, logement, véhicule, transport).',
+      long: 'Les avantages en nature s\'ajoutent au brut pour le calcul des cotisations — ils sont donc soumis aux charges sociales. Ils sont ensuite déduits du net imposable pour obtenir le net à payer, car ils ont déjà été consommés en nature. Exemple : 10 repas × 5,50€ = 55€ en nature → cotisations sur (salaire + 55€), puis on retire 55€ du net car le salarié a déjà eu ses repas.'
     },
 
     taux_horaire_base: {
