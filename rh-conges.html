@@ -219,6 +219,7 @@
     <div class="topbar-right">
       <select class="filter-select" id="year-sel" onchange="onYearChange()"></select>
       <button class="btn btn-outline btn-sm" id="btn-refresh" onclick="reloadAll()" title="Recharger les employés et demandes" style="min-width:36px">🔄</button>
+      <button class="btn btn-outline btn-sm" onclick="syncTousCongesApprouves()" title="Propager tous les congés déjà approuvés vers le planning (rattrapage)">📅 Sync planning</button>
       <button class="btn btn-outline btn-sm" onclick="openAjustModal()">⚙️ Ajuster soldes</button>
       <button class="btn btn-rh btn-sm" onclick="openNewDemandeModal()">+ Demande</button>
     </div>
@@ -1118,6 +1119,244 @@ async function syncDemandePublic(id, data){
 }
 
 // ══ ACTIONS ══
+// ═══════════════════════════════════════════════════════════════════════
+// PROPAGATION VERS LE PLANNING
+// ═══════════════════════════════════════════════════════════════════════
+// À l'approbation d'une demande, on crée automatiquement des créneaux
+// type=conge dans rh/{uid}/plan_{weekKey}/{YYYY-MM-DD}_{empId}.
+// Chaque créneau porte origineConge.demandeId pour rollback propre.
+//
+// Règles :
+// - Jours ouvrés uniquement (exclusion via rh_params.joursFermes)
+// - Si un créneau travail existait déjà → on le remplace par conge,
+//   à l'identique (plages, horaires, note préservées)
+// - Si rien n'existait → on crée un créneau conge sans horaires
+// - Miroir vers rh_planning_public pour le portail salarié
+// ═══════════════════════════════════════════════════════════════════════
+
+function _cgPad(n){return String(n).padStart(2,'0');}
+function _cgFmt(d){return d.getFullYear()+'-'+_cgPad(d.getMonth()+1)+'-'+_cgPad(d.getDate());}
+function _cgMonday(d){
+  const x=new Date(d.getFullYear(),d.getMonth(),d.getDate(),12,0,0);
+  const dow=x.getDay(); // 0=dim..6=sam
+  const diff=dow===0?-6:1-dow; // remonter au lundi
+  x.setDate(x.getDate()+diff);
+  return x;
+}
+function _cgWeekKey(d){ return 'plan_'+_cgFmt(_cgMonday(d)).replace(/-/g,''); }
+
+/* Retourne true si la date est un jour fermé selon rh_params.
+   Fallback prudent : si _params n'a pas joursFermes, on exclut sam/dim. */
+function _cgIsJourFerme(date){
+  const jf=(_params && _params.joursFermes) || {hebdo:[0,6],ponctuels:[]};
+  const dow=date.getDay();
+  if((jf.hebdo||[0,6]).includes(dow)) return true;
+  if((jf.ponctuels||[]).includes(_cgFmt(date))) return true;
+  return false;
+}
+
+/* Itère sur les jours ouvrés [dateDebut..dateFin] inclusifs */
+function _cgJoursOuvresIter(dateDebut, dateFin, cb){
+  if(!dateDebut) return;
+  const d1=new Date(dateDebut+'T12:00:00');
+  const d2=new Date((dateFin||dateDebut)+'T12:00:00');
+  for(let cur=new Date(d1); cur<=d2; cur.setDate(cur.getDate()+1)){
+    if(!_cgIsJourFerme(cur)) cb(new Date(cur));
+  }
+}
+
+/* Propage une demande approuvée dans le planning.
+   Retourne { nbCrees, nbRemplaces, nbSkip } pour le toast. */
+async function propageCongeAuPlanning(demande){
+  const stats={nbCrees:0, nbRemplaces:0, nbSkip:0};
+  if(!demande||!demande.empId||!demande.dateDebut) return stats;
+  const demandeId=demande.id;
+  const empId=demande.empId;
+
+  const jours=[];
+  _cgJoursOuvresIter(demande.dateDebut, demande.dateFin, d=>jours.push(d));
+  if(jours.length===0) return stats;
+
+  // Regrouper par weekKey pour minimiser les lectures Firestore
+  const parSemaine={};
+  jours.forEach(d=>{
+    const wk=_cgWeekKey(d);
+    if(!parSemaine[wk]) parSemaine[wk]=[];
+    parSemaine[wk].push(d);
+  });
+
+  for(const wk of Object.keys(parSemaine)){
+    for(const date of parSemaine[wk]){
+      const dateStr=_cgFmt(date);
+      const docKey=dateStr+'_'+empId;
+      // Lire le doc existant
+      let data={items:[]};
+      try{
+        const snap=await window._getDoc(window._doc(window._db,'rh',window._uid,wk,docKey));
+        if(snap.exists()){ data=snap.data()||{items:[]}; if(!Array.isArray(data.items)) data.items=[]; }
+      }catch(e){ console.warn('[propageConge] read',docKey,e.message); }
+
+      // Skip si déjà un item avec origineConge=demandeId (re-propagation idempotente)
+      const dejaPropage=data.items.some(it=>it.origineConge && it.origineConge.demandeId===demandeId);
+      if(dejaPropage){ stats.nbSkip++; continue; }
+
+      // Chercher un créneau travail existant → le convertir
+      const idxTravail=data.items.findIndex(it=>it.type==='travail'||it.type==='partiel');
+      if(idxTravail>=0){
+        const old=data.items[idxTravail];
+        data.items[idxTravail]={
+          ...old,
+          type:'conge',
+          note:(old.note?old.note+' · ':'')+(_CG_TYPES_LBL[demande.type]||'Congé approuvé'),
+          origineConge:{ demandeId, type:demande.type||'cp', remplaceTravail:true }
+        };
+        stats.nbRemplaces++;
+      } else {
+        // Aucun créneau existant → créer un conge sans horaires
+        data.items.push({
+          id:'c'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+          type:'conge',
+          deb:'',
+          fin:'',
+          note:_CG_TYPES_LBL[demande.type]||'Congé approuvé',
+          origineConge:{ demandeId, type:demande.type||'cp', remplaceTravail:false }
+        });
+        stats.nbCrees++;
+      }
+
+      // Écrire admin + miroir public
+      try{
+        await window._setDoc(window._doc(window._db,'rh',window._uid,wk,docKey),data);
+      }catch(e){ console.error('[propageConge] write',docKey,e.message); throw e; }
+      try{
+        await window._setDoc(window._doc(window._db,'rh_planning_public',window._uid,wk,docKey),data);
+      }catch(e){ /* miroir best-effort */ console.warn('[propageConge] public mirror',e.message); }
+    }
+  }
+  return stats;
+}
+
+/* Libellés des types de congé pour les notes du planning */
+const _CG_TYPES_LBL={
+  cp:'Congés payés', rtt:'RTT', ancienneté:'Anc.', anciennete:'Anc.',
+  maladie:'Maladie', maternite:'Maternité', paternite:'Paternité',
+  familial:'Événement familial', ss_solde:'Sans solde', sans_solde:'Sans solde',
+  formation:'Formation', css:'CSS', recup:'Récupération', autre:'Congé'
+};
+
+/* Retire du planning tous les créneaux portant origineConge.demandeId = demandeId.
+   Retourne le nombre d'items effectivement retirés. */
+async function rollbackCongeDuPlanning(demandeId){
+  let nbRetires=0;
+  if(!demandeId) return 0;
+
+  // On ne sait pas quelles semaines ont été touchées : balayer les semaines
+  // de la demande (rechargeable depuis _demandes)
+  const dem=_demandes.find(d=>d.id===demandeId);
+  if(!dem||!dem.dateDebut) return 0;
+
+  const jours=[];
+  _cgJoursOuvresIter(dem.dateDebut, dem.dateFin, d=>jours.push(d));
+  const parSemaine={};
+  jours.forEach(d=>{
+    const wk=_cgWeekKey(d);
+    if(!parSemaine[wk]) parSemaine[wk]=[];
+    parSemaine[wk].push(d);
+  });
+
+  for(const wk of Object.keys(parSemaine)){
+    for(const date of parSemaine[wk]){
+      const docKey=_cgFmt(date)+'_'+dem.empId;
+      let data=null;
+      try{
+        const snap=await window._getDoc(window._doc(window._db,'rh',window._uid,wk,docKey));
+        if(snap.exists()) data=snap.data()||null;
+      }catch(e){ continue; }
+      if(!data||!Array.isArray(data.items)) continue;
+
+      let changed=false;
+      const newItems=[];
+      data.items.forEach(it=>{
+        if(it.origineConge && it.origineConge.demandeId===demandeId){
+          if(it.origineConge.remplaceTravail){
+            // On avait remplacé un travail : ne pas le jeter, restaurer en travail
+            const restored={...it};
+            delete restored.origineConge;
+            restored.type='travail';
+            // Nettoyer le suffixe de note qu'on avait ajouté
+            if(restored.note){
+              const suffix=' · '+(_CG_TYPES_LBL[it.origineConge.type]||'Congé approuvé');
+              if(restored.note.endsWith(suffix)){
+                restored.note=restored.note.slice(0,-suffix.length);
+              } else if(Object.values(_CG_TYPES_LBL).includes(restored.note)){
+                restored.note='';
+              }
+            }
+            newItems.push(restored);
+            changed=true; nbRetires++;
+          } else {
+            // Créneau purement créé pour le congé → on le retire
+            changed=true; nbRetires++;
+          }
+        } else {
+          newItems.push(it);
+        }
+      });
+
+      if(changed){
+        data.items=newItems;
+        try{
+          await window._setDoc(window._doc(window._db,'rh',window._uid,wk,docKey),data);
+          try{ await window._setDoc(window._doc(window._db,'rh_planning_public',window._uid,wk,docKey),data); }catch(e2){}
+        }catch(e){ console.error('[rollbackConge] write',docKey,e.message); }
+      }
+    }
+  }
+  return nbRetires;
+}
+
+/* Synchronisation en masse : propage toutes les demandes actuellement
+   approuvées vers le planning. Idempotent (saute si déjà propagé).
+   Utilisé pour rattraper les approbations faites AVANT ce fix. */
+async function syncTousCongesApprouves(){
+  const approuvees=_demandes.filter(d=>d.statut==='approved');
+  if(approuvees.length===0){
+    showToast('Aucun congé approuvé à synchroniser','warn');
+    return;
+  }
+  if(!confirm('Synchroniser '+approuvees.length+' demande(s) approuvée(s) avec le planning ?\n\nLes créneaux déjà synchronisés seront ignorés (opération sans doublon).')){
+    return;
+  }
+  const btn=document.querySelector('button[onclick="syncTousCongesApprouves()"]');
+  const oldLbl=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Sync...'; }
+
+  let totalCrees=0, totalRemplaces=0, totalSkip=0, errors=0;
+  for(let i=0;i<approuvees.length;i++){
+    const dem=approuvees[i];
+    if(btn) btn.textContent='⏳ '+(i+1)+'/'+approuvees.length;
+    try{
+      const s=await propageCongeAuPlanning(dem);
+      totalCrees+=s.nbCrees;
+      totalRemplaces+=s.nbRemplaces;
+      totalSkip+=s.nbSkip;
+    }catch(e){
+      console.error('[sync] demande',dem.id,e);
+      errors++;
+    }
+  }
+  if(btn){ btn.disabled=false; btn.textContent=oldLbl||'📅 Sync planning'; }
+
+  const parts=[];
+  if(totalCrees>0) parts.push(totalCrees+' créé(s)');
+  if(totalRemplaces>0) parts.push(totalRemplaces+' remplacé(s)');
+  if(totalSkip>0) parts.push(totalSkip+' déjà OK');
+  const msg=parts.length>0 ? '✅ Sync terminée : '+parts.join(' · ') : '✅ Tout était déjà synchronisé';
+  if(errors>0) showToast(msg+' — '+errors+' erreur(s)','warn');
+  else showToast(msg,'ok');
+}
+window.syncTousCongesApprouves=syncTousCongesApprouves;
+
 async function approuver(id){
   try{
     var update={statut:'approved', traitePar:document.getElementById('uname')?.textContent||'Manager', traiteLe:new Date().toISOString()};
@@ -1126,7 +1365,29 @@ async function approuver(id){
     const idx=_demandes.findIndex(d=>d.id===id);
     if(idx>=0){_demandes[idx].statut='approved';}
     renderAll();
-    showToast('✅ Demande approuvée','ok');
+    // ── Propagation automatique vers le planning ──
+    try{
+      const dem=_demandes.find(d=>d.id===id);
+      if(dem){
+        const stats=await propageCongeAuPlanning(dem);
+        const total=stats.nbCrees+stats.nbRemplaces;
+        if(total>0){
+          const parts=[];
+          if(stats.nbCrees>0) parts.push(stats.nbCrees+' créneau(x) créé(s)');
+          if(stats.nbRemplaces>0) parts.push(stats.nbRemplaces+' travail remplacé(s)');
+          showToast('✅ Demande approuvée · Planning : '+parts.join(', '),'ok');
+        } else if(stats.nbSkip>0){
+          showToast('✅ Demande approuvée (planning déjà à jour)','ok');
+        } else {
+          showToast('✅ Demande approuvée','ok');
+        }
+      } else {
+        showToast('✅ Demande approuvée','ok');
+      }
+    }catch(e){
+      console.error('[approuver] propagation planning:',e);
+      showToast('✅ Approuvée — ⚠ planning non synchronisé (voir console)','warn');
+    }
   }catch(e){ showToast('Erreur','err'); }
 }
 window.approuver=approuver;
@@ -1134,9 +1395,34 @@ window.approuver=approuver;
 function openRefus(id){ _refusId=id; document.getElementById('refus-motif').value=''; document.getElementById('modal-refus').classList.add('show'); }
 window.openRefus=openRefus;
 
+/* Demande confirmation au manager pour supprimer les créneaux planning
+   liés à une demande de congé.
+   - Si la demande n'était pas approuvée → ne rien faire, retourner false (rien à supprimer)
+   - Sinon → window.confirm(), si OUI → rollback, retourne nbRetires, sinon 0 */
+async function _maybeRollbackPlanning(demandeId, wasApproved){
+  if(!wasApproved) return 0;
+  const dem=_demandes.find(d=>d.id===demandeId);
+  if(!dem) return 0;
+  // Ne propose la suppression que si c'était un congé réellement propagé
+  // (on ne fait pas de présupposé : on propose dans tous les cas puisqu'il
+  // était approuvé, même si la propagation a pu échouer)
+  const msg='Cette demande était approuvée. Voulez-vous aussi supprimer les créneaux correspondants dans le planning ?';
+  if(!confirm(msg)) return 0;
+  try{
+    return await rollbackCongeDuPlanning(demandeId);
+  }catch(e){
+    console.error('[rollback planning]',e);
+    showToast('⚠ Erreur rollback planning (voir console)','warn');
+    return 0;
+  }
+}
+
 async function confirmRefus(){
   const motif=document.getElementById('refus-motif').value.trim();
   try{
+    // Mémoriser si la demande était approuvée AVANT update
+    const oldDem=_demandes.find(d=>d.id===_refusId);
+    const wasApproved=oldDem && oldDem.statut==='approved';
     var update={statut:'refused', motifRefus:motif||null, traitePar:document.getElementById('uname')?.textContent||'Manager', traiteLe:new Date().toISOString()};
     await window._updateDoc(window._doc(window._db,'rh_conges',window._uid,'demandes',_refusId),update);
     syncDemandePublic(_refusId,update);
@@ -1144,7 +1430,9 @@ async function confirmRefus(){
     if(idx>=0){_demandes[idx].statut='refused';_demandes[idx].motifRefus=motif||null;}
     closeModal('modal-refus');
     renderAll();
-    showToast('❌ Demande refusée','ok');
+    const nbRetires=await _maybeRollbackPlanning(_refusId, wasApproved);
+    if(nbRetires>0) showToast('❌ Refusée · '+nbRetires+' créneau(x) planning retiré(s)','ok');
+    else showToast('❌ Demande refusée','ok');
   }catch(e){ showToast('Erreur','err'); }
 }
 window.confirmRefus=confirmRefus;
@@ -1152,12 +1440,16 @@ window.confirmRefus=confirmRefus;
 async function annuler(id){
   if(!confirm('Annuler cette demande approuvée ?')) return;
   try{
+    const oldDem=_demandes.find(d=>d.id===id);
+    const wasApproved=oldDem && oldDem.statut==='approved';
     await window._updateDoc(window._doc(window._db,'rh_conges',window._uid,'demandes',id),{statut:'cancelled'});
     syncDemandePublic(id,{statut:'cancelled'});
     const idx=_demandes.findIndex(d=>d.id===id);
     if(idx>=0) _demandes[idx].statut='cancelled';
     renderAll();
-    showToast('Demande annulée','ok');
+    const nbRetires=await _maybeRollbackPlanning(id, wasApproved);
+    if(nbRetires>0) showToast('Annulée · '+nbRetires+' créneau(x) planning retiré(s)','ok');
+    else showToast('Demande annulée','ok');
   }catch(e){ showToast('Erreur','err'); }
 }
 window.annuler=annuler;
@@ -1165,11 +1457,15 @@ window.annuler=annuler;
 async function deleteDemande(id){
   if(!confirm('Supprimer définitivement cette demande ?')) return;
   try{
+    const oldDem=_demandes.find(d=>d.id===id);
+    const wasApproved=oldDem && oldDem.statut==='approved';
     await window._deleteDoc(window._doc(window._db,'rh_conges',window._uid,'demandes',id));
     try{ await window._deleteDoc(window._doc(window._db,'rh_conges_public',window._uid,'demandes',id)); }catch(e){}
+    const nbRetires=await _maybeRollbackPlanning(id, wasApproved);
     _demandes=_demandes.filter(d=>d.id!==id);
     renderAll();
-    showToast('Supprimé','ok');
+    if(nbRetires>0) showToast('Supprimé · '+nbRetires+' créneau(x) planning retiré(s)','ok');
+    else showToast('Supprimé','ok');
   }catch(e){ showToast('Erreur','err'); }
 }
 window.deleteDemande=deleteDemande;
