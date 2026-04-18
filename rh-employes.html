@@ -515,6 +515,50 @@
         <div class="mfield"><label>IBAN</label><input class="minput" id="f-iban" placeholder="FR76 ..."/></div>
       </div>
 
+      <!-- Rythme d'alternance (affiché uniquement pour Alternance/Apprentissage/Stage) -->
+      <div id="f-alternance-block" style="display:none">
+        <div class="msep">🎓 Rythme d'alternance <span id="f-alternance-tooltip"></span><span style="font-size:10px;font-weight:400;color:var(--muted);margin-left:6px">— Semaines école vs entreprise</span></div>
+        <div style="padding:10px 12px;background:#fef3c7;border:1px solid #fde68a;border-radius:8px;margin-bottom:12px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:10px;user-select:none">
+            <input type="checkbox" id="f-alt-actif" onchange="onAlternanceChange()" style="cursor:pointer;width:14px;height:14px;accent-color:#d97706"/>
+            <span style="font-size:12px;font-weight:700;color:#92400e">Activer le rythme d'alternance automatique</span>
+          </label>
+          <div id="f-alt-fields" style="display:none">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+              <div>
+                <label style="font-size:10px;color:#92400e;font-weight:600">Semaines école / cycle</label>
+                <input class="minput" id="f-alt-sem-ecole" type="text" inputmode="decimal" placeholder="1" value="1" oninput="onAlternanceChange()" style="font-size:13px"/>
+              </div>
+              <div>
+                <label style="font-size:10px;color:#92400e;font-weight:600">Semaines entreprise / cycle</label>
+                <input class="minput" id="f-alt-sem-entr" type="text" inputmode="decimal" placeholder="2" value="2" oninput="onAlternanceChange()" style="font-size:13px"/>
+              </div>
+            </div>
+            <div style="margin-bottom:10px">
+              <label style="font-size:10px;color:#92400e;font-weight:600">Date de référence (début d'une semaine école connue)</label>
+              <input class="minput" id="f-alt-date-ref" type="date" onchange="onAlternanceChange()" style="font-size:13px"/>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+              <div>
+                <label style="font-size:10px;color:#92400e;font-weight:600">Début validité (optionnel)</label>
+                <input class="minput" id="f-alt-date-deb" type="date" onchange="onAlternanceChange()" style="font-size:13px"/>
+              </div>
+              <div>
+                <label style="font-size:10px;color:#92400e;font-weight:600">Fin validité (optionnel)</label>
+                <input class="minput" id="f-alt-date-fin" type="date" onchange="onAlternanceChange()" style="font-size:13px"/>
+              </div>
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:10px;font-size:11px;color:#92400e;user-select:none">
+              <input type="checkbox" id="f-alt-heures-comptent" onchange="onAlternanceChange()" style="cursor:pointer;width:13px;height:13px;accent-color:#d97706"/>
+              <span>Les heures école comptent dans le total planifié (salaire alternant)</span>
+            </label>
+            <div id="f-alt-preview" style="font-size:11px;color:#92400e;padding:8px 10px;background:#fffbeb;border-radius:6px;border:1px dashed #fcd34d;line-height:1.5">
+              Saisissez une date de référence pour voir l'aperçu du rythme.
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Avantages en nature -->
       <div class="msep">🥗 Avantages en nature <span id="f-aen-tooltip"></span><span id="f-aen-info" style="font-size:10px;font-weight:400;color:var(--muted);margin-left:6px"></span></div>
       <div style="padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;margin-bottom:12px">
@@ -1926,7 +1970,7 @@ window.openModalNouvelEmploye = function() {
   const s1El = document.getElementById('f-maj-seuil1'); if (s1El) s1El.value = '8';
   const t1El = document.getElementById('f-maj-taux1');  if (t1El) t1El.value = '25';
   const t2El = document.getElementById('f-maj-taux2');  if (t2El) t2El.value = '50';
-  setTimeout(() => { onMajorationCustomChange(); updateMajorationDisplay(); _resetAENFields(); setSalMode('brut'); }, 50);
+  setTimeout(() => { onMajorationCustomChange(); updateMajorationDisplay(); _resetAENFields(); _resetAlternanceFields(); setSalMode('brut'); }, 50);
   document.getElementById('f-contrat').value   = 'CDI';
   document.getElementById('f-categorie').value  = 'employe';
   document.getElementById('f-statut').value    = 'actif';
@@ -2018,6 +2062,7 @@ window.openModalEdit = function(id) {
     onMajorationCustomChange();
     updateMajorationDisplay();
     _loadAENFields(e);
+    _loadAlternanceFields(e);
     // Si taux horaire renseigné mais pas de brut → mode taux horaire
     if (e.tauxHoraireBase && !e.salaireBrut) {
       setSalMode('tauxhoraire');
@@ -2078,6 +2123,7 @@ window.saveEmploye = async function() {
       ]};
     })(),
     avantagesNature: _collectAENFields(),
+    rythmeAlternance: _collectAlternanceFields(),
     tauxCharges:     window._currentTauxCharges || null,
     frequence:       document.getElementById('f-freq').value,
     heuresHebdo:     parseFloat(document.getElementById('f-heures').value)||35,
@@ -2198,6 +2244,7 @@ function _collectFormData() {
       ]};
     })(),
     avantagesNature: _collectAENFields(),
+    rythmeAlternance: _collectAlternanceFields(),
     tauxCharges:     window._currentTauxCharges || null,
     frequence:       document.getElementById('f-freq').value,
     heuresHebdo:     parseFloat(document.getElementById('f-heures').value)||35,
@@ -3047,6 +3094,9 @@ window.onContratChange = function() {
   const fin      = document.getElementById('f-fin')?.value;
   const active   = document.getElementById('pe-active')?.checked;
 
+  // Afficher/masquer le bloc rythme d'alternance
+  _updateAlternanceVisibility();
+
   const legal = getPELegal(contrat, categorie, entree, fin);
 
   // Mettre à jour l'info légale
@@ -3462,7 +3512,7 @@ function _onHeuresHebdoChange() {
 
 /* Appelée quand une checkbox ou un input AEN change.
    type ∈ {'repas','logement','vehicule','transport'} */
-window.onAENChange = function(type) {
+function onAENChange(type) {
   const actif = document.getElementById('f-aen-'+type+'-actif')?.checked || false;
   const fieldsEl = document.getElementById('aen-'+type+'-fields');
   const cardEl   = document.getElementById('aen-card-'+type);
@@ -3481,7 +3531,8 @@ window.onAENChange = function(type) {
   }
   // Recalcul total global
   updateAENTotal();
-};
+}
+window.onAENChange = onAENChange;
 
 /* Recalcule et affiche le total AEN mensuel (somme des types actifs) */
 function updateAENTotal() {
@@ -3574,6 +3625,139 @@ function _collectAENFields() {
     logement:  { actif: logementActif,  montantMensuel: pf(document.getElementById('f-aen-logement-montant')?.value) },
     vehicule:  { actif: vehiculeActif,  montantMensuel: pf(document.getElementById('f-aen-vehicule-montant')?.value) },
     transport: { actif: transportActif, montantMensuel: pf(document.getElementById('f-aen-transport-montant')?.value) }
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════
+// RYTHME D'ALTERNANCE
+// ══════════════════════════════════════════════════════════════════
+
+/* Types de contrat qui déclenchent l'affichage de la section rythme */
+const _ALT_CONTRAT_TYPES = ['Alternance', 'Apprentissage', 'Stage'];
+
+/* Affiche/masque la section rythme selon le type de contrat */
+function _updateAlternanceVisibility() {
+  const contrat = document.getElementById('f-contrat')?.value || '';
+  const block = document.getElementById('f-alternance-block');
+  if (!block) return;
+  block.style.display = _ALT_CONTRAT_TYPES.includes(contrat) ? '' : 'none';
+}
+
+/* Normalise les semaines ISO (lundi comme premier jour) */
+function _altMonday(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12, 0, 0);
+  const dow = x.getDay();
+  const diff = dow === 0 ? -6 : 1 - dow;
+  x.setDate(x.getDate() + diff);
+  return x;
+}
+
+/* Calcule si un lundi donné est une semaine école selon le rythme.
+   rythme = { semainesEcole, semainesEntreprise, dateReference }
+   Retourne null si rythme invalide. */
+function _altIsSemaineEcole(rythme, lundi) {
+  if (!rythme || !rythme.actif) return null;
+  const se = parseInt(rythme.semainesEcole) || 0;
+  const sn = parseInt(rythme.semainesEntreprise) || 0;
+  if (se <= 0 || sn <= 0) return null;
+  if (!rythme.dateReference) return null;
+  const ref = _altMonday(new Date(rythme.dateReference + 'T12:00:00'));
+  const target = _altMonday(lundi);
+  const diffMs = target.getTime() - ref.getTime();
+  const diffSem = Math.round(diffMs / (7 * 24 * 3600 * 1000));
+  const cycle = se + sn;
+  // Modulo qui gère les nombres négatifs (avant la date de référence)
+  const pos = ((diffSem % cycle) + cycle) % cycle;
+  return pos < se;
+}
+
+/* Met à jour le bloc preview et la visibilité des champs selon la case "actif" */
+function onAlternanceChange() {
+  const actif = document.getElementById('f-alt-actif')?.checked || false;
+  const fields = document.getElementById('f-alt-fields');
+  if (fields) fields.style.display = actif ? '' : 'none';
+  if (!actif) return;
+
+  // Preview : montrer les 6 prochaines semaines
+  const preview = document.getElementById('f-alt-preview');
+  if (!preview) return;
+
+  const rythme = {
+    actif: true,
+    semainesEcole: parseInt((document.getElementById('f-alt-sem-ecole')?.value||'').replace(',','.')) || 0,
+    semainesEntreprise: parseInt((document.getElementById('f-alt-sem-entr')?.value||'').replace(',','.')) || 0,
+    dateReference: document.getElementById('f-alt-date-ref')?.value || ''
+  };
+
+  if (!rythme.dateReference || rythme.semainesEcole <= 0 || rythme.semainesEntreprise <= 0) {
+    preview.textContent = 'Saisissez une date de référence + semaines école/entreprise pour voir l\'aperçu.';
+    return;
+  }
+
+  // Générer preview 6 semaines à partir de lundi prochain (ou lundi courant si lundi)
+  const base = _altMonday(new Date());
+  const lines = [];
+  for (let i = 0; i < 6; i++) {
+    const lundi = new Date(base);
+    lundi.setDate(base.getDate() + i * 7);
+    const isEcole = _altIsSemaineEcole(rythme, lundi);
+    const label = lundi.toLocaleDateString('fr-FR', { day:'numeric', month:'short' });
+    const type = isEcole === null ? '?' : (isEcole ? '🎓 École' : '💼 Entreprise');
+    lines.push('Sem. ' + label + ' → ' + type);
+  }
+  preview.innerHTML = lines.join('<br>');
+}
+window.onAlternanceChange = onAlternanceChange;
+
+/* Charge le rythme depuis un employé dans le formulaire */
+function _loadAlternanceFields(emp) {
+  const r = (emp && emp.rythmeAlternance) || null;
+  const cb = document.getElementById('f-alt-actif');
+  if (cb) cb.checked = !!(r && r.actif);
+  const se = document.getElementById('f-alt-sem-ecole');
+  if (se) se.value = r && r.semainesEcole ? r.semainesEcole : '1';
+  const sn = document.getElementById('f-alt-sem-entr');
+  if (sn) sn.value = r && r.semainesEntreprise ? r.semainesEntreprise : '2';
+  const dref = document.getElementById('f-alt-date-ref');
+  if (dref) dref.value = (r && r.dateReference) || '';
+  const ddeb = document.getElementById('f-alt-date-deb');
+  if (ddeb) ddeb.value = (r && r.dateDebut) || '';
+  const dfin = document.getElementById('f-alt-date-fin');
+  if (dfin) dfin.value = (r && r.dateFin) || '';
+  const hc = document.getElementById('f-alt-heures-comptent');
+  if (hc) hc.checked = !!(r && r.heuresComptent);
+  _updateAlternanceVisibility();
+  onAlternanceChange();
+}
+
+/* Reset de la section rythme */
+function _resetAlternanceFields() {
+  const cb = document.getElementById('f-alt-actif');
+  if (cb) cb.checked = false;
+  const se = document.getElementById('f-alt-sem-ecole');   if (se) se.value = '1';
+  const sn = document.getElementById('f-alt-sem-entr');    if (sn) sn.value = '2';
+  const dref = document.getElementById('f-alt-date-ref');  if (dref) dref.value = '';
+  const ddeb = document.getElementById('f-alt-date-deb');  if (ddeb) ddeb.value = '';
+  const dfin = document.getElementById('f-alt-date-fin');  if (dfin) dfin.value = '';
+  const hc = document.getElementById('f-alt-heures-comptent'); if (hc) hc.checked = false;
+  _updateAlternanceVisibility();
+  onAlternanceChange();
+}
+
+/* Collecte le rythme pour saveEmploye + autosave.
+   Retourne null si la case actif n'est pas cochée (pas de pollution Firestore). */
+function _collectAlternanceFields() {
+  const actif = document.getElementById('f-alt-actif')?.checked || false;
+  if (!actif) return null;
+  const pi = v => parseInt((v||'').toString().replace(',','.')) || 0;
+  return {
+    actif: true,
+    semainesEcole: pi(document.getElementById('f-alt-sem-ecole')?.value) || 1,
+    semainesEntreprise: pi(document.getElementById('f-alt-sem-entr')?.value) || 2,
+    dateReference: document.getElementById('f-alt-date-ref')?.value || null,
+    dateDebut: document.getElementById('f-alt-date-deb')?.value || null,
+    dateFin: document.getElementById('f-alt-date-fin')?.value || null,
+    heuresComptent: document.getElementById('f-alt-heures-comptent')?.checked || false
   };
 }
 

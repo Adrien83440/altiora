@@ -19,6 +19,7 @@
       --t-formation:#fef3c7;--tc-formation:#92400e;
       --t-astreinte:#ede9fe;--tc-astreinte:#5b21b6;
       --t-partiel:#fff7ed;--tc-partiel:#c2410c;
+      --t-ecole:#fef3c7;--tc-ecole:#78350f;
       --shadow-xs:0 1px 2px rgba(0,0,0,0.04);
       --shadow-sm:0 2px 8px rgba(0,0,0,0.06);
       --shadow-md:0 4px 16px rgba(0,0,0,0.08);
@@ -308,6 +309,29 @@
     .t-travail{background:linear-gradient(135deg,#dcfce7,#d1fae5);color:var(--tc-travail);border-left-color:#059669;}
     .t-repos{background:linear-gradient(135deg,#f3f4f6,#e5e7eb);color:var(--tc-repos);border-left-color:#9ca3af;}
     .t-conge{background:repeating-linear-gradient(-45deg,#dbeafe,#dbeafe 4px,#eff6ff 4px,#eff6ff 8px)!important;color:var(--tc-conge);border-left-color:#3b82f6;}
+    .t-ecole{background:linear-gradient(135deg,#fde68a 0%,#fcd34d 100%)!important;color:var(--tc-ecole);border-left-color:#d97706;font-weight:700;}
+    /* Filigrane ÉCOLE sur une cellule jour (vue mois) */
+    .day-cell-ecole{position:relative;}
+    .day-cell-ecole::before{
+      content:"🎓 ÉCOLE";
+      position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-18deg);
+      font-size:28px;font-weight:800;color:rgba(217,119,6,0.14);
+      pointer-events:none;white-space:nowrap;z-index:0;letter-spacing:2px;
+    }
+    .day-cell-ecole>*{position:relative;z-index:1;}
+    /* Bande en haut d'une colonne jour pour signaler "semaine école" (vue semaine) */
+    .day-col-ecole-banner{
+      background:linear-gradient(135deg,#fef3c7,#fde68a);
+      color:#78350f;font-size:10px;font-weight:700;letter-spacing:0.5px;
+      padding:3px 6px;border-radius:4px;margin-bottom:3px;
+      border:1px solid #fcd34d;text-align:center;
+    }
+    /* Badge alerte "incohérence rythme" */
+    .rythme-warn{
+      display:inline-block;background:#fef2f2;color:#991b1b;
+      font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;
+      border:1px solid #fca5a5;margin-left:4px;cursor:help;
+    }
     .t-maladie{background:linear-gradient(135deg,#fee2e2,#fecaca);color:var(--tc-maladie);border-left-color:#ef4444;}
     .t-formation{background:linear-gradient(135deg,#fef3c7,#fde68a);color:var(--tc-formation);border-left-color:#f59e0b;}
     .t-astreinte{background:linear-gradient(135deg,#ede9fe,#ddd6fe);color:var(--tc-astreinte);border-left-color:#8b5cf6;}
@@ -1093,6 +1117,7 @@
           <button type="button" class="type-btn" data-type="conge" onclick="setType('conge',this)"><div class="type-btn-icon">🏖️</div><div class="type-btn-lbl">Congé</div></button>
           <button type="button" class="type-btn" data-type="maladie" onclick="setType('maladie',this)"><div class="type-btn-icon">🤒</div><div class="type-btn-lbl">Maladie</div></button>
           <button type="button" class="type-btn" data-type="formation" onclick="setType('formation',this)"><div class="type-btn-icon">📚</div><div class="type-btn-lbl">Formation</div></button>
+          <button type="button" class="type-btn" data-type="ecole" onclick="setType('ecole',this)"><div class="type-btn-icon">🎓</div><div class="type-btn-lbl">École</div></button>
           <button type="button" class="type-btn" data-type="astreinte" onclick="setType('astreinte',this)"><div class="type-btn-icon">🔔</div><div class="type-btn-lbl">Astreinte</div></button>
           <button type="button" class="type-btn" data-type="repos" onclick="setType('repos',this)"><div class="type-btn-icon">😴</div><div class="type-btn-lbl">Repos</div></button>
           <button type="button" class="type-btn" data-type="autre" onclick="setType('autre',this)"><div class="type-btn-icon">📋</div><div class="type-btn-lbl">Autre</div></button>
@@ -1109,6 +1134,14 @@
           <label class="ml">Poste / Note</label>
           <input class="mi" id="cr-note" placeholder="Ex: Caisse, Cuisine, Accueil…"/>
         </div>
+      </div>
+
+      <!-- Option spécifique ÉCOLE : compter dans le total planifié ? -->
+      <div id="cr-ecole-opts" style="display:none;margin-bottom:12px;padding:8px 10px;background:#fef3c7;border:1px solid #fde68a;border-radius:7px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px;color:#92400e;user-select:none;margin:0">
+          <input type="checkbox" id="cr-ecole-heures-comptent" style="cursor:pointer;width:13px;height:13px;accent-color:#d97706"/>
+          <span>Compter les heures école dans le total planifié (salaire alternant)</span>
+        </label>
       </div>
 
       <!-- MULTI-DATES TOGGLE -->
@@ -1404,8 +1437,8 @@ const EMP_PILL_COLORS=[
   {bg:'#f0fdf4',fg:'#166534',bd:'#22c55e'}, // vert clair
   {bg:'#fdf4ff',fg:'#581c87',bd:'#a855f7'}, // mauve
 ];
-const TYPE_ICO={travail:'💼',partiel:'⏰',conge:'🏖️',maladie:'🤒',formation:'📚',astreinte:'🔔',repos:'😴',autre:'📋'};
-const TYPE_LBL={travail:'Travail',partiel:'Tps partiel',conge:'Congé',maladie:'Maladie',formation:'Formation',astreinte:'Astreinte',repos:'Repos',autre:'Autre'};
+const TYPE_ICO={travail:'💼',partiel:'⏰',conge:'🏖️',maladie:'🤒',formation:'📚',astreinte:'🔔',repos:'😴',ecole:'🎓',autre:'📋'};
+const TYPE_LBL={travail:'Travail',partiel:'Tps partiel',conge:'Congé',maladie:'Maladie',formation:'Formation',astreinte:'Astreinte',repos:'Repos',ecole:'École',autre:'Autre'};
 
 // Présets horaires courants par secteur
 const PRESETS=[
@@ -1470,6 +1503,61 @@ function monthDays(d){
 // Clé de collection Firestore (par mois pour vue mois)
 function crKey(d){return `plan_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}`;}
 function weekKey(d){return `plan_${fmt(monday(d)).replace(/-/g,'')}` ;}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RYTHME D'ALTERNANCE — calcul côté planning
+   Les fiches employé peuvent avoir emp.rythmeAlternance = {
+     actif, semainesEcole, semainesEntreprise, dateReference,
+     dateDebut, dateFin, heuresComptent
+   }
+   Cette fonction retourne :
+     true  = lundi considéré semaine école
+     false = lundi considéré semaine entreprise
+     null  = pas de rythme applicable (hors période de validité, emp non alternant, etc.)
+   ═══════════════════════════════════════════════════════════════════════ */
+function _planIsSemaineEcoleAuto(emp, lundi){
+  if(!emp||!emp.rythmeAlternance) return null;
+  const r=emp.rythmeAlternance;
+  if(!r.actif) return null;
+  const se=parseInt(r.semainesEcole)||0;
+  const sn=parseInt(r.semainesEntreprise)||0;
+  if(se<=0||sn<=0||!r.dateReference) return null;
+
+  // Respecter la période de validité si renseignée
+  const lundiFmt=fmt(lundi);
+  if(r.dateDebut && lundiFmt < r.dateDebut) return null;
+  if(r.dateFin   && lundiFmt > r.dateFin)   return null;
+
+  const ref=monday(new Date(r.dateReference+'T12:00:00'));
+  const target=monday(new Date(lundi));
+  const diffSem=Math.round((target.getTime()-ref.getTime())/(7*24*3600*1000));
+  const cycle=se+sn;
+  const pos=((diffSem%cycle)+cycle)%cycle;
+  return pos<se;
+}
+
+/* Helper : nb d'heures effectives d'un item qui comptent dans le total planifié.
+   - travail / partiel / formation / astreinte : toujours comptent
+   - repos / conge / maladie / autre : jamais
+   - ecole : uniquement si item.heuresComptent === true
+   Retourne la durée en heures (float), 0 si ne compte pas. */
+function _planItemHeuresComptent(item){
+  if(!item) return 0;
+  const t=item.type;
+  if(['repos','conge','maladie','autre'].includes(t)) return 0;
+  if(t==='ecole' && !item.heuresComptent) return 0;
+  // Les types qui comptent : calculer la durée
+  const plages = item.plages && item.plages.length ? item.plages : (item.deb&&item.fin?[{deb:item.deb,fin:item.fin}]:[]);
+  let total=0;
+  plages.forEach(p=>{
+    if(!p.deb||!p.fin) return;
+    const [h1,m1]=p.deb.split(':').map(Number);
+    const [h2,m2]=p.fin.split(':').map(Number);
+    const d = (h2*60+m2)-(h1*60+m1);
+    if(d>0) total += d/60;
+  });
+  return total;
+}
 
 // ── INIT ──
 async function initPlanning(){
@@ -1790,13 +1878,29 @@ function renderGantt(){
           const items=(_cr[k]?.items||[]);
           const off=isFerme(d)&&!items.length;
           const infrs=_infractions[k]||[];
-          return `<div class="gd-cell ${isToday(d)?'today':''} ${off?'we':''}"
+          // Rythme alternance auto : est-ce une semaine école ?
+          const lundiD=monday(new Date(d));
+          const isEcoleAuto=_planIsSemaineEcoleAuto(e,lundiD);
+          // Un créneau 'ecole' posé manuellement sur ce jour ?
+          const hasEcoleManuel=items.some(it=>it.type==='ecole');
+          // Un créneau travail qui indiquerait une incohérence avec le rythme auto ?
+          const hasTravailItem=items.some(it=>['travail','partiel'].includes(it.type));
+          const incoherence = isEcoleAuto===true && hasTravailItem;
+          const showFiligrane = (isEcoleAuto===true && !hasEcoleManuel && !hasTravailItem);
+          const cls = [
+            'gd-cell',
+            isToday(d)?'today':'',
+            off?'we':'',
+            showFiligrane?'day-cell-ecole':''
+          ].filter(Boolean).join(' ');
+          return `<div class="${cls}"
             data-dnd-target-k="${k}"
             ondragover="dndOver(event,'${k}')"
             ondragleave="dndLeave(event)"
             ondrop="dndDrop(event,'${k}')"
             onclick="openCreneauModal('${e.id}','${fmt(d)}')">
             ${items.map(it=>pillGantt(it,k)).join('')}
+            ${incoherence?`<div class="rythme-warn" title="Rythme d'alternance prévoit ÉCOLE cette semaine mais un créneau travail est posé">⚠ Incohérence rythme</div>`:''}
             ${infrs.length?`<div style="font-size:8px;font-weight:700;color:#dc2626;padding:1px 3px;background:#fee2e2;border-radius:3px;margin-top:2px">⚠️</div>`:''}
             ${items.length?'':'<div class="add-hint">+</div>'}
           </div>`;
@@ -2034,7 +2138,11 @@ function renderMois(){
 
       const totalH=empData.reduce((s,d)=>s+d.h,0);
       const ferme=isFerme(date);
-      return `<div class="m-cell ${isToday(date)?'m-today':''} ${!cur?'m-other':''} ${isWE(date)?'m-we':''} ${ferme&&cur?'m-ferme':''}"
+      // Détecter : au moins un employé visible en semaine école auto
+      const lundiM=monday(new Date(date));
+      const anyEcoleAuto = (vis||[]).some(emp=>_planIsSemaineEcoleAuto(emp,lundiM)===true);
+      const showEcoleFili = anyEcoleAuto && cur;
+      return `<div class="m-cell ${isToday(date)?'m-today':''} ${!cur?'m-other':''} ${isWE(date)?'m-we':''} ${ferme&&cur?'m-ferme':''} ${showEcoleFili?'day-cell-ecole':''}"
         onclick="openCreneauModal('','${kp}')">
         ${ferme&&cur&&!empData.length?'<div class="m-ferme-badge">Fermé</div>':''}
         <div class="m-dnum">
@@ -2101,7 +2209,7 @@ function renderJour(){
 
 // ── STATS + LÉGALE ──
 function updStats(){
-  let totalH=0,actifs=0,conges=0,abs=0;
+  let totalH=0,actifs=0,conges=0,abs=0,heuresEcole=0;
   const days=_view==='mois'?monthDays(_cur).filter(x=>x.cur).map(x=>x.date):_view==='jour'?[_cur]:weekDays(_cur);
   days.forEach(d=>{
     _emps.forEach(e=>{
@@ -2111,11 +2219,36 @@ function updStats(){
         if(it.type==='travail'||it.type==='partiel'){totalH+=itemH(it);actifs++;}
         else if(it.type==='conge')conges++;
         else if(it.type==='maladie')abs++;
+        else if(it.type==='ecole'){
+          // Heures école comptent seulement si explicitement activé
+          if(it.heuresComptent) totalH += itemH(it);
+          heuresEcole += itemH(it);
+        }
       });
     });
   });
   const set=(id,v)=>{const el=document.getElementById(id);if(el)el.textContent=v;};
   set('s-h',fmtDur(totalH));set('s-act',actifs);set('s-cg',conges);set('s-ab',abs);
+  // Sous-total "dont école" : s'affiche seulement si > 0
+  const elHe=document.getElementById('s-ecole-wrap');
+  if(heuresEcole>0){
+    if(!elHe){
+      // Injecter un nouvel item dans la barre stats
+      const bar=document.getElementById('s-h')?.parentElement?.parentElement;
+      if(bar){
+        const d=document.createElement('div');
+        d.className='sitem';
+        d.id='s-ecole-wrap';
+        d.innerHTML='<div class="sdot" style="background:#d97706"></div><span class="sval" id="s-ecole">'+fmtDur(heuresEcole)+'</span><span class="slbl"> 🎓 école</span>';
+        bar.appendChild(d);
+      }
+    } else {
+      set('s-ecole', fmtDur(heuresEcole));
+      elHe.style.display='';
+    }
+  } else if(elHe){
+    elHe.style.display='none';
+  }
   const infraCnt=Object.values(_infractions).reduce((s,a)=>s+a.length,0);
   const ib=document.getElementById('infr-trigger');
   if(ib)ib.style.display=infraCnt>0?'block':'none';
@@ -2197,7 +2330,8 @@ function empWeekH(eid,days){
   let h=0;
   days.forEach(d=>{
     (_cr[`${fmt(d)}_${eid}`]?.items||[]).forEach(it=>{
-      if(it.type==='travail'||it.type==='partiel')h+=itemH(it);
+      if(it.type==='travail'||it.type==='partiel') h+=itemH(it);
+      else if(it.type==='ecole' && it.heuresComptent) h+=itemH(it);
     });
   });
   return h;
@@ -2251,9 +2385,11 @@ function setType(type,btn){
   _crType=type;
   document.querySelectorAll('.type-btn').forEach(b=>b.classList.remove('active'));
   if(btn)btn.classList.add('active');
-  const showHrs=['travail','partiel','formation','astreinte'].includes(type);
+  const showHrs=['travail','partiel','formation','astreinte','ecole'].includes(type);
   document.getElementById('cr-hrs-section').style.display=showHrs?'block':'none';
   document.getElementById('multi-hrs').style.display=showHrs?'block':'none';
+  const ecoleOpts=document.getElementById('cr-ecole-opts');
+  if(ecoleOpts) ecoleOpts.style.display = type==='ecole' ? '' : 'none';
   renderPresets();
   if(showHrs)renderPlages();
   updLiveAlerts();
@@ -2513,8 +2649,10 @@ async function saveCr(){
   const eid=document.getElementById('cr-emp')?.value;
   const type=_crType;
   const note=document.getElementById('cr-note')?.value||'';
-  const showHrs=['travail','partiel','formation','astreinte'].includes(type);
+  const showHrs=['travail','partiel','formation','astreinte','ecole'].includes(type);
   const plagesData=showHrs?_plages.filter(p=>p.deb&&p.fin):[];
+  // Option spécifique école : compter les heures dans le total ?
+  const ecoleHeuresComptent = type==='ecole' ? (document.getElementById('cr-ecole-heures-comptent')?.checked||false) : false;
 
   if(!eid){showToast('Sélectionnez un employé','warn');return;}
 
@@ -2533,6 +2671,7 @@ async function saveCr(){
       const k=`${date}_${eid}`;
       if(!_cr[k])_cr[k]={items:[]};
       const it={id:'c'+Date.now()+'_'+saved,type,deb:mPlages[0]?.deb||'',fin:mPlages[0]?.fin||'',plages:mPlages.length>0?mPlages:undefined,note};
+      if(type==='ecole') it.heuresComptent = ecoleHeuresComptent;
       _cr[k].items.push(it);
       await saveKey(k,date);
       saved++;
@@ -2557,6 +2696,7 @@ async function saveCr(){
   const k=`${date}_${eid}`;
   if(!_cr[k])_cr[k]={items:[]};
   const it={id:'c'+Date.now(),type,deb:plagesData[0]?.deb||'',fin:plagesData[plagesData.length-1]?.fin||'',plages:plagesData.length>0?plagesData:undefined,note};
+  if(type==='ecole') it.heuresComptent = ecoleHeuresComptent;
 
   if(_editId){
     const {k:ok,itemId}=_editId;
@@ -2687,7 +2827,8 @@ async function saveKey(k,date){
 const TYPE_COLORS={
   travail:'#bbf7d0|#14532d',repos:'#f3f4f6|#6b7280',conge:'#bfdbfe|#1e3a8a',
   maladie:'#fecaca|#7f1d1d',formation:'#fde68a|#78350f',
-  astreinte:'#ddd6fe|#3b0764',partiel:'#fed7aa|#7c2d12'
+  astreinte:'#ddd6fe|#3b0764',partiel:'#fed7aa|#7c2d12',
+  ecole:'#fcd34d|#78350f'
 };
 
 // ── État global du drag ──
@@ -3191,6 +3332,9 @@ function editCr(k,itemId){
   document.getElementById('cr-date').value=date;
   document.getElementById('cr-note').value=it.note||'';
   _plages=it.plages?JSON.parse(JSON.stringify(it.plages)):[{deb:it.deb||'09:00',fin:it.fin||'17:00'}];
+  // Pré-remplir la case "heures école comptent" si édition d'un créneau école
+  const ecoleHcEl = document.getElementById('cr-ecole-heures-comptent');
+  if (ecoleHcEl) ecoleHcEl.checked = !!it.heuresComptent;
   setType(it.type||'travail',document.querySelector(`.type-btn[data-type="${it.type||'travail'}"]`));
   toggleMulti(false);
   onEmpChange();
