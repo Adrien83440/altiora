@@ -817,10 +817,16 @@ async function fetchNews(){
 }
 
 /* ─── MASSE SALARIALE HELPER ─── */
-function _calcMS(d) {
+function _calcMS(d, monthKey) {
   // Wave 1 : délégation vers calc-helpers.js (gère auto-paie, primes, etc.)
   if (window.CalcHelpers && window.CalcHelpers.calcMasseSalariale) {
-    return window.CalcHelpers.calcMasseSalariale(d).total;
+    // Wave paliers_abs : on passe _monthKey pour que le helper puisse appliquer
+    // la règle "prime trimestrielle comptée uniquement sur le 3e mois du trimestre"
+    // et lire le cache CA (rempli par extractMonthData au fil de l'itération).
+    var payload = monthKey
+      ? Object.assign({}, d || {}, { _monthKey: monthKey })
+      : d;
+    return window.CalcHelpers.calcMasseSalariale(payload).total;
   }
   // Fallback défensif
   var ms = d && d.masseSalariale;
@@ -854,6 +860,13 @@ function extractMonthData(d,isFuture,monthKey){
   const caTTC_fp=fp.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;return s+Math.round(h055*1.055*100)/100+Math.round(h10*1.10*100)/100+Math.round(h20*1.20*100)/100+ttcCust(r);},0);
   const tva_fp=fp.reduce((s,r)=>{const h055=parseFloat(r.ht055)||0,h10=parseFloat(r.ht10)||0,h20=parseFloat(r.ht20)||0;return s+Math.round(h055*0.055*100)/100+Math.round(h10*0.10*100)/100+Math.round(h20*0.20*100)/100+tvaCust(r);},0);
   const caHT=caHT_j+caHT_fp;
+  // Wave paliers_abs : on alimente le cache CA par mois (lu par CalcHelpers
+  // pour calculer les primes trimestrielles cumulatives). Le dashboard boucle
+  // les 12 mois dans l'ordre → quand on arrive en mars, jan/fév sont déjà dans le cache.
+  if (monthKey) {
+    if (!window._caByMonth) window._caByMonth = {};
+    window._caByMonth[monthKey] = caHT;
+  }
   const caTTC=caTTC_j+caTTC_fp;
   const tvaCollectee=tva_j+tva_fp;
   const rentrees=d.rentreesSupp?d.rentreesSupp.reduce((s,r)=>s+(parseFloat(r.montant)||0),0):0;
@@ -895,7 +908,7 @@ function extractMonthData(d,isFuture,monthKey){
       creditsHT+=mt;
     }
   });
-  const masseSalHT=_calcMS(d);
+  const masseSalHT=_calcMS(d, monthKey);
   const chargesHT=fixesHT+varHT+creditsHT+leasingHT+masseSalHT;
   // Wave 2 — séparer principal vs total pour pouvoir calculer resultatEconomique
   const creditsPrincipalOnly = window.CalcHelpers

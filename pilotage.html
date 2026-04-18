@@ -1121,6 +1121,77 @@ function fmtE(n) { return fmtN(n) + ' €'; }
 function fmtN(n) { return (parseFloat(n) || 0).toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 function pf(v)   { return parseFloat((v||'').toString().replace(',','.')) || 0; }
 
+// ─── Helpers paliers_abs (CA auto-lu) ───────────────────────────────────────
+// Extrait le CA HT d'un document pilotage/months/{key} (version allégée de calcTotals)
+function _caHtFromPilotMonth(data){
+  if(!data) return 0;
+  var ca=data.ca||[], fp=data.facturesPro||[];
+  var s=0;
+  ca.forEach(function(r){
+    s+=(parseFloat(r.ht055)||0)+(parseFloat(r.ht10)||0)+(parseFloat(r.ht20)||0)+(parseFloat(r.ht21)||0)+(parseFloat(r.ht85)||0);
+    if(!r.ht055 && !r.ht10 && !r.ht20 && !r.ht21 && !r.ht85){ s+=parseFloat(r.montantHT)||0; }
+  });
+  fp.forEach(function(r){
+    s+=(parseFloat(r.ht055)||0)+(parseFloat(r.ht10)||0)+(parseFloat(r.ht20)||0)+(parseFloat(r.ht0)||0)+(parseFloat(r.ht21)||0)+(parseFloat(r.ht85)||0);
+  });
+  return s;
+}
+// Retourne les 3 clés YYYY-MM du trimestre d'une clé donnée
+function _trimestreKeysOfPilot(key){
+  var p=(key||'').split('-'); if(p.length<2) return [];
+  var y=parseInt(p[0],10), mo=parseInt(p[1],10);
+  if(!y||!mo) return [];
+  var startM=Math.floor((mo-1)/3)*3+1; // 1,4,7,10
+  var out=[];
+  for(var i=0;i<3;i++){
+    var mm=startM+i;
+    out.push(y+'-'+(mm<10?'0':'')+mm);
+  }
+  return out;
+}
+// Détermine si la prime d'un objectif paliers_abs doit être comptée ce mois-ci
+//  - mensuel : OUI (chaque mois a son propre CA et sa propre prime)
+//  - trimestriel : OUI uniquement sur le 3e mois du trimestre (mars/juin/sept/déc)
+//    → évite de compter la prime 3 fois dans la masse salariale du trimestre
+function _shouldPrimeApplyToMonth(obj, currentKey){
+  var per=obj.periodicite||'mensuel';
+  if(per==='mensuel') return true;
+  if(per==='trimestriel'){
+    var p=(currentKey||'').split('-'); if(p.length<2) return false;
+    var mo=parseInt(p[1],10);
+    return mo===3 || mo===6 || mo===9 || mo===12;
+  }
+  return false; // annuel/libre pas supportés en paliers_abs
+}
+// Retourne la liste des clés YYYY-MM à sommer pour obtenir le CA de l'objectif
+function _monthsToSumForPaliersAbs(obj, currentKey){
+  var per=obj.periodicite||'mensuel';
+  if(per==='trimestriel') return _trimestreKeysOfPilot(currentKey);
+  return [currentKey];
+}
+// Calcule la prime brute acquise pour un objectif paliers_abs (cumulatif ≥ seuil)
+function _calcPrimeAbsFromCA(paliersAbs, caHT){
+  var s=0;
+  (paliersAbs||[]).forEach(function(p){
+    var seuil=parseFloat(p.seuilCA)||0;
+    var prime=parseFloat(p.primeBrut)||0;
+    if(seuil>0 && caHT>=seuil) s+=prime;
+  });
+  return s;
+}
+// Calcule le CA total à comparer aux paliers pour un objectif donné, mois courant
+// Utilise window._caByMonth ; retourne 0 si données manquantes (safe fallback)
+function _getCAForPaliersAbs(obj, currentKey){
+  var keys=_monthsToSumForPaliersAbs(obj, currentKey);
+  var total=0;
+  keys.forEach(function(k){
+    var v=(window._caByMonth||{})[k];
+    if(typeof v==='number') total+=v;
+  });
+  return total;
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 // Normalise une valeur date vers 'YYYY-MM', tolère les formats Safari dégradés
 function parseYYYYMM(v) {
   if (!v) return '';
@@ -1293,6 +1364,39 @@ async function loadMonth() {
         if (!hasManuel) data.masseSalariale.mode = 'auto';
       }
     }
+
+    // ── Paliers absolus (CA auto) : cache CA par mois + préchargement trimestre ──
+    // Initialise le cache
+    if (!window._caByMonth) window._caByMonth = {};
+    // Stocke le CA du mois courant depuis le snap chargé
+    try {
+      if (snap && snap.exists && snap.exists()) {
+        window._caByMonth[key] = _caHtFromPilotMonth(snap.data());
+      } else {
+        window._caByMonth[key] = 0;
+      }
+    } catch(e){ window._caByMonth[key] = 0; }
+    // Si des objectifs paliers_abs trimestriels existent, précharger les 2 autres mois du trimestre
+    // Uniquement nécessaire si le mois courant est fin de trimestre (mars/juin/sept/déc) — c'est là que la prime s'affiche
+    try {
+      var hasQuartObj = (window._rhObjectifs || []).some(function(o){
+        return o && o.statut!=='annule' && o.statut!=='brouillon'
+          && (o.prime||{}).modePalier==='paliers_abs' && o.periodicite==='trimestriel';
+      });
+      var isEndOfQuarter = ((m + 1) % 3) === 0; // m=2(mars),5(juin),8(sept),11(déc)
+      if (hasQuartObj && isEndOfQuarter) {
+        var trimKeys = _trimestreKeysOfPilot(key);
+        var missingKeys = trimKeys.filter(function(k){ return k !== key && window._caByMonth[k] === undefined; });
+        if (missingKeys.length > 0) {
+          var trimPromises = missingKeys.map(function(k){
+            return window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',k))
+              .then(function(s){ window._caByMonth[k] = (s && s.exists && s.exists()) ? _caHtFromPilotMonth(s.data()) : 0; })
+              .catch(function(){ window._caByMonth[k] = 0; });
+          });
+          await Promise.allSettled(trimPromises);
+        }
+      }
+    } catch(e){ console.warn('[paliers_abs] preload trimestre failed (non bloquant)', e); }
 
     // ── Wave 4 : traiter les fiches de paie chargées (cache par mois) ──
     // Format Firestore : rh/{uid}/paie/{moisKey}_{empId}
@@ -2349,8 +2453,19 @@ function calcMasseSalariale(ms) {
   //
   // La signature historique de cette fonction reçoit `ms` directement (l'objet
   // masseSalariale), alors que le helper attend le document complet. On wrappe.
+  // On ajoute _monthKey + data CA pour permettre le calcul des primes paliers_abs
+  // (CA auto-lu depuis Pilotage, paliers cumulatifs).
   if (window.CalcHelpers && window.CalcHelpers.calcMasseSalariale) {
-    return window.CalcHelpers.calcMasseSalariale({ masseSalariale: ms });
+    var _k = (typeof getMonthKey === 'function') ? getMonthKey() : null;
+    var payload = { masseSalariale: ms, _monthKey: _k };
+    // Si on a _data en scope (document complet du mois), le passer pour le fallback CA
+    try {
+      if (typeof _data !== 'undefined' && _data) {
+        payload.ca = _data.ca;
+        payload.facturesPro = _data.facturesPro;
+      }
+    } catch(e){}
+    return window.CalcHelpers.calcMasseSalariale(payload);
   }
 
   // ─── FALLBACK DÉFENSIF (si le helper n'est pas chargé) ───
@@ -2374,23 +2489,35 @@ function calcMasseSalariale(ms) {
     });
   }
   if (window._rhObjectifs && window._rhObjectifs.length > 0) {
+    var _fallbackKey = (typeof getMonthKey === 'function') ? getMonthKey() : null;
     window._rhObjectifs.forEach(function(obj) {
       if (obj.statut === 'annule' || obj.statut === 'brouillon') return;
       var prime = obj.prime || {};
-      var montant = parseFloat(prime.montantBrut) || 0;
-      if (montant <= 0) return;
       var taux = parseFloat(prime.tauxCharges) || 45;
-      var av = _calcObjAvancement(obj);
       var mode = prime.modePalier || 'tout_ou_rien';
       var brut = 0;
-      if (mode === 'tout_ou_rien') brut = av >= 100 ? montant : 0;
-      else if (mode === 'proportionnel') brut = montant * Math.min(av, 100) / 100;
-      else if (mode === 'paliers') {
-        var paliers = (prime.paliers || []).slice().sort(function(a,b){ return (parseFloat(b.seuil)||0) - (parseFloat(a.seuil)||0); });
-        for (var i = 0; i < paliers.length; i++) {
-          if (av >= (parseFloat(paliers[i].seuil) || 0)) { brut = montant * (parseFloat(paliers[i].primePct) || 0) / 100; break; }
+
+      // ── MODE PALIERS_ABS (CA auto) ──
+      if (mode === 'paliers_abs') {
+        if ((obj.periodicite === 'trimestriel') && !_fallbackKey) return;
+        if (_fallbackKey && !_shouldPrimeApplyToMonth(obj, _fallbackKey)) return;
+        var caTot = _getCAForPaliersAbs(obj, _fallbackKey);
+        brut = _calcPrimeAbsFromCA(prime.paliersAbs, caTot);
+      } else {
+        // ── Modes classiques ──
+        var montant = parseFloat(prime.montantBrut) || 0;
+        if (montant <= 0) return;
+        var av = _calcObjAvancement(obj);
+        if (mode === 'tout_ou_rien') brut = av >= 100 ? montant : 0;
+        else if (mode === 'proportionnel') brut = montant * Math.min(av, 100) / 100;
+        else if (mode === 'paliers') {
+          var paliers = (prime.paliers || []).slice().sort(function(a,b){ return (parseFloat(b.seuil)||0) - (parseFloat(a.seuil)||0); });
+          for (var i = 0; i < paliers.length; i++) {
+            if (av >= (parseFloat(paliers[i].seuil) || 0)) { brut = montant * (parseFloat(paliers[i].primePct) || 0) / 100; break; }
+          }
         }
       }
+
       if (brut > 0) {
         var vol = (obj.type === 'equipe' && obj.employeIds) ? obj.employeIds.length : 1;
         totalPrimes += brut * (1 + taux / 100) * vol;
@@ -2624,8 +2751,18 @@ function renderMasseSalariale(data, t, forceRender) {
 
   // Section Primes & Objectifs
   if (window._rhObjectifs && window._rhObjectifs.length > 0 && msCalc.primes > 0) {
+    var _renderKey = (typeof getMonthKey === 'function') ? getMonthKey() : null;
     var primesObjs = window._rhObjectifs.filter(function(obj) {
-      return obj.statut !== 'annule' && obj.statut !== 'brouillon' && (obj.prime||{}).montantBrut;
+      if (obj.statut === 'annule' || obj.statut === 'brouillon') return false;
+      var prime = obj.prime || {};
+      // paliers_abs : on affiche si la prime doit s'appliquer ce mois ET que le total brut > 0
+      if (prime.modePalier === 'paliers_abs') {
+        if ((obj.periodicite === 'trimestriel') && !_renderKey) return false;
+        if (_renderKey && !_shouldPrimeApplyToMonth(obj, _renderKey)) return false;
+        return (prime.paliersAbs || []).length > 0;
+      }
+      // Modes classiques : comme avant, filtrer sur montantBrut
+      return !!prime.montantBrut;
     });
     html += '<div style="border-top:2px solid var(--border);padding:14px 0 0">' +
       '<div style="font-size:12px;font-weight:700;margin-bottom:10px;display:flex;align-items:center;gap:8px">🏆 Primes & Objectifs' +
@@ -2634,17 +2771,37 @@ function renderMasseSalariale(data, t, forceRender) {
     html += '<table class="data-table"><thead><tr><th>Objectif</th><th>Salarié(s)</th><th>Atteinte</th><th>Prime brute (€)</th><th>Coût chargé (€)</th></tr></thead><tbody>';
     primesObjs.forEach(function(obj, pi) {
       var prime = obj.prime || {};
-      var montant = parseFloat(prime.montantBrut) || 0;
       var taux = parseFloat(prime.tauxCharges) || 45;
-      var av = _calcObjAvancement(obj);
       var mode = prime.modePalier || 'tout_ou_rien';
       var brut = 0;
-      if (mode === 'tout_ou_rien') brut = av >= 100 ? montant : 0;
-      else if (mode === 'proportionnel') brut = montant * Math.min(av, 100) / 100;
-      else if (mode === 'paliers') {
-        var p2 = (prime.paliers || []).slice().sort(function(a,b){ return (parseFloat(b.seuil)||0) - (parseFloat(a.seuil)||0); });
-        for (var i = 0; i < p2.length; i++) { if (av >= (parseFloat(p2[i].seuil) || 0)) { brut = montant * (parseFloat(p2[i].primePct) || 0) / 100; break; } }
+      var avCell = '';
+      var avColor = '#059669';
+
+      if (mode === 'paliers_abs') {
+        // CA auto-lu
+        var caTot = _getCAForPaliersAbs(obj, _renderKey);
+        brut = _calcPrimeAbsFromCA(prime.paliersAbs, caTot);
+        var paliersSorted = (prime.paliersAbs || []).slice().sort(function(a,b){ return (parseFloat(a.seuilCA)||0) - (parseFloat(b.seuilCA)||0); });
+        var atteints = paliersSorted.filter(function(p){ return caTot >= (parseFloat(p.seuilCA)||0); }).length;
+        var total = paliersSorted.length;
+        avColor = atteints === total ? '#059669' : atteints > 0 ? '#d97706' : '#dc2626';
+        var periodLbl = obj.periodicite === 'trimestriel' ? 'trim' : 'mois';
+        avCell = '<div style="text-align:center"><div style="font-weight:700;color:' + avColor + ';font-size:12px">' + atteints + '/' + total + ' paliers</div>' +
+          '<div style="font-size:10px;color:var(--muted);margin-top:2px">CA ' + periodLbl + ' : ' + fmtE(caTot) + '</div></div>';
+      } else {
+        // Modes classiques (avancement %)
+        var montant = parseFloat(prime.montantBrut) || 0;
+        var av = _calcObjAvancement(obj);
+        if (mode === 'tout_ou_rien') brut = av >= 100 ? montant : 0;
+        else if (mode === 'proportionnel') brut = montant * Math.min(av, 100) / 100;
+        else if (mode === 'paliers') {
+          var p2 = (prime.paliers || []).slice().sort(function(a,b){ return (parseFloat(b.seuil)||0) - (parseFloat(a.seuil)||0); });
+          for (var i = 0; i < p2.length; i++) { if (av >= (parseFloat(p2[i].seuil) || 0)) { brut = montant * (parseFloat(p2[i].primePct) || 0) / 100; break; } }
+        }
+        avColor = av >= 100 ? '#059669' : av >= 60 ? '#d97706' : '#dc2626';
+        avCell = '<div style="text-align:center;font-weight:700;color:' + avColor + '">' + av.toFixed(0) + '%</div>';
       }
+
       var vol = (obj.type === 'equipe' && obj.employeIds) ? obj.employeIds.length : 1;
       var cout = brut * (1 + taux / 100) * vol;
       // Noms des employés
@@ -2655,11 +2812,11 @@ function renderMasseSalariale(data, t, forceRender) {
         var emp = window._rhEmployes.find(function(e){ return e.id === obj.employeId; });
         if (emp) empNom = (emp.prenom || '') + ' ' + (emp.nom || '');
       }
-      var avColor = av >= 100 ? '#059669' : av >= 60 ? '#d97706' : '#dc2626';
+      var titreWithBadge = (obj.titre || '—') + (mode === 'paliers_abs' ? ' <span style="font-size:9px;font-weight:700;background:#eff6ff;color:#1e40af;padding:1px 6px;border-radius:20px;margin-left:4px">🔗 CA auto</span>' : '');
       html += '<tr>' +
-        '<td style="font-weight:600">' + (obj.titre || '—') + '</td>' +
+        '<td style="font-weight:600">' + titreWithBadge + '</td>' +
         '<td>' + empNom + '</td>' +
-        '<td style="text-align:center;font-weight:700;color:' + avColor + '">' + av.toFixed(0) + '%</td>' +
+        '<td>' + avCell + '</td>' +
         '<td id="ms-prime-brut-' + pi + '" style="text-align:right">' + fmtN(brut * vol) + '</td>' +
         '<td id="ms-prime-cout-' + pi + '" style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(cout) + '</td>' +
         '</tr>';
@@ -4357,25 +4514,38 @@ function _refreshMSLineCosts() {
 
   // ─── Coût par prime d'objectif (si la section est rendue) ───
   if (window._rhObjectifs && window._rhObjectifs.length > 0) {
+    var _updKey = (typeof getMonthKey === 'function') ? getMonthKey() : null;
     var primesObjs = window._rhObjectifs.filter(function(obj) {
-      return obj && obj.statut !== 'annule' && obj.statut !== 'brouillon' && (obj.prime || {}).montantBrut;
+      if (!obj || obj.statut === 'annule' || obj.statut === 'brouillon') return false;
+      var prime = obj.prime || {};
+      if (prime.modePalier === 'paliers_abs') {
+        if ((obj.periodicite === 'trimestriel') && !_updKey) return false;
+        if (_updKey && !_shouldPrimeApplyToMonth(obj, _updKey)) return false;
+        return (prime.paliersAbs || []).length > 0;
+      }
+      return !!prime.montantBrut;
     });
     primesObjs.forEach(function(obj, pi) {
       var brutEl = document.getElementById('ms-prime-brut-' + pi);
       var coutEl = document.getElementById('ms-prime-cout-' + pi);
       if (!brutEl && !coutEl) return;
       var prime = obj.prime || {};
-      var montant = parseFloat(prime.montantBrut) || 0;
       var tauxP = parseFloat(prime.tauxCharges) || 45;
-      var av = _calcObjAvancement(obj);
       var modeP = prime.modePalier || 'tout_ou_rien';
       var brutP = 0;
-      if (modeP === 'tout_ou_rien') brutP = av >= 100 ? montant : 0;
-      else if (modeP === 'proportionnel') brutP = montant * Math.min(av, 100) / 100;
-      else if (modeP === 'paliers') {
-        var paliers = (prime.paliers || []).slice().sort(function(a,b){ return (parseFloat(b.seuil)||0) - (parseFloat(a.seuil)||0); });
-        for (var j = 0; j < paliers.length; j++) {
-          if (av >= (parseFloat(paliers[j].seuil) || 0)) { brutP = montant * (parseFloat(paliers[j].primePct) || 0) / 100; break; }
+      if (modeP === 'paliers_abs') {
+        var caTotU = _getCAForPaliersAbs(obj, _updKey);
+        brutP = _calcPrimeAbsFromCA(prime.paliersAbs, caTotU);
+      } else {
+        var montant = parseFloat(prime.montantBrut) || 0;
+        var av = _calcObjAvancement(obj);
+        if (modeP === 'tout_ou_rien') brutP = av >= 100 ? montant : 0;
+        else if (modeP === 'proportionnel') brutP = montant * Math.min(av, 100) / 100;
+        else if (modeP === 'paliers') {
+          var paliers = (prime.paliers || []).slice().sort(function(a,b){ return (parseFloat(b.seuil)||0) - (parseFloat(a.seuil)||0); });
+          for (var j = 0; j < paliers.length; j++) {
+            if (av >= (parseFloat(paliers[j].seuil) || 0)) { brutP = montant * (parseFloat(paliers[j].primePct) || 0) / 100; break; }
+          }
         }
       }
       var vol = (obj.type === 'equipe' && obj.employeIds) ? obj.employeIds.length : 1;

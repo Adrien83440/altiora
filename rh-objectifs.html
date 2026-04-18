@@ -353,6 +353,7 @@ var COLORS = ['#059669','#3b82f6','#8b5cf6','#f59e0b','#ef4444','#14b8a6','#6366
 window.initApp = async function(){
   await loadEmployes();
   await loadObjectifs();
+  await _preloadCAForPaliersAbs();
   populateEmpFilter();
   renderObjGrid();
   renderKPIs();
@@ -366,6 +367,54 @@ window.initApp = async function(){
     openCreateModal(p.get('empId'));
   }
 };
+
+// Précharge le CA Pilotage pour tous les objectifs actifs paliers_abs
+// → les cartes + KPIs peuvent afficher la prime acquise en temps réel
+async function _preloadCAForPaliersAbs(){
+  var objs=Object.values(_objectifs).filter(function(o){
+    var m=(o.prime||{}).modePalier;
+    return m==='paliers_abs' && o.statut!=='annule';
+  });
+  if(objs.length===0)return;
+  // Group by periodicite pour mutualiser les fetch (même fenêtre = même CA)
+  var groups={mensuel:[], trimestriel:[]};
+  objs.forEach(function(o){ (groups[o.periodicite||'mensuel']||groups.mensuel).push(o); });
+  var curKey=_currentMonthKey();
+
+  // Mensuel : fetch une seule fois le mois courant
+  if(groups.mensuel.length>0){
+    try{
+      var snap=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',curKey));
+      var caHT=(snap && snap.exists && snap.exists())?_caHtFromMonth(snap.data()):0;
+      var payload={caHT:caHT,libelle:_monthLabelLong(curKey),moisKey:curKey,loaded:true};
+      groups.mensuel.forEach(function(o){ window._objCaCache[o.id]=payload; });
+    }catch(e){
+      groups.mensuel.forEach(function(o){ window._objCaCache[o.id]={caHT:0,libelle:_monthLabelLong(curKey),moisKey:curKey,loaded:true,error:true}; });
+    }
+  }
+
+  // Trimestriel : fetch les 3 mois du trimestre courant
+  if(groups.trimestriel.length>0){
+    var keys=_trimestreKeysOf(curKey);
+    try{
+      var snaps=await Promise.allSettled(keys.map(function(k){
+        return window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',k));
+      }));
+      var caHT=0;
+      snaps.forEach(function(s){
+        if(s.status==='fulfilled' && s.value && s.value.exists && s.value.exists()){
+          caHT+=_caHtFromMonth(s.value.data());
+        }
+      });
+      var trimNum=Math.floor((parseInt(curKey.split('-')[1],10)-1)/3)+1;
+      var libelle='T'+trimNum+' '+keys[0].split('-')[0]+' ('+keys.map(_monthLabelShort).join(' + ')+')';
+      var payload={caHT:caHT,libelle:libelle,moisKey:curKey,trimestreKeys:keys,loaded:true};
+      groups.trimestriel.forEach(function(o){ window._objCaCache[o.id]=payload; });
+    }catch(e){
+      groups.trimestriel.forEach(function(o){ window._objCaCache[o.id]={caHT:0,libelle:'Trimestre en cours',moisKey:curKey,loaded:true,error:true}; });
+    }
+  }
+}
 
 // ═══════════════════════════════════════════
 //  LOAD DATA
@@ -400,7 +449,132 @@ function populateEmpFilter(){
 // ═══════════════════════════════════════════
 //  CALCULS
 // ═══════════════════════════════════════════
+// Cache du CA lu dans Pilotage pour les objectifs paliers_abs (clé = obj.id)
+// { caHT: number, libelle: string, moisKey: string, trimestreKeys: [], loaded: true }
+window._objCaCache = window._objCaCache || {};
+
+// Helper : calcule le CA HT d'un document pilotage/months/{key}
+function _caHtFromMonth(data){
+  if(!data)return 0;
+  var ca=data.ca||[], fp=data.facturesPro||[];
+  var s=0;
+  ca.forEach(function(r){
+    s+=(parseFloat(r.ht055)||0)+(parseFloat(r.ht10)||0)+(parseFloat(r.ht20)||0);
+    // custom TVA (ht21, ht85) rarement utilisé côté saisie quotidienne
+    s+=(parseFloat(r.ht21)||0)+(parseFloat(r.ht85)||0);
+    // Fallback ancien format
+    if(!r.ht055 && !r.ht10 && !r.ht20 && !r.ht21 && !r.ht85){
+      s+=parseFloat(r.montantHT)||0;
+    }
+  });
+  fp.forEach(function(r){
+    s+=(parseFloat(r.ht055)||0)+(parseFloat(r.ht10)||0)+(parseFloat(r.ht20)||0)+(parseFloat(r.ht0)||0)+(parseFloat(r.ht21)||0)+(parseFloat(r.ht85)||0);
+  });
+  return s;
+}
+
+// Helper : construit les clés du trimestre à partir d'une clé YYYY-MM
+function _trimestreKeysOf(key){
+  var p=(key||'').split('-'); if(p.length<2)return [];
+  var y=parseInt(p[0],10), m=parseInt(p[1],10);
+  if(!y||!m)return [];
+  var startM=Math.floor((m-1)/3)*3+1; // 1,4,7,10
+  var keys=[];
+  for(var i=0;i<3;i++){
+    var mm=startM+i;
+    keys.push(y+'-'+(mm<10?'0':'')+mm);
+  }
+  return keys;
+}
+
+// Helper : mois courant en YYYY-MM
+function _currentMonthKey(){
+  var d=new Date();
+  return d.getFullYear()+'-'+(d.getMonth()<9?'0':'')+(d.getMonth()+1);
+}
+
+// Fetch CA Pilotage pour un objectif paliers_abs (async)
+async function _fetchCAForObj(obj){
+  if(!window._uid||!window._db)return null;
+  var periodicite=obj.periodicite||'mensuel';
+  var curKey=_currentMonthKey();
+  try{
+    if(periodicite==='trimestriel'){
+      var keys=_trimestreKeysOf(curKey);
+      var snaps=await Promise.allSettled(keys.map(function(k){
+        return window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',k));
+      }));
+      var caHT=0;
+      snaps.forEach(function(s){
+        if(s.status==='fulfilled' && s.value && s.value.exists && s.value.exists()){
+          caHT+=_caHtFromMonth(s.value.data());
+        }
+      });
+      var y=keys[0].split('-')[0];
+      var trimNum=Math.floor((parseInt(curKey.split('-')[1],10)-1)/3)+1;
+      var libelle='T'+trimNum+' '+y+' ('+keys.map(function(k){return _monthLabelShort(k);}).join(' + ')+')';
+      return {caHT:caHT,libelle:libelle,moisKey:curKey,trimestreKeys:keys,loaded:true};
+    } else {
+      // mensuel (default)
+      var snap=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',curKey));
+      var caHT=(snap && snap.exists && snap.exists())?_caHtFromMonth(snap.data()):0;
+      return {caHT:caHT,libelle:_monthLabelLong(curKey),moisKey:curKey,loaded:true};
+    }
+  }catch(e){
+    console.warn('_fetchCAForObj',e);
+    return {caHT:0,libelle:'—',moisKey:curKey,loaded:true,error:true};
+  }
+}
+
+function _monthLabelShort(key){
+  var noms=['jan','fév','mar','avr','mai','juin','juil','août','sept','oct','nov','déc'];
+  var p=(key||'').split('-'); if(p.length<2)return key;
+  var m=parseInt(p[1],10); return noms[m-1]||key;
+}
+function _monthLabelLong(key){
+  var noms=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+  var p=(key||'').split('-'); if(p.length<2)return key;
+  var m=parseInt(p[1],10); return (noms[m-1]||'')+' '+p[0];
+}
+
+// Calcule la prime acquise pour un objectif paliers_abs (cumulatif, CA ≥ seuil)
+// Paliers : [{seuilCA, primeBrut}]
+function _calcPrimeAbsFromCA(paliersAbs, caHT){
+  var paliers=(paliersAbs||[]).slice().sort(function(a,b){return(parseFloat(a.seuilCA)||0)-(parseFloat(b.seuilCA)||0);});
+  var brut=0;
+  paliers.forEach(function(p){
+    var seuil=parseFloat(p.seuilCA)||0;
+    var prime=parseFloat(p.primeBrut)||0;
+    if(seuil>0 && caHT>=seuil){ brut+=prime; }
+  });
+  return brut;
+}
+
+// Montant brut max potentiel pour un objectif paliers_abs = somme de tous les paliers
+function _primeAbsMontantMax(obj){
+  var paliers=((obj.prime||{}).paliersAbs)||[];
+  var s=0; paliers.forEach(function(p){ s+=parseFloat(p.primeBrut)||0; });
+  return s;
+}
+
 function calcAvancementGlobal(obj){
+  var prime=obj.prime||{};
+  // Mode paliers absolus : avancement = % de la prime max acquise (ou % d'atteinte du plus petit palier si aucune prime)
+  if(prime.modePalier==='paliers_abs'){
+    var cache=window._objCaCache[obj.id];
+    if(!cache||!cache.loaded)return 0;
+    var ca=cache.caHT||0;
+    var maxBrut=_primeAbsMontantMax(obj);
+    if(maxBrut>0){
+      var acq=_calcPrimeAbsFromCA(prime.paliersAbs,ca);
+      return Math.min(acq/maxBrut*100,100);
+    }
+    // Fallback : % sur le 1er palier
+    var paliers=(prime.paliersAbs||[]).slice().sort(function(a,b){return(parseFloat(a.seuilCA)||0)-(parseFloat(b.seuilCA)||0);});
+    var seuilMin=paliers.length?(parseFloat(paliers[0].seuilCA)||0):0;
+    return seuilMin>0?Math.min(ca/seuilMin*100,100):0;
+  }
+  // Mode historique : basé sur critères
   var criteres=obj.criteres||[];
   if(criteres.length===0)return 0;
   var totalPoids=0, totalAvance=0;
@@ -418,8 +592,16 @@ function calcAvancementGlobal(obj){
 
 function calcPrimeAcquise(obj){
   var prime=obj.prime||{};
-  var montant=parseFloat(prime.montantBrut)||0;
   var mode=prime.modePalier||'tout_ou_rien';
+
+  // Mode paliers absolus : cumulatif sur CA Pilotage
+  if(mode==='paliers_abs'){
+    var cache=window._objCaCache[obj.id];
+    if(!cache||!cache.loaded)return 0;
+    return _calcPrimeAbsFromCA(prime.paliersAbs, cache.caHT||0);
+  }
+
+  var montant=parseFloat(prime.montantBrut)||0;
   var avGlobal=calcAvancementGlobal(obj);
 
   // Si mode pct_salaire → calculer montant
@@ -638,9 +820,10 @@ function renderObjGrid(){
       }
     }
 
+    var isAbs=(o.prime||{}).modePalier==='paliers_abs';
     html+='<div class="obj-card'+(o.id===_currentObjId?' active':'')+'" onclick="openDetail(\''+o.id+'\')">';
     html+='<div class="obj-card-head"><div class="obj-card-title">'+esc(o.titre||'Sans titre')+'</div></div>';
-    html+='<div class="obj-card-badges"><span class="badge badge-'+o.type+'">'+(typeLabels[o.type]||o.type)+'</span><span class="badge badge-'+statut+'">'+(statutLabels[statut]||statut)+'</span><span class="badge badge-'+(o.periodicite||'libre')+'">'+(periodeLabels[o.periodicite]||'Libre')+'</span></div>';
+    html+='<div class="obj-card-badges"><span class="badge badge-'+o.type+'">'+(typeLabels[o.type]||o.type)+'</span><span class="badge badge-'+statut+'">'+(statutLabels[statut]||statut)+'</span><span class="badge badge-'+(o.periodicite||'libre')+'">'+(periodeLabels[o.periodicite]||'Libre')+'</span>'+(isAbs?'<span class="badge" style="background:#eff6ff;color:#1e40af">🔗 CA auto</span>':'')+'</div>';
     html+=empHtml;
     // Progress
     html+='<div class="progress-wrap"><div class="progress-bar-bg"><div class="progress-bar-fill" style="width:'+Math.min(av,100)+'%;background:'+barColor+'"></div></div><div class="progress-labels"><span class="progress-pct" style="color:'+barColor+'">'+av.toFixed(0)+'%</span><span class="progress-target">'+(o.dateFin?fmtDateShort(o.dateFin):'—')+'</span></div></div>';
@@ -684,7 +867,7 @@ function renderDetailPanel(obj){
   var barColor=av>=100?'#10b981':av>=60?'#f59e0b':'#ef4444';
   var typeLabels={individuel:'👤 Individuel',equipe:'👥 Équipe',exceptionnel:'⭐ Exceptionnel'};
   var statutLabels={brouillon:'📝 Brouillon',en_cours:'🟢 En cours',atteint:'✅ Atteint',partiel:'🟡 Partiel',non_atteint:'❌ Non atteint',annule:'🚫 Annulé'};
-  var palierLabels={tout_ou_rien:'Tout ou rien',proportionnel:'Proportionnel',paliers:'Paliers configurés'};
+  var palierLabels={tout_ou_rien:'Tout ou rien',proportionnel:'Proportionnel',paliers:'Paliers % configurés',paliers_abs:'💸 Paliers CA (€) — cumulatifs'};
 
   // Employé info
   var empInfo='';
@@ -720,10 +903,34 @@ function renderDetailPanel(obj){
   // Période
   h+='<div style="display:flex;gap:16px;font-size:12px;color:var(--text)"><div><span style="color:var(--muted)">Début :</span> <b>'+(obj.dateDebut?fmtDateShort(obj.dateDebut):'—')+'</b></div><div><span style="color:var(--muted)">Fin :</span> <b>'+(obj.dateFin?fmtDateShort(obj.dateFin):'—')+'</b></div><div><span style="color:var(--muted)">Périodicité :</span> <b>'+(obj.periodicite||'—')+'</b></div></div>';
 
-  // Avancement global
-  h+='<div style="padding:14px;background:white;border:1.5px solid var(--border);border-radius:10px"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;font-weight:700">Avancement global</span><span style="font-size:16px;font-weight:800;color:'+barColor+'">'+av.toFixed(1)+'%</span></div><div class="progress-bar-bg" style="height:12px"><div class="progress-bar-fill" style="width:'+Math.min(av,100)+'%;background:'+barColor+';height:100%"></div></div></div>';
+  // Bloc Suivi CA Pilotage (pour paliers_abs uniquement)
+  if((obj.prime||{}).modePalier==='paliers_abs'){
+    var cache=window._objCaCache[obj.id];
+    var paliersAbs=((obj.prime||{}).paliersAbs||[]).slice().sort(function(a,b){return(parseFloat(a.seuilCA)||0)-(parseFloat(b.seuilCA)||0);});
+    var caLu=cache?(cache.caHT||0):0;
+    var libelleCA=cache?cache.libelle:(obj.periodicite==='trimestriel'?'Trimestre en cours':'Mois en cours');
+    var paliersAtteints=paliersAbs.filter(function(p){return caLu>=(parseFloat(p.seuilCA)||0);});
+    var primeAcqCalc=paliersAtteints.reduce(function(s,p){return s+(parseFloat(p.primeBrut)||0);},0);
+    var prochainPalier=paliersAbs.find(function(p){return caLu<(parseFloat(p.seuilCA)||0);});
 
-  // Critères
+    h+='<div class="section" style="border-color:#bfdbfe"><div class="sec-head" style="background:#eff6ff"><div class="sec-title">🔗 Suivi automatique — CA Pilotage</div>'+(cache?'<span style="font-size:10px;color:#1e40af;font-weight:600">'+esc(libelleCA)+'</span>':'<span class="spin" style="width:12px;height:12px;border-width:2px"></span>')+'</div><div class="sec-body">';
+    h+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">';
+    h+='<div style="padding:10px;background:var(--rh-ghost);border-radius:8px;text-align:center"><div style="font-size:10px;color:var(--muted);margin-bottom:2px">CA HT lu</div><div style="font-size:16px;font-weight:800;color:var(--rh-main)">'+(cache?fmtE(caLu):'—')+'</div></div>';
+    h+='<div style="padding:10px;background:#fef3c7;border-radius:8px;text-align:center"><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Paliers atteints</div><div style="font-size:16px;font-weight:800;color:var(--orange)">'+paliersAtteints.length+' / '+paliersAbs.length+'</div></div>';
+    h+='<div style="padding:10px;background:#dcfce7;border-radius:8px;text-align:center"><div style="font-size:10px;color:var(--muted);margin-bottom:2px">Prime brute acquise</div><div style="font-size:16px;font-weight:800;color:#065f46">'+fmtE(primeAcqCalc)+'</div></div>';
+    h+='</div>';
+    if(prochainPalier){
+      var reste=(parseFloat(prochainPalier.seuilCA)||0)-caLu;
+      h+='<div style="padding:8px 12px;background:white;border:1px dashed var(--border);border-radius:8px;font-size:11px;color:var(--muted);text-align:center">Prochain palier : ≥ <b>'+fmtE(parseFloat(prochainPalier.seuilCA)||0)+'</b> → <b style="color:var(--rh-main)">+'+fmtE(parseFloat(prochainPalier.primeBrut)||0)+'</b> brut — il manque <b>'+fmtE(Math.max(0,reste))+'</b> de CA</div>';
+    }
+    h+='</div></div>';
+  } else {
+    // Avancement global (modes classiques uniquement)
+    h+='<div style="padding:14px;background:white;border:1.5px solid var(--border);border-radius:10px"><div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-size:12px;font-weight:700">Avancement global</span><span style="font-size:16px;font-weight:800;color:'+barColor+'">'+av.toFixed(1)+'%</span></div><div class="progress-bar-bg" style="height:12px"><div class="progress-bar-fill" style="width:'+Math.min(av,100)+'%;background:'+barColor+';height:100%"></div></div></div>';
+  }
+
+  // Critères (uniquement modes classiques)
+  if((obj.prime||{}).modePalier!=='paliers_abs'){
   h+='<div class="section"><div class="sec-head"><div class="sec-title">📋 Critères d\'évaluation</div></div><div class="sec-body">';
   var criteres=obj.criteres||[];
   if(criteres.length===0){
@@ -742,6 +949,7 @@ function renderDetailPanel(obj){
     });
   }
   h+='</div></div>';
+  }
 
   // Prime & Coût
   h+='<div class="section"><div class="sec-head"><div class="sec-title">💰 Prime & Coût employeur</div></div><div class="sec-body">';
@@ -762,9 +970,21 @@ function renderDetailPanel(obj){
     });
     h+='</div>';
   }
+  if(prime.modePalier==='paliers_abs' && (prime.paliersAbs||[]).length>0){
+    var cacheP=window._objCaCache[obj.id];
+    var caLuP=cacheP?(cacheP.caHT||0):0;
+    h+='<div style="margin-top:10px;padding:10px 12px;background:rgba(239,246,255,0.5);border:1px solid #bfdbfe;border-radius:8px;font-size:11px">';
+    h+='<div style="font-weight:700;margin-bottom:6px;color:#1e40af">Paliers CA configurés (cumulatifs) :</div>';
+    (prime.paliersAbs||[]).slice().sort(function(a,b){return(parseFloat(a.seuilCA)||0)-(parseFloat(b.seuilCA)||0);}).forEach(function(p){
+      var atteint=caLuP>=(parseFloat(p.seuilCA)||0);
+      h+='<div style="display:flex;justify-content:space-between;padding:3px 0"><span>'+(atteint?'✅':'⏳')+' ≥ '+fmtE(parseFloat(p.seuilCA)||0)+' de CA HT</span><span style="font-weight:700;color:'+(atteint?'#059669':'var(--muted)')+'">→ +'+fmtE(parseFloat(p.primeBrut)||0)+' brut</span></div>';
+    });
+    h+='</div>';
+  }
   h+='</div></div>';
 
-  // Simulateur impact
+  // Simulateur impact — caché en mode paliers_abs car redondant avec le bloc Suivi CA
+  if(prime.modePalier!=='paliers_abs'){
   h+='<div class="sim-box"><div class="sim-title">📊 Impact financier simulé</div><div class="sim-grid">';
   var vol=1;
   if(obj.type==='equipe' && obj.employeIds) vol=obj.employeIds.length;
@@ -772,6 +992,19 @@ function renderDetailPanel(obj){
   h+='<div class="sim-item"><div class="sim-item-label">Si 80% atteint</div><div class="sim-item-val orange">'+fmtE(calcSimPrime(obj,80)*vol)+'</div><div class="sim-item-sub">coût chargé</div></div>';
   h+='<div class="sim-item"><div class="sim-item-label">Si 50% atteint</div><div class="sim-item-val red">'+fmtE(calcSimPrime(obj,50)*vol)+'</div><div class="sim-item-sub">coût chargé</div></div>';
   h+='</div></div>';
+  } else {
+  // Simulateur spécifique paliers_abs : coût chargé vs brut
+  var volA=1;
+  if(obj.type==='equipe' && obj.employeIds) volA=obj.employeIds.length;
+  var tauxA=parseFloat(prime.tauxCharges)||45;
+  var brutMax=_primeAbsMontantMax(obj);
+  var coutMaxChg=brutMax*(1+tauxA/100)*volA;
+  h+='<div class="sim-box"><div class="sim-title">📊 Impact financier</div><div class="sim-grid">';
+  h+='<div class="sim-item"><div class="sim-item-label">Prime brute max</div><div class="sim-item-val green">'+fmtE(brutMax*volA)+'</div><div class="sim-item-sub">cumul tous paliers'+(volA>1?' × '+volA+' salariés':'')+'</div></div>';
+  h+='<div class="sim-item"><div class="sim-item-label">Coût employeur max</div><div class="sim-item-val red">'+fmtE(coutMaxChg)+'</div><div class="sim-item-sub">chargé '+tauxA+'%</div></div>';
+  h+='<div class="sim-item"><div class="sim-item-label">Prime acquise actuelle</div><div class="sim-item-val orange">'+fmtE(primeAcq*volA)+'</div><div class="sim-item-sub">sur CA lu</div></div>';
+  h+='</div></div>';
+  }
 
   // Alertes conformité
   h+='<div class="section" style="border-color:#c7d2fe"><div class="sec-head" style="background:#f5f3ff"><div class="sec-title">⚖️ Conformité & Analyse juridique</div></div><div class="sec-body">';
@@ -881,7 +1114,7 @@ function openCreateModal(preEmpId){
     employeId:preEmpId||'',employeIds:[],
     periodicite:'mensuel',dateDebut:todayISO(),dateFin:'',
     criteres:[{label:'',cible:'',unite:'€',poids:100,avancement:''}],
-    prime:{montantBrut:'',mode:'fixe',modePalier:'tout_ou_rien',paliers:[{seuil:80,primePct:50},{seuil:100,primePct:100}],tauxCharges:45},
+    prime:{montantBrut:'',mode:'fixe',modePalier:'tout_ou_rien',paliers:[{seuil:80,primePct:50},{seuil:100,primePct:100}],paliersAbs:[{seuilCA:'',primeBrut:''}],tauxCharges:45},
     statut:'brouillon',
     conformite:{verifie:false,alertes:[],ccnCheck:null}
   };
@@ -914,7 +1147,7 @@ function renderCreatePanel(obj,isEdit){
   h+='</div></div>';
 
   // Titre + Description
-  h+='<div class="form-grid-2"><div class="field-wrap"><label class="field-label">Titre de l\'objectif *</label><input class="rh-input" id="c-titre" value="'+esc(obj.titre||'')+'" placeholder="Ex: Atteindre 50k€ de CA mensuel"/></div><div class="field-wrap"><label class="field-label">Périodicité</label><select class="rh-select" id="c-periodicite"><option value="mensuel"'+(obj.periodicite==='mensuel'?' selected':'')+'>Mensuel</option><option value="trimestriel"'+(obj.periodicite==='trimestriel'?' selected':'')+'>Trimestriel</option><option value="annuel"'+(obj.periodicite==='annuel'?' selected':'')+'>Annuel</option><option value="libre"'+(obj.periodicite==='libre'?' selected':'')+'>Libre (dates custom)</option></select></div></div>';
+  h+='<div class="form-grid-2"><div class="field-wrap"><label class="field-label">Titre de l\'objectif *</label><input class="rh-input" id="c-titre" value="'+esc(obj.titre||'')+'" placeholder="Ex: Atteindre 50k€ de CA mensuel"/></div><div class="field-wrap"><label class="field-label">Périodicité</label><select class="rh-select" id="c-periodicite" onchange="onPeriodiciteChange()"><option value="mensuel"'+(obj.periodicite==='mensuel'?' selected':'')+'>Mensuel</option><option value="trimestriel"'+(obj.periodicite==='trimestriel'?' selected':'')+'>Trimestriel</option><option value="annuel"'+(obj.periodicite==='annuel'?' selected':'')+(obj.prime.modePalier==='paliers_abs'?' disabled':'')+'>Annuel'+(obj.prime.modePalier==='paliers_abs'?' (indisponible pour paliers CA)':'')+'</option><option value="libre"'+(obj.periodicite==='libre'?' selected':'')+(obj.prime.modePalier==='paliers_abs'?' disabled':'')+'>Libre (dates custom)'+(obj.prime.modePalier==='paliers_abs'?' (indisponible pour paliers CA)':'')+'</option></select></div></div>';
   h+='<div class="field-wrap"><label class="field-label">Description</label><textarea class="rh-textarea" id="c-description" rows="2" placeholder="Détaillez les attentes...">'+esc(obj.description||'')+'</textarea></div>';
 
   // Employé(s)
@@ -935,8 +1168,8 @@ function renderCreatePanel(obj,isEdit){
   // Dates
   h+='<div class="form-grid-2"><div class="field-wrap"><label class="field-label">Date de début</label><input class="rh-input" id="c-dateDebut" type="date" value="'+(obj.dateDebut||todayISO())+'"/></div><div class="field-wrap"><label class="field-label">Date de fin</label><input class="rh-input" id="c-dateFin" type="date" value="'+(obj.dateFin||'')+'"/></div></div>';
 
-  // Critères
-  h+='<div class="section"><div class="sec-head"><div class="sec-title">📋 Critères d\'évaluation</div><button class="btn btn-outline btn-xs" onclick="addCritere()">+ Critère</button></div><div class="sec-body" id="criteres-body">';
+  // Critères (bloc masqué si mode paliers_abs)
+  h+='<div class="section" id="criteres-section" style="display:'+(obj.prime.modePalier==='paliers_abs'?'none':'block')+'"><div class="sec-head"><div class="sec-title">📋 Critères d\'évaluation</div><button class="btn btn-outline btn-xs" onclick="addCritere()">+ Critère</button></div><div class="sec-body" id="criteres-body">';
   h+='<div style="display:grid;grid-template-columns:1fr 90px 70px 70px 36px;gap:8px;margin-bottom:6px;padding:0 4px"><span style="font-size:10px;font-weight:700;color:var(--muted)">CRITÈRE</span><span style="font-size:10px;font-weight:700;color:var(--muted)">CIBLE</span><span style="font-size:10px;font-weight:700;color:var(--muted)">UNITÉ</span><span style="font-size:10px;font-weight:700;color:var(--muted)">POIDS %</span><span></span></div>';
   h+='<div id="crit-rows">';
   (obj.criteres||[]).forEach(function(c,i){
@@ -947,26 +1180,45 @@ function renderCreatePanel(obj,isEdit){
 
   // Prime
   h+='<div class="section"><div class="sec-head"><div class="sec-title">💰 Configuration de la prime</div></div><div class="sec-body">';
+  // Bloc "montant brut / mode calcul" masqué en mode paliers_abs (somme des paliers = montant max, pas de mode % salaire)
+  h+='<div id="prime-classic-fields" style="display:'+(obj.prime.modePalier==='paliers_abs'?'none':'block')+'">';
   h+='<div class="form-grid-3"><div class="field-wrap"><label class="field-label">Montant brut (€ ou %)</label><input class="rh-input" id="c-prime-montant" type="text" inputmode="decimal" value="'+(obj.prime.montantBrut||'')+'" placeholder="500" oninput="updateSimulateur();updateCreateAlertes()"/></div>';
   h+='<div class="field-wrap"><label class="field-label">Mode de calcul</label><select class="rh-select" id="c-prime-mode" onchange="updateSimulateur();updateCreateAlertes()"><option value="fixe"'+(obj.prime.mode==='fixe'?' selected':'')+'>Montant fixe (€)</option><option value="pct_salaire"'+(obj.prime.mode==='pct_salaire'?' selected':'')+'>% du salaire brut</option><option value="pct_resultat"'+(obj.prime.mode==='pct_resultat'?' selected':'')+'>% du résultat</option></select></div>';
   h+='<div class="field-wrap"><label class="field-label">Taux charges patronales (%)</label><input class="rh-input" id="c-prime-taux" type="number" value="'+(obj.prime.tauxCharges||45)+'" min="0" max="100" step="1" oninput="updateSimulateur()"/></div></div>';
+  h+='</div>';
+  // Bloc taux charges seul en mode paliers_abs (montant brut = somme paliers auto)
+  h+='<div id="prime-abs-fields" style="display:'+(obj.prime.modePalier==='paliers_abs'?'block':'none')+'">';
+  h+='<div class="form-grid-2"><div class="field-wrap"><label class="field-label">Taux charges patronales (%)</label><input class="rh-input" id="c-prime-taux-abs" type="number" value="'+(obj.prime.tauxCharges||45)+'" min="0" max="100" step="1" oninput="updateSimulateur()"/></div><div class="field-wrap"><label class="field-label">Prime max cumulée (auto)</label><div id="prime-abs-max-display" style="padding:7px 12px;background:var(--rh-ghost);border-radius:8px;font-weight:700;color:var(--rh-main);font-size:13px">0 €</div></div></div>';
+  h+='</div>';
 
   // Mode palier
   h+='<div class="field-wrap"><label class="field-label">Mode de déclenchement</label><div style="display:flex;gap:8px;flex-wrap:wrap">';
-  [{k:'tout_ou_rien',l:'🎯 Tout ou rien',d:'100% atteint = prime, sinon 0'},{k:'proportionnel',l:'📐 Proportionnel',d:'Prime au prorata de l\'atteinte'},{k:'paliers',l:'📊 Paliers',d:'Seuils configurables'}].forEach(function(m){
+  [{k:'tout_ou_rien',l:'🎯 Tout ou rien',d:'100% atteint = prime, sinon 0'},{k:'proportionnel',l:'📐 Proportionnel',d:'Prime au prorata de l\'atteinte'},{k:'paliers',l:'📊 Paliers %',d:'Seuils en % d\'atteinte'},{k:'paliers_abs',l:'💸 Paliers CA (€)',d:'CA Pilotage auto, cumulatifs'}].forEach(function(m){
     h+='<button class="btn btn-sm" id="palier-btn-'+m.k+'" style="background:'+(obj.prime.modePalier===m.k?'var(--rh-ghost)':'white')+';color:'+(obj.prime.modePalier===m.k?'var(--rh-main)':'var(--muted)')+';border:1.5px solid '+(obj.prime.modePalier===m.k?'var(--rh-main)':'var(--border)')+';flex-direction:column;display:flex;align-items:flex-start;padding:8px 12px;text-align:left" onclick="setPalierMode(\''+m.k+'\')"><span style="font-size:12px;font-weight:700">'+m.l+'</span><span style="font-size:10px;color:var(--muted);font-weight:400">'+m.d+'</span></button>';
   });
   h+='</div></div>';
 
-  // Paliers config (visible si mode=paliers)
+  // Paliers config en % (visible si mode=paliers)
   h+='<div id="paliers-section" style="display:'+(obj.prime.modePalier==='paliers'?'block':'none')+'">';
-  h+='<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">PALIERS</div>';
+  h+='<div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">PALIERS EN % D\'ATTEINTE</div>';
   h+='<div id="palier-rows">';
   (obj.prime.paliers||[]).forEach(function(p,i){
     h+=renderPalierRow(p,i);
   });
   h+='</div>';
   h+='<button class="btn btn-outline btn-xs" onclick="addPalier()" style="margin-top:6px">+ Palier</button>';
+  h+='</div>';
+
+  // Paliers config absolus (visible si mode=paliers_abs)
+  h+='<div id="paliers-abs-section" style="display:'+(obj.prime.modePalier==='paliers_abs'?'block':'none')+'">';
+  h+='<div style="padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;margin-bottom:10px;font-size:11px;color:#1e40af;line-height:1.5"><b>🔗 CA auto-lu depuis Pilotage.</b> Le CA HT du <b>'+(obj.periodicite==='trimestriel'?'trimestre':'mois')+' en cours</b> est comparé aux paliers. Les primes se <b>cumulent</b> : chaque palier atteint ajoute sa prime. La prime remonte automatiquement dans la masse salariale du Pilotage.<br><span style="font-size:10px;color:#3b5998">⚠️ Pour ce mode, seules les périodicités Mensuel et Trimestriel sont supportées.</span></div>';
+  h+='<div style="display:grid;grid-template-columns:1fr 1fr 36px;gap:8px;margin-bottom:6px;padding:0 4px"><span style="font-size:10px;font-weight:700;color:var(--muted)">SEUIL CA HT (€)</span><span style="font-size:10px;font-weight:700;color:var(--muted)">PRIME BRUT (€)</span><span></span></div>';
+  h+='<div id="palier-abs-rows">';
+  (obj.prime.paliersAbs||[{seuilCA:'',primeBrut:''}]).forEach(function(p,i){
+    h+=renderPalierAbsRow(p,i);
+  });
+  h+='</div>';
+  h+='<button class="btn btn-outline btn-xs" onclick="addPalierAbs()" style="margin-top:6px">+ Palier</button>';
   h+='</div>';
   h+='</div></div>';
 
@@ -988,8 +1240,12 @@ function renderCreatePanel(obj,isEdit){
 
   panel.innerHTML=h;
 
-  // Init simulateur + conformité
-  setTimeout(function(){updateSimulateur();updateCreateAlertes();},50);
+  // Synchroniser l'état global (type + palier mode) avec l'objet chargé
+  window._createObjType=obj.type||'individuel';
+  window._createPalierMode=(obj.prime||{}).modePalier||'tout_ou_rien';
+
+  // Init simulateur + conformité + prime max display
+  setTimeout(function(){updateSimulateur();updateCreateAlertes();updatePrimeAbsMaxDisplay();},50);
 }
 
 function renderCritRow(c,i){
@@ -998,6 +1254,12 @@ function renderCritRow(c,i){
 
 function renderPalierRow(p,i){
   return '<div class="palier-row" id="palier-'+i+'"><div style="display:flex;align-items:center;gap:4px"><span style="font-size:11px;color:var(--muted)">≥</span><input type="number" placeholder="80" value="'+(p.seuil||'')+'" min="0" max="200" style="text-align:center"/><span style="font-size:11px;color:var(--muted)">%</span></div><div style="display:flex;align-items:center;gap:4px"><span style="font-size:11px;color:var(--muted)">→</span><input type="number" placeholder="50" value="'+(p.primePct||'')+'" min="0" max="200" style="text-align:center"/><span style="font-size:11px;color:var(--muted)">% prime</span></div><button class="btn-del" onclick="removePalier('+i+')">✕</button></div>';
+}
+
+function renderPalierAbsRow(p,i){
+  var seuil=(p.seuilCA===0||p.seuilCA)?p.seuilCA:'';
+  var prime=(p.primeBrut===0||p.primeBrut)?p.primeBrut:'';
+  return '<div class="palier-abs-row" id="palier-abs-'+i+'" style="display:grid;grid-template-columns:1fr 1fr 36px;gap:8px;margin-bottom:6px"><div style="display:flex;align-items:center;gap:4px"><span style="font-size:11px;color:var(--muted)">≥</span><input type="text" inputmode="decimal" placeholder="30000" value="'+seuil+'" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;text-align:right;outline:none" oninput="updateSimulateur();updatePrimeAbsMaxDisplay()"/><span style="font-size:11px;color:var(--muted)">€</span></div><div style="display:flex;align-items:center;gap:4px"><span style="font-size:11px;color:var(--muted)">→</span><input type="text" inputmode="decimal" placeholder="200" value="'+prime+'" style="flex:1;padding:7px 10px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:12px;text-align:right;outline:none" oninput="updateSimulateur();updatePrimeAbsMaxDisplay()"/><span style="font-size:11px;color:var(--muted)">€</span></div><button class="btn-del" onclick="removePalierAbs('+i+')">✕</button></div>';
 }
 
 // ═══════════════════════════════════════════
@@ -1065,24 +1327,129 @@ function removePalier(idx){
   if(el)el.remove();
 }
 
+// ───── Paliers absolus (CA €) ─────
+function addPalierAbs(){
+  var container=document.getElementById('palier-abs-rows');
+  if(!container)return;
+  var idx=container.children.length;
+  var div=document.createElement('div');
+  div.innerHTML=renderPalierAbsRow({seuilCA:'',primeBrut:''},idx);
+  container.appendChild(div.firstChild);
+  updateSimulateur();
+  updatePrimeAbsMaxDisplay();
+}
+
+function removePalierAbs(idx){
+  var el=document.getElementById('palier-abs-'+idx);
+  if(el)el.remove();
+  updateSimulateur();
+  updatePrimeAbsMaxDisplay();
+}
+
+// Met à jour l'affichage "Prime max cumulée" dans la section paliers_abs
+function updatePrimeAbsMaxDisplay(){
+  var disp=document.getElementById('prime-abs-max-display');
+  if(!disp)return;
+  var rows=document.querySelectorAll('#palier-abs-rows .palier-abs-row');
+  var s=0;
+  rows.forEach(function(r){
+    var inputs=r.querySelectorAll('input[type=text]');
+    if(inputs.length>=2) s+=parseFloat((inputs[1].value||'').replace(',','.'))||0;
+  });
+  disp.textContent=fmtE(s);
+}
+
+// Adapte les périodicités autorisées quand le mode change
+function onPeriodiciteChange(){
+  // Si l'utilisateur sélectionne une période interdite en mode paliers_abs, on repasse sur mensuel
+  var mode=window._createPalierMode||'tout_ou_rien';
+  var sel=document.getElementById('c-periodicite');
+  if(!sel)return;
+  if(mode==='paliers_abs' && (sel.value==='annuel' || sel.value==='libre')){
+    showToast('Mode Paliers CA : seulement Mensuel ou Trimestriel','warning');
+    sel.value='mensuel';
+  }
+}
+
 window._createPalierMode='tout_ou_rien';
 function setPalierMode(m){
   window._createPalierMode=m;
-  ['tout_ou_rien','proportionnel','paliers'].forEach(function(k){
+  ['tout_ou_rien','proportionnel','paliers','paliers_abs'].forEach(function(k){
     var b=document.getElementById('palier-btn-'+k);
     if(b){b.style.background=k===m?'var(--rh-ghost)':'white';b.style.color=k===m?'var(--rh-main)':'var(--muted)';b.style.borderColor=k===m?'var(--rh-main)':'var(--border)';}
   });
   var sec=document.getElementById('paliers-section');
   if(sec)sec.style.display=m==='paliers'?'block':'none';
+  var secAbs=document.getElementById('paliers-abs-section');
+  if(secAbs)secAbs.style.display=m==='paliers_abs'?'block':'none';
+  // Masquer critères + champs classiques quand mode = paliers_abs
+  var critSec=document.getElementById('criteres-section');
+  if(critSec)critSec.style.display=m==='paliers_abs'?'none':'block';
+  var classic=document.getElementById('prime-classic-fields');
+  if(classic)classic.style.display=m==='paliers_abs'?'none':'block';
+  var absFields=document.getElementById('prime-abs-fields');
+  if(absFields)absFields.style.display=m==='paliers_abs'?'block':'none';
+  // Restreindre périodicité si paliers_abs
+  var periodSel=document.getElementById('c-periodicite');
+  if(periodSel){
+    Array.prototype.forEach.call(periodSel.options,function(opt){
+      if(opt.value==='annuel'||opt.value==='libre'){
+        opt.disabled=(m==='paliers_abs');
+        // Si valeur actuelle interdite, bascule sur mensuel
+        if(m==='paliers_abs' && periodSel.value===opt.value) periodSel.value='mensuel';
+      }
+    });
+  }
+  if(m==='paliers_abs') updatePrimeAbsMaxDisplay();
   updateSimulateur();
 }
 
 function updateSimulateur(){
-  var montant=pf(gv('c-prime-montant'));
-  var taux=parseFloat(gv('c-prime-taux'))||45;
   var mode=window._createPalierMode||'tout_ou_rien';
   var grid=document.getElementById('sim-create-grid');
   if(!grid)return;
+
+  // ── Mode paliers_abs : scénarios CA ──
+  if(mode==='paliers_abs'){
+    var tauxAbs=parseFloat(gv('c-prime-taux-abs'))||45;
+    var rows=document.querySelectorAll('#palier-abs-rows .palier-abs-row');
+    var paliers=[];
+    rows.forEach(function(r){
+      var inputs=r.querySelectorAll('input[type=text]');
+      if(inputs.length>=2){
+        var seuil=parseFloat((inputs[0].value||'').replace(',','.'))||0;
+        var prime=parseFloat((inputs[1].value||'').replace(',','.'))||0;
+        if(seuil>0) paliers.push({seuilCA:seuil,primeBrut:prime});
+      }
+    });
+    if(paliers.length===0){
+      grid.innerHTML='<div style="grid-column:1/-1;padding:10px;text-align:center;color:var(--muted);font-size:11px">Ajoutez au moins un palier pour voir la simulation</div>';
+      return;
+    }
+    paliers.sort(function(a,b){return a.seuilCA-b.seuilCA;});
+    var seuilMin=paliers[0].seuilCA;
+    var seuilMax=paliers[paliers.length-1].seuilCA;
+    // 3 scénarios : sous seuil min (-10%), entre (moyenne), au-dessus max (+10%)
+    var scenarios=[
+      {label:'CA < seuil min',ca:Math.max(0,seuilMin*0.9),color:'red'},
+      {label:'CA = seuil max',ca:seuilMax,color:'orange'},
+      {label:'CA > max (+10%)',ca:seuilMax*1.1,color:'green'}
+    ];
+    var html='';
+    scenarios.forEach(function(s){
+      var brut=0;
+      paliers.forEach(function(p){ if(s.ca>=p.seuilCA) brut+=p.primeBrut; });
+      var chg=brut*(1+tauxAbs/100);
+      html+='<div class="sim-item"><div class="sim-item-label">'+s.label+'</div><div class="sim-item-val '+s.color+'">'+fmtE(chg)+'</div><div class="sim-item-sub">CA '+fmtE(s.ca)+' → prime '+fmtE(brut)+' brut</div></div>';
+    });
+    grid.innerHTML=html;
+    updatePrimeAbsMaxDisplay();
+    return;
+  }
+
+  // ── Modes classiques ──
+  var montant=pf(gv('c-prime-montant'));
+  var taux=parseFloat(gv('c-prime-taux'))||45;
 
   function simCost(avPct){
     var brut=0;
@@ -1113,32 +1480,59 @@ function updateSimulateur(){
 // ═══════════════════════════════════════════
 function _collectFormObj(){
   var type=window._createObjType||'individuel';
+  var mode=window._createPalierMode||'tout_ou_rien';
   var employeId='';var employeIds=[];
   if(type==='equipe'){
     document.querySelectorAll('#equipe-checkboxes input[type=checkbox]:checked').forEach(function(cb){employeIds.push(cb.value);});
   } else {
     employeId=gv('c-employeId');
   }
-  // Recueillir critères
-  var critRows=document.querySelectorAll('#crit-rows .crit-row');
+  // Recueillir critères (vide si mode paliers_abs : critères masqués)
   var criteres=[];
-  critRows.forEach(function(r){
-    var inputs=r.querySelectorAll('input');
-    var sel=r.querySelector('select');
-    if(inputs[0] && inputs[0].value){
-      criteres.push({label:inputs[0].value,cible:inputs[1]?inputs[1].value.replace(',','.'):'',unite:sel?sel.value:'€',poids:parseFloat(inputs[2]?inputs[2].value:0)||0});
-    }
-  });
+  if(mode!=='paliers_abs'){
+    var critRows=document.querySelectorAll('#crit-rows .crit-row');
+    critRows.forEach(function(r){
+      var inputs=r.querySelectorAll('input');
+      var sel=r.querySelector('select');
+      if(inputs[0] && inputs[0].value){
+        criteres.push({label:inputs[0].value,cible:inputs[1]?inputs[1].value.replace(',','.'):'',unite:sel?sel.value:'€',poids:parseFloat(inputs[2]?inputs[2].value:0)||0});
+      }
+    });
+  }
+  // Recueillir paliers abs
+  var paliersAbs=[];
+  if(mode==='paliers_abs'){
+    document.querySelectorAll('#palier-abs-rows .palier-abs-row').forEach(function(r){
+      var inputs=r.querySelectorAll('input[type=text]');
+      if(inputs.length>=2){
+        var seuilCA=parseFloat((inputs[0].value||'').replace(',','.'))||0;
+        var primeBrut=parseFloat((inputs[1].value||'').replace(',','.'))||0;
+        if(seuilCA>0) paliersAbs.push({seuilCA:seuilCA,primeBrut:primeBrut});
+      }
+    });
+  }
+  // Montant brut : en mode paliers_abs = somme des primes (prime max cumulée)
+  var montantBrut, tauxCharges, modeCalc;
+  if(mode==='paliers_abs'){
+    montantBrut=String(paliersAbs.reduce(function(s,p){return s+(p.primeBrut||0);},0));
+    tauxCharges=parseFloat(gv('c-prime-taux-abs'))||45;
+    modeCalc='fixe';
+  } else {
+    montantBrut=gv('c-prime-montant').replace(',','.');
+    tauxCharges=parseFloat(gv('c-prime-taux'))||45;
+    modeCalc=gv('c-prime-mode');
+  }
   return {
     type:type,titre:gv('c-titre'),description:gv('c-description'),
     employeId:employeId,employeIds:employeIds,
     periodicite:gv('c-periodicite'),dateDebut:gv('c-dateDebut'),dateFin:gv('c-dateFin'),
     criteres:criteres,
     prime:{
-      montantBrut:gv('c-prime-montant').replace(',','.'),
-      mode:gv('c-prime-mode'),
-      modePalier:window._createPalierMode||'tout_ou_rien',
-      tauxCharges:parseFloat(gv('c-prime-taux'))||45
+      montantBrut:montantBrut,
+      mode:modeCalc,
+      modePalier:mode,
+      paliersAbs:paliersAbs,
+      tauxCharges:tauxCharges
     },
     statut:'brouillon'
   };
@@ -1205,24 +1599,45 @@ async function submitObjectif(existingId){
   var titre=gv('c-titre');
   if(!titre){showToast('Titre obligatoire','error');return;}
 
-  // Recueillir critères
-  var critRows=document.querySelectorAll('#crit-rows .crit-row');
-  var criteres=[];
-  critRows.forEach(function(r){
-    var inputs=r.querySelectorAll('input');
-    var sel=r.querySelector('select');
-    if(inputs[0].value){
-      criteres.push({label:inputs[0].value,cible:inputs[1].value.replace(',','.'),unite:sel?sel.value:'€',poids:parseFloat(inputs[2].value)||0,avancement:''});
-    }
-  });
+  var mode=window._createPalierMode||'tout_ou_rien';
 
-  // Recueillir paliers
-  var palierRows=document.querySelectorAll('#palier-rows .palier-row');
+  // Recueillir critères (uniquement en modes classiques)
+  var criteres=[];
+  if(mode!=='paliers_abs'){
+    var critRows=document.querySelectorAll('#crit-rows .crit-row');
+    critRows.forEach(function(r){
+      var inputs=r.querySelectorAll('input');
+      var sel=r.querySelector('select');
+      if(inputs[0].value){
+        criteres.push({label:inputs[0].value,cible:inputs[1].value.replace(',','.'),unite:sel?sel.value:'€',poids:parseFloat(inputs[2].value)||0,avancement:''});
+      }
+    });
+  }
+
+  // Recueillir paliers % (si mode=paliers)
   var paliers=[];
-  palierRows.forEach(function(r){
+  document.querySelectorAll('#palier-rows .palier-row').forEach(function(r){
     var inputs=r.querySelectorAll('input[type=number]');
     if(inputs.length>=2) paliers.push({seuil:parseFloat(inputs[0].value)||0,primePct:parseFloat(inputs[1].value)||0});
   });
+
+  // Recueillir paliers absolus (si mode=paliers_abs)
+  var paliersAbs=[];
+  if(mode==='paliers_abs'){
+    document.querySelectorAll('#palier-abs-rows .palier-abs-row').forEach(function(r){
+      var inputs=r.querySelectorAll('input[type=text]');
+      if(inputs.length>=2){
+        var seuilCA=parseFloat((inputs[0].value||'').replace(',','.'))||0;
+        var primeBrut=parseFloat((inputs[1].value||'').replace(',','.'))||0;
+        if(seuilCA>0) paliersAbs.push({seuilCA:seuilCA,primeBrut:primeBrut});
+      }
+    });
+    if(paliersAbs.length===0){
+      showToast('Ajoutez au moins un palier avec seuil > 0','error');return;
+    }
+    // Tri croissant pour stockage cohérent
+    paliersAbs.sort(function(a,b){return a.seuilCA-b.seuilCA;});
+  }
 
   // Employé(s)
   var type=window._createObjType||'individuel';
@@ -1232,6 +1647,23 @@ async function submitObjectif(existingId){
   } else {
     var sel=document.getElementById('c-employeId');
     if(sel) employeId=sel.value;
+  }
+
+  // Champs prime selon mode
+  var montantBrut, tauxCharges, modeCalc;
+  if(mode==='paliers_abs'){
+    montantBrut=String(paliersAbs.reduce(function(s,p){return s+(p.primeBrut||0);},0));
+    tauxCharges=parseFloat(gv('c-prime-taux-abs'))||45;
+    modeCalc='fixe';
+    // Garde-fou périodicité : forcer mensuel/trimestriel
+    var per=gv('c-periodicite');
+    if(per!=='mensuel' && per!=='trimestriel'){
+      showToast('Mode Paliers CA : choisissez Mensuel ou Trimestriel','error');return;
+    }
+  } else {
+    montantBrut=gv('c-prime-montant').replace(',','.');
+    tauxCharges=parseFloat(gv('c-prime-taux'))||45;
+    modeCalc=gv('c-prime-mode');
   }
 
   var obj={
@@ -1245,11 +1677,12 @@ async function submitObjectif(existingId){
     dateFin:gv('c-dateFin'),
     criteres:criteres,
     prime:{
-      montantBrut:gv('c-prime-montant').replace(',','.'),
-      mode:gv('c-prime-mode'),
-      modePalier:window._createPalierMode||'tout_ou_rien',
+      montantBrut:montantBrut,
+      mode:modeCalc,
+      modePalier:mode,
       paliers:paliers,
-      tauxCharges:parseFloat(gv('c-prime-taux'))||45
+      paliersAbs:paliersAbs,
+      tauxCharges:tauxCharges
     },
     statut:existingId?(_objectifs[existingId].statut||'brouillon'):'brouillon',
     conformite:{verifie:false,alertes:[],ccnCheck:null},
@@ -1259,8 +1692,8 @@ async function submitObjectif(existingId){
   if(!existingId) obj.createdAt=new Date().toISOString();
   else {
     obj.createdAt=_objectifs[existingId].createdAt||new Date().toISOString();
-    // Conserver avancements existants
-    if(_objectifs[existingId].criteres){
+    // Conserver avancements existants (uniquement modes classiques)
+    if(mode!=='paliers_abs' && _objectifs[existingId].criteres){
       obj.criteres.forEach(function(nc,i){
         var old=(_objectifs[existingId].criteres||[])[i];
         if(old && old.label===nc.label) nc.avancement=old.avancement||'';
@@ -1278,6 +1711,14 @@ async function submitObjectif(existingId){
       obj.id=ref.id;
       _objectifs[ref.id]=obj;
       syncObjPublic(ref.id, obj);
+    }
+    // Recharger le CA si c'est un objectif paliers_abs → la carte liste l'affiche à jour
+    if(mode==='paliers_abs'){
+      var objId=existingId||obj.id;
+      if(objId){
+        var ca=await _fetchCAForObj(obj);
+        if(ca) window._objCaCache[objId]=ca;
+      }
     }
     closeDetail();
     renderObjGrid();

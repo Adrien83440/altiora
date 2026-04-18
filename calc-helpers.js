@@ -249,6 +249,101 @@
   };
 
   /* ───────────────────────────────────────────────────────────────────────
+   * PALIERS ABSOLUS (CA auto-lu) — helpers internes
+   * ───────────────────────────────────────────────────────────────────────
+   * Les objectifs de type `modePalier === 'paliers_abs'` lient automatiquement
+   * la prime au CA HT du mois (ou du trimestre) consulté dans Pilotage.
+   *
+   * Paliers : [{ seuilCA, primeBrut }] — CUMULATIFS (chaque palier franchi
+   * ajoute sa prime).
+   *
+   * Périodicités supportées :
+   *   • mensuel     → CA du mois courant uniquement
+   *   • trimestriel → somme CA des 3 mois du trimestre, prime comptée
+   *                   UNIQUEMENT sur le 3e mois (mars/juin/sept/déc)
+   * ─────────────────────────────────────────────────────────────────────── */
+  // Extrait le CA HT d'un document pilotage/months/{key}
+  H._caHtFromMonthDoc = function (data) {
+    if (!data) return 0;
+    var ca = data.ca || [], fp = data.facturesPro || [];
+    var s = 0;
+    for (var i = 0; i < ca.length; i++) {
+      var r = ca[i];
+      s += H.pf(r.ht055) + H.pf(r.ht10) + H.pf(r.ht20) + H.pf(r.ht21) + H.pf(r.ht85);
+      if (!r.ht055 && !r.ht10 && !r.ht20 && !r.ht21 && !r.ht85) s += H.pf(r.montantHT);
+    }
+    for (var j = 0; j < fp.length; j++) {
+      var f = fp[j];
+      s += H.pf(f.ht055) + H.pf(f.ht10) + H.pf(f.ht20) + H.pf(f.ht0) + H.pf(f.ht21) + H.pf(f.ht85);
+    }
+    return s;
+  };
+  // Retourne les 3 clés YYYY-MM du trimestre d'une clé donnée
+  H._trimestreKeysOf = function (key) {
+    var p = (key || '').split('-'); if (p.length < 2) return [];
+    var y = parseInt(p[0], 10), mo = parseInt(p[1], 10);
+    if (!y || !mo) return [];
+    var startM = Math.floor((mo - 1) / 3) * 3 + 1;
+    var out = [];
+    for (var i = 0; i < 3; i++) {
+      var mm = startM + i;
+      out.push(y + '-' + (mm < 10 ? '0' : '') + mm);
+    }
+    return out;
+  };
+  // La prime doit-elle s'appliquer à ce mois ? (évite de compter 3x une prime trimestrielle)
+  H._shouldPrimeApplyToMonth = function (obj, monthKey) {
+    var per = (obj && obj.periodicite) || 'mensuel';
+    if (per === 'mensuel') return true;
+    if (per === 'trimestriel') {
+      var p = (monthKey || '').split('-'); if (p.length < 2) return false;
+      var mo = parseInt(p[1], 10);
+      return mo === 3 || mo === 6 || mo === 9 || mo === 12;
+    }
+    return false;
+  };
+  // Calcule la prime brute acquise (cumulatif, CA ≥ seuil)
+  H._calcPrimeAbsFromCA = function (paliersAbs, caHT) {
+    var s = 0;
+    var list = paliersAbs || [];
+    for (var i = 0; i < list.length; i++) {
+      var seuil = H.pf(list[i].seuilCA);
+      var prime = H.pf(list[i].primeBrut);
+      if (seuil > 0 && caHT >= seuil) s += prime;
+    }
+    return s;
+  };
+  // Calcule le CA total à comparer pour un objectif, selon périodicité
+  //   • Essaie d'abord le cache global window._caByMonth (rempli par pilotage)
+  //   • Pour mensuel : fallback sur currentMonthData (d) si pas de cache
+  //   • Pour trimestriel : nécessite le cache ; sinon retourne 0
+  H._getCAForPaliersAbs = function (obj, monthKey, currentMonthData) {
+    var per = (obj && obj.periodicite) || 'mensuel';
+    var cache = (global && global._caByMonth) || {};
+    if (per === 'mensuel') {
+      if (monthKey && typeof cache[monthKey] === 'number') return cache[monthKey];
+      // Fallback : calcule directement depuis le doc du mois (si fourni)
+      if (currentMonthData) return H._caHtFromMonthDoc(currentMonthData);
+      return 0;
+    }
+    if (per === 'trimestriel') {
+      if (!monthKey) return 0;
+      var keys = H._trimestreKeysOf(monthKey);
+      var total = 0, missing = 0;
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (typeof cache[k] === 'number') total += cache[k];
+        else if (k === monthKey && currentMonthData) total += H._caHtFromMonthDoc(currentMonthData);
+        else missing++;
+      }
+      // Si des mois manquent dans le cache → calcul dégradé : on retourne ce qu'on a
+      //  (le cache sera rempli au fur et à mesure que l'utilisateur navigue)
+      return total;
+    }
+    return 0;
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
    * MASSE SALARIALE — calcMasseSalariale(d)
    * ───────────────────────────────────────────────────────────────────────
    * d = le document mensuel pilotage complet (contient d.masseSalariale)
@@ -328,32 +423,47 @@
     }
 
     // ─── PRIMES D'OBJECTIFS ────────────────────────────────────
+    // Note : monthKey peut être lu depuis d._monthKey (ajouté par les callers
+    // qui ont la clé sous la main, typiquement pilotage). Sans monthKey :
+    //   • mensuel    → calcule à partir de d directement (mode dégradé OK)
+    //   • trimestriel → skippé (impossible de savoir si on est fin de trimestre)
+    var _monthKey = d && d._monthKey ? d._monthKey : null;
     if (objs.length > 0) {
       for (var oi = 0; oi < objs.length; oi++) {
         var obj = objs[oi];
         if (!obj || obj.statut === 'annule' || obj.statut === 'brouillon') continue;
         var prime = obj.prime || {};
-        var montant = H.pf(prime.montantBrut);
-        if (montant <= 0) continue;
         var tauxP = H.pf(prime.tauxCharges);
         if (tauxP <= 0) tauxP = 45;
-
-        var av = H._calcObjAvancement(obj);
         var modeP = prime.modePalier || 'tout_ou_rien';
         var brutP = 0;
 
-        if (modeP === 'tout_ou_rien') {
-          brutP = av >= 100 ? montant : 0;
-        } else if (modeP === 'proportionnel') {
-          brutP = montant * Math.min(av, 100) / 100;
-        } else if (modeP === 'paliers') {
-          var paliers = (prime.paliers || []).slice().sort(function (a, b) {
-            return H.pf(b.seuil) - H.pf(a.seuil);
-          });
-          for (var pi = 0; pi < paliers.length; pi++) {
-            if (av >= H.pf(paliers[pi].seuil)) {
-              brutP = montant * H.pf(paliers[pi].primePct) / 100;
-              break;
+        // ── MODE PALIERS_ABS : CA auto-lu, cumulatif ──
+        if (modeP === 'paliers_abs') {
+          // Trimestriel sans monthKey → skip (ne pas afficher de prime sans contexte)
+          if ((obj.periodicite === 'trimestriel') && !_monthKey) continue;
+          // Skip si la prime ne doit pas s'appliquer à ce mois (trimestriel hors fin de trim)
+          if (_monthKey && !H._shouldPrimeApplyToMonth(obj, _monthKey)) continue;
+          var caHT = H._getCAForPaliersAbs(obj, _monthKey, d);
+          brutP = H._calcPrimeAbsFromCA(prime.paliersAbs, caHT);
+        } else {
+          // ── MODES CLASSIQUES (avancement sur critères) ──
+          var montant = H.pf(prime.montantBrut);
+          if (montant <= 0) continue;
+          var av = H._calcObjAvancement(obj);
+          if (modeP === 'tout_ou_rien') {
+            brutP = av >= 100 ? montant : 0;
+          } else if (modeP === 'proportionnel') {
+            brutP = montant * Math.min(av, 100) / 100;
+          } else if (modeP === 'paliers') {
+            var paliers = (prime.paliers || []).slice().sort(function (a, b) {
+              return H.pf(b.seuil) - H.pf(a.seuil);
+            });
+            for (var pi = 0; pi < paliers.length; pi++) {
+              if (av >= H.pf(paliers[pi].seuil)) {
+                brutP = montant * H.pf(paliers[pi].primePct) / 100;
+                break;
+              }
             }
           }
         }
