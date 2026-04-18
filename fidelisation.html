@@ -8,6 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="fidelite-ai.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -263,6 +264,125 @@ main{margin-left:250px;flex:1;display:flex;flex-direction:column}
 .nav-overlay.show{display:block}
 html,body{overflow-x:hidden;max-width:100vw}
 
+/* ═══════════════════════════════════════════════════════════
+   WAVE 1 — SCORING CHURN / LTV / NBA
+   ═══════════════════════════════════════════════════════════ */
+
+/* Score cards (3 blocs en haut de la fiche client) */
+.fc-scores{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px 22px;background:linear-gradient(180deg,rgba(249,250,251,0.6),rgba(255,255,255,0));border-bottom:1px solid var(--border)}
+.fc-score{background:var(--glass-bg-heavy);backdrop-filter:blur(12px);border:1px solid var(--glass-border);border-top:1px solid var(--glass-border-top);border-radius:14px;padding:12px;position:relative;overflow:hidden;box-shadow:0 1px 2px rgba(0,0,0,.03),inset 0 1px 1px rgba(255,255,255,.6);transition:transform .2s}
+.fc-score:hover{transform:translateY(-1px)}
+.fc-score-lbl{font-size:9px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;display:flex;align-items:center;gap:4px}
+
+/* Gauge circulaire churn */
+.churn-gauge{position:relative;width:64px;height:64px;margin:0 auto}
+.churn-gauge svg{width:64px;height:64px;transform:rotate(-90deg)}
+.churn-gauge-bg{fill:none;stroke:rgba(0,0,0,.06);stroke-width:7}
+.churn-gauge-fill{fill:none;stroke-width:7;stroke-linecap:round;transition:stroke-dashoffset .8s cubic-bezier(.4,0,.2,1)}
+.churn-gauge-num{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;letter-spacing:-0.02em}
+.churn-low .churn-gauge-fill{stroke:#10b981}
+.churn-low .churn-gauge-num{color:#065f46}
+.churn-medium .churn-gauge-fill{stroke:#f59e0b}
+.churn-medium .churn-gauge-num{color:#92400e}
+.churn-high .churn-gauge-fill{stroke:#dc2626}
+.churn-high .churn-gauge-num{color:#991b1b}
+.churn-lvl-text{font-size:10px;font-weight:700;text-align:center;margin-top:4px;text-transform:uppercase;letter-spacing:.5px}
+.churn-low .churn-lvl-text{color:#065f46}
+.churn-medium .churn-lvl-text{color:#92400e}
+.churn-high .churn-lvl-text{color:#991b1b}
+
+/* LTV display */
+.ltv-num{font-size:22px;font-weight:800;letter-spacing:-0.02em;text-align:center;color:var(--text)}
+.ltv-trend{font-size:10px;font-weight:600;text-align:center;margin-top:2px;display:flex;align-items:center;justify-content:center;gap:3px}
+.ltv-trend.up{color:#059669}.ltv-trend.stable{color:var(--muted)}.ltv-trend.down{color:#dc2626}
+.ltv-meta{font-size:9px;color:var(--muted);text-align:center;margin-top:3px;line-height:1.3}
+
+/* NBA card */
+.nba-card{padding:10px 12px;border-radius:12px;border:1px solid;display:flex;flex-direction:column;gap:4px;min-height:64px}
+.nba-card.nba-critical{background:linear-gradient(135deg,#fef2f2,#fee2e2);border-color:#fecaca}
+.nba-card.nba-important{background:linear-gradient(135deg,#fffbeb,#fef3c7);border-color:#fde68a}
+.nba-card.nba-normal{background:linear-gradient(135deg,#eff6ff,#dbeafe);border-color:#bfdbfe}
+.nba-card.nba-low{background:linear-gradient(135deg,#f9fafb,#f1f5f9);border-color:#e5e7eb;opacity:.75}
+.nba-title{font-size:12px;font-weight:800;display:flex;align-items:center;gap:5px;line-height:1.2}
+.nba-critical .nba-title{color:#991b1b}
+.nba-important .nba-title{color:#92400e}
+.nba-normal .nba-title{color:#1e40af}
+.nba-low .nba-title{color:#475569}
+.nba-desc{font-size:10.5px;color:var(--muted);line-height:1.4}
+.nba-action-btn{margin-top:auto;padding:5px 10px;border-radius:8px;font-size:11px;font-weight:700;border:none;cursor:pointer;font-family:inherit;align-self:flex-start;transition:.2s}
+.nba-critical .nba-action-btn{background:linear-gradient(135deg,#dc2626,#ef4444);color:#fff;box-shadow:0 2px 6px rgba(220,38,38,.3)}
+.nba-critical .nba-action-btn:hover{transform:translateY(-1px);box-shadow:0 4px 10px rgba(220,38,38,.4)}
+.nba-important .nba-action-btn{background:linear-gradient(135deg,#d97706,#f59e0b);color:#fff;box-shadow:0 2px 6px rgba(217,119,6,.3)}
+.nba-important .nba-action-btn:hover{transform:translateY(-1px)}
+.nba-normal .nba-action-btn{background:rgba(37,99,235,.1);color:var(--blue);border:1px solid rgba(37,99,235,.25)}
+.nba-normal .nba-action-btn:hover{background:rgba(37,99,235,.15)}
+
+/* Badge risque dans liste clients */
+.risk-dot{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;cursor:help}
+.risk-dot::before{content:'';width:7px;height:7px;border-radius:50%;display:inline-block;box-shadow:0 0 0 2px rgba(255,255,255,.6) inset}
+.risk-dot.risk-low{background:rgba(16,185,129,.12);color:#065f46}
+.risk-dot.risk-low::before{background:#10b981}
+.risk-dot.risk-medium{background:rgba(245,158,11,.15);color:#92400e}
+.risk-dot.risk-medium::before{background:#f59e0b}
+.risk-dot.risk-high{background:rgba(220,38,38,.12);color:#991b1b;animation:riskPulse 2s ease-in-out infinite}
+.risk-dot.risk-high::before{background:#dc2626}
+@keyframes riskPulse{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,.4)}50%{box-shadow:0 0 0 4px rgba(220,38,38,0)}}
+
+/* Dashboard priorités card */
+.prio-dash-card{background:linear-gradient(135deg,rgba(255,255,255,.75),rgba(254,242,242,.4));border:1px solid rgba(220,38,38,.15);border-top:1px solid rgba(255,255,255,.9);border-radius:var(--radius);padding:18px 20px;position:relative;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.04),inset 0 1px 1px rgba(255,255,255,.7)}
+.prio-dash-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#dc2626,#f59e0b,#2563eb);border-radius:3px 3px 0 0}
+.prio-dash-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.prio-dash-title{font-size:14px;font-weight:800;display:flex;align-items:center;gap:6px;letter-spacing:-0.01em}
+.prio-dash-link{font-size:11px;font-weight:700;color:var(--blue);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:3px}
+.prio-dash-link:hover{text-decoration:underline}
+.prio-row{display:grid;grid-template-columns:32px 1fr 80px 90px 1fr auto;gap:10px;align-items:center;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:10px;border:1px solid rgba(0,0,0,.04);margin-bottom:6px;transition:.15s;cursor:pointer}
+.prio-row:hover{background:rgba(255,255,255,.9);transform:translateX(2px)}
+.prio-row:last-child{margin-bottom:0}
+.prio-avatar{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:11px;flex-shrink:0}
+.prio-name{font-size:12.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prio-name-sub{font-size:10px;color:var(--muted);margin-top:1px}
+.prio-nba-inline{font-size:11px;color:var(--text);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prio-nba-inline strong{font-weight:700}
+
+/* Panel priorités complet */
+.priorites-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px}
+.priorites-filter-bar{display:flex;gap:6px;flex-wrap:wrap}
+.prio-filter-btn{padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;cursor:pointer;background:rgba(255,255,255,.7);color:var(--muted);border:1.5px solid var(--border);font-family:inherit;transition:.2s}
+.prio-filter-btn.on{background:var(--blue);color:#fff;border-color:var(--blue);box-shadow:0 2px 8px rgba(37,99,235,.25)}
+.prio-filter-btn:not(.on):hover{border-color:var(--blue);color:var(--blue)}
+.prio-kpi-bar{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.prio-kpi{background:var(--glass-bg-heavy);backdrop-filter:blur(12px);border:1px solid var(--glass-border);border-top:1px solid var(--glass-border-top);border-radius:14px;padding:14px;position:relative;overflow:hidden;box-shadow:var(--glass-inset)}
+.prio-kpi-lbl{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.prio-kpi-val{font-size:26px;font-weight:800;letter-spacing:-0.03em;line-height:1.1}
+.prio-kpi-sub{font-size:10px;color:var(--muted);margin-top:3px}
+.prio-kpi.critical .prio-kpi-val{color:#dc2626}
+.prio-kpi.important .prio-kpi-val{color:#d97706}
+.prio-kpi.value .prio-kpi-val{color:#059669}
+.prio-kpi.total .prio-kpi-val{color:var(--blue)}
+.prio-full-row{background:var(--glass-bg-heavy);backdrop-filter:blur(12px);border:1px solid var(--glass-border);border-top:1px solid var(--glass-border-top);border-radius:14px;padding:14px 16px;margin-bottom:8px;display:grid;grid-template-columns:40px 1fr 100px 110px 2fr auto;gap:14px;align-items:center;box-shadow:var(--glass-inset);transition:.2s}
+.prio-full-row:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,0,0,.06)}
+.prio-full-actions{display:flex;gap:6px;flex-wrap:wrap}
+.prio-empty{text-align:center;padding:48px 20px;color:var(--muted);font-size:13px;background:var(--glass-bg-heavy);border:1px dashed var(--border);border-radius:14px}
+.prio-empty-icon{font-size:42px;margin-bottom:12px;opacity:.5}
+
+/* Factors tooltip (pourquoi ce score) */
+.score-factors-wrap{margin-top:8px;padding:8px 10px;background:rgba(15,23,42,.03);border-radius:8px;font-size:10.5px;line-height:1.5;color:var(--muted)}
+.score-factors-wrap strong{color:var(--text);font-weight:700;display:block;margin-bottom:3px;font-size:10px}
+.score-factors-wrap ul{list-style:none;padding:0;margin:0}
+.score-factors-wrap li{padding:1px 0}
+.score-factors-wrap li::before{content:'·';font-weight:700;margin-right:4px;color:var(--muted)}
+
+/* Responsive scores */
+@media(max-width:640px){
+  .fc-scores{grid-template-columns:1fr;gap:8px;padding:12px 16px}
+  .fc-score{padding:10px}
+  .prio-row{grid-template-columns:32px 1fr auto;gap:8px}
+  .prio-row > :nth-child(3),.prio-row > :nth-child(4),.prio-row > :nth-child(5){display:none}
+  .prio-full-row{grid-template-columns:40px 1fr auto;gap:10px;padding:10px}
+  .prio-full-row > :nth-child(3),.prio-full-row > :nth-child(4),.prio-full-row > :nth-child(5){display:none}
+  .prio-kpi-bar{grid-template-columns:1fr 1fr}
+}
+
 @media(max-width:768px){
   .hamburger{display:flex!important}
   nav{position:fixed!important;top:0!important;left:0!important;height:100vh!important;height:-webkit-fill-available!important;width:min(280px,84vw)!important;z-index:1001!important;transform:translateX(-105%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1)!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch!important;margin:0!important}
@@ -359,6 +479,7 @@ html,body{overflow-x:hidden;max-width:100vw}
   <!-- TABS -->
   <div class="main-tabs" id="mainTabs">
     <div class="mtab on" data-tab="dashboard" onclick="switchTab('dashboard',this)">📊 Dashboard</div>
+    <div class="mtab" data-tab="priorites" onclick="switchTab('priorites',this)">⚡ Priorités <span class="badge-tab" id="badge-priorites" style="background:linear-gradient(135deg,#dc2626,#f59e0b)">0</span></div>
     <div class="mtab" data-tab="clients" onclick="switchTab('clients',this)">👥 Clients <span class="badge-tab" id="badge-clients">0</span></div>
     <div class="mtab" data-tab="carte" onclick="switchTab('carte',this)">🎴 Carte fidélité</div>
     <div class="mtab" data-tab="points" onclick="switchTab('points',this)">⭐ Points & Récompenses</div>
@@ -370,6 +491,14 @@ html,body{overflow-x:hidden;max-width:100vw}
   <!-- ═══ DASHBOARD ═══ -->
   <div class="panel on" id="panel-dashboard">
     <div class="g4" id="kpiGrid"></div>
+    <!-- ⚡ Actions prioritaires (IA scoring) -->
+    <div class="prio-dash-card" id="prioDashCard" style="display:none">
+      <div class="prio-dash-head">
+        <div class="prio-dash-title">⚡ Actions prioritaires cette semaine</div>
+        <a class="prio-dash-link" onclick="switchTab('priorites',null)">Voir toutes les priorités →</a>
+      </div>
+      <div id="prioDashList"></div>
+    </div>
     <div class="g2">
       <div class="card">
         <div class="card-head"><div class="card-title">📈 Évolution clients fidèles</div></div>
@@ -406,6 +535,35 @@ html,body{overflow-x:hidden;max-width:100vw}
     </div>
   </div>
 
+  <!-- ═══ PRIORITÉS (IA scoring) ═══ -->
+  <div class="panel" id="panel-priorites">
+    <div style="padding:14px 18px;background:linear-gradient(135deg,rgba(220,38,38,.06),rgba(37,99,235,.05));border:1px solid rgba(0,0,0,.06);border-radius:14px;margin-bottom:4px;display:flex;align-items:flex-start;gap:12px">
+      <div style="font-size:22px;line-height:1">🤖</div>
+      <div style="flex:1;font-size:12px;color:var(--muted);line-height:1.55">
+        <strong style="color:var(--text);font-weight:700">Votre assistant fidélisation</strong> analyse chaque client (rythme de visite, panier, ancienneté) pour identifier ceux qui méritent votre attention. Les actions sont classées par <strong>urgence × valeur</strong> — les premiers sont ceux qui vous rapporteront le plus vite.
+      </div>
+    </div>
+
+    <!-- KPIs priorités -->
+    <div class="prio-kpi-bar" id="prioKpiBar"></div>
+
+    <!-- Filtres + actions batch -->
+    <div class="priorites-header">
+      <div class="priorites-filter-bar">
+        <button class="prio-filter-btn on" id="prio-filt-all" onclick="filterPrio('all',this)">Toutes</button>
+        <button class="prio-filter-btn" id="prio-filt-critical" onclick="filterPrio('critical',this)">🚨 Critiques</button>
+        <button class="prio-filter-btn" id="prio-filt-important" onclick="filterPrio('important',this)">⚠️ Importantes</button>
+        <button class="prio-filter-btn" id="prio-filt-normal" onclick="filterPrio('normal',this)">💬 Normales</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span style="font-size:11px;color:var(--muted)" id="prio-count-label">— clients</span>
+      </div>
+    </div>
+
+    <!-- Liste priorités -->
+    <div id="prioritesList"></div>
+  </div>
+
   <!-- ═══ CLIENTS ═══ -->
   <div class="panel" id="panel-clients">
     <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
@@ -416,6 +574,12 @@ html,body{overflow-x:hidden;max-width:100vw}
       <select class="ci" id="filterTag" onchange="renderClients()" style="width:140px">
         <option value="">Tous les tags</option>
       </select>
+      <select class="ci" id="filterRisk" onchange="renderClients()" style="width:140px">
+        <option value="">Tous les risques</option>
+        <option value="high">🚨 Risque élevé</option>
+        <option value="medium">⚠️ Risque moyen</option>
+        <option value="low">✅ Risque faible</option>
+      </select>
       <button class="btn btn-p btn-xs" onclick="openModal('addClient')">+ Client</button>
       <button class="btn btn-o btn-xs" onclick="openImportClients()" style="gap:4px">📥 Importer</button>
       <button class="btn btn-xs" style="background:#f0fdf4;color:#065f46;border:1.5px solid #bbf7d0" onclick="openModal('smsInscription')">📱 Inviter par SMS</button>
@@ -425,7 +589,7 @@ html,body{overflow-x:hidden;max-width:100vw}
         <table class="clients-table">
           <thead>
             <tr>
-              <th>Client</th><th>Segment</th><th>Tags</th><th>Points</th><th>Tampons</th>
+              <th>Client</th><th>⚡</th><th>Segment</th><th>Tags</th><th>Points</th><th>Tampons</th>
               <th>Dernière visite</th><th>Actions</th>
             </tr>
           </thead>
@@ -822,6 +986,29 @@ html,body{overflow-x:hidden;max-width:100vw}
       </div>
       <div id="fc-link-display" style="display:none;margin-top:8px;font-size:9px;word-break:break-all;color:var(--muted);background:#f8faff;padding:6px 10px;border-radius:8px;border:1px solid var(--border)"></div>
     </div>
+    <!-- ⚡ Scores IA (churn / LTV / NBA) -->
+    <div class="fc-scores" id="fc-scores-block" style="display:none">
+      <div class="fc-score" id="fc-score-churn">
+        <div class="fc-score-lbl">🎯 Risque de perte</div>
+        <div id="fc-churn-gauge"></div>
+        <div class="churn-lvl-text" id="fc-churn-level">—</div>
+      </div>
+      <div class="fc-score" id="fc-score-ltv">
+        <div class="fc-score-lbl">💎 Valeur (12 mois)</div>
+        <div class="ltv-num" id="fc-ltv-num">—</div>
+        <div class="ltv-trend" id="fc-ltv-trend"></div>
+        <div class="ltv-meta" id="fc-ltv-meta"></div>
+      </div>
+      <div class="fc-score" style="padding:0;border:none;background:transparent;box-shadow:none">
+        <div class="nba-card" id="fc-nba-card">
+          <div class="nba-title" id="fc-nba-title">—</div>
+          <div class="nba-desc" id="fc-nba-desc"></div>
+          <button class="nba-action-btn" id="fc-nba-btn" style="display:none"></button>
+        </div>
+      </div>
+    </div>
+    <!-- Explication score (pliable) -->
+    <div id="fc-score-factors" style="display:none;padding:0 22px"></div>
     <!-- TABS internes -->
     <div style="display:flex;gap:0;border-bottom:1px solid var(--border);overflow-x:auto">
       <div class="fc-tab on" onclick="fcTab('infos',this)">📋 Infos</div>
@@ -1325,6 +1512,7 @@ function switchTab(id, el){
     else if(el.classList.contains('mtab'))el.classList.add('on');
   }
   if(id==='clients')renderClients();
+  if(id==='priorites')renderPriorites();
   if(id==='points'){renderPaliers();renderPointsTable()}
   if(id==='coupons')renderCoupons();
   if(id==='campagnes'){renderCampagnes();loadSmsCredits();renderReviewDashboard();}
@@ -1600,6 +1788,315 @@ function defaultPaliers(){return[
   {id:uid(),pts:2000,reward:'Statut VIP + cadeau surprise',icon:'👑'},
 ]}
 
+// ═══════════════════════════════════════════════════════════
+// ⚡ FIDAI — HELPERS UI (Wave 1 : scoring churn / LTV / NBA)
+// ═══════════════════════════════════════════════════════════
+// Toutes ces fonctions se désactivent gracieusement si window._FidAI
+// n'est pas chargé, ou renvoient des valeurs safe.
+
+function fidaiOK(){ return typeof window._FidAI !== 'undefined' && window._FidAI; }
+function fidaiCompute(c){
+  if(!fidaiOK() || !c) return null;
+  try { return window._FidAI.computeAll(c, cfg); }
+  catch(e){ console.warn('[FidAI] compute err',e); return null; }
+}
+
+// Rend une gauge circulaire SVG pour le churn
+function fidaiGauge(score, level, size){
+  size = size || 64;
+  var r = (size - 14) / 2;
+  var circ = 2 * Math.PI * r;
+  var offset = circ * (1 - (score || 0) / 100);
+  var cls = 'churn-' + (level || 'low');
+  return '<div class="churn-gauge '+cls+'" style="width:'+size+'px;height:'+size+'px">'
+    + '<svg width="'+size+'" height="'+size+'">'
+    + '<circle class="churn-gauge-bg" cx="'+(size/2)+'" cy="'+(size/2)+'" r="'+r+'"/>'
+    + '<circle class="churn-gauge-fill" cx="'+(size/2)+'" cy="'+(size/2)+'" r="'+r+'" stroke-dasharray="'+circ+'" stroke-dashoffset="'+offset+'"/>'
+    + '</svg>'
+    + '<div class="churn-gauge-num">'+(score||0)+'</div>'
+    + '</div>';
+}
+
+// Badge risque compact (pour liste clients)
+function fidaiRiskBadge(level, score){
+  var cls = 'risk-' + (level || 'low');
+  var lbl = level === 'high' ? 'Risque' : level === 'medium' ? 'Moyen' : 'OK';
+  return '<span class="risk-dot '+cls+'" title="Score de risque : '+(score||0)+'/100 — cliquer sur la fiche pour le détail">'+lbl+'</span>';
+}
+
+// Format trend LTV
+function fidaiLtvTrend(trend){
+  if(trend === 'up') return '<span class="ltv-trend up">↗ en hausse</span>';
+  if(trend === 'down') return '<span class="ltv-trend down">↘ en baisse</span>';
+  return '<span class="ltv-trend stable">→ stable</span>';
+}
+
+// Exécute l'action d'une NBA (câblée sur les fonctions existantes du module)
+function fidaiExecuteNBA(clientId, actionType){
+  var c = clients.find(function(x){return x.id===clientId});
+  if(!c){ toast('Client introuvable','err'); return; }
+  switch(actionType){
+    case 'sms_coupon':
+    case 'reconquete_vip':
+    case 'reconquete':
+      // Ouvre le flow de réactivation (coupon + SMS)
+      if(typeof sendReactivation === 'function') sendReactivation(clientId);
+      else toast('Fonction réactivation non disponible','err');
+      break;
+    case 'sms_welcome':
+      // Welcome-back : ouvre la fiche client sur l'onglet points (points bonus)
+      openFicheClient(clientId);
+      setTimeout(function(){
+        var tabs = document.querySelectorAll('.fc-tab');
+        if(tabs[1]) fcTab('points', tabs[1]);
+      }, 100);
+      toast('💡 Ajoutez des points bonus pour relancer '+c.prenom,'info');
+      break;
+    case 'sms_last_stamp':
+    case 'sms_soft':
+    case 'sms_thanks':
+    case 'sms_milestone':
+    case 'sms_anniv_inscription':
+      // Ouvre fiche client — le commerçant peut envoyer un SMS manuel
+      openFicheClient(clientId);
+      toast('💬 Consultez la fiche de '+c.prenom+' pour agir','info');
+      break;
+    case 'bday_bonus':
+      if(typeof sendBdayBonus === 'function') sendBdayBonus(clientId);
+      else toast('Fonction bonus non disponible','err');
+      break;
+    default:
+      openFicheClient(clientId);
+  }
+}
+window.fidaiExecuteNBA = fidaiExecuteNBA;
+
+// Rendu du bloc factors (explication "pourquoi ce score")
+function fidaiRenderFactors(factors){
+  if(!factors || !factors.length) return '';
+  var items = factors.slice(0,5).map(function(f){ return '<li>'+f.replace(/</g,'&lt;')+'</li>'; }).join('');
+  return '<div class="score-factors-wrap"><strong>Pourquoi ce score ?</strong><ul>'+items+'</ul></div>';
+}
+
+// ═══════════════════════════════════════════════════════════
+// RENDU CARTE "Actions prioritaires" (dashboard)
+// ═══════════════════════════════════════════════════════════
+function renderPrioritiesDash(){
+  var card = document.getElementById('prioDashCard');
+  var list = document.getElementById('prioDashList');
+  if(!card || !list || !fidaiOK()){
+    if(card) card.style.display='none';
+    return;
+  }
+  if(!clients.length){ card.style.display='none'; return; }
+
+  var ranked;
+  try { ranked = window._FidAI.rankByRisk(clients, cfg); }
+  catch(e){ console.warn('[FidAI] rank err',e); card.style.display='none'; return; }
+
+  // Top 5 actions réellement actionnables (non "low")
+  var actionable = ranked.filter(function(r){ return r.nba.urgency !== 'low'; }).slice(0,5);
+  if(!actionable.length){ card.style.display='none'; return; }
+
+  card.style.display='block';
+  list.innerHTML = actionable.map(function(r){
+    var c = r.client;
+    var avatar = '<div class="prio-avatar" style="background:'+avatarColor(c.prenom)+'">'+(c.prenom[0]||'')+(c.nom[0]||'')+'</div>';
+    var riskBadge = fidaiRiskBadge(r.churn.level, r.churn.score);
+    var ltv = r.ltv.value ? ('LTV ' + fi(r.ltv.value) + '€') : '—';
+    var btnCls = 'nba-action-btn';
+    var btnHtml = r.nba.action.type !== 'none'
+      ? '<button class="'+btnCls+'" onclick="event.stopPropagation();fidaiExecuteNBA(\''+c.id+'\',\''+r.nba.action.type+'\')">'+r.nba.icon+' Agir</button>'
+      : '';
+    return '<div class="prio-row nba-'+r.nba.urgency+'" onclick="openFicheClient(\''+c.id+'\')" style="border-color:'
+      + (r.nba.urgency==='critical'?'rgba(220,38,38,.2)':r.nba.urgency==='important'?'rgba(217,119,6,.2)':'rgba(37,99,235,.15)')+'">'
+      + avatar
+      + '<div><div class="prio-name">'+c.prenom+' '+c.nom+'</div><div class="prio-name-sub">'+ltv+'</div></div>'
+      + '<div>'+riskBadge+'</div>'
+      + '<div style="font-size:10px;color:var(--muted);font-weight:600">'+(r.ltv.value?fi(r.ltv.value)+'€/an':'')+'</div>'
+      + '<div class="prio-nba-inline"><strong>'+r.nba.icon+' '+r.nba.label+'</strong></div>'
+      + btnHtml
+      + '</div>';
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// PANEL PRIORITÉS (vue complète)
+// ═══════════════════════════════════════════════════════════
+var _prioFilter = 'all';
+function filterPrio(f, btn){
+  _prioFilter = f;
+  document.querySelectorAll('[id^="prio-filt-"]').forEach(function(b){ b.classList.remove('on'); });
+  if(btn) btn.classList.add('on');
+  renderPriorites();
+}
+
+function renderPriorites(){
+  var listEl = document.getElementById('prioritesList');
+  var kpiEl = document.getElementById('prioKpiBar');
+  var badge = document.getElementById('badge-priorites');
+  var countLbl = document.getElementById('prio-count-label');
+  if(!listEl) return;
+
+  if(!fidaiOK()){
+    listEl.innerHTML = '<div class="prio-empty"><div class="prio-empty-icon">⚠️</div>Le moteur de scoring n\'est pas chargé.</div>';
+    if(kpiEl) kpiEl.innerHTML = '';
+    return;
+  }
+  if(!clients.length){
+    listEl.innerHTML = '<div class="prio-empty"><div class="prio-empty-icon">👥</div>Aucun client pour l\'instant. Ajoutez ou importez vos clients pour voir les priorités.</div>';
+    if(kpiEl) kpiEl.innerHTML = '';
+    if(badge) badge.textContent = '0';
+    return;
+  }
+
+  var ranked;
+  try { ranked = window._FidAI.rankByRisk(clients, cfg); }
+  catch(e){
+    console.warn('[FidAI] rank err',e);
+    listEl.innerHTML = '<div class="prio-empty"><div class="prio-empty-icon">⚠️</div>Erreur de calcul des priorités.</div>';
+    return;
+  }
+
+  // KPIs
+  var nbCrit = ranked.filter(function(r){return r.nba.urgency==='critical'}).length;
+  var nbImp  = ranked.filter(function(r){return r.nba.urgency==='important'}).length;
+  var nbLow  = ranked.filter(function(r){return r.nba.urgency==='low'}).length;
+  var ltvAtRisk = ranked
+    .filter(function(r){ return r.nba.urgency === 'critical' || (r.churn.level === 'high' && r.ltv.value > 0); })
+    .reduce(function(s,r){ return s + (r.ltv.value || 0); }, 0);
+
+  if(kpiEl){
+    kpiEl.innerHTML =
+        '<div class="prio-kpi critical"><div class="prio-kpi-lbl">🚨 Critiques</div><div class="prio-kpi-val">'+nbCrit+'</div><div class="prio-kpi-sub">action rapide recommandée</div></div>'
+      + '<div class="prio-kpi important"><div class="prio-kpi-lbl">⚠️ Importantes</div><div class="prio-kpi-val">'+nbImp+'</div><div class="prio-kpi-sub">à planifier cette semaine</div></div>'
+      + '<div class="prio-kpi value"><div class="prio-kpi-lbl">💎 Valeur à sauver</div><div class="prio-kpi-val">'+fi(ltvAtRisk)+'€</div><div class="prio-kpi-sub">LTV cumulée des clients à risque</div></div>'
+      + '<div class="prio-kpi total"><div class="prio-kpi-lbl">👥 Clients analysés</div><div class="prio-kpi-val">'+ranked.length+'</div><div class="prio-kpi-sub">'+(ranked.length-nbLow)+' avec action possible</div></div>';
+  }
+
+  if(badge) badge.textContent = nbCrit > 0 ? nbCrit : (nbImp > 0 ? nbImp : '0');
+  if(badge){
+    if(nbCrit > 0){ badge.style.background = 'linear-gradient(135deg,#dc2626,#ef4444)'; }
+    else if(nbImp > 0){ badge.style.background = 'linear-gradient(135deg,#d97706,#f59e0b)'; }
+    else { badge.style.background = 'linear-gradient(135deg,#64748b,#94a3b8)'; }
+  }
+
+  // Filtre
+  var filtered = ranked;
+  if(_prioFilter === 'critical') filtered = ranked.filter(function(r){return r.nba.urgency==='critical'});
+  else if(_prioFilter === 'important') filtered = ranked.filter(function(r){return r.nba.urgency==='important'});
+  else if(_prioFilter === 'normal') filtered = ranked.filter(function(r){return r.nba.urgency==='normal'});
+  else if(_prioFilter === 'all') filtered = ranked.filter(function(r){return r.nba.urgency!=='low'}); // on masque 'low' par défaut
+
+  if(countLbl) countLbl.textContent = filtered.length + ' client' + (filtered.length>1?'s':'');
+
+  if(!filtered.length){
+    listEl.innerHTML = '<div class="prio-empty"><div class="prio-empty-icon">🎉</div>Aucune priorité dans cette catégorie. Votre base est saine !</div>';
+    return;
+  }
+
+  listEl.innerHTML = filtered.map(function(r){
+    var c = r.client;
+    var avatar = '<div class="prio-avatar" style="background:'+avatarColor(c.prenom)+';width:40px;height:40px;font-size:13px">'+(c.prenom[0]||'')+(c.nom[0]||'')+'</div>';
+    var riskBadge = fidaiRiskBadge(r.churn.level, r.churn.score);
+    var ltvStr = r.ltv.value ? (fi(r.ltv.value)+'€ <span style="color:var(--muted);font-weight:500">/an</span>') : '<span style="color:var(--muted)">—</span>';
+    var trendIcon = r.ltv.trend==='up'?' ↗':r.ltv.trend==='down'?' ↘':'';
+    var btn = r.nba.action.type !== 'none'
+      ? '<button class="nba-action-btn" onclick="event.stopPropagation();fidaiExecuteNBA(\''+c.id+'\',\''+r.nba.action.type+'\')">'+r.nba.icon+' Agir</button>'
+      : '';
+    return '<div class="prio-full-row nba-'+r.nba.urgency+'" onclick="openFicheClient(\''+c.id+'\')">'
+      + avatar
+      + '<div><div style="font-weight:700;font-size:13px">'+c.prenom+' '+c.nom+'</div>'
+      +   '<div style="font-size:10px;color:var(--muted);margin-top:2px">'+(c.tel||c.email||'—')+'</div></div>'
+      + '<div>'+riskBadge+'</div>'
+      + '<div style="font-size:13px;font-weight:700">'+ltvStr+'<span style="font-size:10px;color:var(--muted);font-weight:600">'+trendIcon+'</span></div>'
+      + '<div style="font-size:11.5px;line-height:1.35"><strong style="font-weight:700">'+r.nba.icon+' '+r.nba.label+'</strong><div style="color:var(--muted);font-size:10.5px;margin-top:2px">'+r.nba.desc+'</div></div>'
+      + '<div class="prio-full-actions"><button class="btn btn-xs btn-o" onclick="event.stopPropagation();openFicheClient(\''+c.id+'\')" style="padding:5px 10px">👁️ Fiche</button>'
+      + btn + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════
+// RENDU FICHE CLIENT — 3 BLOCS SCORES
+// ═══════════════════════════════════════════════════════════
+function fidaiRenderFiche(c){
+  var block = document.getElementById('fc-scores-block');
+  var factorsEl = document.getElementById('fc-score-factors');
+  if(!block || !fidaiOK() || !c){
+    if(block) block.style.display='none';
+    if(factorsEl){ factorsEl.style.display='none'; factorsEl.innerHTML=''; }
+    return;
+  }
+  var res = fidaiCompute(c);
+  if(!res){
+    block.style.display='none';
+    if(factorsEl){ factorsEl.style.display='none'; factorsEl.innerHTML=''; }
+    return;
+  }
+
+  block.style.display='grid';
+
+  // Churn gauge
+  var gaugeEl = document.getElementById('fc-churn-gauge');
+  if(gaugeEl) gaugeEl.outerHTML = '<div id="fc-churn-gauge">'+fidaiGauge(res.churn.score, res.churn.level, 64)+'</div>';
+  var lvlText = res.churn.level === 'high' ? 'Élevé' : res.churn.level === 'medium' ? 'Moyen' : 'Faible';
+  var lvlEl = document.getElementById('fc-churn-level');
+  if(lvlEl) lvlEl.textContent = lvlText;
+  // Réappliquer la classe parent pour la couleur du gauge (les span dedans utilisent .churn-X)
+  var churnParent = document.getElementById('fc-score-churn');
+  if(churnParent){
+    churnParent.classList.remove('churn-low','churn-medium','churn-high');
+    churnParent.classList.add('churn-'+res.churn.level);
+  }
+
+  // LTV
+  var ltvNum = document.getElementById('fc-ltv-num');
+  if(ltvNum) ltvNum.textContent = res.ltv.value ? fi(res.ltv.value)+'€' : '—';
+  var ltvTrend = document.getElementById('fc-ltv-trend');
+  if(ltvTrend) ltvTrend.outerHTML = '<div id="fc-ltv-trend">'+fidaiLtvTrend(res.ltv.trend)+'</div>';
+  var ltvMeta = document.getElementById('fc-ltv-meta');
+  if(ltvMeta){
+    var meta = [];
+    if(res.ltv.avgBasket>0) meta.push('panier ~'+fe(res.ltv.avgBasket));
+    if(res.ltv.yearlyVisits>0) meta.push('~'+res.ltv.yearlyVisits+' visites/an');
+    ltvMeta.textContent = meta.join(' · ') || 'Données insuffisantes';
+  }
+
+  // NBA
+  var nbaCard = document.getElementById('fc-nba-card');
+  if(nbaCard){
+    nbaCard.classList.remove('nba-critical','nba-important','nba-normal','nba-low');
+    nbaCard.classList.add('nba-'+res.nba.urgency);
+  }
+  var nbaTitle = document.getElementById('fc-nba-title');
+  if(nbaTitle) nbaTitle.innerHTML = res.nba.icon+' '+res.nba.label;
+  var nbaDesc = document.getElementById('fc-nba-desc');
+  if(nbaDesc) nbaDesc.textContent = res.nba.desc;
+  var nbaBtn = document.getElementById('fc-nba-btn');
+  if(nbaBtn){
+    if(res.nba.action.type !== 'none'){
+      nbaBtn.textContent = 'Agir maintenant';
+      nbaBtn.style.display = 'inline-block';
+      nbaBtn.onclick = function(){ fidaiExecuteNBA(c.id, res.nba.action.type); };
+    } else {
+      nbaBtn.style.display = 'none';
+      nbaBtn.onclick = null;
+    }
+  }
+
+  // Factors
+  if(factorsEl){
+    if(res.churn.factors && res.churn.factors.length){
+      factorsEl.innerHTML = fidaiRenderFactors(res.churn.factors);
+      factorsEl.style.display = 'block';
+    } else {
+      factorsEl.innerHTML = '';
+      factorsEl.style.display = 'none';
+    }
+  }
+}
+
 // ═══ DASHBOARD ═══
 let chartC=null, chartS=null;
 function renderDashboard(){
@@ -1672,6 +2169,7 @@ function renderDashboard(){
     </div>`).join('')
     :`<div style="font-size:12px;color:var(--muted);text-align:center;padding:16px">Aucun client inactif 🎉</div>`;
   renderReviewDashboard();
+  renderPrioritiesDash();
 }
 
 // ═══ CLIENTS ═══
@@ -1700,14 +2198,22 @@ function renderClients(){
   const q=document.getElementById('searchClient').value.toLowerCase();
   const seg=document.getElementById('filterSeg').value;
   const tagFilter=document.getElementById('filterTag').value;
+  const riskFilter=document.getElementById('filterRisk')?document.getElementById('filterRisk').value:'';
   let list=clients.filter(c=>{
     const match=`${c.prenom} ${c.nom} ${c.tel||''} ${c.email||''} ${(c.tags||[]).join(' ')}`.toLowerCase().includes(q);
     const segMatch=!seg||getSeg(c)===seg;
     const tagMatch=!tagFilter||(c.tags||[]).includes(tagFilter);
-    return match&&segMatch&&tagMatch;
+    let riskMatch=true;
+    if(riskFilter && fidaiOK()){
+      try{
+        const ch=window._FidAI.computeChurn(c);
+        riskMatch=(ch.level===riskFilter);
+      }catch(e){ riskMatch=true; }
+    }
+    return match&&segMatch&&tagMatch&&riskMatch;
   });
   const tb=document.getElementById('clientsTbody');
-  if(!list.length){const qs=q?(q+'').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';tb.innerHTML=`<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--muted)">Aucun client${qs?` pour "${qs}"`:''}</td></tr>`;return}
+  if(!list.length){const qs=q?(q+'').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'';tb.innerHTML=`<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--muted)">Aucun client${qs?` pour "${qs}"`:''}</td></tr>`;return}
   const cfgT=parseInt(cfg.tampons)||10;
   const topSegPts=getTopPointsThreshold();
   const inactifSegDef=getInactifSeg();
@@ -1719,11 +2225,20 @@ function renderClients(){
     const tampons=c.tampons||0;
     const isInactif=inactifSegId&&seg===inactifSegId;
     const inactifWarn=isInactif?`<div style="font-size:9px;color:#dc2626;font-weight:700;margin-top:1px">⚠️ ${c.lastVisit?daysSince(c.lastVisit)+'j':'?'}</div>`:'';
+    // ⚡ Colonne risque (FidAI)
+    let riskCell='<span style="font-size:10px;color:var(--muted)">—</span>';
+    if(fidaiOK()){
+      try{
+        const ch=window._FidAI.computeChurn(c);
+        riskCell=fidaiRiskBadge(ch.level, ch.score);
+      }catch(e){ /* silent fallback */ }
+    }
     return`<tr>
       <td><div style="display:flex;align-items:center;gap:9px">
         <div class="client-avatar" style="background:${avatarColor(c.prenom)}">${c.prenom[0]}${c.nom[0]}</div>
         <div><div style="font-weight:700">${c.prenom} ${c.nom}</div><div style="font-size:10px;color:var(--muted)">${c.email||c.tel||'—'}</div>${inactifWarn}</div>
       </div></td>
+      <td>${riskCell}</td>
       <td>${segBadge(seg)}</td>
       <td><div style="display:flex;flex-wrap:wrap;gap:3px">${renderTagsInline(c.tags)}</div></td>
       <td><div style="font-weight:700">${fi(c.points||0)}</div><div style="display:flex;align-items:center;gap:5px;margin-top:3px"><div class="points-bar"><div class="points-fill" style="width:${pct}%"></div></div><span style="font-size:10px;color:var(--muted)">${pct}%</span></div></td>
@@ -3112,6 +3627,8 @@ function openFicheClient(id){
   // Render tags in fiche
   fcRenderTags(c);
   fcPopulateReview(c);
+  // ⚡ Scores IA (churn / LTV / NBA)
+  fidaiRenderFiche(c);
   // Reset tabs
   // Reset tous les panels + activer Infos
   ['infos','points','carte','histo','roue'].forEach(p=>{
