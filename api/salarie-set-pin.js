@@ -2,46 +2,115 @@
 // Definit ou change le PIN d'un salarie.
 //
 // DEUX MODES :
-// 1. mode='manager' : le manager definit/reset le PIN d'un de ses salaries
+// 1. mode='manager' : le manager definit/reset le PIN d'un salarie
 //    Input : { publicId, newPin, mode: 'manager', idToken }
-//    - Requiert idToken Firebase du manager
-//    - Verifie que le manager est bien le proprietaire (uid match rh_employes_public.uid)
+//    - Verifie idToken via accounts:lookup (REST)
+//    - Ownership : manager uid == rh_employes_public.uid
 //
-// 2. mode='self' : le salarie change son propre PIN (il doit connaitre l'ancien)
+// 2. mode='self' : le salarie change son propre PIN
 //    Input : { publicId, newPin, mode: 'self', currentPin }
-//    - Requiert le PIN actuel
-//    - Applique l'anti-bruteforce sur currentPin (evite de s'en servir comme oracle)
+//    - Anti-bruteforce sur currentPin
 //
-// SECURITE :
-// - newPin doit etre 4 chiffres
-// - En mode manager : verification idToken Firebase + ownership (uid match)
-// - En mode self : verification currentPin avec anti-bruteforce (meme que verify-pin)
-// - Hash stocke avec salt publicId (meme algo que verify-pin)
+// Pattern : REST API + compte admin api@altiora.app
 
-const { initializeApp, cert, getApps } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
-const { getAuth } = require('firebase-admin/auth');
 const crypto = require('crypto');
 
-function getApp() {
-  if (!getApps().length) {
-    initializeApp({
-      credential: cert({
-        projectId: 'altiora-70599',
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-      }),
-    });
-  }
-}
-function getDb() { getApp(); return getFirestore(); }
-function getAuthAdmin() { getApp(); return getAuth(); }
+const FIREBASE_PROJECT = 'altiora-70599';
+const FB_KEY = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+const FS_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents`;
+const IDT_BASE = 'https://identitytoolkit.googleapis.com/v1';
 
+let _adminToken = null;
+let _adminTokenExp = 0;
+
+async function getAdminToken() {
+  if (_adminToken && Date.now() < _adminTokenExp - 300000) return _adminToken;
+  const email = process.env.FIREBASE_API_EMAIL;
+  const password = process.env.FIREBASE_API_PASSWORD;
+  if (!email || !password) { console.error('[set-pin] FIREBASE_API_EMAIL/PASSWORD manquants'); return null; }
+  const r = await fetch(`${IDT_BASE}/accounts:signInWithPassword?key=${FB_KEY}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, returnSecureToken: true }),
+  });
+  const data = await r.json();
+  if (data.idToken) {
+    _adminToken = data.idToken;
+    _adminTokenExp = Date.now() + (parseInt(data.expiresIn || '3600') * 1000);
+    return _adminToken;
+  }
+  console.error('[set-pin] Admin login failed:', data.error && data.error.message);
+  return null;
+}
+
+function authHeaders(token) {
+  return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+}
+
+function toFsFields(obj) {
+  const ff = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null || v === undefined)     ff[k] = { nullValue: null };
+    else if (typeof v === 'string')        ff[k] = { stringValue: v };
+    else if (typeof v === 'boolean')       ff[k] = { booleanValue: v };
+    else if (typeof v === 'number') {
+      if (Number.isInteger(v))             ff[k] = { integerValue: String(v) };
+      else                                 ff[k] = { doubleValue: v };
+    }
+    else                                   ff[k] = { stringValue: String(v) };
+  }
+  return ff;
+}
+
+function fromFsFields(fields) {
+  if (!fields) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v.stringValue !== undefined)       out[k] = v.stringValue;
+    else if (v.integerValue !== undefined) out[k] = parseInt(v.integerValue);
+    else if (v.doubleValue !== undefined)  out[k] = v.doubleValue;
+    else if (v.booleanValue !== undefined) out[k] = v.booleanValue;
+    else if (v.nullValue !== undefined)    out[k] = null;
+    else                                    out[k] = v;
+  }
+  return out;
+}
+
+async function fsGet(path, token) {
+  const r = await fetch(`${FS_BASE}/${path}`, { headers: authHeaders(token) });
+  if (r.status === 404) return { exists: false, data: null };
+  if (!r.ok) throw new Error(`fsGet ${path} → ${r.status}: ${await r.text()}`);
+  const json = await r.json();
+  return { exists: true, data: fromFsFields(json.fields) };
+}
+
+async function fsSet(path, fields, token) {
+  const mask = Object.keys(fields).map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
+  const r = await fetch(`${FS_BASE}/${path}?${mask}`, {
+    method: 'PATCH', headers: authHeaders(token),
+    body: JSON.stringify({ fields: toFsFields(fields) }),
+  });
+  if (!r.ok) throw new Error(`fsSet ${path} → ${r.status}: ${await r.text()}`);
+  return true;
+}
+
+// Verifie un idToken client Firebase (manager) via REST Identity Toolkit
+async function verifyClientIdToken(idToken) {
+  const r = await fetch(`${IDT_BASE}/accounts:lookup?key=${FB_KEY}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken }),
+  });
+  if (!r.ok) return null;
+  const data = await r.json();
+  const user = data.users && data.users[0];
+  if (!user) return null;
+  return { uid: user.localId, email: user.email || null };
+}
+
+// ── Crypto ──
 function hashPin(publicId, pin) {
   const secret = process.env.PIN_SERVER_SECRET || '';
   if (secret.length < 16) throw new Error('PIN_SERVER_SECRET manquant ou trop court');
-  const payload = secret + ':' + publicId + ':' + pin;
-  return crypto.createHash('sha256').update(payload).digest('hex');
+  return crypto.createHash('sha256').update(secret + ':' + publicId + ':' + pin).digest('hex');
 }
 
 function timingSafeEqualStr(a, b) {
@@ -86,47 +155,41 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'invalid_mode' });
     }
     if (!process.env.PIN_SERVER_SECRET || process.env.PIN_SERVER_SECRET.length < 16) {
-      console.error('[salarie-set-pin] PIN_SERVER_SECRET manquant ou trop court');
+      console.error('[set-pin] PIN_SERVER_SECRET manquant ou trop court');
       return res.status(500).json({ success: false, error: 'server_config' });
     }
 
-    const db = getDb();
+    const adminToken = await getAdminToken();
+    if (!adminToken) return res.status(500).json({ success: false, error: 'admin_auth_failed' });
 
-    // Verifier que le salarie existe
-    const pubSnap = await db.collection('rh_employes_public').doc(publicId).get();
-    if (!pubSnap.exists) {
+    const pub = await fsGet(`rh_employes_public/${publicId}`, adminToken);
+    if (!pub.exists) {
       return res.status(200).json({ success: false, error: 'invalid_credentials' });
     }
-    const pubData = pubSnap.data() || {};
-    const ownerUid = pubData.uid;
+    const ownerUid = (pub.data || {}).uid;
 
     // ═══════════════════════════════════════
-    // MODE MANAGER : verif idToken + ownership
+    // MODE MANAGER
     // ═══════════════════════════════════════
     if (mode === 'manager') {
       const { idToken } = req.body || {};
       if (!idToken || typeof idToken !== 'string') {
         return res.status(401).json({ success: false, error: 'auth_required' });
       }
-      let decoded;
-      try {
-        decoded = await getAuthAdmin().verifyIdToken(idToken);
-      } catch (e) {
-        console.warn('[salarie-set-pin] idToken invalide:', e.message);
+      const verified = await verifyClientIdToken(idToken);
+      if (!verified || !verified.uid) {
         return res.status(401).json({ success: false, error: 'invalid_token' });
       }
-      const managerUid = decoded.uid;
-      if (!managerUid || managerUid !== ownerUid) {
+      if (verified.uid !== ownerUid) {
         return res.status(403).json({ success: false, error: 'not_owner' });
       }
 
-      // OK : enregistrer le PIN
       const hash = hashPin(publicId, newPin);
-      const now = new Date().toISOString();
-      await db.collection('rh_auth_salaries').doc(publicId).set({
+      const nowIso = new Date().toISOString();
+      await fsSet(`rh_auth_salaries/${publicId}`, {
         pinHash: hash,
-        pinCreatedAt: now,
-        pinLastReset: now,
+        pinCreatedAt: nowIso,
+        pinLastReset: nowIso,
         pinAttempts: 0,
         pinLockedUntil: null,
         pinLength: 4,
@@ -134,14 +197,14 @@ module.exports = async function handler(req, res) {
         tempResetCode: null,
         tempResetExpiresAt: null,
         setBy: 'manager',
-        setByUid: managerUid,
-      }, { merge: true });
+        setByUid: verified.uid,
+      }, adminToken);
 
       return res.status(200).json({ success: true });
     }
 
     // ═══════════════════════════════════════
-    // MODE SELF : verif currentPin + anti-bruteforce
+    // MODE SELF
     // ═══════════════════════════════════════
     if (mode === 'self') {
       const { currentPin } = req.body || {};
@@ -149,17 +212,15 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ success: false, error: 'invalid_current_pin_format' });
       }
 
-      const authRef = db.collection('rh_auth_salaries').doc(publicId);
-      const authSnap = await authRef.get();
-      if (!authSnap.exists) {
+      const auth = await fsGet(`rh_auth_salaries/${publicId}`, adminToken);
+      if (!auth.exists) {
         return res.status(200).json({ success: false, error: 'no_pin_set' });
       }
-      const authData = authSnap.data() || {};
+      const authData = auth.data || {};
       if (!authData.pinHash) {
         return res.status(200).json({ success: false, error: 'no_pin_set' });
       }
 
-      // Check lock actif
       const now = Date.now();
       if (authData.pinLockedUntil) {
         const lockTs = new Date(authData.pinLockedUntil).getTime();
@@ -171,7 +232,6 @@ module.exports = async function handler(req, res) {
         }
       }
 
-      // Verifier currentPin avec timing-safe
       const candidateHash = hashPin(publicId, currentPin);
       const match = timingSafeEqualStr(candidateHash, authData.pinHash);
 
@@ -180,7 +240,7 @@ module.exports = async function handler(req, res) {
         const newLockUntil = computeLockUntil(newAttempts);
         const update = { pinAttempts: newAttempts };
         if (newLockUntil) update.pinLockedUntil = newLockUntil;
-        await authRef.set(update, { merge: true });
+        await fsSet(`rh_auth_salaries/${publicId}`, update, adminToken);
         return res.status(200).json({
           success: false,
           error: newLockUntil ? 'locked' : 'wrong_current_pin',
@@ -189,9 +249,9 @@ module.exports = async function handler(req, res) {
         });
       }
 
-      // currentPin OK -> enregistrer le nouveau
+      // currentPin OK -> enregistrer
       const hash = hashPin(publicId, newPin);
-      await authRef.set({
+      await fsSet(`rh_auth_salaries/${publicId}`, {
         pinHash: hash,
         pinLastReset: new Date(now).toISOString(),
         pinAttempts: 0,
@@ -200,16 +260,15 @@ module.exports = async function handler(req, res) {
         tempResetCode: null,
         tempResetExpiresAt: null,
         setBy: 'self',
-      }, { merge: true });
+      }, adminToken);
 
       return res.status(200).json({ success: true });
     }
 
-    // Ne devrait jamais arriver (verifie plus haut)
     return res.status(400).json({ success: false, error: 'invalid_mode' });
 
   } catch (e) {
     console.error('[salarie-set-pin]', e);
-    return res.status(500).json({ success: false, error: 'server_error' });
+    return res.status(500).json({ success: false, error: 'server_error', detail: String(e.message || e) });
   }
 };

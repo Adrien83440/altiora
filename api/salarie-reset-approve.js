@@ -1,63 +1,121 @@
 // api/salarie-reset-approve.js
-// Appele par le manager pour approuver une demande de reset (ou forcer un reset).
-// Genere un nouveau PIN 4 chiffres aleatoire, l'enregistre, et le renvoie + envoie email au manager.
+// Appele par le manager pour generer un nouveau PIN.
 //
-// Input:  { publicId: string, idToken: string (manager) }
-// Output: { success: true, newPin: string, emailSent: boolean }
-//         { success: false, error }
+// Input:  { publicId, idToken (manager) }
+// Output: { success: true, newPin, emailSent } ou { success: false, error }
 //
 // SECURITE :
-// - idToken verifie cote serveur via firebase-admin
-// - Ownership : le manager doit etre le uid proprietaire du salarie
-// - newPin genere cote serveur avec crypto.randomInt (non-biased)
-// - Le PIN est renvoye UNE SEULE fois (pas stocke en clair en base)
-// - Email au manager via Resend (redondance : si l'UI se ferme, le manager a quand meme le PIN par mail)
+// - idToken verifie via accounts:lookup (REST)
+// - Ownership check (manager uid == owner uid du salarie)
+// - newPin genere avec crypto.randomInt (uniform)
+// - PIN renvoye UNE FOIS, non stocke en clair, email au manager en redondance
 
-const { initializeApp, cert, getApps } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
-const { getAuth } = require('firebase-admin/auth');
 const crypto = require('crypto');
 
-function getApp() {
-  if (!getApps().length) {
-    initializeApp({
-      credential: cert({
-        projectId: 'altiora-70599',
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-      }),
-    });
+const FIREBASE_PROJECT = 'altiora-70599';
+const FB_KEY = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+const FS_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents`;
+const IDT_BASE = 'https://identitytoolkit.googleapis.com/v1';
+
+let _adminToken = null;
+let _adminTokenExp = 0;
+
+async function getAdminToken() {
+  if (_adminToken && Date.now() < _adminTokenExp - 300000) return _adminToken;
+  const email = process.env.FIREBASE_API_EMAIL;
+  const password = process.env.FIREBASE_API_PASSWORD;
+  if (!email || !password) { console.error('[reset-approve] FIREBASE_API_EMAIL/PASSWORD manquants'); return null; }
+  const r = await fetch(`${IDT_BASE}/accounts:signInWithPassword?key=${FB_KEY}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, returnSecureToken: true }),
+  });
+  const data = await r.json();
+  if (data.idToken) {
+    _adminToken = data.idToken;
+    _adminTokenExp = Date.now() + (parseInt(data.expiresIn || '3600') * 1000);
+    return _adminToken;
   }
+  console.error('[reset-approve] Admin login failed:', data.error && data.error.message);
+  return null;
 }
-function getDb() { getApp(); return getFirestore(); }
-function getAuthAdmin() { getApp(); return getAuth(); }
+
+function authHeaders(token) {
+  return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+}
+
+function toFsFields(obj) {
+  const ff = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null || v === undefined)     ff[k] = { nullValue: null };
+    else if (typeof v === 'string')        ff[k] = { stringValue: v };
+    else if (typeof v === 'boolean')       ff[k] = { booleanValue: v };
+    else if (typeof v === 'number') {
+      if (Number.isInteger(v))             ff[k] = { integerValue: String(v) };
+      else                                 ff[k] = { doubleValue: v };
+    }
+    else                                   ff[k] = { stringValue: String(v) };
+  }
+  return ff;
+}
+
+function fromFsFields(fields) {
+  if (!fields) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v.stringValue !== undefined)       out[k] = v.stringValue;
+    else if (v.integerValue !== undefined) out[k] = parseInt(v.integerValue);
+    else if (v.booleanValue !== undefined) out[k] = v.booleanValue;
+    else if (v.nullValue !== undefined)    out[k] = null;
+    else                                    out[k] = v;
+  }
+  return out;
+}
+
+async function fsGet(path, token) {
+  const r = await fetch(`${FS_BASE}/${path}`, { headers: authHeaders(token) });
+  if (r.status === 404) return { exists: false, data: null };
+  if (!r.ok) throw new Error(`fsGet ${path} → ${r.status}: ${await r.text()}`);
+  const json = await r.json();
+  return { exists: true, data: fromFsFields(json.fields) };
+}
+
+async function fsSet(path, fields, token) {
+  const mask = Object.keys(fields).map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
+  const r = await fetch(`${FS_BASE}/${path}?${mask}`, {
+    method: 'PATCH', headers: authHeaders(token),
+    body: JSON.stringify({ fields: toFsFields(fields) }),
+  });
+  if (!r.ok) throw new Error(`fsSet ${path} → ${r.status}: ${await r.text()}`);
+  return true;
+}
+
+async function verifyClientIdToken(idToken) {
+  const r = await fetch(`${IDT_BASE}/accounts:lookup?key=${FB_KEY}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken }),
+  });
+  if (!r.ok) return null;
+  const data = await r.json();
+  const user = data.users && data.users[0];
+  if (!user) return null;
+  return { uid: user.localId, email: user.email || null };
+}
 
 function hashPin(publicId, pin) {
   const secret = process.env.PIN_SERVER_SECRET || '';
   if (secret.length < 16) throw new Error('PIN_SERVER_SECRET manquant ou trop court');
-  const payload = secret + ':' + publicId + ':' + pin;
-  return crypto.createHash('sha256').update(payload).digest('hex');
+  return crypto.createHash('sha256').update(secret + ':' + publicId + ':' + pin).digest('hex');
 }
 
-// Genere un PIN 4 chiffres aleatoire cryptographiquement sur
 function genRandomPin() {
-  // crypto.randomInt(0, 10000) retourne un entier uniforme dans [0, 10000[
   const n = crypto.randomInt(0, 10000);
   return String(n).padStart(4, '0');
 }
 
-// Envoi email via Resend (meme pattern que les autres APIs)
 async function sendEmailToManager(managerEmail, salarieName, newPin) {
   const resendKey = process.env.RESEND_API_KEY;
   const resendFrom = process.env.RESEND_FROM || 'ALTEORE <noreply@alteore.com>';
-  if (!resendKey) {
-    console.warn('[salarie-reset-approve] RESEND_API_KEY manquant, email non envoye');
-    return false;
-  }
-  if (!managerEmail) {
-    console.warn('[salarie-reset-approve] managerEmail manquant, email non envoye');
-    return false;
-  }
+  if (!resendKey || !managerEmail) return false;
 
   const subject = 'Nouveau code d\'acces pour ' + (salarieName || 'votre salarie');
   const html = ''
@@ -78,27 +136,19 @@ async function sendEmailToManager(managerEmail, salarieName, newPin) {
     +     '⚠️ Ne transferez pas cet email. Pour des raisons de securite, ce code ne sera plus visible apres fermeture.'
     +   '</p>'
     + '</div>'
-    + '<div style="text-align:center;color:#9ca3af;font-size:11px;margin-top:16px">'
-    +   'ALTEORE &middot; Espace salarie'
-    + '</div>'
+    + '<div style="text-align:center;color:#9ca3af;font-size:11px;margin-top:16px">ALTEORE &middot; Espace salarie</div>'
     + '</div>';
 
   try {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + resendKey,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': 'Bearer ' + resendKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ from: resendFrom, to: managerEmail, subject, html }),
     });
-    if (!r.ok) {
-      console.warn('[salarie-reset-approve] Resend KO:', r.status, await r.text());
-      return false;
-    }
+    if (!r.ok) { console.warn('[reset-approve] Resend KO:', r.status, await r.text()); return false; }
     return true;
   } catch (e) {
-    console.warn('[salarie-reset-approve] Resend error:', e.message);
+    console.warn('[reset-approve] Resend error:', e.message);
     return false;
   }
 }
@@ -119,41 +169,35 @@ module.exports = async function handler(req, res) {
       return res.status(401).json({ success: false, error: 'auth_required' });
     }
     if (!process.env.PIN_SERVER_SECRET || process.env.PIN_SERVER_SECRET.length < 16) {
-      console.error('[salarie-reset-approve] PIN_SERVER_SECRET manquant ou trop court');
+      console.error('[reset-approve] PIN_SERVER_SECRET manquant');
       return res.status(500).json({ success: false, error: 'server_config' });
     }
 
-    // Verifier idToken
-    let decoded;
-    try {
-      decoded = await getAuthAdmin().verifyIdToken(idToken);
-    } catch (e) {
-      console.warn('[salarie-reset-approve] idToken invalide:', e.message);
+    const verified = await verifyClientIdToken(idToken);
+    if (!verified || !verified.uid) {
       return res.status(401).json({ success: false, error: 'invalid_token' });
     }
-    const managerUid = decoded.uid;
-    const managerEmail = decoded.email || null;
 
-    const db = getDb();
+    const adminToken = await getAdminToken();
+    if (!adminToken) return res.status(500).json({ success: false, error: 'admin_auth_failed' });
 
-    // Verifier que le salarie existe + ownership
-    const pubSnap = await db.collection('rh_employes_public').doc(publicId).get();
-    if (!pubSnap.exists) {
+    const pub = await fsGet(`rh_employes_public/${publicId}`, adminToken);
+    if (!pub.exists) {
       return res.status(404).json({ success: false, error: 'salarie_not_found' });
     }
-    const pubData = pubSnap.data() || {};
-    if (pubData.uid !== managerUid) {
+    const pubData = pub.data || {};
+    if (pubData.uid !== verified.uid) {
       return res.status(403).json({ success: false, error: 'not_owner' });
     }
 
     // Generer nouveau PIN + hash
     const newPin = genRandomPin();
     const hash = hashPin(publicId, newPin);
-    const now = new Date().toISOString();
+    const nowIso = new Date().toISOString();
 
-    await db.collection('rh_auth_salaries').doc(publicId).set({
+    await fsSet(`rh_auth_salaries/${publicId}`, {
       pinHash: hash,
-      pinLastReset: now,
+      pinLastReset: nowIso,
       pinAttempts: 0,
       pinLockedUntil: null,
       pinLength: 4,
@@ -162,21 +206,21 @@ module.exports = async function handler(req, res) {
       tempResetExpiresAt: null,
       tempResetRequestedAt: null,
       setBy: 'manager_reset',
-      setByUid: managerUid,
-    }, { merge: true });
+      setByUid: verified.uid,
+    }, adminToken);
 
-    // Envoyer email au manager avec le PIN (redondance UI)
+    // Email au manager
     const salarieName = [pubData.prenom, pubData.nom].filter(Boolean).join(' ').trim() || null;
-    const emailSent = await sendEmailToManager(managerEmail, salarieName, newPin);
+    const emailSent = await sendEmailToManager(verified.email, salarieName, newPin);
 
     return res.status(200).json({
       success: true,
-      newPin,  // Renvoye UNE SEULE FOIS, non stocke en clair
+      newPin,
       emailSent,
     });
 
   } catch (e) {
     console.error('[salarie-reset-approve]', e);
-    return res.status(500).json({ success: false, error: 'server_error' });
+    return res.status(500).json({ success: false, error: 'server_error', detail: String(e.message || e) });
   }
 };

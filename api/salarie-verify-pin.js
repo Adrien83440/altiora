@@ -2,53 +2,101 @@
 // Verifie le PIN saisi par un salarie et retourne un token de session.
 //
 // Input:  { publicId: string, pin: string (4 chiffres) }
-// Output OK:    { success: true, token: string, expiresAt: ISO }
-// Output KO:    { success: false, error, attemptsRemaining, lockedUntil }
+// Output OK: { success: true, token: string, expiresAt: ISO }
+// Output KO: { success: false, error, attemptsRemaining, lockedUntil }
 //
-// SECURITE :
-// - Hash SHA-256 avec salt fixe + publicId + PIN (rend arc-en-ciel inutile)
-// - Anti-bruteforce progressif : 5 echecs -> 5min, 10 -> 1h, 15 -> 24h
-// - Token de session : HMAC-SHA256(publicId + expiresAt, SECRET) en base64
-// - Collection privee, bypass rules via Admin SDK
-//
-// ENV VARS requises :
-// - FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY (Service Account deja configure)
-// - PIN_SERVER_SECRET : secret long (>32 chars) utilise pour hash PIN + signer token
-//   Generer avec : openssl rand -base64 48
+// Pattern : REST API + compte admin api@altiora.app
 
-const { initializeApp, cert, getApps } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
 const crypto = require('crypto');
 
-function getDb() {
-  if (!getApps().length) {
-    initializeApp({
-      credential: cert({
-        projectId: 'altiora-70599',
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-      }),
-    });
+const FIREBASE_PROJECT = 'altiora-70599';
+const FB_KEY = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+const FS_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents`;
+const IDT_BASE = 'https://identitytoolkit.googleapis.com/v1';
+
+let _adminToken = null;
+let _adminTokenExp = 0;
+
+async function getAdminToken() {
+  if (_adminToken && Date.now() < _adminTokenExp - 300000) return _adminToken;
+  const email = process.env.FIREBASE_API_EMAIL;
+  const password = process.env.FIREBASE_API_PASSWORD;
+  if (!email || !password) { console.error('[verify-pin] FIREBASE_API_EMAIL/PASSWORD manquants'); return null; }
+  const r = await fetch(`${IDT_BASE}/accounts:signInWithPassword?key=${FB_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, returnSecureToken: true }),
+  });
+  const data = await r.json();
+  if (data.idToken) {
+    _adminToken = data.idToken;
+    _adminTokenExp = Date.now() + (parseInt(data.expiresIn || '3600') * 1000);
+    return _adminToken;
   }
-  return getFirestore();
+  console.error('[verify-pin] Admin login failed:', data.error && data.error.message);
+  return null;
 }
 
-// Hash du PIN avec salt : rend le hash stocke non reutilisable sur un autre user
-// Format : SHA-256(SECRET:publicId:PIN)
-// publicId participe au salt -> meme PIN pour 2 salaries = 2 hashes differents
+function authHeaders(token) {
+  return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' };
+}
+
+function toFsFields(obj) {
+  const ff = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === null || v === undefined)     ff[k] = { nullValue: null };
+    else if (typeof v === 'string')        ff[k] = { stringValue: v };
+    else if (typeof v === 'boolean')       ff[k] = { booleanValue: v };
+    else if (typeof v === 'number') {
+      if (Number.isInteger(v))             ff[k] = { integerValue: String(v) };
+      else                                 ff[k] = { doubleValue: v };
+    }
+    else                                   ff[k] = { stringValue: String(v) };
+  }
+  return ff;
+}
+
+function fromFsFields(fields) {
+  if (!fields) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(fields)) {
+    if (v.stringValue !== undefined)       out[k] = v.stringValue;
+    else if (v.integerValue !== undefined) out[k] = parseInt(v.integerValue);
+    else if (v.doubleValue !== undefined)  out[k] = v.doubleValue;
+    else if (v.booleanValue !== undefined) out[k] = v.booleanValue;
+    else if (v.nullValue !== undefined)    out[k] = null;
+    else                                    out[k] = v;
+  }
+  return out;
+}
+
+async function fsGet(path, token) {
+  const r = await fetch(`${FS_BASE}/${path}`, { headers: authHeaders(token) });
+  if (r.status === 404) return { exists: false, data: null };
+  if (!r.ok) throw new Error(`fsGet ${path} → ${r.status}: ${await r.text()}`);
+  const json = await r.json();
+  return { exists: true, data: fromFsFields(json.fields) };
+}
+
+async function fsSet(path, fields, token) {
+  const mask = Object.keys(fields).map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
+  const r = await fetch(`${FS_BASE}/${path}?${mask}`, {
+    method: 'PATCH', headers: authHeaders(token),
+    body: JSON.stringify({ fields: toFsFields(fields) }),
+  });
+  if (!r.ok) throw new Error(`fsSet ${path} → ${r.status}: ${await r.text()}`);
+  return true;
+}
+
+// ── Crypto helpers ──
 function hashPin(publicId, pin) {
   const secret = process.env.PIN_SERVER_SECRET || '';
-  if (secret.length < 16) {
-    throw new Error('PIN_SERVER_SECRET manquant ou trop court (>= 16 caracteres requis)');
-  }
-  const payload = secret + ':' + publicId + ':' + pin;
-  return crypto.createHash('sha256').update(payload).digest('hex');
+  if (secret.length < 16) throw new Error('PIN_SERVER_SECRET manquant ou trop court');
+  return crypto.createHash('sha256').update(secret + ':' + publicId + ':' + pin).digest('hex');
 }
 
-// Genere un token de session signe HMAC-SHA256
-// Format : base64(publicId:expiresAtMs).HMACsignature
 function makeSessionToken(publicId, ttlHours) {
-  const secret = process.env.PIN_SERVER_SECRET || '';
+  const secret = process.env.PIN_SERVER_SECRET;
   const expiresAt = Date.now() + (ttlHours * 3600 * 1000);
   const payload = publicId + ':' + expiresAt;
   const payloadB64 = Buffer.from(payload).toString('base64url');
@@ -56,13 +104,11 @@ function makeSessionToken(publicId, ttlHours) {
   return payloadB64 + '.' + sig;
 }
 
-// Anti-bruteforce : calcule la duree de lock selon le nombre d'echecs total
-// Retourne ISO string ou null si pas de lock a appliquer
 function computeLockUntil(newAttempts) {
   const now = Date.now();
-  if (newAttempts === 5)  return new Date(now +  5 * 60 * 1000).toISOString();       // 5 min
-  if (newAttempts === 10) return new Date(now + 60 * 60 * 1000).toISOString();       // 1h
-  if (newAttempts >= 15)  return new Date(now + 24 * 60 * 60 * 1000).toISOString();  // 24h
+  if (newAttempts === 5)  return new Date(now +  5 * 60 * 1000).toISOString();
+  if (newAttempts === 10) return new Date(now + 60 * 60 * 1000).toISOString();
+  if (newAttempts >= 15)  return new Date(now + 24 * 60 * 60 * 1000).toISOString();
   return null;
 }
 
@@ -74,13 +120,10 @@ function getAttemptsRemaining(pinAttempts) {
   return 0;
 }
 
-// Comparaison timing-safe des hashes (evite les attaques par timing)
 function timingSafeEqualStr(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   if (a.length !== b.length) return false;
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  return crypto.timingSafeEqual(bufA, bufB);
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
 module.exports = async function handler(req, res) {
@@ -93,57 +136,44 @@ module.exports = async function handler(req, res) {
   try {
     const { publicId, pin } = req.body || {};
 
-    // Validation input
     if (!publicId || typeof publicId !== 'string' || publicId.length < 6) {
       return res.status(400).json({ success: false, error: 'invalid_input' });
     }
     if (!pin || typeof pin !== 'string' || !/^[0-9]{4}$/.test(pin)) {
       return res.status(400).json({ success: false, error: 'invalid_pin_format' });
     }
-
-    // Check server secret present
     if (!process.env.PIN_SERVER_SECRET || process.env.PIN_SERVER_SECRET.length < 16) {
-      console.error('[salarie-verify-pin] PIN_SERVER_SECRET manquant ou trop court');
+      console.error('[verify-pin] PIN_SERVER_SECRET manquant ou trop court');
       return res.status(500).json({ success: false, error: 'server_config' });
     }
 
-    const db = getDb();
+    const token = await getAdminToken();
+    if (!token) return res.status(500).json({ success: false, error: 'admin_auth_failed' });
 
-    // 1. Verifier que le salarie existe
-    const pubSnap = await db.collection('rh_employes_public').doc(publicId).get();
-    if (!pubSnap.exists) {
-      // Reponse neutre pour eviter l'enumeration
+    // 1. Salarie existe ?
+    const pub = await fsGet(`rh_employes_public/${publicId}`, token);
+    if (!pub.exists) {
       return res.status(200).json({
-        success: false,
-        error: 'invalid_credentials',
-        attemptsRemaining: 5,
-        lockedUntil: null,
+        success: false, error: 'invalid_credentials',
+        attemptsRemaining: 5, lockedUntil: null,
       });
     }
 
-    // 2. Lire l'auth doc
-    const authRef = db.collection('rh_auth_salaries').doc(publicId);
-    const authSnap = await authRef.get();
-
-    if (!authSnap.exists) {
-      // Pas de doc auth -> salarie grandfathered sans PIN defini
-      // Ne devrait pas arriver si le front appelle check-status avant
+    // 2. Doc auth
+    const auth = await fsGet(`rh_auth_salaries/${publicId}`, token);
+    if (!auth.exists) {
       return res.status(200).json({
-        success: false,
-        error: 'no_pin_set',
-        attemptsRemaining: 5,
-        lockedUntil: null,
+        success: false, error: 'no_pin_set',
+        attemptsRemaining: 5, lockedUntil: null,
       });
     }
 
-    const authData = authSnap.data() || {};
-    const hasPin = !!(authData.pinHash && authData.pinHash.length > 0);
+    const authData = auth.data || {};
+    const hasPin = !!(authData.pinHash && String(authData.pinHash).length > 0);
     if (!hasPin) {
       return res.status(200).json({
-        success: false,
-        error: 'no_pin_set',
-        attemptsRemaining: 5,
-        lockedUntil: null,
+        success: false, error: 'no_pin_set',
+        attemptsRemaining: 5, lockedUntil: null,
       });
     }
 
@@ -153,48 +183,36 @@ module.exports = async function handler(req, res) {
       const lockTs = new Date(authData.pinLockedUntil).getTime();
       if (!isNaN(lockTs) && lockTs > now) {
         return res.status(200).json({
-          success: false,
-          error: 'locked',
-          attemptsRemaining: 0,
-          lockedUntil: authData.pinLockedUntil,
+          success: false, error: 'locked',
+          attemptsRemaining: 0, lockedUntil: authData.pinLockedUntil,
         });
       }
     }
 
-    // 4. Hash du PIN recu et comparaison timing-safe
+    // 4. Hash + compare timing-safe
     const candidateHash = hashPin(publicId, pin);
     const match = timingSafeEqualStr(candidateHash, authData.pinHash);
 
     if (match) {
-      // PIN correct : reset compteur + update lastLogin + genere token
-      const token = makeSessionToken(publicId, 8); // TTL 8h
+      // Success : reset compteur + token
+      const sessToken = makeSessionToken(publicId, 8);
       const expiresAt = new Date(now + 8 * 3600 * 1000).toISOString();
-
-      await authRef.set({
+      await fsSet(`rh_auth_salaries/${publicId}`, {
         pinAttempts: 0,
         pinLockedUntil: null,
         lastLoginAt: new Date(now).toISOString(),
-      }, { merge: true });
-
-      return res.status(200).json({
-        success: true,
-        token,
-        expiresAt,
-      });
+      }, token);
+      return res.status(200).json({ success: true, token: sessToken, expiresAt });
     }
 
-    // 5. Mismatch : incrementer compteur et potentiellement lock
+    // 5. Mismatch : incrementer + potentiellement lock
     const currentAttempts = parseInt(authData.pinAttempts) || 0;
     const newAttempts = currentAttempts + 1;
     const newLockUntil = computeLockUntil(newAttempts);
 
-    const updatePayload = {
-      pinAttempts: newAttempts,
-    };
-    if (newLockUntil) {
-      updatePayload.pinLockedUntil = newLockUntil;
-    }
-    await authRef.set(updatePayload, { merge: true });
+    const update = { pinAttempts: newAttempts };
+    if (newLockUntil) update.pinLockedUntil = newLockUntil;
+    await fsSet(`rh_auth_salaries/${publicId}`, update, token);
 
     return res.status(200).json({
       success: false,
@@ -205,6 +223,6 @@ module.exports = async function handler(req, res) {
 
   } catch (e) {
     console.error('[salarie-verify-pin]', e);
-    return res.status(500).json({ success: false, error: 'server_error' });
+    return res.status(500).json({ success: false, error: 'server_error', detail: String(e.message || e) });
   }
 };
