@@ -386,6 +386,20 @@
       </div>
     </div>
 
+    <!-- Install PWA - n'apparaît que si non installée -->
+    <div class="card" id="pwa-install-card" style="display:none;background:linear-gradient(135deg,rgba(5,150,105,0.08),rgba(16,185,129,0.05));border:1px solid rgba(5,150,105,0.25)">
+      <div class="card-body" style="padding:16px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+          <div style="font-size:28px">📲</div>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:2px">Installer l'application</div>
+            <div style="font-size:11px;color:var(--muted);line-height:1.4">Accédez plus vite à votre espace depuis l'écran d'accueil</div>
+          </div>
+        </div>
+        <button class="btn btn-green" onclick="openInstallModal()" style="width:100%;padding:10px">Comment installer ? →</button>
+      </div>
+    </div>
+
   </div>
 
   <!-- ══ ONGLET PROFIL ══ -->
@@ -1148,6 +1162,44 @@ styleEl.textContent = `
     #cal-grid .cal-day.off,
     #cal-grid .cal-day.work-generic { min-height: 40px !important; }
   }
+  /* ── Écrans très étroits : < 400px (smartphones standards en portrait) ── */
+  @media (max-width: 400px) {
+    #cal-grid .cal-day {
+      min-height: 56px !important;
+      padding: 4px 2px 3px !important;
+      border-radius: 7px !important;
+    }
+    .cal-day-num {
+      font-size: 11px !important;
+      margin-bottom: 3px !important;
+    }
+    .cal-shift-pill {
+      font-size: 8px !important;
+      padding: 1px 3px !important;
+      border-left-width: 2px !important;
+      border-radius: 3px !important;
+      gap: 2px !important;
+      /* Forcer le masquage de la note sur très petit écran */
+    }
+    .cal-shift-pill .shift-note { display: none !important; }
+    .cal-total-badge {
+      font-size: 6.5px !important;
+      margin-top: 2px !important;
+    }
+    .cal-total-badge svg { width: 6px !important; height: 6px !important; }
+    #cal-grid { gap: 2px !important; }
+    #cal-grid .cal-day.off,
+    #cal-grid .cal-day.work-generic { min-height: 36px !important; }
+    /* Toucher Target : min 44x44 pour l'accessibilité mais on reste en grille serrée */
+    .cal-hdr { font-size: 9.5px !important; padding: 3px 0 5px !important; }
+  }
+  /* ── Écrans ultra-étroits : < 340px (anciens iPhone SE, Galaxy Mini) ── */
+  @media (max-width: 340px) {
+    #cal-grid .cal-day { min-height: 50px !important; padding: 3px 1px 2px !important; }
+    .cal-day-num { font-size: 10px !important; }
+    .cal-shift-pill { font-size: 7px !important; padding: 1px 2px !important; }
+    .cal-total-badge { display: none !important; }
+  }
 `;
 document.head.appendChild(styleEl);
 
@@ -1407,6 +1459,22 @@ function getItemHours(it) {
   return '';
 }
 
+/* Version compacte pour très petits écrans : juste l'heure de début en "09h" */
+function getItemHoursCompact(it) {
+  var first = (it.plages && it.plages.length > 0) ? it.plages[0] : it;
+  if (!first.deb) return '';
+  // "09:00" → "09h" ; "09:30" → "9h30"
+  var parts = first.deb.split(':');
+  if (parts.length !== 2) return first.deb;
+  var h = parseInt(parts[0], 10) || 0;
+  var m = parseInt(parts[1], 10) || 0;
+  return m === 0 ? h + 'h' : h + 'h' + String(m).padStart(2, '0');
+}
+
+function _isMobileNarrow() {
+  return (typeof window !== 'undefined' && window.innerWidth && window.innerWidth <= 400);
+}
+
 function patchCalDays() {
   var cache = window._planningCache || {};
   var calGrid = document.getElementById('cal-grid');
@@ -1444,7 +1512,7 @@ function patchCalDays() {
     items.forEach(function(it) {
       var pill = document.createElement('div');
       pill.className = 'cal-shift-pill ' + (it.type || 'travail');
-      var hrs = getItemHours(it);
+      var hrs = _isMobileNarrow() ? getItemHoursCompact(it) : getItemHours(it);
       var noteHtml = it.note ? '<span class="shift-note">· ' + it.note + '</span>' : '';
       pill.innerHTML = (hrs || (PLAN_ICONS[it.type] || it.type)) + noteHtml;
       shiftsEl.appendChild(pill);
@@ -1476,6 +1544,21 @@ window.renderAll = function() {
 };
 
 console.log('[PATCH v2] Planning fixes + Timeline chargés ✓');
+
+/* Re-render du calendrier au changement de taille fenêtre (rotation, etc.)
+   pour adapter compact/long format des heures */
+var _resizeTimer = null;
+var _lastIsMobile = _isMobileNarrow();
+window.addEventListener('resize', function() {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(function() {
+    var nowMobile = _isMobileNarrow();
+    if (nowMobile !== _lastIsMobile) {
+      _lastIsMobile = nowMobile;
+      if (typeof patchCalDays === 'function') patchCalDays();
+    }
+  }, 200);
+});
 })();
 </script>
 
@@ -2730,6 +2813,266 @@ setTimeout(function() {
   if (_uid && window._dbReady) loadObjectifsSalarie();
 }, 4000);
 
+})();
+</script>
+
+<!-- ══ PWA INSTALL MODAL ══ -->
+<div id="install-modal" style="display:none;position:fixed;inset:0;background:rgba(15,31,92,0.85);z-index:9998;backdrop-filter:blur(6px);align-items:flex-end;justify-content:center;padding:0">
+  <div style="background:white;border-radius:22px 22px 0 0;width:100%;max-width:520px;max-height:92vh;overflow-y:auto;padding:22px 20px 30px;box-shadow:0 -10px 40px rgba(0,0,0,0.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div style="font-size:28px">📲</div>
+        <div style="font-size:16px;font-weight:800;color:#0f1f5c">Installer l'application</div>
+      </div>
+      <button onclick="closeInstallModal()" style="background:transparent;border:none;font-size:22px;cursor:pointer;color:#9ca3af;padding:4px 10px">×</button>
+    </div>
+
+    <div style="font-size:12px;color:#6b7280;line-height:1.5;margin-bottom:18px">
+      Ajoutez l'application à votre écran d'accueil pour y accéder rapidement, sans passer par le navigateur.
+    </div>
+
+    <!-- Onglets plateforme -->
+    <div style="display:flex;gap:6px;margin-bottom:16px;background:#f3f4f6;padding:4px;border-radius:10px" id="install-tabs">
+      <button id="install-tab-auto" onclick="selectInstallTab('auto')" class="install-tab-btn active" style="flex:1;padding:7px 10px;background:white;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;color:#059669;box-shadow:0 1px 3px rgba(0,0,0,0.08)">📱 Mon appareil</button>
+      <button id="install-tab-ios" onclick="selectInstallTab('ios')" class="install-tab-btn" style="flex:1;padding:7px 10px;background:transparent;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;color:#6b7280">🍏 iPhone</button>
+      <button id="install-tab-android" onclick="selectInstallTab('android')" class="install-tab-btn" style="flex:1;padding:7px 10px;background:transparent;border:none;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer;color:#6b7280">🤖 Android</button>
+    </div>
+
+    <!-- Instructions iOS -->
+    <div id="install-instr-ios" style="display:none">
+      <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:11px;color:#78350f">
+        <b>⚠️ Important :</b> utilisez <b>Safari</b> (pas Chrome ou Firefox) pour installer sur iPhone/iPad.
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:12px;padding:12px;background:#f9fafb;border-radius:10px">
+        <div style="font-size:24px;flex-shrink:0">1️⃣</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:#0f1f5c;margin-bottom:4px">Appuyez sur le bouton <b>Partager</b></div>
+          <div style="font-size:11px;color:#6b7280;line-height:1.5">En bas de Safari, icône avec la flèche qui sort du carré <span style="font-family:monospace;background:#e5e7eb;padding:1px 6px;border-radius:4px">⬆️</span></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:12px;padding:12px;background:#f9fafb;border-radius:10px">
+        <div style="font-size:24px;flex-shrink:0">2️⃣</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:#0f1f5c;margin-bottom:4px">Faites défiler et choisissez <b>Sur l'écran d'accueil</b></div>
+          <div style="font-size:11px;color:#6b7280;line-height:1.5">Icône <span style="font-family:monospace;background:#e5e7eb;padding:1px 6px;border-radius:4px">➕</span> dans le menu de partage</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;padding:12px;background:#f0fdf4;border-radius:10px;border:1px solid #86efac">
+        <div style="font-size:24px;flex-shrink:0">3️⃣</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:4px">Appuyez sur <b>Ajouter</b></div>
+          <div style="font-size:11px;color:#047857;line-height:1.5">L'icône apparaît sur votre écran d'accueil, comme une vraie app ✨</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Instructions Android -->
+    <div id="install-instr-android" style="display:none">
+      <div id="install-android-native-wrap" style="display:none;margin-bottom:14px">
+        <button id="install-android-native-btn" onclick="triggerNativeInstall()" style="width:100%;padding:14px;background:linear-gradient(135deg,#059669,#10b981);color:white;border:none;border-radius:12px;font-size:14px;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(5,150,105,0.3)">
+          ⚡ Installer automatiquement
+        </button>
+        <div style="font-size:10px;color:#6b7280;text-align:center;margin-top:6px">Ou suivez les instructions manuelles ci-dessous</div>
+      </div>
+      <div style="background:#eff6ff;border:1px solid #93c5fd;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:11px;color:#1e3a8a">
+        <b>💡 Astuce :</b> utilisez <b>Chrome</b> pour la meilleure expérience.
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:12px;padding:12px;background:#f9fafb;border-radius:10px">
+        <div style="font-size:24px;flex-shrink:0">1️⃣</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:#0f1f5c;margin-bottom:4px">Appuyez sur le menu <b>⋮</b></div>
+          <div style="font-size:11px;color:#6b7280;line-height:1.5">Les 3 points verticaux en haut à droite de Chrome</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;margin-bottom:12px;padding:12px;background:#f9fafb;border-radius:10px">
+        <div style="font-size:24px;flex-shrink:0">2️⃣</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:#0f1f5c;margin-bottom:4px">Choisissez <b>Ajouter à l'écran d'accueil</b></div>
+          <div style="font-size:11px;color:#6b7280;line-height:1.5">Ou "Installer l'application" selon votre version Android</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:12px;padding:12px;background:#f0fdf4;border-radius:10px;border:1px solid #86efac">
+        <div style="font-size:24px;flex-shrink:0">3️⃣</div>
+        <div style="flex:1">
+          <div style="font-size:13px;font-weight:700;color:#065f46;margin-bottom:4px">Confirmez l'ajout</div>
+          <div style="font-size:11px;color:#047857;line-height:1.5">L'application apparaît sur votre écran d'accueil ✨</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Instructions Auto-détection -->
+    <div id="install-instr-auto">
+      <div id="install-auto-content" style="padding:18px 0;text-align:center;color:#6b7280">
+        <div style="font-size:32px;margin-bottom:10px">🔍</div>
+        <div style="font-size:13px">Détection de votre appareil...</div>
+      </div>
+    </div>
+
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid #f3f4f6;font-size:10px;color:#9ca3af;text-align:center;line-height:1.5">
+      Une fois installée, l'application s'ouvre en plein écran sans barre de navigateur.<br>
+      Vos données restent synchronisées comme d'habitude.
+    </div>
+  </div>
+</div>
+
+<!-- ══ PWA INSTALL LOGIC ══ -->
+<script>
+(function(){
+'use strict';
+
+var _deferredInstallPrompt = null;
+
+/* Détection plateforme */
+function detectPlatform() {
+  var ua = navigator.userAgent || '';
+  // iPad sur iOS 13+ se présente comme Mac, on vérifie aussi touch
+  var isIOS = /iPad|iPhone|iPod/.test(ua) || (ua.indexOf('Mac') >= 0 && navigator.maxTouchPoints > 1);
+  var isAndroid = /Android/i.test(ua);
+  var isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(ua);
+  return { isIOS: isIOS, isAndroid: isAndroid, isSafari: isSafari, ua: ua };
+}
+
+/* L'app est-elle déjà installée (lancée en mode standalone PWA) ? */
+function isStandalone() {
+  if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return true;
+  // iOS Safari
+  if ('standalone' in window.navigator && window.navigator.standalone) return true;
+  return false;
+}
+
+/* Afficher ou masquer la carte d'installation selon le contexte */
+function updateInstallCardVisibility() {
+  var card = document.getElementById('pwa-install-card');
+  if (!card) return;
+  // Cacher si déjà installée
+  if (isStandalone()) {
+    card.style.display = 'none';
+    return;
+  }
+  // Cacher si l'utilisateur a cliqué "J'ai compris" récemment
+  try {
+    var dismissed = localStorage.getItem('install_dismissed');
+    if (dismissed) {
+      var t = parseInt(dismissed, 10);
+      // Cacher pendant 7 jours après dismiss
+      if (Date.now() - t < 7 * 24 * 3600 * 1000) {
+        card.style.display = 'none';
+        return;
+      }
+    }
+  } catch(e) {}
+  card.style.display = '';
+}
+
+/* Auto-tab : choisit iOS ou Android selon l'appareil */
+function renderAutoInstallTab() {
+  var el = document.getElementById('install-auto-content');
+  if (!el) return;
+  var p = detectPlatform();
+  if (p.isIOS) {
+    el.innerHTML = '<div style="font-size:28px;margin-bottom:8px">🍏</div><div style="font-size:13px;color:#0f1f5c;font-weight:700;margin-bottom:4px">iPhone / iPad détecté</div><div style="font-size:11px;color:#6b7280;margin-bottom:14px">Suivez ces étapes dans Safari</div>';
+    // Redirige vers les instructions iOS
+    selectInstallTab('ios');
+  } else if (p.isAndroid) {
+    el.innerHTML = '<div style="font-size:28px;margin-bottom:8px">🤖</div><div style="font-size:13px;color:#0f1f5c;font-weight:700;margin-bottom:4px">Android détecté</div><div style="font-size:11px;color:#6b7280;margin-bottom:14px">Suivez ces étapes dans Chrome</div>';
+    selectInstallTab('android');
+  } else {
+    el.innerHTML = '<div style="font-size:28px;margin-bottom:8px">💻</div><div style="font-size:13px;color:#0f1f5c;font-weight:700;margin-bottom:4px">Appareil de bureau détecté</div><div style="font-size:11px;color:#6b7280;line-height:1.5">Dans Chrome : icône <b>⊕</b> dans la barre d\'adresse à droite, puis <b>Installer</b>.<br>Dans Edge : menu <b>⋯</b> → <b>Applications</b> → <b>Installer ce site en tant qu\'application</b>.</div>';
+  }
+}
+
+/* Bascule d'onglet de la modale */
+function selectInstallTab(tab) {
+  ['auto','ios','android'].forEach(function(t){
+    var btn = document.getElementById('install-tab-'+t);
+    var instr = document.getElementById('install-instr-'+t);
+    if (btn) {
+      if (t === tab) {
+        btn.style.background = 'white';
+        btn.style.color = '#059669';
+        btn.style.boxShadow = '0 1px 3px rgba(0,0,0,0.08)';
+        btn.classList.add('active');
+      } else {
+        btn.style.background = 'transparent';
+        btn.style.color = '#6b7280';
+        btn.style.boxShadow = 'none';
+        btn.classList.remove('active');
+      }
+    }
+    if (instr) instr.style.display = (t === tab) ? '' : 'none';
+  });
+}
+window.selectInstallTab = selectInstallTab;
+
+function openInstallModal() {
+  var m = document.getElementById('install-modal');
+  if (!m) return;
+  m.style.display = 'flex';
+  renderAutoInstallTab();
+  // Si prompt natif dispo (Android Chrome), afficher le bouton
+  var nativeWrap = document.getElementById('install-android-native-wrap');
+  if (nativeWrap) {
+    nativeWrap.style.display = _deferredInstallPrompt ? '' : 'none';
+  }
+}
+window.openInstallModal = openInstallModal;
+
+function closeInstallModal() {
+  var m = document.getElementById('install-modal');
+  if (m) m.style.display = 'none';
+}
+window.closeInstallModal = closeInstallModal;
+
+function triggerNativeInstall() {
+  if (!_deferredInstallPrompt) return;
+  _deferredInstallPrompt.prompt();
+  _deferredInstallPrompt.userChoice.then(function(choice){
+    if (choice.outcome === 'accepted') {
+      closeInstallModal();
+      try { localStorage.setItem('install_dismissed', Date.now()); } catch(e) {}
+      updateInstallCardVisibility();
+    }
+    _deferredInstallPrompt = null;
+  });
+}
+window.triggerNativeInstall = triggerNativeInstall;
+
+/* Ferme si on clique sur le fond */
+document.addEventListener('click', function(e) {
+  var m = document.getElementById('install-modal');
+  if (m && e.target === m) closeInstallModal();
+});
+
+/* Capture le prompt natif Android Chrome */
+window.addEventListener('beforeinstallprompt', function(e) {
+  e.preventDefault();
+  _deferredInstallPrompt = e;
+  console.log('[PWA] Prompt install capturé (Android Chrome)');
+});
+
+/* App installée */
+window.addEventListener('appinstalled', function() {
+  console.log('[PWA] Application installée ✓');
+  try { localStorage.setItem('install_dismissed', Date.now()); } catch(e) {}
+  updateInstallCardVisibility();
+  closeInstallModal();
+});
+
+/* Au chargement : décider si on montre la carte */
+function initPwaInstall() {
+  updateInstallCardVisibility();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initPwaInstall);
+} else {
+  initPwaInstall();
+}
+
+// Vérif récurrente au changement d'onglet (utile car updates DOM)
+setTimeout(initPwaInstall, 800);
+
+console.log('[PWA install] Module chargé ✓');
 })();
 </script>
 
