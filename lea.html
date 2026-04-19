@@ -294,30 +294,86 @@
       padding:32px;gap:20px;
     }
     .rec-overlay.show{display:flex}
-    .rec-ring{
-      width:160px;height:160px;border-radius:50%;
-      border:3px solid rgba(239,68,68,0.3);
-      background:rgba(239,68,68,0.08);
+    .rec-close{
+      position:absolute;top:calc(20px + var(--safe-top));right:20px;
+      background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.15);
+      color:#fff;width:36px;height:36px;border-radius:50%;
+      font-size:16px;cursor:pointer;font-family:inherit;
       display:flex;align-items:center;justify-content:center;
-      font-size:60px;
-      animation:rec-pulse 1.3s infinite;
+      transition:.15s;
     }
-    @keyframes rec-pulse{
+    .rec-close:active{background:rgba(255,255,255,0.18)}
+
+    /* Le ring change d'apparence selon l'état */
+    .rec-ring{
+      width:170px;height:170px;border-radius:50%;
+      display:flex;align-items:center;justify-content:center;
+      transition:all .3s;position:relative;
+    }
+    .rec-ring-icon{font-size:64px;transition:transform .3s}
+
+    /* État LISTENING (user parle) — rouge, pulse fort */
+    .rec-ring.listening{
+      border:3px solid rgba(239,68,68,0.4);
+      background:rgba(239,68,68,0.08);
+      animation:rec-pulse-red 1.3s infinite;
+    }
+    @keyframes rec-pulse-red{
       0%{box-shadow:0 0 0 0 rgba(239,68,68,0.5);transform:scale(1)}
-      70%{box-shadow:0 0 0 25px rgba(239,68,68,0);transform:scale(1.03)}
+      70%{box-shadow:0 0 0 30px rgba(239,68,68,0);transform:scale(1.04)}
       100%{box-shadow:0 0 0 0 rgba(239,68,68,0);transform:scale(1)}
     }
-    .rec-status{font-size:17px;font-weight:800;text-align:center}
+    /* État SILENCE DETECT (compte à rebours avant cut) — orange */
+    .rec-ring.silencing{
+      border:3px solid rgba(245,158,11,0.5);
+      background:rgba(245,158,11,0.08);
+      animation:rec-pulse-orange 0.6s infinite;
+    }
+    @keyframes rec-pulse-orange{
+      0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0.5);transform:scale(1)}
+      50%{box-shadow:0 0 0 15px rgba(245,158,11,0);transform:scale(1.02)}
+    }
+    /* État THINKING (Léa réfléchit) — violet, pulse lent */
+    .rec-ring.thinking{
+      border:3px solid rgba(167,139,250,0.5);
+      background:rgba(167,139,250,0.12);
+      animation:rec-pulse-purple 1.8s infinite;
+    }
+    @keyframes rec-pulse-purple{
+      0%,100%{box-shadow:0 0 0 0 rgba(167,139,250,0.4);transform:scale(1)}
+      50%{box-shadow:0 0 0 18px rgba(167,139,250,0);transform:scale(1.02)}
+    }
+    /* État SPEAKING (Léa parle) — violet fort, ondes sonores */
+    .rec-ring.speaking{
+      border:3px solid rgba(124,58,237,0.6);
+      background:linear-gradient(135deg,rgba(167,139,250,0.18),rgba(124,58,237,0.12));
+      animation:rec-pulse-speak 1s infinite;
+    }
+    @keyframes rec-pulse-speak{
+      0%,100%{box-shadow:0 0 0 0 rgba(124,58,237,0.5);transform:scale(1)}
+      50%{box-shadow:0 0 0 22px rgba(124,58,237,0);transform:scale(1.05)}
+    }
+    /* État ERROR */
+    .rec-ring.error{
+      border:3px solid rgba(239,68,68,0.6);
+      background:rgba(239,68,68,0.15);
+    }
+
+    .rec-status{font-size:17px;font-weight:800;text-align:center;min-height:24px}
     .rec-transcript{
-      font-size:14px;color:var(--muted);text-align:center;
-      max-width:320px;line-height:1.55;min-height:40px;padding:0 8px;
+      font-size:15px;color:rgba(255,255,255,0.9);text-align:center;
+      max-width:360px;line-height:1.55;min-height:50px;padding:0 8px;
+      font-style:italic;
     }
-    .rec-stop{
-      margin-top:12px;padding:12px 32px;border-radius:99px;
-      background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);
-      color:#fff;font-weight:700;font-size:14px;cursor:pointer;
+    .rec-actions{display:flex;gap:10px;margin-top:8px;min-height:44px}
+    .rec-btn-primary,.rec-btn-pause{
+      padding:12px 28px;border-radius:99px;
+      background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);
+      color:#fff;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit;
+      transition:.15s;
     }
-    .rec-stop:active{background:rgba(255,255,255,0.15)}
+    .rec-btn-primary:active,.rec-btn-pause:active{background:rgba(255,255,255,0.2);transform:scale(0.97)}
+    .rec-btn-pause{background:rgba(124,58,237,0.2);border-color:rgba(167,139,250,0.4)}
 
     /* Install banner iOS */
     .ios-banner{
@@ -388,12 +444,18 @@
     </div>
   </div>
 
-  <!-- Recording overlay -->
+  <!-- Recording overlay : mode conversation continue (Wave 3.7.3) -->
   <div id="rec-overlay" class="rec-overlay">
-    <div class="rec-ring">🎤</div>
-    <div class="rec-status">Léa t'écoute…</div>
-    <div id="rec-transcript" class="rec-transcript">Parle maintenant</div>
-    <button class="rec-stop" onclick="stopRecording()">Terminer</button>
+    <button class="rec-close" id="rec-close" onclick="endConversation()" aria-label="Fermer la conversation">✕</button>
+    <div class="rec-ring" id="rec-ring">
+      <div class="rec-ring-icon" id="rec-ring-icon">🎤</div>
+    </div>
+    <div class="rec-status" id="rec-status">Parle, je t'écoute</div>
+    <div id="rec-transcript" class="rec-transcript"></div>
+    <div class="rec-actions" id="rec-actions">
+      <button class="rec-btn-primary" id="rec-btn-primary" onclick="stopRecording()" style="display:none">⏹ Terminer</button>
+      <button class="rec-btn-pause" id="rec-btn-pause" onclick="interruptSpeaking()" style="display:none">⏸ Interrompre</button>
+    </div>
   </div>
 
   <!-- Banner install iOS -->
@@ -521,7 +583,6 @@ window.doLogout = async function() {
   // ── State ──
   var _isSending = false;
   var _recognition = null;
-  var _isRecording = false;
   var _currentAudio = null;
 
   // Mini-markdown pour les réponses de Léa
@@ -750,90 +811,267 @@ window.doLogout = async function() {
     setTimeout(function(){ msgs.scrollTop = msgs.scrollHeight; }, 50);
   }
 
-  // ══════════════════════════════════════════════════════
-  // VOCAL : speech-to-text via Web Speech API, puis vocal-ai
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════
+  // VOCAL — MODE CONVERSATION CONTINUE (Wave 3.7.3)
+  // ──────────────────────────────────────────────────────────────────
+  // Pattern "Siri-like" :
+  //   1. Tap micro → overlay plein écran, ring rouge pulse, j'écoute
+  //   2. Détection de silence 2.5s → j'arrête d'écouter auto (pas besoin de bouton)
+  //   3. Envoi → ring violet pulse (thinking)
+  //   4. Réponse texte reçue → lecture voix navigateur (Amélie) IMMÉDIATE
+  //      → ring violet fort pulse (speaking) + bouton "⏸ Interrompre"
+  //   5. Fin de parole → ring rouge pulse à nouveau, écoute recommence
+  //   6. Boucle jusqu'à ce que l'user tap ✕ (ferme) ou silence prolongé sans parler
+  //
+  // En parallèle (après étape 4) : requête TTS Nova OpenAI en arrière-plan
+  // → bouton 🔊 posé sur la bulle chat pour réécouter avec la belle voix.
+  //
+  // Gestion des bugs iOS SpeechRecognition :
+  //   - Recréer une instance fraîche à chaque cycle (pas de réutilisation)
+  //   - Cleanup complet avant redémarrage (stop, abort, nullify)
+  //   - Retry automatique 1 fois si error 'no-speech' ou 'aborted'
+  // ══════════════════════════════════════════════════════════════════
+
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var _convActive = false;           // vrai mode conversation en cours
+  var _convState = 'idle';           // 'idle' | 'listening' | 'silencing' | 'thinking' | 'speaking'
+  var _silenceTimer = null;          // timer pour couper après 2.5s de silence
+  var _finalTranscript = '';
+  var _interimTranscript = '';
+  var _browserSynth = window.speechSynthesis || null;
+  var _browserVoice = null;          // voix Amélie/Thomas préchargée
 
+  // ──────────────────────────────────────────────────────────────────
+  // Sélection de la meilleure voix française navigateur
+  // ──────────────────────────────────────────────────────────────────
+  function selectBrowserVoice() {
+    if (!_browserSynth) return null;
+    var voices = _browserSynth.getVoices();
+    if (!voices || !voices.length) return null;
+    var preferred = ['Amélie', 'Amelie', 'Audrey', 'Thomas', 'Marie', 'Virginie', 'Google français'];
+    for (var i = 0; i < preferred.length; i++) {
+      var v = voices.find(function(vo){ return vo.name && vo.name.indexOf(preferred[i]) !== -1 && vo.lang && vo.lang.indexOf('fr') === 0; });
+      if (v) return v;
+    }
+    return voices.find(function(vo){ return vo.lang && vo.lang.indexOf('fr') === 0; }) || null;
+  }
+
+  // iOS Safari charge les voix async — attendre leur dispo
+  if (_browserSynth) {
+    _browserVoice = selectBrowserVoice();
+    _browserSynth.onvoiceschanged = function(){ _browserVoice = selectBrowserVoice(); };
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // Helpers d'état visuel de l'overlay
+  // ──────────────────────────────────────────────────────────────────
+  function setConvState(state, statusText, transcriptText) {
+    _convState = state;
+    var ring = document.getElementById('rec-ring');
+    var icon = document.getElementById('rec-ring-icon');
+    var status = document.getElementById('rec-status');
+    var transcript = document.getElementById('rec-transcript');
+    var btnPrimary = document.getElementById('rec-btn-primary');
+    var btnPause = document.getElementById('rec-btn-pause');
+
+    ring.className = 'rec-ring ' + state;
+    if (state === 'listening')   icon.textContent = '🎤';
+    else if (state === 'silencing') icon.textContent = '🎤';
+    else if (state === 'thinking')  icon.textContent = '💭';
+    else if (state === 'speaking')  icon.textContent = '🗣';
+    else if (state === 'error')     icon.textContent = '⚠️';
+    else icon.textContent = '🎤';
+
+    if (statusText !== undefined) status.textContent = statusText;
+    if (transcriptText !== undefined) transcript.textContent = transcriptText;
+
+    // Boutons
+    btnPrimary.style.display = (state === 'listening' || state === 'silencing') ? '' : 'none';
+    btnPause.style.display   = (state === 'speaking') ? '' : 'none';
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // Entry point : tap sur le micro
+  // ──────────────────────────────────────────────────────────────────
   window.toggleRecording = function() {
-    if (_isRecording) { stopRecording(); return; }
-    startRecording();
-  };
-
-  window.startRecording = function() {
-    if (!SR) {
-      // Pas de speech recognition → focus input texte
-      document.getElementById('input-text').focus();
-      alert("La saisie vocale n'est pas disponible sur ce navigateur. Tape ta question.");
+    if (_convActive) {
+      // Si le micro fait rien, c'est probablement un état bloqué — on ferme proprement
+      endConversation();
       return;
     }
-    _isRecording = true;
+    startConversation();
+  };
+
+  // Compatibility alias (legacy)
+  window.startRecording = function() { startConversation(); };
+  window.stopRecording = function() { finishListeningAndSend(); };
+  window.endConversation = function() { endConversationClean(); };
+  window.interruptSpeaking = function() {
+    if (_browserSynth) try { _browserSynth.cancel(); } catch(e){}
+    if (_currentAudio) try { _currentAudio.pause(); _currentAudio = null; } catch(e){}
+    // On relance l'écoute direct après interruption
+    if (_convActive) startListeningCycle();
+  };
+
+  function startConversation() {
+    if (!SR) {
+      alert("La saisie vocale n'est pas disponible sur ce navigateur. Tape ta question.");
+      document.getElementById('input-text').focus();
+      return;
+    }
+    _convActive = true;
     document.getElementById('input-mic').classList.add('recording');
     document.getElementById('rec-overlay').classList.add('show');
-    document.getElementById('rec-transcript').textContent = 'Parle maintenant';
+    setConvState('listening', 'Parle, je t\'écoute', '');
+    startListeningCycle();
+  }
 
-    _recognition = new SR();
+  function endConversationClean() {
+    _convActive = false;
+    clearSilenceTimer();
+    if (_recognition) {
+      try { _recognition.onresult = null; _recognition.onend = null; _recognition.onerror = null; } catch(e){}
+      try { _recognition.abort(); } catch(e){}
+      try { _recognition.stop(); } catch(e){}
+      _recognition = null;
+    }
+    if (_browserSynth) try { _browserSynth.cancel(); } catch(e){}
+    if (_currentAudio) try { _currentAudio.pause(); _currentAudio = null; } catch(e){}
+    document.getElementById('input-mic').classList.remove('recording');
+    document.getElementById('rec-overlay').classList.remove('show');
+    setConvState('idle', 'Parle, je t\'écoute', '');
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // Cycle d'écoute : crée une instance SpeechRecognition fraîche à chaque fois
+  // ──────────────────────────────────────────────────────────────────
+  function clearSilenceTimer() {
+    if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
+  }
+
+  function startListeningCycle() {
+    if (!_convActive) return;
+    // Cleanup ancienne instance
+    if (_recognition) {
+      try { _recognition.onresult = null; _recognition.onend = null; _recognition.onerror = null; } catch(e){}
+      try { _recognition.abort(); } catch(e){}
+      _recognition = null;
+    }
+    clearSilenceTimer();
+    _finalTranscript = '';
+    _interimTranscript = '';
+    setConvState('listening', 'Parle, je t\'écoute', '');
+
+    try {
+      _recognition = new SR();
+    } catch(e) {
+      setConvState('error', 'Impossible de lancer le micro', '');
+      setTimeout(endConversationClean, 1500);
+      return;
+    }
+
     _recognition.lang = 'fr-FR';
     _recognition.continuous = false;
     _recognition.interimResults = true;
     _recognition.maxAlternatives = 1;
 
-    var finalTranscript = '';
-
     _recognition.onresult = function(event) {
-      var interim = '';
+      if (!_convActive) return;
+      _interimTranscript = '';
       for (var i = event.resultIndex; i < event.results.length; i++) {
         var res = event.results[i];
-        if (res.isFinal) finalTranscript += res[0].transcript;
-        else interim += res[0].transcript;
+        if (res.isFinal) _finalTranscript += res[0].transcript;
+        else _interimTranscript += res[0].transcript;
       }
-      var display = finalTranscript || interim;
-      if (display) document.getElementById('rec-transcript').textContent = '"' + display + '"';
+      var display = (_finalTranscript + ' ' + _interimTranscript).trim();
+      if (display) {
+        document.getElementById('rec-transcript').textContent = '« ' + display + ' »';
+      }
+      // Reset le timer de silence à chaque nouveau mot
+      restartSilenceTimer();
     };
 
     _recognition.onerror = function(event) {
       console.warn('[lea] speech error:', event.error);
-      document.getElementById('rec-transcript').textContent = '⚠️ ' + (event.error === 'no-speech' ? 'Aucune voix détectée' : 'Erreur micro');
-      setTimeout(stopRecording, 1500);
+      if (!_convActive) return;
+      if (event.error === 'no-speech' || event.error === 'aborted') {
+        // Pas grave — on continue à écouter en redémarrant
+        setTimeout(function(){ if (_convActive) startListeningCycle(); }, 200);
+        return;
+      }
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setConvState('error', 'Micro refusé', 'Autorise le micro dans les réglages de ton navigateur');
+        setTimeout(endConversationClean, 3000);
+        return;
+      }
+      // Autre erreur → on retente une fois
+      setConvState('error', 'Petit souci micro, je réessaie…', '');
+      setTimeout(function(){ if (_convActive) startListeningCycle(); }, 500);
     };
 
     _recognition.onend = function() {
-      if (!_isRecording) return; // stop manuel déjà géré
-      _isRecording = false;
-      document.getElementById('input-mic').classList.remove('recording');
-      document.getElementById('rec-overlay').classList.remove('show');
-      if (finalTranscript.trim()) {
-        // Envoyer la transcription via vocal-ai (qui retourne texte + audio pour Léa)
-        processVocalQuestion(finalTranscript.trim());
+      // onend peut arriver avant le silence timer (iOS arrête seul)
+      // Si user a parlé → envoyer
+      // Si rien → redémarrer si la conv est encore active
+      if (!_convActive) return;
+      clearSilenceTimer();
+      var q = _finalTranscript.trim();
+      if (q.length > 0) {
+        processVoiceQuestion(q);
+      } else if (_interimTranscript.trim().length > 0) {
+        processVoiceQuestion(_interimTranscript.trim());
+      } else {
+        // Rien capté → redémarrer
+        setTimeout(function(){ if (_convActive && _convState === 'listening') startListeningCycle(); }, 200);
       }
     };
 
-    try { _recognition.start(); }
-    catch(e) { console.warn(e); stopRecording(); }
-  };
+    try {
+      _recognition.start();
+    } catch(e) {
+      // Parfois iOS lance InvalidStateError si instance déjà active — retry après cleanup
+      console.warn('[lea] start error:', e);
+      setTimeout(function(){ if (_convActive) startListeningCycle(); }, 300);
+    }
+  }
 
-  window.stopRecording = function() {
-    _isRecording = false;
-    document.getElementById('input-mic').classList.remove('recording');
-    document.getElementById('rec-overlay').classList.remove('show');
-    if (_recognition) try { _recognition.stop(); } catch(e) {}
-  };
+  // 2.5s de silence après le dernier mot détecté → on cut et on envoie
+  function restartSilenceTimer() {
+    clearSilenceTimer();
+    _silenceTimer = setTimeout(function() {
+      if (_convState !== 'listening') return;
+      setConvState('silencing', 'Fin de question…', '« ' + (_finalTranscript || _interimTranscript) + ' »');
+      finishListeningAndSend();
+    }, 2500);
+  }
 
-  // ── Process question vocale ──
-  // Stratégie : on envoie via /api/agent-chat (avec flag mobile) pour bénéficier des tools
-  // d'écriture (ajouter_ca, etc.), puis on lit la réponse à voix haute via vocal-ai (TTS seulement).
-  async function processVocalQuestion(question) {
-    if (_isSending) return;
-    _isSending = true;
+  function finishListeningAndSend() {
+    clearSilenceTimer();
+    var q = (_finalTranscript || _interimTranscript).trim();
+    if (_recognition) {
+      try { _recognition.stop(); } catch(e){}
+    }
+    if (q.length === 0) {
+      // Rien à envoyer, redémarrer
+      if (_convActive) setTimeout(startListeningCycle, 200);
+      return;
+    }
+    processVoiceQuestion(q);
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // Traitement d'une question vocale
+  // ──────────────────────────────────────────────────────────────────
+  async function processVoiceQuestion(question) {
+    if (!_convActive) return;
+    setConvState('thinking', 'Je réfléchis…', '« ' + question + ' »');
 
     // Masquer empty state
     var empty = document.getElementById('empty-state');
     if (empty) empty.style.display = 'none';
 
+    // Ajouter la question user dans le chat (pour trace après fermeture overlay)
     appendMessage('user', question);
-    scrollToBottom();
-
-    var thinkingId = appendThinking();
     scrollToBottom();
 
     try {
@@ -843,58 +1081,92 @@ window.doLogout = async function() {
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
         body: JSON.stringify({ message: question, mobile: true }),
       });
-      removeThinking(thinkingId);
       var data = await r.json();
 
       if (!r.ok) {
+        setConvState('error', 'Erreur : ' + (data.error || 'inconnu'), '');
         appendMessage('assistant', '⚠️ ' + (data.error || 'Erreur inconnue'));
-        _isSending = false;
-        scrollToBottom();
+        setTimeout(function(){ if (_convActive) startListeningCycle(); }, 2000);
         return;
       }
 
       var answerText = data.response || 'Pas de réponse';
-      // On garde le rowElement pour pouvoir y attacher le bouton 🔊 ensuite
       var leaRow = appendMessage('assistant', answerText, data.toolsUsed, data.toolTraces);
       scrollToBottom();
 
-      // ── Lecture audio via vocal-ai TTS ──
-      // On appelle vocal-ai avec une flag "tts_only" pour ne pas regénérer la réponse mais juste l'audio.
-      // Stratégie double : (1) tente autoplay, (2) si bloqué, bouton 🔊 Écouter qui pulse dans la bulle.
-      try {
-        var tokenTts = await window._auth.currentUser.getIdToken();
-        var rTts = await fetch('/api/vocal-ai', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tokenTts },
-          body: JSON.stringify({
-            question: question,
-            metrics: {},
-            prenom: '',
-            tts_only: true,
-            text_to_speak: answerText,
-          }),
-        });
-        var dataTts = await rTts.json();
-        if (dataTts.audioUrl) {
-          // Tentative autoplay
-          var ok = await playAudio(dataTts.audioUrl, function onEnded() {
-            // Callback quand l'audio se termine : rien à faire (le bouton d'écoute sera déjà posé)
-          });
-          // Toujours attacher le bouton 🔊 :
-          // - Si autoplay a marché : bouton discret pour ré-écouter
-          // - Si autoplay bloqué : bouton qui pulse pour attirer l'œil
-          attachAudioButton(leaRow, dataTts.audioUrl, !ok);
-        }
-      } catch(e) { console.warn('[lea] tts failed:', e); }
+      // ── Lecture via voix NAVIGATEUR (auto-play iOS OK) ──
+      setConvState('speaking', 'Léa te répond', answerText);
+      speakWithBrowserVoice(answerText, function onEndSpeak() {
+        if (!_convActive) return;
+        // Après que Léa a fini de parler → relancer l'écoute pour conversation continue
+        setTimeout(function(){ if (_convActive) startListeningCycle(); }, 300);
+      });
+
+      // ── En parallèle : générer TTS Nova OpenAI pour le bouton 🔊 de réécoute ──
+      generateNovaAudioInBackground(question, answerText, leaRow);
 
     } catch(e) {
-      removeThinking(thinkingId);
-      console.error('[lea] vocal process error:', e);
+      console.error('[lea] voice question error:', e);
+      setConvState('error', 'Erreur réseau', '');
       appendMessage('assistant', '⚠️ Erreur réseau.');
-    } finally {
-      _isSending = false;
-      scrollToBottom();
+      setTimeout(function(){ if (_convActive) startListeningCycle(); }, 2000);
     }
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // Voix navigateur (speechSynthesis) — auto-play iOS compatible
+  // ──────────────────────────────────────────────────────────────────
+  function speakWithBrowserVoice(text, onEnd) {
+    if (!_browserSynth) {
+      if (onEnd) onEnd();
+      return;
+    }
+    try { _browserSynth.cancel(); } catch(e){}
+
+    // Nettoyer le markdown avant de parler
+    var clean = text.replace(/\*\*([^*]+)\*\*/g, '$1')
+                    .replace(/\*([^*]+)\*/g, '$1')
+                    .replace(/`([^`]+)`/g, '$1')
+                    .replace(/[#\[\]\(\)]/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+
+    var utt = new SpeechSynthesisUtterance(clean);
+    utt.lang = 'fr-FR';
+    utt.rate = 1.0;
+    utt.pitch = 1.05;
+    utt.volume = 1.0;
+    if (_browserVoice) utt.voice = _browserVoice;
+    utt.onend = function() { if (onEnd) onEnd(); };
+    utt.onerror = function() { if (onEnd) onEnd(); };
+    try {
+      _browserSynth.speak(utt);
+    } catch(e) {
+      console.warn('[lea] synth error:', e);
+      if (onEnd) onEnd();
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+  // TTS Nova OpenAI en arrière-plan (pour bouton 🔊 de réécoute)
+  // ──────────────────────────────────────────────────────────────────
+  async function generateNovaAudioInBackground(question, answerText, leaRow) {
+    try {
+      var token = await window._auth.currentUser.getIdToken();
+      var r = await fetch('/api/vocal-ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({
+          question: question, metrics: {}, prenom: '',
+          tts_only: true, text_to_speak: answerText,
+        }),
+      });
+      var data = await r.json();
+      if (data.audioUrl && leaRow) {
+        // Attacher le bouton 🔊 pour réécouter avec Nova (belle voix)
+        attachAudioButton(leaRow, data.audioUrl, false);
+      }
+    } catch(e) { console.warn('[lea] Nova TTS background failed:', e); }
   }
 
   // Lit un audio (data URL base64 ou URL classique).
