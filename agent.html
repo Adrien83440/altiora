@@ -779,8 +779,19 @@
       'lire_rh': 'RH',
       'lire_fidelisation': 'fidélisation',
       'lire_marges': 'marges',
+      'enregistrer_fait_business': 'mémorisation',
+      'enregistrer_preference': 'préférence',
     };
-    var tools = toolsUsed.split(',').filter(Boolean);
+    // Compatibilité : array (nouveau format) OU string CSV (ancien format)
+    var tools;
+    if (Array.isArray(toolsUsed)) {
+      tools = toolsUsed.filter(Boolean);
+    } else if (typeof toolsUsed === 'string') {
+      tools = toolsUsed.split(',').filter(Boolean);
+    } else {
+      return '';
+    }
+    if (!tools.length) return '';
     var unique = [];
     tools.forEach(function(t){ if (unique.indexOf(t) === -1) unique.push(t); });
     var mapped = unique.map(function(t){ return labels[t] || t; });
@@ -887,7 +898,13 @@
         method: 'GET',
         headers: { 'Authorization': 'Bearer ' + token },
       });
-      var data = await r.json();
+      // Parsing résilient : si l'API timeout (504), elle renvoie du HTML → crash JSON.parse
+      var data;
+      try {
+        data = await r.json();
+      } catch (parseErr) {
+        throw new Error('Serveur indisponible (code ' + r.status + '). Réessaie dans quelques secondes.');
+      }
       if (!r.ok) throw new Error(data.error || 'Erreur chargement mémoire');
       renderMemory(data);
       memoryLoaded = true;
@@ -1028,7 +1045,7 @@
   window.refreshSummary = async function() {
     var btn = document.getElementById('btn-refresh-summary');
     if (!btn || btn.disabled) return;
-    if (!confirm('Régénérer le résumé business maintenant ? Cela prend 20-30 secondes.')) return;
+    if (!confirm('Régénérer le résumé business maintenant ? Cela prend 20-40 secondes — Léa analyse tes 12 derniers mois de données.')) return;
     btn.disabled = true;
     btn.innerHTML = '<span>⏳</span> Régénération en cours…';
     try {
@@ -1041,7 +1058,13 @@
         },
         body: JSON.stringify({ action: 'refresh_summary' }),
       });
-      var data = await r.json();
+      // Parsing résilient (timeout/504 → HTML au lieu de JSON)
+      var data;
+      try {
+        data = await r.json();
+      } catch (parseErr) {
+        throw new Error('Serveur indisponible (code ' + r.status + ').');
+      }
       if (!r.ok) {
         if (data.code === 'RATE_LIMIT') {
           showError(data.error);
@@ -1052,9 +1075,46 @@
         btn.innerHTML = '<span>🔄</span> Régénérer';
         return;
       }
-      // Succès
-      memoryLoaded = false;
-      await loadMemory();
+      // Succès : 202 = queued (fire-and-forget), on poll toutes les 10s max 6x (1 min)
+      btn.innerHTML = '<span>⏳</span> Analyse par Léa… (~40s)';
+      var attempts = 0;
+      var initialVersion = 0;
+      // Récupérer la version actuelle pour savoir quand le refresh est terminé
+      try {
+        var tk2 = await window._auth.currentUser.getIdToken();
+        var r0 = await fetch('/api/agent-memory', { headers: { 'Authorization': 'Bearer ' + tk2 } });
+        var d0 = await r0.json();
+        initialVersion = (d0.summary && d0.summary.version) || 0;
+      } catch (e) { /* ignorer */ }
+
+      var poll = async function() {
+        attempts++;
+        try {
+          var tk = await window._auth.currentUser.getIdToken();
+          var res = await fetch('/api/agent-memory', { headers: { 'Authorization': 'Bearer ' + tk } });
+          if (res.ok) {
+            var d = await res.json();
+            var currentVersion = (d.summary && d.summary.version) || 0;
+            if (currentVersion > initialVersion) {
+              // Refresh terminé !
+              memoryLoaded = false;
+              renderMemory(d);
+              memoryLoaded = true;
+              return;
+            }
+          }
+        } catch (e) { /* continuer le polling */ }
+
+        if (attempts < 12) { // 12 x 10s = 2 min max
+          setTimeout(poll, 10000);
+        } else {
+          // Timeout polling : on arrête, on affiche un message
+          btn.disabled = false;
+          btn.innerHTML = '<span>🔄</span> Régénérer';
+          showError('La régénération prend plus de temps que prévu. Ferme et réouvre le panneau dans 1-2 minutes.');
+        }
+      };
+      setTimeout(poll, 15000); // 1er poll après 15s
     } catch(e) {
       console.error('[memory] refresh:', e);
       showError('Erreur : ' + e.message);
