@@ -85,6 +85,21 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
 .empty{text-align:center;padding:36px 20px;color:var(--muted);font-size:14px;}
 .empty-ico{font-size:36px;margin-bottom:12px;display:block;}
 
+/* Générateur IA */
+.ai-box{background:linear-gradient(135deg,#ede9fe 0%,#fce7f3 100%);border:1px solid #c4b5fd;border-radius:var(--rlg);padding:22px 24px;margin-bottom:22px;position:relative;overflow:hidden;}
+.ai-box::before{content:'';position:absolute;top:-30px;right:-30px;width:120px;height:120px;background:radial-gradient(circle,rgba(168,85,247,0.15),transparent 70%);pointer-events:none;}
+.ai-box-head{display:flex;align-items:center;gap:10px;margin-bottom:12px;position:relative;}
+.ai-box-title{font-size:15px;font-weight:700;color:#6d28d9;}
+.ai-box-sub{font-size:12.5px;color:#7c3aed;opacity:0.85;margin-bottom:14px;line-height:1.5;position:relative;}
+.ai-box textarea{width:100%;padding:12px 14px;border:1px solid #c4b5fd;border-radius:12px;font-family:inherit;font-size:14px;background:white;color:var(--text);resize:vertical;min-height:78px;line-height:1.55;transition:border-color .2s;}
+.ai-box textarea:focus{outline:none;border-color:#7c3aed;box-shadow:0 0 0 3px rgba(124,58,237,0.15);}
+.ai-box-actions{display:flex;gap:10px;margin-top:12px;align-items:center;flex-wrap:wrap;}
+.btn-ai{background:linear-gradient(135deg,#7c3aed,#ec4899);color:white;border:none;font-family:inherit;font-size:14px;font-weight:700;padding:11px 22px;border-radius:22px;cursor:pointer;transition:all .2s;display:inline-flex;align-items:center;gap:8px;box-shadow:0 2px 8px rgba(124,58,237,0.25);}
+.btn-ai:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(124,58,237,0.35);}
+.btn-ai:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
+.ai-hint{font-size:11.5px;color:#7c3aed;opacity:0.7;}
+.ai-version-input{padding:8px 12px;border:1px solid #c4b5fd;border-radius:10px;font-family:inherit;font-size:13px;width:130px;background:white;}
+
 .toast{position:fixed;top:22px;right:22px;padding:14px 20px;border-radius:14px;color:white;font-size:14px;font-weight:500;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:10001;transform:translateY(-20px);opacity:0;transition:all .25s;}
 .toast.show{transform:translateY(0);opacity:1;}
 .toast.success{background:var(--green);}
@@ -124,6 +139,25 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
   <section class="section">
     <div class="section-h">
       <div class="section-t" id="formTitle">Créer une nouveauté</div>
+    </div>
+
+    <!-- ✨ Générateur IA -->
+    <div class="ai-box" id="aiBox">
+      <div class="ai-box-head">
+        <span style="font-size:20px;">✨</span>
+        <div class="ai-box-title">Générer avec l'IA</div>
+      </div>
+      <div class="ai-box-sub">
+        Décris en 1-2 phrases ce que tu as fait. L'IA rédige automatiquement le titre, l'emoji, la catégorie, le résumé et la description longue dans le style Alteore.
+      </div>
+      <textarea id="ai-description" placeholder="Ex: j'ai ajouté la possibilité pour Léa de modifier les charges fixes et variables, et de créer des emprunts. Elle peut aussi voir le planning RH sur 4 semaines maintenant."></textarea>
+      <div class="ai-box-actions">
+        <input type="text" class="ai-version-input" id="ai-version" placeholder="Wave 5 (optionnel)" maxlength="40"/>
+        <button class="btn-ai" id="btnGenerate">
+          <span id="btnGenerateText">✨ Générer</span>
+        </button>
+        <span class="ai-hint" id="aiHint">~3s via Claude Haiku</span>
+      </div>
     </div>
 
     <div class="form-grid">
@@ -311,6 +345,73 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
 
   document.getElementById('btnCancel').addEventListener('click', resetForm);
 
+  // ── ✨ Générateur IA ──
+  document.getElementById('btnGenerate').addEventListener('click', async function () {
+    const description = document.getElementById('ai-description').value.trim();
+    const version = document.getElementById('ai-version').value.trim();
+    if (!description) {
+      toast('Décris d\'abord ce que tu as fait.', 'error');
+      document.getElementById('ai-description').focus();
+      return;
+    }
+    if (description.length < 15) {
+      toast('La description est trop courte (min 15 caractères).', 'error');
+      return;
+    }
+
+    const btn = document.getElementById('btnGenerate');
+    const btnText = document.getElementById('btnGenerateText');
+    const hint = document.getElementById('aiHint');
+    btn.disabled = true;
+    btnText.textContent = '⏳ Génération…';
+    hint.textContent = 'Rédaction en cours, patience…';
+
+    try {
+      // Récupérer le token Firebase
+      const user = auth.currentUser;
+      if (!user) throw new Error('Non authentifié');
+      const token = await user.getIdToken();
+
+      const r = await fetch('/api/generate-update-content', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + token,
+        },
+        body: JSON.stringify({ description, version }),
+      });
+      const data = await r.json();
+
+      if (!r.ok) {
+        throw new Error(data.error || 'Erreur serveur');
+      }
+
+      // Auto-remplissage des champs
+      document.getElementById('f-title').value = data.title || '';
+      document.getElementById('f-emoji').value = data.emoji || '🎉';
+      document.getElementById('f-badge').value = data.badge || 'New';
+      document.getElementById('f-short').value = data.short || '';
+      document.getElementById('f-long').value = data.long_html || '';
+      if (version) document.getElementById('f-version').value = version;
+
+      // Maj compteur caractères
+      document.getElementById('shortCount').textContent = (data.short || '').length;
+
+      // Scroll doux vers les champs remplis
+      document.getElementById('f-title').scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      toast('✨ Contenu généré ! Vérifie et ajuste si besoin avant de créer.', 'success');
+      hint.innerHTML = '<span style="color:#059669;font-weight:600;">✓ Généré — tu peux régénérer si besoin</span>';
+    } catch (e) {
+      console.error('[ai-gen]', e);
+      toast('Erreur IA : ' + e.message, 'error');
+      hint.textContent = '~3s via Claude Haiku';
+    } finally {
+      btn.disabled = false;
+      btnText.textContent = '✨ Régénérer';
+    }
+  });
+
   function resetForm() {
     editingId = null;
     document.getElementById('formTitle').textContent = 'Créer une nouveauté';
@@ -326,6 +427,11 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
     document.getElementById('f-long').value = '';
     document.getElementById('f-published').checked = true;
     document.getElementById('shortCount').textContent = '0';
+    // Reset IA
+    document.getElementById('ai-description').value = '';
+    document.getElementById('ai-version').value = '';
+    document.getElementById('btnGenerateText').textContent = '✨ Générer';
+    document.getElementById('aiHint').textContent = '~3s via Claude Haiku';
   }
 
   // ── Liste ──
