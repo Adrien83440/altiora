@@ -27,6 +27,14 @@
   const CAN_SCENARIOS    = ['max', 'master', 'trial', 'dev'];
   const CAN_PREVISIONS   = ['master', 'trial', 'dev'];
 
+  // ── AGENT LÉA (Wave 1+) ──
+  // Pages qui nécessitent soit le trial, soit l'addon Léa (agentEnabled),
+  // soit le mode dégradé (agentDegradedMode) pour l'accès en lecture.
+  const AGENT_PAGES = ['agent.html', 'agent-historique.html'];
+  // agent-upgrade.html est accessible à tous les plans payants (pro/max/master/trial/dev)
+  // pour permettre l'activation de l'addon.
+  const CAN_AGENT_UPGRADE = ['pro', 'max', 'master', 'trial', 'dev'];
+
   // Pages RH (contrôle d'accès + détection page active)
   const RH_PAGES = [
     'rh-dashboard.html', 'rh-employes.html', 'rh-planning.html', 'rh-conges.html',
@@ -602,6 +610,30 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
     if (RH_PAGES.includes(PAGE)        && !CAN_RH.includes(plan))           { showUpgradeModal('rh');           return false; }
     if (PAGE === 'scenarios.html'       && !CAN_SCENARIOS.includes(plan))     { showUpgradeModal('scenarios');    return false; }
     if (PAGE === 'previsions.html'     && !CAN_PREVISIONS.includes(plan))    { showUpgradeModal('previsions');   return false; }
+
+    // ── AGENT LÉA ──
+    // agent.html / agent-historique.html : nécessite trial OU agentEnabled OU agentDegradedMode
+    // Si le user n'a aucun de ces accès mais est sur un plan payant, on redirige vers agent-upgrade
+    if (AGENT_PAGES.includes(PAGE)) {
+      var hasTrial     = plan === 'trial' || plan === 'dev';
+      var hasAddon     = window._agentEnabled === true;
+      var hasDegraded  = window._agentDegradedMode === true;
+      if (!hasTrial && !hasAddon && !hasDegraded) {
+        if (CAN_AGENT_UPGRADE.includes(plan)) {
+          location.href = 'agent-upgrade.html';
+        } else {
+          location.href = 'profil.html?tab=abonnement&upgrade=core';
+        }
+        return false;
+      }
+    }
+
+    // agent-upgrade.html : nécessite un plan payant (pro/max/master/trial/dev)
+    if (PAGE === 'agent-upgrade.html' && !CAN_AGENT_UPGRADE.includes(plan)) {
+      location.href = 'profil.html?tab=abonnement&upgrade=core';
+      return false;
+    }
+
     const corePages = ['dashboard.html','pilotage.html','marges.html','cout-revient.html','panier-moyen.html','dettes.html','suivi-ca.html','cashflow.html','banque.html','bank-validation.html'];
     if (corePages.includes(PAGE) && !CAN_CORE.includes(plan)) { showUpgradeModal('core'); return false; }
     return true;
@@ -686,6 +718,22 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
         if (av) av.textContent = n[0]?.toUpperCase() || 'A';
         if (un) un.textContent = n;
       }
+
+      // ── AGENT LÉA (Wave 1+) : exposer les flags sur window ──
+      // agentEnabled : true si l'addon Léa est actif (plan payant + subscription_item Léa)
+      // agentDegradedMode : true si post-trial sans addon (accès lecture seule aux briefings hebdo)
+      // Disponibles aussi pendant le trial (plan==='trial' → tous les droits sans flag)
+      if (snap.exists()) {
+        const ud = snap.data();
+        window._agentEnabled      = ud.agentEnabled === true;
+        window._agentDegradedMode = ud.agentDegradedMode === true;
+        window._agentAddonStatus  = ud.agentAddonStatus || null;
+      } else {
+        window._agentEnabled      = false;
+        window._agentDegradedMode = false;
+        window._agentAddonStatus  = null;
+      }
+
       if (!checkPageAccess(plan)) { applyNavPlan(plan); return; }
       applyNavPlan(plan);
       handleProfilParams();
