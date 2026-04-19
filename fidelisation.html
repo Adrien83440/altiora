@@ -2428,6 +2428,27 @@ function copBuildSnapshot(){
 }
 
 // ─── Envoi d'un message ───
+
+// Attend que Firebase Auth soit prêt (max 5s) et retourne le user ou null
+function copWaitAuth(){
+  return new Promise(resolve => {
+    // Cas 1 : déjà prêt
+    const existing = window._auth?.currentUser;
+    if(existing) return resolve(existing);
+    // Cas 2 : Firebase pas encore chargé (module async) — poll court
+    let attempts = 0;
+    const tick = setInterval(() => {
+      attempts++;
+      const u = window._auth?.currentUser;
+      if(u){ clearInterval(tick); return resolve(u); }
+      if(attempts >= 50){ // 50 × 100ms = 5s
+        clearInterval(tick);
+        return resolve(null);
+      }
+    }, 100);
+  });
+}
+
 async function copSendMessage(userText){
   if(_copState.busy) return;
   if(!userText || !userText.trim()) return;
@@ -2441,8 +2462,14 @@ async function copSendMessage(userText){
   copShowTyping();
 
   try{
-    const user = window._auth?.currentUser;
-    if(!user){ copHideTyping(); copRenderError('Tu n\u2019es pas connecté.'); copSetBusy(false); return; }
+    // Attendre que Firebase Auth soit prêt (certains clics rapides arrivent avant le chargement)
+    const user = await copWaitAuth();
+    if(!user){
+      copHideTyping();
+      copRenderError('Firebase n\u2019a pas fini de se connecter. Recharge la page si ça persiste.');
+      copSetBusy(false);
+      return;
+    }
     const idToken = await user.getIdToken();
 
     // Historique (excluant le dernier = le message qu'on envoie)
