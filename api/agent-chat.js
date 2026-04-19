@@ -309,12 +309,13 @@ async function saveMessage(uid, role, textContent, metadata) {
 const TOOLS = [
   {
     name: 'lire_pilotage',
-    description: "Lit les données financières mensuelles de l'entreprise : CA HT par taux de TVA, charges fixes, charges variables, crédits, leasing. Utiliser pour tout ce qui touche CA, charges, marge, résultat pour un mois/année donné.",
+    description: "Lit les données financières mensuelles de l'entreprise : CA HT par taux de TVA, charges fixes, charges variables, crédits, leasing. Utiliser pour tout ce qui touche CA, charges, marge, résultat pour un mois/année donné. Passer detail_jours:true pour avoir le détail jour par jour du CA (recommandé quand l'utilisateur demande le CA d'une date précise, le CA d'aujourd'hui, le détail quotidien, etc.).",
     input_schema: {
       type: 'object',
       properties: {
         year:  { type: 'integer', description: "Année (ex: 2026)" },
         month: { type: 'integer', description: "Mois 1-12, ou 0 pour tous les mois de l'année" },
+        detail_jours: { type: 'boolean', description: "Si true, retourne aussi le tableau jour par jour du CA avec montants par TVA. Défaut false (juste les totaux mensuels). À activer pour : 'CA du X avril', 'CA aujourd'hui', 'détail par jour', 'quel jour j'ai vendu le plus', etc." },
       },
       required: ['year', 'month'],
     },
@@ -778,6 +779,7 @@ function sumCredits(arr) {
 
 async function tool_lire_pilotage(uid, input) {
   const { year, month } = input;
+  const detailJours = input.detail_jours === true;
   if (!year) return { error: "L'année est requise" };
 
   // Mois spécifique
@@ -792,13 +794,46 @@ async function tool_lire_pilotage(uid, input) {
     const cr = sumCredits(data.credits);
     const ls = sumCharges(data.leasing);
     const resultat_estime = Math.round((ca.total - cf - cv - cr.total - ls) * 100) / 100;
-    return {
+
+    const result = {
       periode: key, trouve: true,
       ca_ht: ca.total, ca_par_tva: ca.par_tva,
       charges_fixes: cf, charges_variables: cv,
       credits: cr, leasing: ls,
       resultat_estime,
     };
+
+    // Détail jour par jour si demandé (Wave 4 — fix demande CA aujourd'hui / par jour)
+    if (detailJours && Array.isArray(data.ca)) {
+      const jours = [];
+      for (const row of data.ca) {
+        if (!row || !row.date) continue;
+        const h055 = parseFloat(row.ht055) || 0;
+        const h10  = parseFloat(row.ht10) || 0;
+        const h20  = parseFloat(row.ht20) || 0;
+        const h21  = parseFloat(row.ht21) || 0;
+        const h85  = parseFloat(row.ht85) || 0;
+        const multi = h055 + h10 + h20 + h21 + h85;
+        const hSingle = parseFloat(row.montantHT) || 0;
+        const totalJour = multi > 0 ? multi : hSingle;
+        // N'inclure que les jours avec du CA pour alléger la réponse
+        if (totalJour > 0) {
+          jours.push({
+            date: row.date,
+            total_ht: Math.round(totalJour * 100) / 100,
+            ht055: h055 || null,
+            ht10: h10 || null,
+            ht20: h20 || null,
+            ht21: h21 || null,
+            ht85: h85 || null,
+          });
+        }
+      }
+      result.detail_jours = jours;
+      result.nombre_jours_avec_ca = jours.length;
+    }
+
+    return result;
   }
 
   // Toute l'année
