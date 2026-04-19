@@ -336,13 +336,30 @@ try { (function () {
     } catch(e) { cb({}); }
   }
   function saveField(k, v) {
-    try { var d = {}; d[k] = v;
-      _sd()(_dc()(window._db, 'tuto_progress', window._uid), d, { merge: true }).catch(function () {});
-    } catch(e) {}
+    try {
+      var d = {}; d[k] = v;
+      return _sd()(_dc()(window._db, 'tuto_progress', window._uid), d, { merge: true })
+        .catch(function (err) {
+          console.warn('[onboarding] saveField failed (' + k + '):', err && err.message);
+        });
+    } catch(e) {
+      console.warn('[onboarding] saveField exception:', e);
+    }
   }
   waitReady(function () {
+    // Court-circuit : si localStorage dit "désactivé", on s'arrête immédiatement
+    // (cas où Firestore a raté ou n'est pas encore sync → évite que les tutos reviennent)
+    try {
+      if (localStorage.getItem('alteoreTutoDisabled') === '1') return;
+    } catch(e) {}
     loadProgress(function (progress) {
       if (progress.tutoDisabled) return;
+      // Aussi localStorage pour checklistDismissed
+      try {
+        if (localStorage.getItem('alteoreTutoChecklistDismissed') === '1') {
+          progress.checklistDismissed = true;
+        }
+      } catch(e) {}
       try { if (PAGE === 'dashboard.html') injectChecklist(progress); } catch(e) {}
       try { if (TOURS[PAGE]) maybeTour(progress); } catch(e) {}
     });
@@ -385,8 +402,18 @@ try { (function () {
       s.textContent='@keyframes obFadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}@media(max-width:768px){#onboarding-checklist{padding:0 10px!important}}';
       document.head.appendChild(s);}
   }
-  window._obDismiss=function(){saveField('checklistDismissed',true);};
-  window._obDisableAll=function(){saveField('tutoDisabled',true);var el=document.getElementById('onboarding-checklist');if(el)el.remove();try{close();}catch(e){}try{cleanup();}catch(e){}};
+  window._obDismiss=function(){
+    try{localStorage.setItem('alteoreTutoChecklistDismissed','1');}catch(e){}
+    saveField('checklistDismissed',true);
+  };
+  window._obDisableAll=function(){
+    // Filet de sécurité : localStorage écrit instantanément, Firestore en sync
+    try{localStorage.setItem('alteoreTutoDisabled','1');}catch(e){}
+    saveField('tutoDisabled',true);
+    var el=document.getElementById('onboarding-checklist');if(el)el.remove();
+    try{close();}catch(e){}
+    try{cleanup();}catch(e){}
+  };
   function maybeTour(p){var t=TOURS[PAGE];if(!t||p[t.id])return;
     setTimeout(function(){try{startTour(t);}catch(e){cleanup();}},t.delay||2500);}
   var _ov,_tt,_ix,_cf;
