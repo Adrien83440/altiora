@@ -1393,25 +1393,59 @@ async function runConversation(uid, userDoc, userEmail, userMessage, history, me
     // Ajouter la réponse assistant (avec tool_use) au contexte
     messages.push({ role: 'assistant', content });
 
-    // Exécuter les tools en parallèle
-    const toolResults = await Promise.all(
-      toolUses.map(async tu => {
+    // ═══════════════════════════════════════════════════════════════════
+    // Exécution des tools : SEQUENTIEL pour écriture, PARALLELE pour lecture
+    // ═══════════════════════════════════════════════════════════════════
+    // Les tools d'écriture (ajouter_ca, ajouter_charge, etc.) doivent s'exécuter
+    // en séquence : si Léa appelle 2x ajouter_ca dans la même réponse (ex: "ajoute
+    // 500 en TVA 5.5 ET 1500 en TVA 10"), le 2e appel doit voir le résultat du 1er
+    // pour ne pas écraser l'écriture. En parallèle, ils liraient tous les deux
+    // le même état initial → race condition → last write wins.
+    //
+    // Les tools de lecture restent en parallèle (pas d'effet de bord).
+    const WRITE_TOOLS = ['ajouter_ca', 'ajouter_charge', 'ajouter_note',
+                         'enregistrer_fait_business', 'enregistrer_preference'];
+    const hasWriteTool = toolUses.some(tu => WRITE_TOOLS.includes(tu.name));
+
+    let toolResults;
+    if (hasWriteTool) {
+      // Exécution séquentielle stricte pour préserver la cohérence
+      toolResults = [];
+      for (const tu of toolUses) {
         toolsUsed.push(tu.name);
         const result = await executeTool(tu.name, tu.input, uid);
-        // Debug trace : capturer ce qui s'est réellement passé pour diagnostic
         toolTraces.push({
           name: tu.name,
           input: tu.input,
           result_preview: JSON.stringify(result).slice(0, 400),
           success: result && !result.error,
         });
-        return {
+        toolResults.push({
           type: 'tool_result',
           tool_use_id: tu.id,
           content: JSON.stringify(result),
-        };
-      })
-    );
+        });
+      }
+    } else {
+      // Lecture pure : parallèle pour la perf
+      toolResults = await Promise.all(
+        toolUses.map(async tu => {
+          toolsUsed.push(tu.name);
+          const result = await executeTool(tu.name, tu.input, uid);
+          toolTraces.push({
+            name: tu.name,
+            input: tu.input,
+            result_preview: JSON.stringify(result).slice(0, 400),
+            success: result && !result.error,
+          });
+          return {
+            type: 'tool_result',
+            tool_use_id: tu.id,
+            content: JSON.stringify(result),
+          };
+        })
+      );
+    }
 
     // Ajouter les résultats au contexte
     messages.push({ role: 'user', content: toolResults });
