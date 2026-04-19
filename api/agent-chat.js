@@ -902,30 +902,84 @@ async function tool_ajouter_ca(uid, input) {
   const monthKey = monthKeyFromDate(dateIso);
   const tvaField = normalizeTva(input.taux_tva);
 
-  // Lire le doc existant du mois
+  // Lire le doc existant du mois (ou construire un template par défaut si absent)
   const path = `pilotage/${uid}/months/${monthKey}`;
   const doc = await fsGet(path);
   const existing = doc ? docToObject(doc) : {};
-  const ca = Array.isArray(existing.ca) ? existing.ca : [];
 
-  // Nouvelle ligne CA (tous les champs ht* en string pour cohérence avec le format existant)
-  const newLine = {
-    date: dateIso,
-    ht055: '', ht10: '', ht20: '', ht21: '', ht85: '',
-    source: 'lea',
-    addedAt: new Date().toISOString(),
-  };
-  newLine[tvaField] = String(montantHt);
-  if (input.note && typeof input.note === 'string') {
-    newLine.note = input.note.slice(0, 200);
+  // ── Structure ca[] attendue par pilotage.html ──
+  // Le tableau ca contient UNE ENTRÉE PAR JOUR du mois (pré-générée).
+  // On NE PUSH PAS une nouvelle ligne — ça casserait la condition
+  // `s.ca.length === data.ca.length` dans pilotage.html (ligne 1306).
+  // On CHERCHE la ligne du jour par date et on REMPLIT le bon champ ht*.
+  //
+  // Format date : "D/M/YYYY" (ex: "25/4/2026", pas de padding zéro).
+
+  // Construire le tableau ca avec toutes les lignes du mois si absent
+  const parts = dateIso.split('/');
+  const dayOfMonth = parseInt(parts[0]);
+  const monthNum = parseInt(parts[1]);
+  const yearNum = parseInt(parts[2]);
+  const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
+
+  let ca;
+  if (Array.isArray(existing.ca) && existing.ca.length === daysInMonth) {
+    // Structure existante correcte → on la réutilise
+    ca = existing.ca.map(r => ({ ...r }));  // copie défensive
+  } else {
+    // Pas de doc ou mauvaise taille → on reconstruit la structure standard
+    ca = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      ca.push({
+        date: `${d}/${monthNum}/${yearNum}`,
+        ht055: '', ht10: '', ht20: '',
+      });
+    }
+    // Si existing.ca avait des données (ancienne structure), on les migre vers la nouvelle
+    if (Array.isArray(existing.ca)) {
+      for (const oldRow of existing.ca) {
+        if (!oldRow.date) continue;
+        const oldParts = String(oldRow.date).split('/');
+        const oldDay = parseInt(oldParts[0]);
+        if (oldDay >= 1 && oldDay <= daysInMonth) {
+          ca[oldDay - 1] = { ...ca[oldDay - 1], ...oldRow };
+        }
+      }
+    }
   }
 
-  ca.push(newLine);
+  // Trouver la ligne du jour (index = dayOfMonth - 1 si structure standard)
+  let targetIdx = dayOfMonth - 1;
+  // Vérifier que l'index correspond bien à la date attendue (sécurité)
+  if (!ca[targetIdx] || ca[targetIdx].date !== dateIso) {
+    // Fallback : recherche par date
+    targetIdx = ca.findIndex(r => r && r.date === dateIso);
+    if (targetIdx === -1) {
+      return { error: `Ligne du ${dateIso} introuvable dans le pilotage.`, success: false };
+    }
+  }
 
-  // Écrire en merge (garder chargesFixe, chargesVar, etc. intacts)
+  // Accumuler le montant si la case a déjà une valeur (permet plusieurs ventes/jour)
+  const existingVal = parseFloat(ca[targetIdx][tvaField]) || 0;
+  const newVal = existingVal + montantHt;
+  ca[targetIdx][tvaField] = String(newVal);
+
+  // Marquer la ligne comme touchée par Léa (pour traçabilité, n'affecte pas l'affichage)
+  if (!ca[targetIdx]._leaAdditions) ca[targetIdx]._leaAdditions = [];
+  ca[targetIdx]._leaAdditions.push({
+    montant: montantHt,
+    tva: tvaField,
+    addedAt: new Date().toISOString(),
+    note: (input.note || '').slice(0, 200),
+  });
+
+  // Écrire en merge
   await fsPatch(path, { ca });
 
   const tvaDisplay = tvaField === 'ht055' ? '5,5%' : tvaField === 'ht10' ? '10%' : tvaField === 'ht21' ? '2,1%' : tvaField === 'ht85' ? '8,5%' : '20%';
+  const accumuleMsg = existingVal > 0
+    ? ` (ajouté aux ${existingVal}€ déjà présents, total ${newVal}€)`
+    : '';
   return {
     success: true,
     ajouté: {
@@ -933,8 +987,9 @@ async function tool_ajouter_ca(uid, input) {
       tva: tvaDisplay,
       date: dateIso,
       mois: monthKey,
+      total_du_jour: newVal,
     },
-    message: `Ligne de CA de ${montantHt}€ HT (TVA ${tvaDisplay}) ajoutée au ${dateIso}. Visible immédiatement dans ton pilotage de ${monthKey}.`,
+    message: `${montantHt}€ HT en TVA ${tvaDisplay} ajoutés au ${dateIso}${accumuleMsg}. Visible immédiatement dans pilotage ${monthKey}.`,
   };
 }
 
@@ -970,14 +1025,11 @@ async function tool_ajouter_charge(uid, input) {
 
   const newLine = {
     fournisseur: (input.fournisseur || '').slice(0, 100),
-    type: (input.fournisseur || 'Charge ' + typeCharge).slice(0, 50),
+    type: '',  // catégorie libre, vide par défaut, l'user peut compléter dans pilotage
     montantHT: String(montantHt),
     tvaRate: tvaNum,
     deductible: 'Oui',
     pointe: 'Non',
-    date: dateIso,
-    source: 'lea',
-    addedAt: new Date().toISOString(),
   };
 
   current.push(newLine);
@@ -1151,6 +1203,16 @@ Tu as accès à **ajouter_ca**, **ajouter_charge** et **ajouter_note** pour modi
 2. Si un paramètre est flou (montant imprécis, date ambiguë, TVA non spécifiée et doute possible) → DEMANDE une clarification avant d'écrire
 3. Après écriture réussie, confirme en une phrase courte : "✅ J'ai ajouté 1 500 € en TVA 20% pour aujourd'hui." (plutôt que "le tool a été appelé avec succès")
 
+## ⚠️ HONNÊTETÉ SUR LE RÉSULTAT DES TOOLS (ABSOLUMENT CRITIQUE)
+
+Quand tu appelles un tool d'écriture, tu DOIS lire la valeur de retour :
+- Si le résultat contient \`success: true\` → tu peux confirmer l'ajout
+- Si le résultat contient \`error: "..."\` ou \`success: false\` → tu DOIS signaler clairement l'échec au dirigeant avec le message d'erreur. Jamais prétendre que ça a marché.
+
+**Exemple d'erreur** : si \`ajouter_ca\` renvoie \`{ error: "Montant invalide", success: false }\`, tu réponds : "⚠️ Je n'ai pas réussi à ajouter ce CA : montant invalide. Peux-tu me redonner le montant ?"
+
+**NE JAMAIS** dire "c'est noté" ou "c'est ajouté" sans avoir reçu \`success: true\` dans le tool_result. Si tu n'es pas sûre, réappelle le tool ou demande au dirigeant.
+
 **Valeurs par défaut raisonnables** :
 - Date non précisée → aujourd'hui
 - TVA non précisée pour un CA → 20% (le plus courant). Mais si le dirigeant est visiblement dans la restauration (résumé business), propose 10%.
@@ -1252,6 +1314,7 @@ async function runConversation(uid, userDoc, userEmail, userMessage, history, me
   let totalIn = 0, totalOut = 0;
   let finalText = '';
   const toolsUsed = [];
+  const toolTraces = [];
 
   while (iterations < MAX_TOOL_ITERATIONS) {
     iterations++;
@@ -1300,6 +1363,13 @@ async function runConversation(uid, userDoc, userEmail, userMessage, history, me
       toolUses.map(async tu => {
         toolsUsed.push(tu.name);
         const result = await executeTool(tu.name, tu.input, uid);
+        // Debug trace : capturer ce qui s'est réellement passé pour diagnostic
+        toolTraces.push({
+          name: tu.name,
+          input: tu.input,
+          result_preview: JSON.stringify(result).slice(0, 400),
+          success: result && !result.error,
+        });
         return {
           type: 'tool_result',
           tool_use_id: tu.id,
@@ -1316,6 +1386,7 @@ async function runConversation(uid, userDoc, userEmail, userMessage, history, me
     text: finalText,
     iterations,
     toolsUsed: [...new Set(toolsUsed)], // unique
+    toolTraces, // détail de chaque exécution pour debug
     tokens: { input: totalIn, output: totalOut },
     costCents: estimateCostCents(totalIn, totalOut),
   };
@@ -1409,6 +1480,7 @@ module.exports = async (req, res) => {
       success: true,
       response: result.text || "(Léa n'a pas su répondre, réessaie)",
       toolsUsed: result.toolsUsed,
+      toolTraces: (mobile === true) ? result.toolTraces : undefined,
       iterations: result.iterations,
       quota: {
         used: quota.used + 1,
