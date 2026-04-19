@@ -152,8 +152,15 @@ module.exports = async (req, res) => {
 
     // ── GET : lire toute la mémoire ──
     if (req.method === 'GET') {
+      // Parallélisation des 3 lectures (summary + facts + preferences)
+      // Auparavant séquentiel → risque de timeout 504 avec maxDuration 15s
+      const [summaryDoc, factsRes, prefsRes] = await Promise.all([
+        fsGet(`agent/${uid}/memory/business-summary`),
+        fsList(`agent/${uid}/memory-facts`, 100),
+        fsList(`agent/${uid}/memory-preferences`, 20),
+      ]);
+
       // Résumé business
-      const summaryDoc = await fsGet(`agent/${uid}/memory/business-summary`);
       const summary = summaryDoc ? {
         text: fv(summaryDoc, 'text') || '',
         generatedAt: fv(summaryDoc, 'generatedAt') || null,
@@ -162,7 +169,6 @@ module.exports = async (req, res) => {
       } : null;
 
       // Faits
-      const factsRes = await fsList(`agent/${uid}/memory-facts`, 100);
       const facts = (factsRes?.documents || [])
         .map(d => ({
           id: (d.name || '').split('/').pop(),
@@ -175,7 +181,6 @@ module.exports = async (req, res) => {
         .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
 
       // Préférences
-      const prefsRes = await fsList(`agent/${uid}/memory-preferences`, 20);
       const preferences = (prefsRes?.documents || [])
         .map(d => ({
           type: (d.name || '').split('/').pop(),
@@ -220,22 +225,28 @@ module.exports = async (req, res) => {
           }
         }
 
-        // Appel interne à l'API de régénération
+        // Déclencher la régénération en "fire-and-forget" : on n'attend PAS la réponse
+        // car agent-memory-refresh prend 20-40s et agent-memory timeout à 15s.
+        // L'UI informera l'utilisateur de revenir dans ~1 min pour voir le nouveau résumé.
         const appUrl = process.env.APP_URL || 'https://alteore.com';
         const internalSecret = process.env.CRON_SECRET || 'internal';
-        const resp = await fetch(`${appUrl}/api/agent-memory-refresh`, {
+
+        // On déclenche sans await → Node continue et répond 202 immédiatement.
+        // On ajoute un .catch() pour éviter les unhandled rejection dans les logs Vercel.
+        fetch(`${appUrl}/api/agent-memory-refresh`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${internalSecret}`,
           },
           body: JSON.stringify({ uid, trigger: 'manual' }),
+        }).catch(e => console.warn('[agent-memory] fire-and-forget refresh failed:', e.message));
+
+        return res.status(202).json({
+          success: true,
+          queued: true,
+          message: "Régénération lancée. Reviens dans ~1 minute pour voir le nouveau résumé.",
         });
-        const result = await resp.json();
-        if (!resp.ok) {
-          return res.status(500).json({ error: result.error || 'Erreur régénération', details: result });
-        }
-        return res.status(200).json({ success: true, ...result });
       }
 
       return res.status(400).json({ error: 'Action inconnue. Valeurs acceptées : delete_fact, delete_preference, refresh_summary' });
