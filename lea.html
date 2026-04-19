@@ -616,7 +616,7 @@ window.doLogout = async function() {
       if (!r.ok) {
         appendMessage('assistant', '⚠️ ' + (data.error || 'Erreur inconnue'));
       } else {
-        appendMessage('assistant', data.response || 'Pas de réponse', data.toolsUsed);
+        appendMessage('assistant', data.response || 'Pas de réponse', data.toolsUsed, data.toolTraces);
         // Vocal auto-play si présent (réponses vocales à une saisie texte → non, on ne lit pas)
       }
     } catch(e) {
@@ -631,7 +631,7 @@ window.doLogout = async function() {
   };
 
   // ── Append message ──
-  function appendMessage(role, content, toolsUsed) {
+  function appendMessage(role, content, toolsUsed, toolTraces) {
     var msgs = document.getElementById('msgs-zone');
     var row = document.createElement('div');
     row.className = 'msg-row ' + role;
@@ -656,6 +656,35 @@ window.doLogout = async function() {
         badge.textContent = label;
         bubble.appendChild(badge);
       }
+    }
+
+    // ── DEBUG : afficher les traces de tools (mobile uniquement, si présentes) ──
+    if (role === 'assistant' && toolTraces && Array.isArray(toolTraces) && toolTraces.length) {
+      var bubble = row.querySelector('.msg-bubble');
+      var dbg = document.createElement('details');
+      dbg.style.cssText = 'margin-top:10px;font-size:11px;background:rgba(0,0,0,0.25);border-radius:8px;padding:8px 10px;border:1px solid rgba(255,255,255,0.1)';
+      var summary = document.createElement('summary');
+      summary.style.cssText = 'cursor:pointer;color:rgba(255,255,255,0.7);font-weight:700';
+      summary.textContent = '🔍 Debug ' + toolTraces.length + ' tool' + (toolTraces.length > 1 ? 's' : '') + ' appelé' + (toolTraces.length > 1 ? 's' : '');
+      dbg.appendChild(summary);
+      toolTraces.forEach(function(t, i){
+        var item = document.createElement('div');
+        item.style.cssText = 'margin-top:8px;padding:8px;background:rgba(0,0,0,0.25);border-radius:6px;border-left:3px solid ' + (t.success ? '#10b981' : '#ef4444');
+        var head = document.createElement('div');
+        head.style.cssText = 'font-weight:700;color:' + (t.success ? '#6ee7b7' : '#fca5a5') + ';margin-bottom:4px';
+        head.textContent = (t.success ? '✓ ' : '✗ ') + t.name;
+        item.appendChild(head);
+        var inp = document.createElement('div');
+        inp.style.cssText = 'color:rgba(255,255,255,0.6);font-family:monospace;font-size:10px;word-break:break-all;margin-bottom:4px';
+        inp.textContent = 'input: ' + JSON.stringify(t.input);
+        item.appendChild(inp);
+        var out = document.createElement('div');
+        out.style.cssText = 'color:rgba(255,255,255,0.75);font-family:monospace;font-size:10px;word-break:break-all';
+        out.textContent = 'result: ' + (t.result_preview || '(vide)');
+        item.appendChild(out);
+        dbg.appendChild(item);
+      });
+      bubble.appendChild(dbg);
     }
   }
 
@@ -782,7 +811,7 @@ window.doLogout = async function() {
       }
 
       var answerText = data.response || 'Pas de réponse';
-      appendMessage('assistant', answerText, data.toolsUsed);
+      appendMessage('assistant', answerText, data.toolsUsed, data.toolTraces);
       scrollToBottom();
 
       // ── Lecture audio via vocal-ai TTS ──
