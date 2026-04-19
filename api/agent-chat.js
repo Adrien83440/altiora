@@ -391,6 +391,47 @@ const TOOLS = [
       required: ['preference'],
     },
   },
+  {
+    name: 'ajouter_ca',
+    description: "Ajoute une ligne de chiffre d'affaires dans le pilotage mensuel de l'entreprise. Utiliser quand l'utilisateur dicte une vente/un CA à l'oral ou à l'écrit (ex: 'ajoute 1500 euros de CA en TVA 20 aujourd'hui', 'j'ai fait 800€ en 10% ce matin'). Le CA sera visible immédiatement dans le module pilotage. Toujours CONFIRMER le montant, la TVA et le mois cible avant d'ajouter si le message est ambigu. Le montant doit être en HT.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        montant_ht: { type: 'number', description: "Montant HT en euros (positif). Ex: 1500 pour 1500€ HT." },
+        taux_tva: { type: 'string', description: "Taux de TVA : '20' (standard), '10' (restauration), '5.5' (alimentation), '2.1' (presse), '8.5' (outre-mer). Si non précisé, utiliser '20' par défaut." },
+        date: { type: 'string', description: "Date au format JJ/MM/AAAA. Si non précisée, utiliser la date du jour." },
+        note: { type: 'string', description: "Note/libellé optionnel pour cette ligne de CA (ex: 'vente boutique', 'facture client Dupont')." },
+      },
+      required: ['montant_ht'],
+    },
+  },
+  {
+    name: 'ajouter_charge',
+    description: "Ajoute une ligne de charge dans le pilotage mensuel (charges fixes ou variables). Utiliser quand l'utilisateur dicte une dépense (ex: 'ajoute 250 euros de charge pour le loyer', 'note 50€ de carburant'). Le montant doit être en HT.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        montant_ht: { type: 'number', description: "Montant HT en euros (positif)." },
+        type_charge: { type: 'string', description: "'fixe' (loyer, assurance, abonnement…) ou 'variable' (carburant, fournitures, matière première…). Si doute, 'variable'." },
+        fournisseur: { type: 'string', description: "Nom du fournisseur ou libellé de la charge (ex: 'EDF', 'Essence', 'Loyer')." },
+        taux_tva: { type: 'string', description: "Taux TVA : '20' (défaut), '10', '5.5', '2.1', '8.5'." },
+        date: { type: 'string', description: "Date JJ/MM/AAAA. Si non précisée, date du jour." },
+      },
+      required: ['montant_ht', 'type_charge'],
+    },
+  },
+  {
+    name: 'ajouter_note',
+    description: "Ajoute une note/rappel dans le carnet de bord Léa (pas dans le pilotage financier). Utiliser quand l'utilisateur veut noter une info qui n'est pas un chiffre (ex: 'note que j'ai rencontré un fournisseur intéressant', 'rappelle-moi d'appeler le banquier demain'). Différent d'enregistrer_fait_business qui est pour des faits permanents — ici c'est plutôt une note datée ponctuelle.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        contenu: { type: 'string', description: "Contenu de la note (max 500 caractères)." },
+        categorie: { type: 'string', description: "'rappel', 'reunion', 'idee', 'todo', 'autre'" },
+      },
+      required: ['contenu'],
+    },
+  },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -803,6 +844,182 @@ async function tool_enregistrer_preference(uid, input) {
   return { saved: true, type, preference };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// TOOLS D'ÉCRITURE (Wave 3.7 — app mobile Léa)
+// ═══════════════════════════════════════════════════════════════════════════
+// Ces tools permettent à Léa d'écrire dans le pilotage. Scope strict sur l'uid.
+// Chaque écriture est horodatée et marquée `source: 'lea'` pour traçabilité.
+//
+// Structure pilotage/{uid}/months/{YYYY-MM} :
+//   { ca: [{date, ht055, ht10, ht20, ...}], chargesFixe: [...], chargesVar: [...] }
+
+function parseDateFrToIso(dateStr) {
+  // '25/04/2026' → '25/4/2026' (format utilisé dans pilotage)
+  if (!dateStr) {
+    const d = new Date();
+    return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+  }
+  const parts = dateStr.split('/');
+  if (parts.length !== 3) return null;
+  const d = parseInt(parts[0]);
+  const m = parseInt(parts[1]);
+  const y = parseInt(parts[2]);
+  if (!d || !m || !y || d < 1 || d > 31 || m < 1 || m > 12 || y < 2020 || y > 2100) return null;
+  return `${d}/${m}/${y}`;
+}
+
+function monthKeyFromDate(dateStr) {
+  // '25/4/2026' → '2026-04'
+  const parts = dateStr.split('/');
+  const m = parseInt(parts[1]);
+  const y = parseInt(parts[2]);
+  return `${y}-${String(m).padStart(2, '0')}`;
+}
+
+function normalizeTva(taux) {
+  // Accepte '20', '20%', '20.0', '5,5' etc. → renvoie le nom de champ pilotage
+  if (!taux) return 'ht20';
+  const s = String(taux).replace(',', '.').replace('%', '').trim();
+  const n = parseFloat(s);
+  if (n === 20) return 'ht20';
+  if (n === 10) return 'ht10';
+  if (n === 5.5) return 'ht055';
+  if (n === 2.1) return 'ht21';
+  if (n === 8.5) return 'ht85';
+  return 'ht20'; // fallback sécurisé
+}
+
+async function tool_ajouter_ca(uid, input) {
+  const montantHt = parseFloat(input.montant_ht);
+  if (!montantHt || isNaN(montantHt) || montantHt <= 0) {
+    return { error: "Le montant HT doit être un nombre positif.", success: false };
+  }
+  if (montantHt > 1000000) {
+    return { error: "Montant trop élevé, merci de vérifier.", success: false };
+  }
+  const dateIso = parseDateFrToIso(input.date);
+  if (!dateIso) return { error: "Date invalide. Format attendu : JJ/MM/AAAA.", success: false };
+  const monthKey = monthKeyFromDate(dateIso);
+  const tvaField = normalizeTva(input.taux_tva);
+
+  // Lire le doc existant du mois
+  const path = `pilotage/${uid}/months/${monthKey}`;
+  const doc = await fsGet(path);
+  const existing = doc ? docToObject(doc) : {};
+  const ca = Array.isArray(existing.ca) ? existing.ca : [];
+
+  // Nouvelle ligne CA (tous les champs ht* en string pour cohérence avec le format existant)
+  const newLine = {
+    date: dateIso,
+    ht055: '', ht10: '', ht20: '', ht21: '', ht85: '',
+    source: 'lea',
+    addedAt: new Date().toISOString(),
+  };
+  newLine[tvaField] = String(montantHt);
+  if (input.note && typeof input.note === 'string') {
+    newLine.note = input.note.slice(0, 200);
+  }
+
+  ca.push(newLine);
+
+  // Écrire en merge (garder chargesFixe, chargesVar, etc. intacts)
+  await fsPatch(path, { ca });
+
+  const tvaDisplay = tvaField === 'ht055' ? '5,5%' : tvaField === 'ht10' ? '10%' : tvaField === 'ht21' ? '2,1%' : tvaField === 'ht85' ? '8,5%' : '20%';
+  return {
+    success: true,
+    ajouté: {
+      montant_ht: montantHt,
+      tva: tvaDisplay,
+      date: dateIso,
+      mois: monthKey,
+    },
+    message: `Ligne de CA de ${montantHt}€ HT (TVA ${tvaDisplay}) ajoutée au ${dateIso}. Visible immédiatement dans ton pilotage de ${monthKey}.`,
+  };
+}
+
+async function tool_ajouter_charge(uid, input) {
+  const montantHt = parseFloat(input.montant_ht);
+  if (!montantHt || isNaN(montantHt) || montantHt <= 0) {
+    return { error: "Le montant HT doit être un nombre positif.", success: false };
+  }
+  if (montantHt > 500000) {
+    return { error: "Montant trop élevé, merci de vérifier.", success: false };
+  }
+  const typeCharge = (input.type_charge || 'variable').toLowerCase();
+  if (typeCharge !== 'fixe' && typeCharge !== 'variable') {
+    return { error: "type_charge doit être 'fixe' ou 'variable'.", success: false };
+  }
+  const dateIso = parseDateFrToIso(input.date);
+  if (!dateIso) return { error: "Date invalide. Format JJ/MM/AAAA.", success: false };
+  const monthKey = monthKeyFromDate(dateIso);
+
+  const path = `pilotage/${uid}/months/${monthKey}`;
+  const doc = await fsGet(path);
+  const existing = doc ? docToObject(doc) : {};
+  const fieldName = typeCharge === 'fixe' ? 'chargesFixe' : 'chargesVar';
+  const current = Array.isArray(existing[fieldName]) ? existing[fieldName] : [];
+
+  // Taux TVA (en nombre, format existant)
+  const tvaNum = (function() {
+    if (!input.taux_tva) return 20;
+    const s = String(input.taux_tva).replace(',', '.').replace('%', '').trim();
+    const n = parseFloat(s);
+    return [20, 10, 5.5, 2.1, 8.5, 0].includes(n) ? n : 20;
+  })();
+
+  const newLine = {
+    fournisseur: (input.fournisseur || '').slice(0, 100),
+    type: (input.fournisseur || 'Charge ' + typeCharge).slice(0, 50),
+    montantHT: String(montantHt),
+    tvaRate: tvaNum,
+    deductible: 'Oui',
+    pointe: 'Non',
+    date: dateIso,
+    source: 'lea',
+    addedAt: new Date().toISOString(),
+  };
+
+  current.push(newLine);
+  const patchData = {};
+  patchData[fieldName] = current;
+  await fsPatch(path, patchData);
+
+  return {
+    success: true,
+    ajouté: {
+      montant_ht: montantHt,
+      type: typeCharge,
+      fournisseur: input.fournisseur || null,
+      date: dateIso,
+      mois: monthKey,
+    },
+    message: `Charge ${typeCharge} de ${montantHt}€ HT ajoutée au ${dateIso}${input.fournisseur ? ' (' + input.fournisseur + ')' : ''}.`,
+  };
+}
+
+async function tool_ajouter_note(uid, input) {
+  const contenu = (input.contenu || '').trim();
+  if (!contenu) return { error: "Le contenu de la note est requis.", success: false };
+  if (contenu.length > 500) return { error: "Note trop longue (max 500 caractères).", success: false };
+  const categorie = (input.categorie || 'autre').trim();
+
+  const ts = new Date().toISOString();
+  const docId = ts.replace(/[:.]/g, '-') + '-' + Math.random().toString(36).slice(2, 8);
+  await fsCreateWithId(`agent/${uid}/notes`, docId, {
+    contenu,
+    categorie,
+    createdAt: ts,
+    source: 'lea',
+  });
+
+  return {
+    success: true,
+    ajouté: { contenu, categorie },
+    message: `Note enregistrée : "${contenu.slice(0, 100)}${contenu.length > 100 ? '...' : ''}"`,
+  };
+}
+
 // Dispatcher
 async function executeTool(toolName, input, uid) {
   try {
@@ -817,6 +1034,9 @@ async function executeTool(toolName, input, uid) {
       case 'lire_marges':        result = await tool_lire_marges(uid, input || {}); break;
       case 'enregistrer_fait_business': result = await tool_enregistrer_fait_business(uid, input || {}); break;
       case 'enregistrer_preference':    result = await tool_enregistrer_preference(uid, input || {}); break;
+      case 'ajouter_ca':         result = await tool_ajouter_ca(uid, input || {}); break;
+      case 'ajouter_charge':     result = await tool_ajouter_charge(uid, input || {}); break;
+      case 'ajouter_note':       result = await tool_ajouter_note(uid, input || {}); break;
       default: return { error: `Tool inconnu : ${toolName}` };
     }
     // Cap la taille du résultat
@@ -881,10 +1101,11 @@ async function loadMemory(uid) {
   return out;
 }
 
-function buildSystemPrompt(userDoc, userEmail, memory) {
+function buildSystemPrompt(userDoc, userEmail, memory, opts) {
   const prenom = fv(userDoc, 'name') || fv(userDoc, 'prenom') || (userEmail?.split('@')[0] || '');
   const entreprise = fv(userDoc, 'entreprise') || fv(userDoc, 'nomEntreprise') || '';
   const today = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const isMobile = opts?.mobile === true;
 
   // Section mémoire : injectée seulement si on a quelque chose à dire
   let memorySection = '';
@@ -912,6 +1133,30 @@ function buildSystemPrompt(userDoc, userEmail, memory) {
       memorySection += '\n';
     }
   }
+
+  const mobileSection = isMobile ? `
+
+# CONTEXTE : TU ES DANS L'APP MOBILE LÉA
+Le dirigeant te parle depuis son téléphone (app mobile Léa). Adapte-toi :
+- Sois ENCORE PLUS concise : 1-3 phrases max, pas de longs paragraphes (lecture mobile)
+- Évite les listes à puces quand possible, préfère le texte fluide
+- Pour les chiffres : format lisible sur petit écran (ex : "12 340 €" plutôt que tableaux)
+- Si tu réponds à une question vocale, ton texte sera aussi lu à voix haute : utilise des phrases orales fluides
+
+## TOOLS D'ÉCRITURE ACTIFS EN MODE MOBILE
+Tu as accès à **ajouter_ca**, **ajouter_charge** et **ajouter_note** pour modifier directement le pilotage.
+
+**Règle critique** : avant TOUTE écriture, suis cette logique :
+1. Si le message est clair et non-ambigu (ex: "ajoute 1500€ de CA en TVA 20 aujourd'hui") → exécute directement le tool puis confirme brièvement
+2. Si un paramètre est flou (montant imprécis, date ambiguë, TVA non spécifiée et doute possible) → DEMANDE une clarification avant d'écrire
+3. Après écriture réussie, confirme en une phrase courte : "✅ J'ai ajouté 1 500 € en TVA 20% pour aujourd'hui." (plutôt que "le tool a été appelé avec succès")
+
+**Valeurs par défaut raisonnables** :
+- Date non précisée → aujourd'hui
+- TVA non précisée pour un CA → 20% (le plus courant). Mais si le dirigeant est visiblement dans la restauration (résumé business), propose 10%.
+- Type de charge non précisé → "variable" par défaut
+
+**NE JAMAIS** inventer un montant. Si le dirigeant dit "ajoute une vente" sans chiffre, demande "combien ?".` : '';
 
   return `Tu es Léa, l'employée IA d'Alteore. Tu es le bras droit du dirigeant : tu gères le pilotage financier, la trésorerie, les stocks, la RH, la fidélisation client.
 
@@ -963,25 +1208,38 @@ Lecture :
 Écriture mémoire :
 - **enregistrer_fait_business** : mémoriser un fait important sur le business
 - **enregistrer_preference** : mémoriser une préférence de style du dirigeant
-
-# CE QUE TU NE FAIS PAS (WAVE 3)
+${isMobile ? `
+Écriture données (app mobile uniquement) :
+- **ajouter_ca** : ajouter une ligne de CA dans le pilotage du mois
+- **ajouter_charge** : ajouter une charge fixe/variable
+- **ajouter_note** : ajouter une note/rappel dans le carnet de bord
+` : ''}
+# CE QUE TU NE FAIS PAS
 Tu ne peux pas encore :
 - Envoyer des emails, SMS, générer des contrats (Waves 4-6)
-- Modifier les données pilotage/banque/stock (tu es en lecture seule sur les données business)
+- ${isMobile ? 'Modifier les données stock/RH/fidélisation (seulement CA/charges/notes pour l\'instant)' : 'Modifier les données pilotage/banque/stock (tu es en lecture seule sur les données business)'}
 - Programmer des rappels ou tâches récurrentes (Wave 4)
 
-Si on te demande ces actions : explique gentiment que ça arrive bientôt.${memorySection}`;
+Si on te demande ces actions : explique gentiment que ça arrive bientôt.${mobileSection}${memorySection}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 7. MAIN CLAUDE LOOP
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function runConversation(uid, userDoc, userEmail, userMessage, history, memory) {
+async function runConversation(uid, userDoc, userEmail, userMessage, history, memory, opts) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY manquante');
 
-  const systemPrompt = buildSystemPrompt(userDoc, userEmail, memory);
+  const isMobile = opts?.mobile === true;
+  const systemPrompt = buildSystemPrompt(userDoc, userEmail, memory, { mobile: isMobile });
+
+  // Filtrer les tools : tools d'écriture données (ajouter_ca etc.) uniquement en mode mobile
+  // pour éviter les écritures intempestives depuis le site web.
+  const WRITE_DATA_TOOLS = ['ajouter_ca', 'ajouter_charge', 'ajouter_note'];
+  const activeTools = isMobile
+    ? TOOLS
+    : TOOLS.filter(t => !WRITE_DATA_TOOLS.includes(t.name));
 
   // Historique → format Claude : on ne garde que des messages TEXT propres
   // (pas de tool_use/tool_result persistés, cf. architecture)
@@ -1009,7 +1267,7 @@ async function runConversation(uid, userDoc, userEmail, userMessage, history, me
         model: MODEL,
         max_tokens: 2048,
         system: systemPrompt,
-        tools: TOOLS,
+        tools: activeTools,
         messages,
       }),
     });
@@ -1083,7 +1341,7 @@ module.exports = async (req, res) => {
   const { uid, email } = verified;
 
   // Body
-  const { message } = req.body || {};
+  const { message, mobile } = req.body || {};
   if (!message || typeof message !== 'string' || message.trim().length === 0) {
     return res.status(400).json({ error: "Paramètre 'message' requis (string non vide)" });
   }
@@ -1129,7 +1387,7 @@ module.exports = async (req, res) => {
     await saveMessage(uid, 'user', message.trim());
 
     // Claude !
-    const result = await runConversation(uid, userDoc, email, message.trim(), history, memory);
+    const result = await runConversation(uid, userDoc, email, message.trim(), history, memory, { mobile: mobile === true });
 
     // Sauver la réponse finale avec métadonnées
     if (result.text) {

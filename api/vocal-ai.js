@@ -299,7 +299,32 @@ export default async function handler(req, res) {
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY manquante' });
 
   try {
-    const { question, metrics, prenom } = req.body;
+    const { question, metrics, prenom, tts_only, text_to_speak } = req.body;
+
+    // ── Mode TTS-only (Wave 3.7 — app mobile Léa) ──
+    // Le front mobile appelle agent-chat pour la réponse (avec tools),
+    // puis vocal-ai juste pour la synthèse audio via OpenAI.
+    // Évite de regénérer la réponse Claude deux fois.
+    if (tts_only === true) {
+      if (!text_to_speak || typeof text_to_speak !== 'string') {
+        return res.status(400).json({ error: "text_to_speak requis en mode tts_only" });
+      }
+      if (text_to_speak.length > 2000) {
+        return res.status(400).json({ error: "Texte trop long pour TTS (max 2000 caractères)" });
+      }
+      // Vérifier l'accès Léa : TTS OpenAI réservé aux clients Léa
+      const userDoc = await fsGet(`users/${auth.uid}`);
+      if (!hasLeaAccess(userDoc)) {
+        return res.status(403).json({ error: "TTS OpenAI réservé aux abonnés Léa", leaMode: false });
+      }
+      const audioUrl = await generateAudioOpenAI(text_to_speak);
+      return res.status(200).json({
+        audioUrl,       // null si OpenAI a échoué → front fallback SpeechSynthesis
+        leaMode: true,
+        ttsOnly: true,
+      });
+    }
+
     if (!question) return res.status(400).json({ error: 'Question manquante' });
     if (typeof question !== 'string' || question.length > 500) {
       return res.status(400).json({ error: 'Question invalide (max 500 caractères)' });
