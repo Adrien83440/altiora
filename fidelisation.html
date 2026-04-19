@@ -5118,6 +5118,8 @@ onAuthStateChanged(auth, async user=>{
     setTimeout(()=>hideSyncBadge(),2500);
     // ⚡ Wave 2 : init Copilote IA
     if(typeof window.copInit === 'function') window.copInit();
+    // ⚡ Wave 3.5 : rebrandage "Copilote" → "Léa" si addon Léa actif
+    if(typeof window.applyLeaBranding === 'function') window.applyLeaBranding();
 
   }catch(e){
     console.error('Firebase error:', e.code, e.message);
@@ -5542,6 +5544,62 @@ window.printQR=printQR;
 window.fcCopyRoueLink = fcCopyRoueLink;
 window.fcSendRoueSms = fcSendRoueSms;
 window.markRoueCouponUsed = markRoueCouponUsed;
+
+// ═══════════════════════════════════════════════════════════
+// Wave 3.5 — Rebrandage visuel Copilote → Léa si addon actif
+// ═══════════════════════════════════════════════════════════
+// On lit users/{uid} pour détecter role/plan/agentEnabled/betaTester.
+// Si Léa est disponible pour ce user, on rebrande tous les labels visibles
+// sans toucher à la logique métier (tools spécialisés préservés).
+window.applyLeaBranding = async function() {
+  try {
+    if (!window._uid || !window._db || !window._fbDoc || !window._fbGetDoc) return;
+    const snap = await window._fbGetDoc(window._fbDoc(window._db, 'users', window._uid));
+    if (!snap.exists()) return;
+    const d = snap.data();
+    const hasLea = d.role === 'admin'
+                || d.betaTester === true
+                || d.agentEnabled === true
+                || d.plan === 'trial'
+                || d.plan === 'dev';
+    if (!hasLea) return;
+
+    // 1. Renommer le titre de l'onglet dans la barre principale
+    var tabLabel = document.querySelector('.mtab[data-tab="copilote"]');
+    if (tabLabel) {
+      tabLabel.innerHTML = '👩‍💼 Léa <span class="badge-pro" style="background:linear-gradient(135deg,#7c3aed,#a78bfa);color:#fff">Fidélisation</span>';
+    }
+
+    // 2. Renommer les titres "Copilote Fidélisation" dans les vues
+    document.querySelectorAll('.copilot-head-title').forEach(function(el){
+      el.textContent = 'Léa — Fidélisation';
+    });
+
+    // 3. Changer l'intro du chat
+    var firstBubble = document.querySelector('.cop-bubble');
+    if (firstBubble && firstBubble.textContent.indexOf('Copilote Fidélisation') !== -1) {
+      firstBubble.innerHTML = 'Salut ! C\'est Léa, en mode Fidélisation. Je connais tes clients, tes ventes, tes priorités. Tu peux me demander de préparer une campagne, un coupon, un palier, ou creuser une analyse client.<br><br>Voilà quelques idées pour démarrer :';
+    }
+
+    // 4. Tooltip du bouton flottant
+    var fab = document.getElementById('copilot-fab');
+    if (fab) fab.setAttribute('title', 'Léa — Fidélisation');
+
+    // 5. Petit lien vers le chat Léa général (analyse globale)
+    var copHeader = document.querySelector('.copilot-head');
+    if (copHeader && !document.getElementById('lea-global-link')) {
+      var link = document.createElement('a');
+      link.id = 'lea-global-link';
+      link.href = 'agent.html';
+      link.textContent = '↗ Chat général';
+      link.title = 'Ouvrir le chat Léa complet (analyse business toute l\'entreprise)';
+      link.style.cssText = 'margin-left:auto;font-size:11px;color:rgba(124,58,237,0.7);text-decoration:none;padding:4px 10px;border-radius:99px;border:1px solid rgba(124,58,237,0.2);background:rgba(124,58,237,0.04);font-weight:600;transition:.15s';
+      link.onmouseover = function(){ this.style.background='rgba(124,58,237,0.12)'; this.style.color='#5b21b6'; };
+      link.onmouseout  = function(){ this.style.background='rgba(124,58,237,0.04)'; this.style.color='rgba(124,58,237,0.7)'; };
+      copHeader.appendChild(link);
+    }
+  } catch(e) { console.warn('[fid-lea-branding] error:', e); }
+};
 </script>
 
 <script src="nav.js"></script>
