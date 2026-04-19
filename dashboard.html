@@ -1004,6 +1004,45 @@ async function loadData(_tries){
   // Hide vocal button for non-Max plans
   var vFab=document.getElementById('vocalFab');
   if(vFab) vFab.style.display=CAN_MAX.includes(plan)?'flex':'none';
+
+  // ── Wave 3.6 : rebranding vocal en mode Léa ──
+  // On lit directement users/{uid} pour ne pas dépendre du timing de nav.js.
+  // Si nav.js a déjà posé les flags, tant mieux, sinon on les lit nous-mêmes.
+  try {
+    var isLea = false;
+    if (window._isAdmin === true || window._isBetaTester === true
+        || window._agentEnabled === true || plan === 'trial' || plan === 'dev') {
+      isLea = true;
+    } else if (window._uid && window._db) {
+      // Fallback : lire directement le doc user si les flags window ne sont pas encore là
+      try {
+        var uSnap = await window._getDoc(window._doc(window._db, 'users', window._uid));
+        if (uSnap.exists()) {
+          var ud = uSnap.data();
+          isLea = ud.role === 'admin' || ud.betaTester === true || ud.agentEnabled === true
+                  || ud.plan === 'trial' || ud.plan === 'dev';
+        }
+      } catch(e) { /* ignorer */ }
+    }
+
+    window._vocalLeaMode = isLea;
+
+    if (vFab && isLea) {
+      vFab.textContent = '👩‍💼';
+      vFab.setAttribute('title', 'Parle à Léa');
+      vFab.style.fontSize = '26px';
+
+      // Adapter l'overlay : icône initiale + placeholder texte + hint
+      var vIcon = document.getElementById('vocalIcon');
+      if (vIcon) vIcon.textContent = '👩‍💼';
+      var vStatus = document.getElementById('vocalStatus');
+      if (vStatus) vStatus.textContent = 'Parle à Léa';
+      var vInput = document.getElementById('vocalTextInput');
+      if (vInput) vInput.setAttribute('placeholder', 'Pose ta question à Léa...');
+      var vHint = document.querySelector('.vocal-hint');
+      if (vHint) vHint.textContent = 'Essaie : "Comment va mon CA ?" · "Mes charges du mois ?" · "Mon objectif est à combien ?" · "Tréso tendue ?"';
+    }
+  } catch(e) { /* fallback silencieux : icône micro par défaut */ }
   // Load stock data
   await loadStockData();
   // Load RH employees for masse salariale
@@ -2058,17 +2097,19 @@ function setVocalState(state) {
   ring.className = 'vocal-ring ' + state;
 
   if (state === 'idle') {
-    fab.textContent = '🎤'; icon.textContent = '🎤';
-    status.textContent = 'Appuyez et parlez';
+    var leaMode = window._vocalLeaMode === true;
+    fab.textContent = leaMode ? '👩‍💼' : '🎤';
+    icon.textContent = leaMode ? '👩‍💼' : '🎤';
+    status.textContent = leaMode ? 'Parle à Léa' : 'Appuyez et parlez';
   } else if (state === 'listening') {
     fab.textContent = '⏹'; icon.textContent = '👂';
-    status.textContent = 'Je vous écoute...';
+    status.textContent = window._vocalLeaMode ? 'Léa t\'écoute…' : 'Je vous écoute...';
   } else if (state === 'thinking') {
     fab.textContent = '⏳'; icon.textContent = '🧠';
-    status.textContent = 'Analyse en cours...';
+    status.textContent = window._vocalLeaMode ? 'Léa réfléchit…' : 'Analyse en cours...';
   } else if (state === 'speaking') {
     fab.textContent = '⏹'; icon.textContent = '🗣';
-    status.textContent = 'Réponse';
+    status.textContent = window._vocalLeaMode ? 'Léa répond' : 'Réponse';
   }
 }
 
@@ -2152,6 +2193,11 @@ function sendTextQuestion() {
 }
 window.sendTextQuestion = sendTextQuestion;
 
+// ═══════════════════════════════════════════════════════════
+// Wave 3.6 — Audio player OpenAI (mode Léa) + fallback browser
+// ═══════════════════════════════════════════════════════════
+var _currentAudio = null; // HTMLAudioElement en cours de lecture (mode Léa)
+
 async function processQuestion(question) {
   setVocalState('thinking');
 
@@ -2168,15 +2214,51 @@ async function processQuestion(question) {
     document.getElementById('vocalAnswer').textContent = answer;
     document.getElementById('vocalAnswer').style.display = '';
 
-    // Try to speak if supported
-    if (_synth && _speechSupported) {
+    // ── PRIORITÉ 1 : audio pré-généré par OpenAI TTS (mode Léa) ──
+    if (data.audioUrl) {
+      playOpenAIAudio(data.audioUrl);
+    }
+    // ── PRIORITÉ 2 : fallback SpeechSynthesis navigateur ──
+    else if (_synth && _speechSupported) {
       speakAnswer(answer);
-    } else {
+    }
+    // ── PRIORITÉ 3 : pas d'audio possible, on s'arrête ──
+    else {
       setVocalState('idle');
     }
   } catch(e) {
     document.getElementById('vocalAnswer').textContent = 'Erreur : ' + e.message;
     document.getElementById('vocalAnswer').style.display = '';
+    setVocalState('idle');
+  }
+}
+
+// Audio OpenAI TTS (mode Léa uniquement)
+// Reçoit une data URL base64 → joue via HTMLAudioElement
+function playOpenAIAudio(audioUrl) {
+  // Stopper toute lecture en cours
+  stopAllAudio();
+  try {
+    _currentAudio = new Audio(audioUrl);
+    _currentAudio.onplay = function() { setVocalState('speaking'); };
+    _currentAudio.onended = function() { setVocalState('idle'); _currentAudio = null; };
+    _currentAudio.onerror = function(e) {
+      console.warn('[vocal] OpenAI audio error, fallback to SpeechSynthesis');
+      _currentAudio = null;
+      // Fallback : essayer SpeechSynthesis si possible
+      var answer = document.getElementById('vocalAnswer').textContent;
+      if (answer && _synth && _speechSupported) speakAnswer(answer);
+      else setVocalState('idle');
+    };
+    var p = _currentAudio.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch(function(err) {
+        console.warn('[vocal] audio play blocked:', err);
+        setVocalState('idle');
+      });
+    }
+  } catch(e) {
+    console.warn('[vocal] playOpenAIAudio error:', e);
     setVocalState('idle');
   }
 }
@@ -2191,8 +2273,15 @@ function speakAnswer(text) {
   utterance.pitch = 1.0;
 
   var voices = _synth.getVoices();
-  var frVoice = voices.find(function(v) { return v.lang.startsWith('fr'); });
-  if (frVoice) utterance.voice = frVoice;
+  // Sélection de la meilleure voix française disponible (Wave 3.6 : qualité améliorée)
+  // Priorité : Amélie (macOS/iOS, qualité naturelle), Thomas (macOS), Hortense (Windows), puis fallback fr-*
+  var bestVoice = null;
+  var preferredNames = ['Amélie', 'Amelie', 'Thomas', 'Hortense', 'Google français'];
+  for (var i = 0; i < preferredNames.length && !bestVoice; i++) {
+    bestVoice = voices.find(function(v) { return v.name && v.name.indexOf(preferredNames[i]) !== -1 && v.lang.startsWith('fr'); });
+  }
+  if (!bestVoice) bestVoice = voices.find(function(v) { return v.lang.startsWith('fr'); });
+  if (bestVoice) utterance.voice = bestVoice;
 
   utterance.onstart = function() { setVocalState('speaking'); };
   utterance.onend = function() { setVocalState('idle'); };
@@ -2201,8 +2290,16 @@ function speakAnswer(text) {
   _synth.speak(utterance);
 }
 
-function stopSpeaking() {
+function stopAllAudio() {
   if (_synth) _synth.cancel();
+  if (_currentAudio) {
+    try { _currentAudio.pause(); _currentAudio.currentTime = 0; } catch(e) {}
+    _currentAudio = null;
+  }
+}
+
+function stopSpeaking() {
+  stopAllAudio();
   setVocalState('idle');
 }
 
