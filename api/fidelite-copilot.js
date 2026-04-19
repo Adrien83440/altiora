@@ -55,7 +55,7 @@ async function _checkPlan(uid, token){
     if(!r.ok) return null;
     const d = await r.json();
     const plan = d.fields?.plan?.stringValue || 'free';
-    const allowed = ['max','master','trial'];
+    const allowed = ['max','master','trial','dev'];
     return allowed.includes(plan) ? plan : null;
   }catch(e){ return null; }
 }
