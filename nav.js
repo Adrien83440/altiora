@@ -336,6 +336,7 @@ nav#alteore-nav .lea-badge.active{background:linear-gradient(135deg,rgba(16,185,
 nav#alteore-nav .lea-badge.degraded{background:rgba(245,158,11,.2);color:#fbbf24;border-color:rgba(245,158,11,.3)}
 nav#alteore-nav .lea-badge.trial{background:rgba(96,165,250,.2);color:#93c5fd;border-color:rgba(96,165,250,.3)}
 nav#alteore-nav .lea-badge.admin{background:linear-gradient(135deg,rgba(239,68,68,.25),rgba(220,38,38,.25));color:#fca5a5;border-color:rgba(239,68,68,.3)}
+nav#alteore-nav .lea-badge.beta{background:linear-gradient(135deg,rgba(99,102,241,.3),rgba(79,70,229,.3));color:#c7d2fe;border-color:rgba(99,102,241,.35)}
 @keyframes leaPulse{
   0%,100%{box-shadow:0 0 0 1px rgba(255,255,255,.15), 0 0 12px rgba(167,139,250,.3)}
   50%{box-shadow:0 0 0 1px rgba(255,255,255,.2), 0 0 18px rgba(167,139,250,.55)}
@@ -613,14 +614,17 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
     const upl = document.getElementById('uplan');
     if (upl) upl.textContent = PLAN_NAMES[plan] || plan;
 
-    if (!CAN_FIDELISATION.includes(plan)) lockNavItem('nav-fid',    'Max+',   'fidelisation');
-    if (!CAN_STOCK.includes(plan))        lockNavItem('nav-stock',  'Pro+',   'stock');
-    if (!CAN_IMPORT.includes(plan))       lockNavItem('nav-import', 'Pro+',   'import');
-    if (!CAN_BILAN.includes(plan))        lockNavItem('nav-bilan',  'Max+',   'bilan');
-    if (!CAN_RAPPORT.includes(plan))      lockNavItem('nav-rapport','Pro+',   'rapport');
-    if (!CAN_RH.includes(plan))           lockNavItem('nav-rh',     'Master', 'rh');
-    if (!CAN_SCENARIOS.includes(plan))     lockNavItem('nav-scenarios','Max+', 'scenarios');
-    if (!CAN_PREVISIONS.includes(plan))    lockNavItem('nav-previsions','Master', 'previsions');
+    // ── BYPASS ADMIN : si role=admin, on ne lock aucun menu (accès à tout) ──
+    const isAdmin = window._isAdmin === true;
+
+    if (!isAdmin && !CAN_FIDELISATION.includes(plan)) lockNavItem('nav-fid',    'Max+',   'fidelisation');
+    if (!isAdmin && !CAN_STOCK.includes(plan))        lockNavItem('nav-stock',  'Pro+',   'stock');
+    if (!isAdmin && !CAN_IMPORT.includes(plan))       lockNavItem('nav-import', 'Pro+',   'import');
+    if (!isAdmin && !CAN_BILAN.includes(plan))        lockNavItem('nav-bilan',  'Max+',   'bilan');
+    if (!isAdmin && !CAN_RAPPORT.includes(plan))      lockNavItem('nav-rapport','Pro+',   'rapport');
+    if (!isAdmin && !CAN_RH.includes(plan))           lockNavItem('nav-rh',     'Master', 'rh');
+    if (!isAdmin && !CAN_SCENARIOS.includes(plan))    lockNavItem('nav-scenarios','Max+', 'scenarios');
+    if (!isAdmin && !CAN_PREVISIONS.includes(plan))   lockNavItem('nav-previsions','Master', 'previsions');
 
     // ── LÉA — gestion visibilité + badge dynamique selon statut ──
     applyLeaNavItem(plan);
@@ -631,17 +635,18 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
 
   // Met à jour l'item "Léa" de la sidebar (placé dans la section "Intelligence IA") :
   //  - Cache l'item si le plan ne permet pas l'accès (free, trial_expired, past_due, etc.)
-  //  - Sinon affiche un badge adapté au statut (Trial / Active / Veille / Nouveau / Admin)
-  //  - Les admins (users/{uid}.isAdmin == true) ont toujours accès et voient "Admin"
+  //  - Sinon affiche un badge adapté au statut
+  //  - Ordre de priorité : Admin > Beta > Actif > Inclus (trial) > Veille (dégradé) > Nouveau
   function applyLeaNavItem(plan) {
     var navItem = document.getElementById('nav-lea');
     var badge   = document.getElementById('nav-lea-badge');
     if (!navItem || !badge) return;
 
     var isAdmin      = window._isAdmin === true;
+    var isBetaTester = window._isBetaTester === true;
     var agentEnabled = window._agentEnabled === true;
     var agentDegraded = window._agentDegradedMode === true;
-    var canSee = isAdmin || CAN_AGENT_UPGRADE.includes(plan); // pro/max/master/trial/dev ou admin
+    var canSee = isAdmin || isBetaTester || CAN_AGENT_UPGRADE.includes(plan);
 
     if (!canSee) {
       navItem.style.display = 'none';
@@ -649,11 +654,14 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
     }
 
     navItem.style.display = '';
-    badge.classList.remove('active', 'degraded', 'trial', 'admin');
+    badge.classList.remove('active', 'degraded', 'trial', 'admin', 'beta');
 
     if (isAdmin) {
       badge.textContent = 'Admin';
       badge.classList.add('admin');
+    } else if (isBetaTester) {
+      badge.textContent = 'Beta';
+      badge.classList.add('beta');
     } else if (agentEnabled) {
       badge.textContent = 'Actif';
       badge.classList.add('active');
@@ -669,6 +677,9 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
   }
 
   function checkPageAccess(plan) {
+    // ── BYPASS ADMIN : role=admin → accès complet à tout, aucune restriction ──
+    if (window._isAdmin === true) return true;
+
     // ── Plan free / past_due / trial_expired → redirection (pas de plan gratuit) ──
     const BLOCKED_PLANS = ['free', 'past_due', 'trial_expired', 'deleted', 'promo_expired'];
     const ALLOWED_PAGES_FREE = ['profil.html', 'aide.html', 'tutoriels.html'];
@@ -688,14 +699,13 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
     if (PAGE === 'previsions.html'     && !CAN_PREVISIONS.includes(plan))    { showUpgradeModal('previsions');   return false; }
 
     // ── AGENT LÉA ──
-    // agent.html / agent-historique.html : nécessite trial OU agentEnabled OU agentDegradedMode OU isAdmin
-    // Si le user n'a aucun de ces accès mais est sur un plan payant, on redirige vers agent-upgrade
+    // agent.html / agent-historique.html : trial OU agentEnabled OU agentDegradedMode OU betaTester (admin déjà bypass plus haut)
     if (AGENT_PAGES.includes(PAGE)) {
       var hasTrial     = plan === 'trial' || plan === 'dev';
       var hasAddon     = window._agentEnabled === true;
       var hasDegraded  = window._agentDegradedMode === true;
-      var isAdmin      = window._isAdmin === true;
-      if (!hasTrial && !hasAddon && !hasDegraded && !isAdmin) {
+      var isBetaTester = window._isBetaTester === true;
+      if (!hasTrial && !hasAddon && !hasDegraded && !isBetaTester) {
         if (CAN_AGENT_UPGRADE.includes(plan)) {
           location.href = 'agent-upgrade.html';
         } else {
@@ -705,8 +715,8 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       }
     }
 
-    // agent-upgrade.html : nécessite un plan payant (pro/max/master/trial/dev) ou isAdmin
-    if (PAGE === 'agent-upgrade.html' && !CAN_AGENT_UPGRADE.includes(plan) && window._isAdmin !== true) {
+    // agent-upgrade.html : nécessite un plan payant
+    if (PAGE === 'agent-upgrade.html' && !CAN_AGENT_UPGRADE.includes(plan)) {
       location.href = 'profil.html?tab=abonnement&upgrade=core';
       return false;
     }
@@ -799,26 +809,22 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       // ── AGENT LÉA (Wave 1+) : exposer les flags sur window ──
       // agentEnabled : true si l'addon Léa est actif (plan payant + subscription_item Léa)
       // agentDegradedMode : true si post-trial sans addon (accès lecture seule aux briefings hebdo)
-      // isAdmin : bypass total, accès complet à Léa même sans addon (pour Adrien, Emily, équipe interne)
-      //   Deux sources possibles :
-      //     - Flag isAdmin:true dans users/{uid} Firestore
-      //     - Email de l'utilisateur dans la whitelist ADMIN_EMAILS (fallback automatique)
+      // isAdmin : role === 'admin' dans users/{uid} → bypass total, accès complet à TOUT
+      // isBetaTester : betaTester === true → accès Léa en bypass Stripe (pour testeurs)
       // Disponibles aussi pendant le trial (plan==='trial' → tous les droits sans flag)
-      const ADMIN_EMAILS = ['contact@adrienemily.com'];
-      const currentEmail = (window._auth && window._auth.currentUser && window._auth.currentUser.email) || '';
-      const isAdminByEmail = ADMIN_EMAILS.includes(currentEmail);
-
       if (snap.exists()) {
         const ud = snap.data();
         window._agentEnabled      = ud.agentEnabled === true;
         window._agentDegradedMode = ud.agentDegradedMode === true;
         window._agentAddonStatus  = ud.agentAddonStatus || null;
-        window._isAdmin           = ud.isAdmin === true || isAdminByEmail;
+        window._isAdmin           = ud.role === 'admin';
+        window._isBetaTester      = ud.betaTester === true;
       } else {
         window._agentEnabled      = false;
         window._agentDegradedMode = false;
         window._agentAddonStatus  = null;
-        window._isAdmin           = isAdminByEmail;
+        window._isAdmin           = false;
+        window._isBetaTester      = false;
       }
 
       if (!checkPageAccess(plan)) { applyNavPlan(plan); return; }
