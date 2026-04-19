@@ -103,6 +103,24 @@ async function fsDelete(path) {
   return true;
 }
 
+// ── Lecture avec le idToken de l'utilisateur (pour son propre user doc) ──
+// Les règles Firestore users/{uid} n'autorisent que le propriétaire (isOwner),
+// pas le compte serveur. On doit utiliser le token de l'utilisateur lui-même.
+async function fsGetAsUser(path, userIdToken) {
+  if (!userIdToken) return null;
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}`;
+  try {
+    const res = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + userIdToken }
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    return res.json();
+  } catch (e) {
+    return null;
+  }
+}
+
 function fvRaw(f) {
   if (!f) return null;
   if (f.stringValue !== undefined)    return f.stringValue;
@@ -141,7 +159,9 @@ module.exports = async (req, res) => {
 
   try {
     // Access check : admin / beta / trial / agentEnabled
-    const userDoc = await fsGet(`users/${uid}`);
+    // IMPORTANT : on lit users/{uid} avec le idToken utilisateur, pas le token admin,
+    // car les règles Firestore n'autorisent que le propriétaire (isOwner).
+    const userDoc = await fsGetAsUser(`users/${uid}`, idToken);
     if (!userDoc) return res.status(400).json({ error: 'Utilisateur introuvable' });
     const role       = fv(userDoc, 'role');
     const plan       = fv(userDoc, 'plan');
