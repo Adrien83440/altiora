@@ -1,4 +1,4 @@
-// ── nav.js — Alteore ── v5 (nav centralisée + module RH Master + dirigeant + chatbot)
+// ── nav.js — Alteore ── v5 (nav centralisée + module RH Master + dirigeant + chatbot + updates)
 (function () {
 
   // ── Vercel Analytics ──
@@ -7,6 +7,16 @@
     va.defer = true;
     va.src = '/_vercel/insights/script.js';
     document.head.appendChild(va);
+  }
+
+  // ── updates.js : système de news/changelog in-app ──
+  // Injecté ici pour être dispo sur toutes les pages du dashboard (qui chargent nav.js).
+  // Il s'auto-init et attend que Firebase + le logo sidebar soient prêts.
+  if (!document.querySelector('script[src*="updates.js"]')) {
+    var upd = document.createElement('script');
+    upd.defer = true;
+    upd.src = '/updates.js';
+    document.head.appendChild(upd);
   }
 
   // ════════════════════════════════════════════════
