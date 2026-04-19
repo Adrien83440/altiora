@@ -2447,58 +2447,47 @@ window._copDiag = function(){
 };
 
 // Attend que Firebase Auth soit prêt.
-// Stratégie : on s'abonne directement à onAuthStateChanged sur l'instance auth —
-// c'est la méthode officielle Firebase qui force un callback immédiat avec
-// l'état d'auth, qu'il soit déjà restauré ou en cours.
+// Stratégie simplifiée : on s'abonne à l'event alteore-auth-ready émis par
+// le subscriber early dans le module Firebase, + fallback poll court.
 function copWaitAuth(){
   return new Promise(resolve => {
     // Cas 1 : déjà prêt (chemin rapide)
+    if(window._authReady && window._auth?.currentUser){
+      return resolve(window._auth.currentUser);
+    }
     if(window._auth?.currentUser){
       return resolve(window._auth.currentUser);
     }
-    // Cas 2 : on s'abonne à onAuthStateChanged si dispo
-    if(window._onAuthStateChanged && window._auth){
-      let resolved = false;
-      const timeoutId = setTimeout(() => {
-        if(resolved) return;
-        resolved = true;
-        try { unsub && unsub(); } catch(e){}
-        console.warn('[Copilot] auth timeout after onAuthStateChanged subscribe. State:', {
-          hasAuth: !!window._auth,
-          hasCurrentUser: !!window._auth?.currentUser,
-          uid: window._uid
-        });
-        resolve(null);
-      }, 15000);
-      const unsub = window._onAuthStateChanged(window._auth, (user) => {
-        if(resolved) return;
-        if(user){
-          resolved = true;
-          clearTimeout(timeoutId);
-          try { unsub && unsub(); } catch(e){}
-          // Propager _uid si manquant (en cas de timing bizarre)
-          if(!window._uid) window._uid = user.uid;
-          resolve(user);
-        }
-        // Si user est null on continue d'attendre jusqu'au timeout
-      });
-      return;
-    }
-    // Cas 3 (fallback) : _onAuthStateChanged absent, on poll
-    let attempts = 0;
+
+    let done = false;
+    const finish = (user) => {
+      if(done) return;
+      done = true;
+      window.removeEventListener('alteore-auth-ready', onReady);
+      clearInterval(tick);
+      clearTimeout(timeoutId);
+      resolve(user);
+    };
+
+    // Listener event custom (instantané dès que le module Firebase restaure la session)
+    const onReady = () => {
+      const u = window._auth?.currentUser;
+      if(u) finish(u);
+    };
+    window.addEventListener('alteore-auth-ready', onReady);
+
+    // Poll en parallèle (ceinture + bretelles)
     const tick = setInterval(() => {
-      attempts++;
-      if(window._auth?.currentUser){
-        clearInterval(tick);
-        if(!window._uid) window._uid = window._auth.currentUser.uid;
-        return resolve(window._auth.currentUser);
-      }
-      if(attempts >= 100){ // 10s
-        clearInterval(tick);
-        console.warn('[Copilot] poll fallback timeout');
-        return resolve(null);
-      }
-    }, 100);
+      const u = window._auth?.currentUser;
+      if(u){ finish(u); }
+    }, 200);
+
+    // Timeout 15s
+    const timeoutId = setTimeout(() => {
+      console.warn('[Copilot] auth wait timeout');
+      console.warn('[Copilot] Tape window._copDiag() pour diag complet');
+      finish(null);
+    }, 15000);
   });
 }
 
@@ -4992,6 +4981,24 @@ window._onAuthStateChanged = onAuthStateChanged;
 window._copFirestoreMods = function(){
   return Promise.resolve({ doc, setDoc, getDoc });
 };
+
+// ═══════════════════════════════════════════════════════════
+// 🔥 SUBSCRIBER AUTH DÉDIÉ (résout les races du Copilote)
+// Indépendant du onAuthStateChanged principal plus bas.
+// Set window._uid et window._authReady IMMÉDIATEMENT dès que Firebase
+// restaure la session, sans faire de redirect ni de plan check.
+// Un callback supplémentaire est gratuit côté Firebase.
+// ═══════════════════════════════════════════════════════════
+console.log('[Auth-Early] Subscribing to onAuthStateChanged at', new Date().toISOString());
+onAuthStateChanged(auth, (u) => {
+  console.log('[Auth-Early] callback fired. user =', u ? u.uid.slice(0,8)+'...' : 'null', 'at', new Date().toISOString());
+  if(u && u.uid){
+    window._uid = u.uid;
+    window._authReady = true;
+    // Déclencher un event custom pour que le Copilote réagisse immédiatement
+    try{ window.dispatchEvent(new CustomEvent('alteore-auth-ready', { detail: { uid: u.uid } })); }catch(e){}
+  }
+});
 
 // ── Auth ──
 onAuthStateChanged(auth, async user=>{
