@@ -171,7 +171,8 @@ async function fsCreateWithId(parentPath, docId, data) {
 }
 
 async function fsPatch(path, data) {
-  const mask = Object.keys(data).map(k => `updateMask.fieldPaths=${k}`).join('&');
+  // Upsert : crée le doc si absent, maj sinon.
+  const mask = Object.keys(data).map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}?${mask}`;
   const fields = {};
   for (const [k, v] of Object.entries(data)) fields[k] = toFsValue(v);
@@ -364,6 +365,30 @@ const TOOLS = [
       properties: {
         max_items: { type: 'integer', description: "Nombre max de produits (défaut 30, max 100)" },
       },
+    },
+  },
+  {
+    name: 'enregistrer_fait_business',
+    description: "Mémorise un fait important à propos de l'entreprise ou du dirigeant pour le retrouver dans les conversations futures. À utiliser DE MANIÈRE AUTONOME quand tu identifies une info qui pourra être utile plus tard : particularités comptables, échéances récurrentes, événements marquants, décisions du dirigeant, relations clients/employés clés, habitudes business, saisonnalité observée, objectifs annoncés. Ne PAS demander l'autorisation avant d'utiliser ce tool — tu décides toi-même si un fait mérite d'être mémorisé. Après mémorisation, mentionne-le brièvement dans ta réponse (ex: 'Je note que...').",
+    input_schema: {
+      type: 'object',
+      properties: {
+        fait: { type: 'string', description: "Le fait à mémoriser, en une phrase claire et autonome (max 300 caractères). Ex: 'L'URSSAF est prélevée le 15 du mois', 'Sophie part en congés du 15 au 30 juin 2026', 'Objectif CA 2026: 250k€'." },
+        categorie: { type: 'string', description: "Catégorie du fait : 'comptable', 'rh', 'client', 'strategie', 'saisonnalite', 'echeance', 'preference', 'autre'" },
+      },
+      required: ['fait'],
+    },
+  },
+  {
+    name: 'enregistrer_preference',
+    description: "Mémorise une préférence du dirigeant sur la façon dont il veut que tu te comportes. À utiliser quand tu détectes une consigne de style ou d'interaction : 'réponds-moi en plus court', 'évite les emojis', 'détaille davantage les analyses', etc. Surécrit la préférence existante de même type.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        preference: { type: 'string', description: "La préférence en une phrase (max 200 caractères)." },
+        type: { type: 'string', description: "Type : 'ton', 'longueur', 'format', 'langue', 'autre'" },
+      },
+      required: ['preference'],
     },
   },
 ];
@@ -707,6 +732,77 @@ async function tool_lire_marges(uid, input) {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// MÉMOIRE LONG TERME (Wave 3)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Cap le nombre de faits persistés par user pour éviter dérive contexte + coût.
+// Au-delà, on rejette les nouveaux faits avec un message explicatif pour Léa.
+const MAX_FACTS_PER_USER = 80;
+
+async function tool_enregistrer_fait_business(uid, input) {
+  const fait = (input.fait || '').trim();
+  const categorie = (input.categorie || 'autre').trim();
+  if (!fait) return { error: "Le champ 'fait' est requis" };
+  if (fait.length > 300) return { error: "Le fait est trop long (max 300 caractères)" };
+
+  // Vérifier le quota
+  const existing = await fsList(`agent/${uid}/memory-facts`, MAX_FACTS_PER_USER + 1);
+  const existingDocs = existing?.documents || [];
+  if (existingDocs.length >= MAX_FACTS_PER_USER) {
+    return {
+      error: `Limite de ${MAX_FACTS_PER_USER} faits atteinte. Suggère au dirigeant de nettoyer sa mémoire dans la section 🧠 Mémoire de la page Léa.`,
+      saved: false,
+    };
+  }
+
+  // Déduplication simple : si le même fait existe déjà (case-insensitive), on ignore
+  const lower = fait.toLowerCase();
+  for (const d of existingDocs) {
+    const existingFait = (fv(d, 'fait') || '').toLowerCase();
+    if (existingFait === lower) {
+      return { saved: false, message: "Ce fait existe déjà, rien à mémoriser.", duplicate: true };
+    }
+  }
+
+  const ts = new Date().toISOString();
+  const docId = ts.replace(/[:.]/g, '-') + '-' + Math.random().toString(36).slice(2, 8);
+  await fsCreateWithId(`agent/${uid}/memory-facts`, docId, {
+    fait,
+    categorie,
+    source: 'conversation',
+    createdAt: ts,
+  });
+
+  return { saved: true, fait, categorie, factId: docId };
+}
+
+async function tool_enregistrer_preference(uid, input) {
+  const preference = (input.preference || '').trim();
+  const type = (input.type || 'autre').trim();
+  if (!preference) return { error: "Le champ 'preference' est requis" };
+  if (preference.length > 200) return { error: "Préférence trop longue (max 200 caractères)" };
+
+  // Document singleton par type : on écrase à chaque fois
+  const path = `agent/${uid}/memory-preferences/${type}`;
+  const existing = await fsGet(path);
+
+  const data = {
+    preference,
+    type,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (existing) {
+    await fsPatch(path, data);
+  } else {
+    // fsPatch sur path inexistant fonctionne sur Firestore REST : il crée le doc.
+    await fsPatch(path, data);
+  }
+
+  return { saved: true, type, preference };
+}
+
 // Dispatcher
 async function executeTool(toolName, input, uid) {
   try {
@@ -719,6 +815,8 @@ async function executeTool(toolName, input, uid) {
       case 'lire_rh':            result = await tool_lire_rh(uid, input || {}); break;
       case 'lire_fidelisation':  result = await tool_lire_fidelisation(uid, input || {}); break;
       case 'lire_marges':        result = await tool_lire_marges(uid, input || {}); break;
+      case 'enregistrer_fait_business': result = await tool_enregistrer_fait_business(uid, input || {}); break;
+      case 'enregistrer_preference':    result = await tool_enregistrer_preference(uid, input || {}); break;
       default: return { error: `Tool inconnu : ${toolName}` };
     }
     // Cap la taille du résultat
@@ -734,13 +832,86 @@ async function executeTool(toolName, input, uid) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 6. SYSTEM PROMPT
+// 6. SYSTEM PROMPT + MÉMOIRE LONG TERME
 // ═══════════════════════════════════════════════════════════════════════════
 
-function buildSystemPrompt(userDoc, userEmail) {
+// Charge les 3 briques de mémoire long terme de l'utilisateur
+async function loadMemory(uid) {
+  const out = {
+    summary: null,
+    facts: [],
+    preferences: [],
+  };
+
+  // 1. Résumé business
+  const summaryDoc = await fsGet(`agent/${uid}/memory/business-summary`);
+  if (summaryDoc) {
+    out.summary = {
+      text: fv(summaryDoc, 'text') || '',
+      generatedAt: fv(summaryDoc, 'generatedAt') || null,
+      version: parseInt(fv(summaryDoc, 'version') || 0),
+    };
+  }
+
+  // 2. Faits (liste, triés par date de création desc)
+  const factsRes = await fsList(`agent/${uid}/memory-facts`, 100);
+  const factsDocs = factsRes?.documents || [];
+  out.facts = factsDocs
+    .map(d => ({
+      id: (d.name || '').split('/').pop(),
+      fait: fv(d, 'fait') || '',
+      categorie: fv(d, 'categorie') || 'autre',
+      createdAt: fv(d, 'createdAt') || '',
+    }))
+    .filter(f => f.fait)
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    .slice(0, 50); // max 50 faits dans le contexte (anti-explosion)
+
+  // 3. Préférences (singleton par type)
+  const prefsRes = await fsList(`agent/${uid}/memory-preferences`, 20);
+  const prefsDocs = prefsRes?.documents || [];
+  out.preferences = prefsDocs
+    .map(d => ({
+      type: (d.name || '').split('/').pop(),
+      preference: fv(d, 'preference') || '',
+      updatedAt: fv(d, 'updatedAt') || '',
+    }))
+    .filter(p => p.preference);
+
+  return out;
+}
+
+function buildSystemPrompt(userDoc, userEmail, memory) {
   const prenom = fv(userDoc, 'name') || fv(userDoc, 'prenom') || (userEmail?.split('@')[0] || '');
   const entreprise = fv(userDoc, 'entreprise') || fv(userDoc, 'nomEntreprise') || '';
   const today = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  // Section mémoire : injectée seulement si on a quelque chose à dire
+  let memorySection = '';
+  if (memory && (memory.summary?.text || memory.facts.length || memory.preferences.length)) {
+    memorySection = '\n\n# CE QUE TU SAIS DÉJÀ SUR L\'ENTREPRISE ET SON DIRIGEANT\n';
+    memorySection += '(Utilise ces informations pour personnaliser tes réponses, mais ne les récite pas bêtement. Cite-les quand c\'est pertinent.)\n\n';
+
+    if (memory.summary?.text) {
+      memorySection += `## Synthèse du business\n${memory.summary.text}\n\n`;
+    }
+
+    if (memory.facts.length) {
+      memorySection += `## Faits mémorisés (${memory.facts.length})\n`;
+      for (const f of memory.facts) {
+        memorySection += `- [${f.categorie}] ${f.fait}\n`;
+      }
+      memorySection += '\n';
+    }
+
+    if (memory.preferences.length) {
+      memorySection += '## Préférences du dirigeant\n';
+      for (const p of memory.preferences) {
+        memorySection += `- ${p.preference}\n`;
+      }
+      memorySection += '\n';
+    }
+  }
 
   return `Tu es Léa, l'employée IA d'Alteore. Tu es le bras droit du dirigeant : tu gères le pilotage financier, la trésorerie, les stocks, la RH, la fidélisation client.
 
@@ -761,18 +932,26 @@ ${prenom ? '- Prénom : ' + prenom : '- Prénom non disponible'}
 ${entreprise ? '- Entreprise : ' + entreprise : ''}
 
 # RÈGLES DE RÉPONSE
-1. **Va chercher les données avant de répondre** : utilise les tools dès que la question concerne des chiffres (pilotage, stock, banque, RH, fidélisation). **Ne jamais inventer un chiffre.**
-2. **Concise par défaut** : 2-4 phrases. Va droit au but. Ne pas faire 3 paragraphes si 2 phrases suffisent.
-3. **Chiffres d'abord, analyse ensuite** : format type "Ton CA d'avril est de **45 320 €**. +12 % vs mars, tu progresses bien."
-4. **Honnêteté** : si un tool renvoie vide ou erreur, dis-le franchement. Ne bluffe pas.
-5. **Format français** : euros avec espaces pour les milliers et virgule pour les décimales (ex: **15 420,50 €**). Pourcentages avec 1 décimale max (ex: **12,5 %**).
+1. **Va chercher les données avant de répondre** : utilise les tools de lecture dès que la question concerne des chiffres. **Ne jamais inventer un chiffre.**
+2. **Concise par défaut** : 2-4 phrases. Va droit au but.
+3. **Chiffres d'abord, analyse ensuite** : format "Ton CA d'avril est de **45 320 €**. +12 % vs mars, tu progresses bien."
+4. **Honnêteté** : si un tool renvoie vide ou erreur, dis-le franchement.
+5. **Format français** : euros avec espaces pour milliers et virgule pour décimales (**15 420,50 €**). Pourcentages avec 1 décimale max (**12,5 %**).
 6. **Markdown léger autorisé** : **gras** sur les chiffres clés, listes à puces pour énumérations courtes, pas d'abus.
-7. **Comparaisons** : donne toujours la variation en **€ ET en %**. Ex: "+2 340 € (+18,5 %)".
+7. **Comparaisons** : variation en **€ ET en %**. Ex: "+2 340 € (+18,5 %)".
 8. **Ambiguïté** : pose UNE question de clarification, jamais plusieurs.
-9. **Proactivité discrète** : si tu vois un signal important en répondant à une question (tréso tendue, rupture stock imminente, marge qui glisse), mentionne-le brièvement à la fin.
-10. **Appels multi-tools** : tu peux appeler plusieurs tools dans la même réponse si besoin (ex: comparer 2 mois → 2 appels à lire_pilotage).
+9. **Proactivité discrète** : si tu vois un signal important (tréso tendue, rupture imminente, marge qui glisse), mentionne-le brièvement à la fin.
+10. **Appels multi-tools** : plusieurs tools dans la même réponse si besoin.
+
+# MÉMORISATION AUTONOME (IMPORTANT)
+Tu as deux tools d'écriture pour construire ta mémoire long terme :
+- **enregistrer_fait_business** : utilise-le DE TA PROPRE INITIATIVE quand tu repères un fait qui mérite d'être retenu pour plus tard (échéance récurrente, info client/employé clé, objectif annoncé, particularité business, saisonnalité, etc.). Ne demande PAS l'autorisation. Quand tu le fais, mentionne-le en une phrase courte dans ta réponse ("Je note que..." / "J'enregistre...").
+- **enregistrer_preference** : utilise-le quand le dirigeant te donne une consigne de style ("réponds en plus court", "pas d'emoji", etc.).
+
+Ces mémoires te suivront d'une conversation à l'autre. Utilise-les avec parcimonie : ne mémorise pas tout et n'importe quoi, seulement ce qui a une vraie valeur de long terme. Ne re-mémorise jamais un fait déjà présent dans la section "Faits mémorisés" ci-dessous.
 
 # TOOLS DISPONIBLES
+Lecture :
 - **lire_pilotage** : CA, charges, crédits pour un mois ou toute une année
 - **lire_historique_ca** : CA sur N mois glissants
 - **lire_banque** : soldes et mouvements bancaires
@@ -781,24 +960,28 @@ ${entreprise ? '- Entreprise : ' + entreprise : ''}
 - **lire_fidelisation** : clients fid, segmentation, top clients
 - **lire_marges** : fiches marges produits, top/bottom rentabilité
 
-# CE QUE TU NE FAIS PAS (WAVE 2)
+Écriture mémoire :
+- **enregistrer_fait_business** : mémoriser un fait important sur le business
+- **enregistrer_preference** : mémoriser une préférence de style du dirigeant
+
+# CE QUE TU NE FAIS PAS (WAVE 3)
 Tu ne peux pas encore :
 - Envoyer des emails, SMS, générer des contrats (Waves 4-6)
-- Modifier les données dans Firestore (tu es en lecture seule)
-- Programmer des rappels ou tâches récurrentes (Wave 3)
+- Modifier les données pilotage/banque/stock (tu es en lecture seule sur les données business)
+- Programmer des rappels ou tâches récurrentes (Wave 4)
 
-Si on te demande ces actions : explique gentiment que ça arrive bientôt et que tu peux déjà analyser les chiffres pour préparer le terrain.`;
+Si on te demande ces actions : explique gentiment que ça arrive bientôt.${memorySection}`;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 7. MAIN CLAUDE LOOP
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function runConversation(uid, userDoc, userEmail, userMessage, history) {
+async function runConversation(uid, userDoc, userEmail, userMessage, history, memory) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY manquante');
 
-  const systemPrompt = buildSystemPrompt(userDoc, userEmail);
+  const systemPrompt = buildSystemPrompt(userDoc, userEmail, memory);
 
   // Historique → format Claude : on ne garde que des messages TEXT propres
   // (pas de tool_use/tool_result persistés, cf. architecture)
@@ -939,11 +1122,14 @@ module.exports = async (req, res) => {
     // Historique du mois
     const history = await loadHistory(uid);
 
+    // Mémoire long terme (Wave 3)
+    const memory = await loadMemory(uid);
+
     // Sauver le message user AVANT de lancer Claude (au cas où ça crash, on garde trace)
     await saveMessage(uid, 'user', message.trim());
 
     // Claude !
-    const result = await runConversation(uid, userDoc, email, message.trim(), history);
+    const result = await runConversation(uid, userDoc, email, message.trim(), history, memory);
 
     // Sauver la réponse finale avec métadonnées
     if (result.text) {
