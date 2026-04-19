@@ -53,7 +53,7 @@ async function _verifyAuth(req, res) {
     const d = await r.json();
     const u = d.users?.[0];
     if (!u?.localId) { res.status(401).json({ error: 'Utilisateur introuvable.' }); return null; }
-    return { uid: u.localId };
+    return { uid: u.localId, idToken: token };
   } catch (e) {
     res.status(401).json({ error: 'Erreur auth.' });
     return null;
@@ -118,6 +118,24 @@ async function fsList(path, pageSize = 100) {
   const res = await fetch(url + (token ? '' : '&key=' + fbKey), { headers });
   if (!res.ok) return { documents: [] };
   return res.json();
+}
+
+// ── Lecture avec le idToken de l'utilisateur (pour son propre user doc) ──
+// Les règles Firestore pour users/{uid} n'autorisent que le propriétaire (isOwner),
+// pas le compte serveur. On doit donc utiliser le token de l'utilisateur lui-même.
+async function fsGetAsUser(path, userIdToken) {
+  if (!userIdToken) return null;
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}`;
+  try {
+    const res = await fetch(url, {
+      headers: { 'Authorization': 'Bearer ' + userIdToken }
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    return res.json();
+  } catch (e) {
+    return null;
+  }
 }
 
 function fvRaw(f) {
@@ -303,7 +321,10 @@ export default async function handler(req, res) {
     const jour = now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 
     // ── Détection mode Léa ──
-    const userDoc = await fsGet(`users/${auth.uid}`);
+    // IMPORTANT : on lit le user doc avec le idToken de l'utilisateur, pas celui
+    // du compte serveur. Les règles Firestore pour users/{uid} n'autorisent que
+    // le propriétaire (isOwner), donc fsGet() classique (avec token admin) retourne null.
+    const userDoc = await fsGetAsUser(`users/${auth.uid}`, auth.idToken);
     const leaMode = hasLeaAccess(userDoc);
 
     let prompt, model, maxTokens;
