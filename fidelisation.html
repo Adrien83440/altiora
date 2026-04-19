@@ -2429,20 +2429,31 @@ function copBuildSnapshot(){
 
 // ─── Envoi d'un message ───
 
-// Attend que Firebase Auth soit prêt (max 5s) et retourne le user ou null
+// Attend que Firebase Auth soit prêt. On utilise window._uid comme signal
+// car il est défini par onAuthStateChanged après qu'auth.currentUser soit fiable.
 function copWaitAuth(){
   return new Promise(resolve => {
-    // Cas 1 : déjà prêt
-    const existing = window._auth?.currentUser;
-    if(existing) return resolve(existing);
-    // Cas 2 : Firebase pas encore chargé (module async) — poll court
+    // Si déjà prêt
+    if(window._uid && window._auth?.currentUser){
+      return resolve(window._auth.currentUser);
+    }
+    // Sinon poll
     let attempts = 0;
     const tick = setInterval(() => {
       attempts++;
-      const u = window._auth?.currentUser;
-      if(u){ clearInterval(tick); return resolve(u); }
-      if(attempts >= 50){ // 50 × 100ms = 5s
+      if(window._uid && window._auth?.currentUser){
         clearInterval(tick);
+        return resolve(window._auth.currentUser);
+      }
+      if(attempts >= 80){ // 80 × 100ms = 8s
+        clearInterval(tick);
+        // Diagnostic pour debug
+        console.warn('[Copilot] auth timeout. State:', {
+          hasAuth: !!window._auth,
+          hasCurrentUser: !!window._auth?.currentUser,
+          uid: window._uid,
+          firebaseReady: window._firebaseReady
+        });
         return resolve(null);
       }
     }, 100);
@@ -2462,15 +2473,27 @@ async function copSendMessage(userText){
   copShowTyping();
 
   try{
-    // Attendre que Firebase Auth soit prêt (certains clics rapides arrivent avant le chargement)
+    // Attendre que Firebase Auth soit prêt
     const user = await copWaitAuth();
     if(!user){
       copHideTyping();
-      copRenderError('Firebase n\u2019a pas fini de se connecter. Recharge la page si ça persiste.');
+      const diag = [];
+      if(!window._auth) diag.push('_auth absent');
+      if(!window._uid) diag.push('_uid absent');
+      if(window._auth && !window._auth.currentUser) diag.push('currentUser null');
+      copRenderError('Problème de connexion Firebase' + (diag.length ? ' ('+diag.join(', ')+')' : '') + '. Recharge la page.');
       copSetBusy(false);
       return;
     }
-    const idToken = await user.getIdToken();
+    let idToken;
+    try {
+      idToken = await user.getIdToken();
+    } catch(tokErr){
+      copHideTyping();
+      copRenderError('Impossible de récupérer le token Firebase : ' + (tokErr.message||'inconnu'));
+      copSetBusy(false);
+      return;
+    }
 
     // Historique (excluant le dernier = le message qu'on envoie)
     const history = _copState.messages.slice(0, -1).slice(-10).map(m => ({
