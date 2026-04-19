@@ -99,6 +99,15 @@
       <span>📈</span><span>Suivi CA &amp; Résultats</span>
     </div>
 
+    <!-- ═══════════════════════════════════ -->
+    <!-- EMPLOYÉE IA LÉA (Wave 1+)         -->
+    <!-- ═══════════════════════════════════ -->
+    <div class="ns lea-ns">Employée IA</div>
+    <div class="ni lea-ni${a('agent.html') || a('agent-historique.html') || a('agent-upgrade.html')}" id="nav-lea" onclick="location.href='agent.html'">
+      <span class="lea-avatar-mini">👩‍💼</span><span style="flex:1;font-weight:700">Léa</span>
+      <span id="nav-lea-badge" class="lea-badge">Nouveau</span>
+    </div>
+
     <!-- KPIs -->
     <div class="ni${aNI(kpisPages)}" id="nav-kpis" onclick="toggleAlteoreNav('kpis-sub',this)">
       <span>🎯</span><span style="flex:1">KPIs Clés</span><span class="chev" id="chev-kpis">›</span>
@@ -307,6 +316,36 @@ nav#alteore-nav .rh-si:hover{color:rgba(255,255,255,.82);background:rgba(16,185,
 nav#alteore-nav .rh-si.on{color:#fff;background:rgba(16,185,129,.17);border-left-color:rgba(16,185,129,.75)}
 nav#alteore-nav .rh-dot{background:rgba(52,211,153,.28)}
 nav#alteore-nav .rh-si.on .rh-dot{background:#10b981}
+
+/* ── LÉA — couleurs violettes ── */
+nav#alteore-nav .lea-ns{color:rgba(167,139,250,.6)}
+nav#alteore-nav .ni.lea-ni{color:#fff;font-weight:700;position:relative}
+nav#alteore-nav .ni.lea-ni:hover{background:rgba(124,58,237,.14);border-left-color:rgba(167,139,250,.55)}
+nav#alteore-nav .ni.lea-ni.on{background:rgba(124,58,237,.2);border-left-color:#a78bfa}
+nav#alteore-nav .lea-avatar-mini{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:20px;height:20px;
+  background:linear-gradient(135deg,#a78bfa,#7c3aed);
+  border-radius:50%;
+  font-size:12px;
+  box-shadow:0 0 0 1px rgba(255,255,255,.15), 0 0 12px rgba(167,139,250,.3);
+  flex-shrink:0;
+}
+nav#alteore-nav .lea-badge{
+  font-size:9px;font-weight:700;letter-spacing:.3px;
+  padding:2px 7px;border-radius:20px;
+  background:linear-gradient(135deg,rgba(167,139,250,.3),rgba(124,58,237,.3));
+  color:#ddd6fe;
+  border:1px solid rgba(167,139,250,.3);
+}
+nav#alteore-nav .lea-badge.active{background:linear-gradient(135deg,rgba(16,185,129,.3),rgba(5,150,105,.3));color:#6ee7b7;border-color:rgba(16,185,129,.3)}
+nav#alteore-nav .lea-badge.degraded{background:rgba(245,158,11,.2);color:#fbbf24;border-color:rgba(245,158,11,.3)}
+nav#alteore-nav .lea-badge.trial{background:rgba(96,165,250,.2);color:#93c5fd;border-color:rgba(96,165,250,.3)}
+@keyframes leaPulse{
+  0%,100%{box-shadow:0 0 0 1px rgba(255,255,255,.15), 0 0 12px rgba(167,139,250,.3)}
+  50%{box-shadow:0 0 0 1px rgba(255,255,255,.2), 0 0 18px rgba(167,139,250,.55)}
+}
+nav#alteore-nav .ni.lea-ni .lea-avatar-mini{animation:leaPulse 3s ease-in-out infinite}
 
 /* ── THÈME VERT GLOBAL quand RH ouvert ── */
 nav#alteore-nav.rh-mode{background:linear-gradient(180deg,#052e16 0%,#064e23 50%,#065f2c 100%);transition:background .45s ease}
@@ -588,8 +627,53 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
     if (!CAN_SCENARIOS.includes(plan))     lockNavItem('nav-scenarios','Max+', 'scenarios');
     if (!CAN_PREVISIONS.includes(plan))    lockNavItem('nav-previsions','Master', 'previsions');
 
+    // ── LÉA — gestion visibilité + badge dynamique selon statut ──
+    applyLeaNavItem(plan);
+
     const mainEl = document.querySelector('main, .main');
     if (mainEl) mainEl.style.visibility = 'visible';
+  }
+
+  // Met à jour l'item "Léa" de la sidebar :
+  //  - Cache la section si le plan ne permet pas l'accès (free, trial_expired, past_due, etc.)
+  //  - Sinon affiche un badge adapté au statut (Trial / Active / Veille / Nouveau)
+  function applyLeaNavItem(plan) {
+    var navItem     = document.getElementById('nav-lea');
+    var badge       = document.getElementById('nav-lea-badge');
+    if (!navItem || !badge) return;
+
+    var section = navItem.previousElementSibling; // le <div class="ns lea-ns">
+    var canSee  = CAN_AGENT_UPGRADE.includes(plan); // pro/max/master/trial/dev
+
+    if (!canSee) {
+      // Cacher la section pour les plans qui ne peuvent pas souscrire Léa
+      navItem.style.display = 'none';
+      if (section && section.classList.contains('lea-ns')) section.style.display = 'none';
+      return;
+    }
+
+    // Visible — ajuster badge selon statut
+    navItem.style.display = '';
+    if (section && section.classList.contains('lea-ns')) section.style.display = '';
+
+    var agentEnabled  = window._agentEnabled === true;
+    var agentDegraded = window._agentDegradedMode === true;
+
+    badge.classList.remove('active', 'degraded', 'trial');
+
+    if (agentEnabled) {
+      badge.textContent = 'Actif';
+      badge.classList.add('active');
+    } else if (plan === 'trial') {
+      badge.textContent = 'Inclus';
+      badge.classList.add('trial');
+    } else if (agentDegraded) {
+      badge.textContent = '💤 Veille';
+      badge.classList.add('degraded');
+    } else {
+      // Pro/Max/Master sans addon → CTA "Nouveau"
+      badge.textContent = 'Nouveau';
+    }
   }
 
   function checkPageAccess(plan) {
