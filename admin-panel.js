@@ -16,6 +16,7 @@
 (function () {
   if (window.__alteoreAdminPanelInit) return;
   window.__alteoreAdminPanelInit = true;
+  console.log('[admin-panel] 🚀 script exécuté, en attente de Firebase + sidebar…');
 
   // ══════════════════════════════════════════════════════════════
   // CATALOGUE DES LIENS ADMIN
@@ -306,21 +307,37 @@
   // ══════════════════════════════════════════════════════════════
   function waitForFirebase(cb, tries) {
     tries = tries || 0;
-    if (window._uid && window._getDoc && window._db && window._doc) {
+    var fbReady = window._uid && window._getDoc && window._db && window._doc;
+    var slotReady = !!document.getElementById('nav-admin-slot');
+    if (fbReady && slotReady) {
+      console.log('[admin-panel] ✓ ready after ' + tries + ' ticks');
       cb();
-    } else if (tries < 40) {
+    } else if (tries < 200) {  // 200 × 150ms = 30 secondes max
+      if (tries === 20) console.log('[admin-panel] ⏳ still waiting... fb:', fbReady, 'slot:', slotReady);
+      if (tries === 100) console.warn('[admin-panel] ⏳ still waiting after 15s — fb:', fbReady, 'slot:', slotReady);
       setTimeout(function () { waitForFirebase(cb, tries + 1); }, 150);
+    } else {
+      console.warn('[admin-panel] ❌ TIMEOUT after 30s — fb:', fbReady, 'slot:', slotReady, '— widget NOT injected');
     }
   }
 
   async function isUserAdmin() {
+    console.log('[admin-panel] check role for uid:', window._uid);
     try {
       var snap = await window._getDoc(window._doc(window._db, 'users', window._uid));
-      if (!snap.exists()) return false;
+      if (!snap.exists()) {
+        console.warn('[admin-panel] ❌ user doc does not exist');
+        return false;
+      }
       var data = snap.data();
-      return data.role === 'admin';
+      console.log('[admin-panel] user.role =', JSON.stringify(data.role), 'typeof:', typeof data.role);
+      var isAdmin = data.role === 'admin';
+      if (!isAdmin) {
+        console.log('[admin-panel] ℹ️ not admin — widget will not be injected');
+      }
+      return isAdmin;
     } catch (e) {
-      console.warn('[admin-panel] isAdmin check failed:', e);
+      console.warn('[admin-panel] ❌ isAdmin check failed:', e && e.message, e);
       return false;
     }
   }
