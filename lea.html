@@ -928,6 +928,26 @@ window.doLogout = async function() {
       alert("La saisie vocale n'est pas disponible sur ce navigateur. Tape ta question.");
       return;
     }
+
+    // ── Priming speechSynthesis (Wave 3.10.1 fix iOS PWA) ──
+    // iOS exige une utterance déclenchée dans la session user gesture pour autoriser
+    // speechSynthesis ensuite. On déclenche ici une utterance silencieuse/courte
+    // pendant qu'on est dans le handler du tap micro. Ça débloque speechSynthesis
+    // pour les utterances suivantes (la vraie réponse de Léa).
+    //
+    // Important : speechSynthesis n'utilise PAS MediaStream — aucun conflit avec
+    // SpeechRecognition qui va démarrer juste après.
+    if (_browserSynth) {
+      try {
+        _browserSynth.cancel();
+        var primer = new SpeechSynthesisUtterance(' ');
+        primer.volume = 0;       // silencieux
+        primer.rate = 10;        // ultra rapide (finit en ~50ms)
+        if (_browserVoice) primer.voice = _browserVoice;
+        _browserSynth.speak(primer);
+      } catch(e) { /* silent */ }
+    }
+
     _convActive = true;
     _convBuffer = [];
     document.getElementById('input-mic').classList.add('recording');
@@ -1071,12 +1091,22 @@ window.doLogout = async function() {
       setOverlayText('', '« ' + question + ' »', answerText);
 
       // ── Lecture IMMÉDIATE via speechSynthesis (autoplay iOS OK) ──
-      speakWithBrowser(answerText, function onSpeechEnd() {
-        if (!_convActive) return;
-        // Conversation continue : relancer le micro pour le tour suivant
-        setRingState('', 'Léa t\'écoute…');
-        _isProcessing = false;
-        setTimeout(startListeningCycle, 400);
+      // speakWithBrowser appelle onEnd(spoke) : spoke=true si ça a parlé, false si échec silencieux
+      speakWithBrowser(answerText, function onSpeechEnd(spoke) {
+        if (!_convActive) { _isProcessing = false; return; }
+        if (!spoke) {
+          // speechSynthesis a échoué silencieusement (iOS PWA bug connu)
+          // → afficher un message visuel pour que l'user sache que Léa n'a pas parlé
+          setOverlayText('(Son indisponible, lis la réponse ci-dessus)', undefined, undefined);
+        }
+        // Dans tous les cas (parlé ou non), on relance le micro pour continuer la conversation
+        setTimeout(function() {
+          if (!_convActive) return;
+          setRingState('', 'Léa t\'écoute…');
+          setOverlayText('Parle maintenant', undefined, undefined);
+          _isProcessing = false;
+          startListeningCycle();
+        }, spoke ? 400 : 1200);  // si son ok : 400ms pause naturelle ; sinon : 1.2s pour lire
       });
 
       // ── En parallèle : Nova OpenAI en arrière-plan (pour bouton 🔊 après flush) ──
@@ -1116,9 +1146,18 @@ window.doLogout = async function() {
   }
 
   // Fait parler Léa via speechSynthesis navigateur (auto-play iOS compatible
-  // quand déclenché dans session user gesture récente)
+  // quand déclenché dans session user gesture récente).
+  //
+  // Wave 3.10.1 — Robustesse :
+  //  - Timeout de sécurité : si onend ne se déclenche pas dans 20s, on force onEnd
+  //    pour ne pas bloquer la conversation continue
+  //  - Estimation durée utterance : 150 chars/5s environ → on calcule un timeout
+  //    min = (length * 60ms) + 2000ms buffer, max = 25s
+  //  - Détection d'échec rapide : si le speech s'arrête sans avoir parlé (onend
+  //    dans < 100ms), on considère que speechSynthesis a échoué silencieusement
+  //    et on signale via onEnd avec un flag 'failed' pour fallback Nova
   function speakWithBrowser(text, onEnd) {
-    if (!_browserSynth || !text) { if (onEnd) onEnd(); return; }
+    if (!_browserSynth || !text) { if (onEnd) onEnd(false); return; }
     try { _browserSynth.cancel(); } catch(e) {}
 
     // Nettoyer le markdown pour la synthèse
@@ -1130,6 +1169,21 @@ window.doLogout = async function() {
                     .replace(/\s+/g, ' ')
                     .trim();
 
+    if (!clean) { if (onEnd) onEnd(false); return; }
+
+    // Estimer la durée de parole (pour le timeout de sécurité)
+    var estimatedMs = Math.min(25000, Math.max(3000, clean.length * 65 + 2000));
+    var startTs = Date.now();
+    var called = false;
+    var timeoutId = null;
+
+    var finish = function(spoke) {
+      if (called) return;
+      called = true;
+      if (timeoutId) { clearTimeout(timeoutId); timeoutId = null; }
+      if (onEnd) onEnd(spoke);
+    };
+
     try {
       var utt = new SpeechSynthesisUtterance(clean);
       utt.lang = 'fr-FR';
@@ -1137,12 +1191,32 @@ window.doLogout = async function() {
       utt.pitch = 1.05;
       utt.volume = 1.0;
       if (_browserVoice) utt.voice = _browserVoice;
-      utt.onend = function() { if (onEnd) onEnd(); };
-      utt.onerror = function() { if (onEnd) onEnd(); };
+
+      utt.onend = function() {
+        var elapsed = Date.now() - startTs;
+        // Si onend arrive trop vite (< 150ms pour un texte de plus de 10 chars),
+        // c'est que speechSynthesis a échoué silencieusement (iOS PWA bug connu)
+        var spoke = !(elapsed < 150 && clean.length > 10);
+        if (!spoke) console.warn('[lea] speechSynthesis failed silently (elapsed ' + elapsed + 'ms for ' + clean.length + ' chars)');
+        finish(spoke);
+      };
+      utt.onerror = function(e) {
+        console.warn('[lea] utterance error:', e && e.error);
+        finish(false);
+      };
+
       _browserSynth.speak(utt);
+
+      // Timeout de sécurité : on ne reste JAMAIS bloqué
+      timeoutId = setTimeout(function() {
+        console.warn('[lea] speechSynthesis timeout after ' + estimatedMs + 'ms, forcing end');
+        try { _browserSynth.cancel(); } catch(e) {}
+        finish(true); // on suppose que ça a parlé, on laisse la conv continuer
+      }, estimatedMs);
+
     } catch(e) {
       console.warn('[lea] synth error:', e);
-      if (onEnd) onEnd();
+      finish(false);
     }
   }
 
