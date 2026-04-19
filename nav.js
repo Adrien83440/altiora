@@ -800,18 +800,25 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       // agentEnabled : true si l'addon Léa est actif (plan payant + subscription_item Léa)
       // agentDegradedMode : true si post-trial sans addon (accès lecture seule aux briefings hebdo)
       // isAdmin : bypass total, accès complet à Léa même sans addon (pour Adrien, Emily, équipe interne)
+      //   Deux sources possibles :
+      //     - Flag isAdmin:true dans users/{uid} Firestore
+      //     - Email de l'utilisateur dans la whitelist ADMIN_EMAILS (fallback automatique)
       // Disponibles aussi pendant le trial (plan==='trial' → tous les droits sans flag)
+      const ADMIN_EMAILS = ['contact@adrienemily.com'];
+      const currentEmail = (window._auth && window._auth.currentUser && window._auth.currentUser.email) || '';
+      const isAdminByEmail = ADMIN_EMAILS.includes(currentEmail);
+
       if (snap.exists()) {
         const ud = snap.data();
         window._agentEnabled      = ud.agentEnabled === true;
         window._agentDegradedMode = ud.agentDegradedMode === true;
         window._agentAddonStatus  = ud.agentAddonStatus || null;
-        window._isAdmin           = ud.isAdmin === true;
+        window._isAdmin           = ud.isAdmin === true || isAdminByEmail;
       } else {
         window._agentEnabled      = false;
         window._agentDegradedMode = false;
         window._agentAddonStatus  = null;
-        window._isAdmin           = false;
+        window._isAdmin           = isAdminByEmail;
       }
 
       if (!checkPageAccess(plan)) { applyNavPlan(plan); return; }
