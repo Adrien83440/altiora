@@ -99,15 +99,6 @@
       <span>📈</span><span>Suivi CA &amp; Résultats</span>
     </div>
 
-    <!-- ═══════════════════════════════════ -->
-    <!-- EMPLOYÉE IA LÉA (Wave 1+)         -->
-    <!-- ═══════════════════════════════════ -->
-    <div class="ns lea-ns">Employée IA</div>
-    <div class="ni lea-ni${a('agent.html') || a('agent-historique.html') || a('agent-upgrade.html')}" id="nav-lea" onclick="location.href='agent.html'">
-      <span class="lea-avatar-mini">👩‍💼</span><span style="flex:1;font-weight:700">Léa</span>
-      <span id="nav-lea-badge" class="lea-badge">Nouveau</span>
-    </div>
-
     <!-- KPIs -->
     <div class="ni${aNI(kpisPages)}" id="nav-kpis" onclick="toggleAlteoreNav('kpis-sub',this)">
       <span>🎯</span><span style="flex:1">KPIs Clés</span><span class="chev" id="chev-kpis">›</span>
@@ -147,6 +138,10 @@
     </div>
     <!-- IA -->
     <div class="ns">Intelligence IA</div>
+    <div class="ni lea-ni${a('agent.html') || a('agent-historique.html') || a('agent-upgrade.html')}" id="nav-lea" onclick="location.href='agent.html'">
+      <span class="lea-avatar-mini">👩‍💼</span><span style="flex:1;font-weight:700">Léa</span>
+      <span id="nav-lea-badge" class="lea-badge">Nouveau</span>
+    </div>
     <div class="ni${a('bilan.html')}" id="nav-bilan" onclick="location.href='bilan.html'">
       <span>🤖</span><span style="flex:1">Analyse de Bilan</span>
       <span style="font-size:10px;font-weight:700;background:rgba(79,126,248,.3);color:#a5b4fc;padding:2px 7px;border-radius:20px">IA</span>
@@ -317,8 +312,7 @@ nav#alteore-nav .rh-si.on{color:#fff;background:rgba(16,185,129,.17);border-left
 nav#alteore-nav .rh-dot{background:rgba(52,211,153,.28)}
 nav#alteore-nav .rh-si.on .rh-dot{background:#10b981}
 
-/* ── LÉA — couleurs violettes ── */
-nav#alteore-nav .lea-ns{color:rgba(167,139,250,.6)}
+/* ── LÉA — couleurs violettes (placée dans la section Intelligence IA) ── */
 nav#alteore-nav .ni.lea-ni{color:#fff;font-weight:700;position:relative}
 nav#alteore-nav .ni.lea-ni:hover{background:rgba(124,58,237,.14);border-left-color:rgba(167,139,250,.55)}
 nav#alteore-nav .ni.lea-ni.on{background:rgba(124,58,237,.2);border-left-color:#a78bfa}
@@ -341,6 +335,7 @@ nav#alteore-nav .lea-badge{
 nav#alteore-nav .lea-badge.active{background:linear-gradient(135deg,rgba(16,185,129,.3),rgba(5,150,105,.3));color:#6ee7b7;border-color:rgba(16,185,129,.3)}
 nav#alteore-nav .lea-badge.degraded{background:rgba(245,158,11,.2);color:#fbbf24;border-color:rgba(245,158,11,.3)}
 nav#alteore-nav .lea-badge.trial{background:rgba(96,165,250,.2);color:#93c5fd;border-color:rgba(96,165,250,.3)}
+nav#alteore-nav .lea-badge.admin{background:linear-gradient(135deg,rgba(239,68,68,.25),rgba(220,38,38,.25));color:#fca5a5;border-color:rgba(239,68,68,.3)}
 @keyframes leaPulse{
   0%,100%{box-shadow:0 0 0 1px rgba(255,255,255,.15), 0 0 12px rgba(167,139,250,.3)}
   50%{box-shadow:0 0 0 1px rgba(255,255,255,.2), 0 0 18px rgba(167,139,250,.55)}
@@ -634,34 +629,32 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
     if (mainEl) mainEl.style.visibility = 'visible';
   }
 
-  // Met à jour l'item "Léa" de la sidebar :
-  //  - Cache la section si le plan ne permet pas l'accès (free, trial_expired, past_due, etc.)
-  //  - Sinon affiche un badge adapté au statut (Trial / Active / Veille / Nouveau)
+  // Met à jour l'item "Léa" de la sidebar (placé dans la section "Intelligence IA") :
+  //  - Cache l'item si le plan ne permet pas l'accès (free, trial_expired, past_due, etc.)
+  //  - Sinon affiche un badge adapté au statut (Trial / Active / Veille / Nouveau / Admin)
+  //  - Les admins (users/{uid}.isAdmin == true) ont toujours accès et voient "Admin"
   function applyLeaNavItem(plan) {
-    var navItem     = document.getElementById('nav-lea');
-    var badge       = document.getElementById('nav-lea-badge');
+    var navItem = document.getElementById('nav-lea');
+    var badge   = document.getElementById('nav-lea-badge');
     if (!navItem || !badge) return;
 
-    var section = navItem.previousElementSibling; // le <div class="ns lea-ns">
-    var canSee  = CAN_AGENT_UPGRADE.includes(plan); // pro/max/master/trial/dev
+    var isAdmin      = window._isAdmin === true;
+    var agentEnabled = window._agentEnabled === true;
+    var agentDegraded = window._agentDegradedMode === true;
+    var canSee = isAdmin || CAN_AGENT_UPGRADE.includes(plan); // pro/max/master/trial/dev ou admin
 
     if (!canSee) {
-      // Cacher la section pour les plans qui ne peuvent pas souscrire Léa
       navItem.style.display = 'none';
-      if (section && section.classList.contains('lea-ns')) section.style.display = 'none';
       return;
     }
 
-    // Visible — ajuster badge selon statut
     navItem.style.display = '';
-    if (section && section.classList.contains('lea-ns')) section.style.display = '';
+    badge.classList.remove('active', 'degraded', 'trial', 'admin');
 
-    var agentEnabled  = window._agentEnabled === true;
-    var agentDegraded = window._agentDegradedMode === true;
-
-    badge.classList.remove('active', 'degraded', 'trial');
-
-    if (agentEnabled) {
+    if (isAdmin) {
+      badge.textContent = 'Admin';
+      badge.classList.add('admin');
+    } else if (agentEnabled) {
       badge.textContent = 'Actif';
       badge.classList.add('active');
     } else if (plan === 'trial') {
@@ -671,7 +664,6 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       badge.textContent = '💤 Veille';
       badge.classList.add('degraded');
     } else {
-      // Pro/Max/Master sans addon → CTA "Nouveau"
       badge.textContent = 'Nouveau';
     }
   }
@@ -696,13 +688,14 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
     if (PAGE === 'previsions.html'     && !CAN_PREVISIONS.includes(plan))    { showUpgradeModal('previsions');   return false; }
 
     // ── AGENT LÉA ──
-    // agent.html / agent-historique.html : nécessite trial OU agentEnabled OU agentDegradedMode
+    // agent.html / agent-historique.html : nécessite trial OU agentEnabled OU agentDegradedMode OU isAdmin
     // Si le user n'a aucun de ces accès mais est sur un plan payant, on redirige vers agent-upgrade
     if (AGENT_PAGES.includes(PAGE)) {
       var hasTrial     = plan === 'trial' || plan === 'dev';
       var hasAddon     = window._agentEnabled === true;
       var hasDegraded  = window._agentDegradedMode === true;
-      if (!hasTrial && !hasAddon && !hasDegraded) {
+      var isAdmin      = window._isAdmin === true;
+      if (!hasTrial && !hasAddon && !hasDegraded && !isAdmin) {
         if (CAN_AGENT_UPGRADE.includes(plan)) {
           location.href = 'agent-upgrade.html';
         } else {
@@ -712,8 +705,8 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       }
     }
 
-    // agent-upgrade.html : nécessite un plan payant (pro/max/master/trial/dev)
-    if (PAGE === 'agent-upgrade.html' && !CAN_AGENT_UPGRADE.includes(plan)) {
+    // agent-upgrade.html : nécessite un plan payant (pro/max/master/trial/dev) ou isAdmin
+    if (PAGE === 'agent-upgrade.html' && !CAN_AGENT_UPGRADE.includes(plan) && window._isAdmin !== true) {
       location.href = 'profil.html?tab=abonnement&upgrade=core';
       return false;
     }
@@ -806,16 +799,19 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       // ── AGENT LÉA (Wave 1+) : exposer les flags sur window ──
       // agentEnabled : true si l'addon Léa est actif (plan payant + subscription_item Léa)
       // agentDegradedMode : true si post-trial sans addon (accès lecture seule aux briefings hebdo)
+      // isAdmin : bypass total, accès complet à Léa même sans addon (pour Adrien, Emily, équipe interne)
       // Disponibles aussi pendant le trial (plan==='trial' → tous les droits sans flag)
       if (snap.exists()) {
         const ud = snap.data();
         window._agentEnabled      = ud.agentEnabled === true;
         window._agentDegradedMode = ud.agentDegradedMode === true;
         window._agentAddonStatus  = ud.agentAddonStatus || null;
+        window._isAdmin           = ud.isAdmin === true;
       } else {
         window._agentEnabled      = false;
         window._agentDegradedMode = false;
         window._agentAddonStatus  = null;
+        window._isAdmin           = false;
       }
 
       if (!checkPageAccess(plan)) { applyNavPlan(plan); return; }
