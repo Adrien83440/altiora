@@ -367,6 +367,118 @@ const TOOLS = [
       },
     },
   },
+
+  // ── WAVE 3.8 : lecture étendue ──
+  {
+    name: 'lire_planning_rh',
+    description: "Planning RH : horaires et shifts des employés sur une période. Utiliser pour questions sur qui travaille quand, qui est de repos, quels horaires un employé a cette semaine, le planning du mois, etc. Par défaut renvoie les 2 prochaines semaines.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        date_debut: { type: 'string', description: "Date de début YYYY-MM-DD (défaut: aujourd'hui)" },
+        date_fin: { type: 'string', description: "Date de fin YYYY-MM-DD (défaut: aujourd'hui + 14 jours)" },
+        employe_id: { type: 'string', description: "Filtrer sur un employé spécifique (optionnel)" },
+      },
+    },
+  },
+  {
+    name: 'lire_emargements_rh',
+    description: "Émargements et pointages : heures effectivement travaillées par les employés, état des fiches mensuelles (signées ou pas), historique des arrivées/départs. Utiliser pour questions sur les heures réelles vs planning, suivi du temps de travail, conformité des fiches d'émargement.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        mois: { type: 'string', description: "Mois cible YYYY-MM (défaut: mois courant)" },
+        employe_id: { type: 'string', description: "Filtrer sur un employé (optionnel)" },
+      },
+    },
+  },
+  {
+    name: 'lire_conges_complets',
+    description: "Historique complet des congés : approuvés, en attente, refusés, tous types (CP, RTT, maladie, etc.). Utiliser pour questions sur les soldes congés, l'historique de congés d'un employé, les demandes en attente à traiter, la planification des absences.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        statut: { type: 'string', description: "'tous' (défaut), 'en_attente', 'approuve', 'refuse'" },
+        annee: { type: 'integer', description: "Année cible (ex: 2026). Sans ce filtre = toutes années." },
+      },
+    },
+  },
+  {
+    name: 'lire_cashflow',
+    description: "Trésorerie : solde de départ configuré + projection du mois courant (CA - charges - crédits - leasing). Utiliser pour questions sur la tréso, la santé financière court terme, combien il reste sur le compte en fin de mois, si la boîte est dans le vert ou rouge ce mois-ci.",
+    input_schema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'lire_dettes',
+    description: "Dettes de l'entreprise : emprunts bancaires (avec taux, durée, capital), leasings (avec loyers), dettes fournisseurs en attente, découverts autorisés. Utiliser pour questions sur les mensualités à payer, le niveau d'endettement, les échéances à venir.",
+    input_schema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'lire_profil_entreprise',
+    description: "Identité légale et administrative : raison sociale, SIRET, forme juridique, TVA intracom, dirigeant, adresse siège, secteur d'activité, convention collective (CCN/IDCC). Utiliser quand on te demande les infos légales, les coordonnées, ou pour adapter tes conseils au secteur.",
+    input_schema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'lire_fournisseurs',
+    description: "Liste des fournisseurs enregistrés + fiches détaillées (factures d'achat archivées). Utiliser pour questions sur les fournisseurs habituels, les achats récents par fournisseur, retrouver une facture.",
+    input_schema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'lire_cartes_cadeaux',
+    description: "Cartes cadeaux vendues : celles encore actives (CA différé à venir), celles soldées, soldes restants. Utiliser pour questions sur les cartes cadeaux en circulation, le CA différé total à l'actif.",
+    input_schema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'lire_panier_moyen',
+    description: "Panier moyen et nombre de clients mois par mois : panier moyen, nombre de transactions, fréquence de visite. Utiliser pour questions sur l'évolution du panier, la fréquentation du magasin, la valeur client.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        annee: { type: 'integer', description: "Année cible (défaut: année courante)" },
+      },
+    },
+  },
+  {
+    name: 'lire_bilans',
+    description: "Bilans comptables annuels analysés : CA, résultat net, EBITDA, capitaux propres, endettement, ratios, analyse IA, points forts/vigilance. Utiliser pour questions sur l'année écoulée, la santé globale de la boîte, la performance annuelle.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        annee: { type: 'integer', description: "Année du bilan (défaut: année précédente = dernier bilan clos)" },
+      },
+    },
+  },
+  {
+    name: 'lire_objectifs_rh',
+    description: "Objectifs commerciaux ou opérationnels définis par employé : cible vs réalisé, type (CA, quantité, qualité), statut. Utiliser pour questions sur la performance individuelle, le suivi d'objectifs, les primes.",
+    input_schema: {
+      type: 'object',
+      properties: {},
+    },
+  },
+  {
+    name: 'lire_recrutement_rh',
+    description: "Recrutements en cours : offres ouvertes, candidats actifs, entretiens planifiés. Utiliser pour questions sur les recrutements en cours, combien de candidats sur telle offre, prochains entretiens.",
+    input_schema: {
+      type: 'object',
+      properties: {},
+    },
+  },
   {
     name: 'enregistrer_fait_business',
     description: "Mémorise un fait important à propos de l'entreprise ou du dirigeant pour le retrouver dans les conversations futures. À utiliser DE MANIÈRE AUTONOME quand tu identifies une info qui pourra être utile plus tard : particularités comptables, échéances récurrentes, événements marquants, décisions du dirigeant, relations clients/employés clés, habitudes business, saisonnalité observée, objectifs annoncés. Ne PAS demander l'autorisation avant d'utiliser ce tool — tu décides toi-même si un fait mérite d'être mémorisé. Après mémorisation, mentionne-le brièvement dans ta réponse (ex: 'Je note que...').",
@@ -774,6 +886,677 @@ async function tool_lire_marges(uid, input) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// WAVE 3.8 — LECTURE ÉTENDUE
+// 12 tools pour que Léa voit TOUT Alteore :
+//   RH avancé : planning, émargements, congés complets, objectifs, recrutement
+//   Finance : cashflow, dettes, bilans
+//   Référentiels : profil entreprise, fournisseurs, cartes cadeaux, panier moyen
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Helper : normaliser YYYY-MM-DD depuis une Date
+function fmtDateIso(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// Helper : calculer les clés de semaine (format YYYYMMDD du lundi) couvrant une plage de dates
+function weeksKeysInRange(startDate, endDate) {
+  const keys = new Set();
+  const cursor = new Date(startDate);
+  cursor.setHours(12, 0, 0, 0);
+  while (cursor <= endDate) {
+    const dow = cursor.getDay();
+    const diff = dow === 0 ? -6 : 1 - dow;
+    const mon = new Date(cursor);
+    mon.setDate(mon.getDate() + diff);
+    mon.setHours(12, 0, 0, 0);
+    keys.add(fmtDateIso(mon).replace(/-/g, ''));
+    cursor.setDate(cursor.getDate() + 7);
+  }
+  return Array.from(keys);
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_lire_planning_rh
+// Lecture du planning RH : horaires + shifts pour les employés
+// Input : { date_debut?: "YYYY-MM-DD", date_fin?: "YYYY-MM-DD", employe_id?: string }
+// Si pas de dates → semaine en cours + semaine suivante
+// Structure Firestore : rh/{uid}/plan_{YYYYMMDD_du_lundi}/{docId}
+//   docId = format "{employeId}_{YYYY-MM-DD}" généralement
+//   data = { employeId, jour (YYYY-MM-DD), plages: [{deb, fin}], type }
+// ───────────────────────────────────────────────────────────────────
+async function tool_lire_planning_rh(uid, input) {
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const dStart = input.date_debut ? new Date(input.date_debut) : today;
+  const dEnd = input.date_fin
+    ? new Date(input.date_fin)
+    : new Date(today.getTime() + 14 * 24 * 3600 * 1000);
+  dStart.setHours(12, 0, 0, 0);
+  dEnd.setHours(12, 0, 0, 0);
+
+  const filterEmploye = (input.employe_id || '').trim();
+
+  // Lister les employés pour mapper les IDs aux noms
+  const empRes = await fsList(`rh/${uid}/employes`, 100);
+  const empDocs = empRes?.documents || [];
+  const employesMap = {};
+  for (const d of empDocs) {
+    const data = docToObject(d);
+    const id = (d.name || '').split('/').pop();
+    employesMap[id] = {
+      id,
+      prenom: data.prenom || data.firstname || '-',
+      nom: data.nom || data.lastname || '-',
+    };
+  }
+
+  const weekKeys = weeksKeysInRange(dStart, dEnd);
+  const creneaux = [];
+  for (const wk of weekKeys) {
+    try {
+      const res = await fsList(`rh/${uid}/plan_${wk}`, 200);
+      const docs = res?.documents || [];
+      for (const doc of docs) {
+        const data = docToObject(doc);
+        const employeId = data.employeId || data.employe || '';
+        if (filterEmploye && employeId !== filterEmploye) continue;
+        const jour = data.jour || data.date || '';
+        if (jour) {
+          const jDate = new Date(jour);
+          if (jDate < dStart || jDate > dEnd) continue;
+        }
+        const plages = Array.isArray(data.plages) && data.plages.length > 0
+          ? data.plages
+          : (data.deb && data.fin ? [{ deb: data.deb, fin: data.fin }] : []);
+        const emp = employesMap[employeId] || { id: employeId, prenom: '?', nom: '?' };
+        creneaux.push({
+          employe: emp.prenom + ' ' + emp.nom,
+          employe_id: employeId,
+          jour: jour,
+          plages: plages,
+          type: data.type || 'travail',
+        });
+      }
+    } catch (e) { /* semaine sans data, skip */ }
+  }
+
+  // Trier par date puis employé
+  creneaux.sort(function (a, b) {
+    if (a.jour !== b.jour) return a.jour < b.jour ? -1 : 1;
+    return a.employe.localeCompare(b.employe);
+  });
+
+  return {
+    periode: { debut: fmtDateIso(dStart), fin: fmtDateIso(dEnd) },
+    nombre_creneaux: creneaux.length,
+    nombre_employes_concernes: new Set(creneaux.map(function (c) { return c.employe_id; })).size,
+    creneaux: creneaux,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_lire_emargements_rh
+// Heures pointées, écarts planning/réel, fiches d'émargement
+// Input : { mois?: "YYYY-MM", employe_id?: string }
+// Structure : rh_emargements/{uid}/fiches/{id} et rh_pointages_public/{uid}/events/{dateId}
+// ───────────────────────────────────────────────────────────────────
+async function tool_lire_emargements_rh(uid, input) {
+  const now = new Date();
+  const moisTarget = input.mois || (now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0'));
+  const filterEmploye = (input.employe_id || '').trim();
+
+  // Lire employés pour nommer
+  const empRes = await fsList(`rh/${uid}/employes`, 100);
+  const empDocs = empRes?.documents || [];
+  const employesMap = {};
+  for (const d of empDocs) {
+    const data = docToObject(d);
+    const id = (d.name || '').split('/').pop();
+    employesMap[id] = (data.prenom || '-') + ' ' + (data.nom || '-');
+  }
+
+  // Lire fiches d'émargement
+  let fiches = [];
+  try {
+    const res = await fsList(`rh_emargements/${uid}/fiches`, 100);
+    const docs = res?.documents || [];
+    fiches = docs.map(function (d) {
+      const data = docToObject(d);
+      const id = (d.name || '').split('/').pop();
+      return {
+        id,
+        employe: employesMap[data.employeId] || data.employeId || '?',
+        mois: data.mois || '',
+        status: data.status || data.statut || 'en_cours',
+        total_heures: parseFloat(data.totalHeures) || parseFloat(data.heures_total) || null,
+        signe: !!data.signatureEmploye,
+      };
+    }).filter(function (f) {
+      if (moisTarget && f.mois && f.mois !== moisTarget) return false;
+      if (filterEmploye && f.id.indexOf(filterEmploye) === -1) return false;
+      return true;
+    });
+  } catch (e) { /* pas de fiches */ }
+
+  // Lire pointages du mois (si dispo)
+  let pointages = [];
+  try {
+    const res = await fsList(`rh_pointages_public/${uid}/events`, 200);
+    const docs = res?.documents || [];
+    pointages = docs.map(function (d) {
+      const data = docToObject(d);
+      const id = (d.name || '').split('/').pop();
+      return {
+        date: data.date || id,
+        employe: employesMap[data.employeId] || data.employeId || '?',
+        employe_id: data.employeId || '',
+        debut: data.debut || data.heureArrivee || null,
+        fin: data.fin || data.heureDepart || null,
+        pauses: data.pauses || [],
+      };
+    }).filter(function (p) {
+      if (moisTarget && p.date && p.date.indexOf(moisTarget) !== 0) return false;
+      if (filterEmploye && p.employe_id !== filterEmploye) return false;
+      return true;
+    });
+  } catch (e) { /* pas de pointages */ }
+
+  return {
+    mois: moisTarget,
+    nombre_fiches: fiches.length,
+    fiches_par_statut: {
+      signees: fiches.filter(function (f) { return f.signe; }).length,
+      en_attente: fiches.filter(function (f) { return !f.signe; }).length,
+    },
+    fiches: fiches,
+    nombre_pointages: pointages.length,
+    pointages: pointages.slice(0, 50), // limiter volume
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_lire_conges_complets
+// Tous les congés (approuvés, en attente, refusés, historique)
+// Input : { statut?: 'tous'|'en_attente'|'approuve'|'refuse', annee?: number }
+// ───────────────────────────────────────────────────────────────────
+async function tool_lire_conges_complets(uid, input) {
+  const statutFilter = input.statut || 'tous';
+  const anneeFilter = input.annee || null;
+
+  // Employés pour nommer
+  const empRes = await fsList(`rh/${uid}/employes`, 100);
+  const empDocs = empRes?.documents || [];
+  const employesMap = {};
+  for (const d of empDocs) {
+    const data = docToObject(d);
+    const id = (d.name || '').split('/').pop();
+    employesMap[id] = (data.prenom || '-') + ' ' + (data.nom || '-');
+  }
+
+  const cgRes = await fsList(`rh_conges/${uid}/demandes`, 200);
+  const cgDocs = cgRes?.documents || [];
+  const conges = cgDocs.map(function (d) {
+    const data = docToObject(d);
+    const id = (d.name || '').split('/').pop();
+    return {
+      id,
+      employe: employesMap[data.employeId || data.employe] || '?',
+      employe_id: data.employeId || data.employe || '',
+      date_debut: data.dateDebut || null,
+      date_fin: data.dateFin || null,
+      type: data.type || 'CP',
+      statut: data.statut || 'en_attente',
+      nb_jours: parseFloat(data.nbJours) || parseFloat(data.jours) || null,
+      motif: data.motif || null,
+      date_creation: data.dateCreation || null,
+    };
+  });
+
+  let filtered = conges;
+  if (statutFilter !== 'tous') {
+    filtered = filtered.filter(function (c) { return c.statut === statutFilter; });
+  }
+  if (anneeFilter) {
+    filtered = filtered.filter(function (c) {
+      return (c.date_debut && String(c.date_debut).indexOf(String(anneeFilter)) === 0)
+          || (c.date_fin && String(c.date_fin).indexOf(String(anneeFilter)) === 0);
+    });
+  }
+
+  // Tri récent en premier
+  filtered.sort(function (a, b) {
+    return (b.date_debut || '').localeCompare(a.date_debut || '');
+  });
+
+  return {
+    filtre: { statut: statutFilter, annee: anneeFilter },
+    nombre_total: filtered.length,
+    repartition_statut: {
+      approuve: conges.filter(function (c) { return c.statut === 'approuve'; }).length,
+      en_attente: conges.filter(function (c) { return c.statut === 'en_attente'; }).length,
+      refuse: conges.filter(function (c) { return c.statut === 'refuse'; }).length,
+    },
+    conges: filtered.slice(0, 100),
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_lire_cashflow
+// Trésorerie actuelle + projection depuis pilotage courant
+// Input : {} (pas de paramètre, donne la vue d'ensemble)
+// Structure : cashflow/{uid}/config/tresorerie → {solde, date}
+// ───────────────────────────────────────────────────────────────────
+async function tool_lire_cashflow(uid, input) {
+  const cfgDoc = await fsGet(`cashflow/${uid}/config/tresorerie`);
+  const cfg = cfgDoc ? docToObject(cfgDoc) : null;
+
+  const soldeDepart = cfg && typeof cfg.solde === 'number' ? cfg.solde : null;
+  const dateDepart = cfg ? cfg.date : null;
+
+  // Calculer tréso approx = solde_depart + CA mois courant - charges mois courant
+  const now = new Date();
+  const monthKey = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  const pilotageDoc = await fsGet(`pilotage/${uid}/months/${monthKey}`);
+  const pilotage = pilotageDoc ? docToObject(pilotageDoc) : {};
+
+  let caHt = 0, caTtc = 0;
+  if (Array.isArray(pilotage.ca)) {
+    for (const row of pilotage.ca) {
+      const h055 = parseFloat(row.ht055) || 0;
+      const h10  = parseFloat(row.ht10) || 0;
+      const h20  = parseFloat(row.ht20) || 0;
+      const h21  = parseFloat(row.ht21) || 0;
+      const h85  = parseFloat(row.ht85) || 0;
+      const multi = h055 + h10 + h20 + h21 + h85;
+      const ht = multi > 0 ? multi : (parseFloat(row.montantHT) || 0);
+      caHt += ht;
+      caTtc += h055 * 1.055 + h10 * 1.10 + h20 * 1.20 + h21 * 1.021 + h85 * 1.085;
+      if (multi === 0 && ht > 0) caTtc += ht * 1.20; // fallback ancien format
+    }
+  }
+
+  let chargesFixes = 0;
+  if (Array.isArray(pilotage.chargesFixe)) {
+    chargesFixes = pilotage.chargesFixe.reduce(function (s, r) { return s + (parseFloat(r.montant) || 0); }, 0);
+  }
+  let chargesVar = 0;
+  if (Array.isArray(pilotage.chargesVar)) {
+    chargesVar = pilotage.chargesVar.reduce(function (s, r) { return s + (parseFloat(r.montant) || 0); }, 0);
+  }
+  let creditsMensuels = 0;
+  if (Array.isArray(pilotage.credits)) {
+    creditsMensuels = pilotage.credits.reduce(function (s, r) { return s + (parseFloat(r.mensualite) || parseFloat(r.montant) || 0); }, 0);
+  }
+  let leasingMensuels = 0;
+  if (Array.isArray(pilotage.leasing)) {
+    leasingMensuels = pilotage.leasing.reduce(function (s, r) { return s + (parseFloat(r.mensualite) || parseFloat(r.montant) || 0); }, 0);
+  }
+
+  const resultatCourant = caTtc - chargesFixes - chargesVar - creditsMensuels - leasingMensuels;
+  const tresoEstime = soldeDepart !== null ? soldeDepart + resultatCourant : null;
+
+  return {
+    solde_depart: soldeDepart,
+    date_solde_depart: dateDepart,
+    mois_courant: monthKey,
+    ca_ht_mois: Math.round(caHt * 100) / 100,
+    ca_ttc_mois: Math.round(caTtc * 100) / 100,
+    charges_fixes_mois: Math.round(chargesFixes * 100) / 100,
+    charges_variables_mois: Math.round(chargesVar * 100) / 100,
+    credits_mensualite: Math.round(creditsMensuels * 100) / 100,
+    leasing_mensualite: Math.round(leasingMensuels * 100) / 100,
+    resultat_mois_tresorerie: Math.round(resultatCourant * 100) / 100,
+    tresorerie_estimee_fin_mois: tresoEstime !== null ? Math.round(tresoEstime * 100) / 100 : null,
+    note: !soldeDepart
+      ? "Aucun solde de trésorerie configuré. Le dirigeant peut le faire dans la page Cashflow."
+      : null,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_lire_dettes
+// Emprunts, leasings, dettes fournisseurs, découverts
+// Structure : dettes/{uid}/data/all → { list: [...] }
+// ───────────────────────────────────────────────────────────────────
+async function tool_lire_dettes(uid, input) {
+  const doc = await fsGet(`dettes/${uid}/data/all`);
+  const obj = doc ? docToObject(doc) : {};
+  const list = Array.isArray(obj.list) ? obj.list : [];
+
+  const actives = list.filter(function (d) { return d.active !== false; });
+
+  const resume = {
+    emprunts: actives.filter(function (d) { return d.type === 'emprunt'; }),
+    leasings: actives.filter(function (d) { return d.type === 'leasing'; }),
+    fournisseurs: actives.filter(function (d) { return d.type === 'fournisseur'; }),
+    decouverts: actives.filter(function (d) { return d.type === 'decouvert'; }),
+  };
+
+  // Agrégats
+  const totalCapitalEmpruntes = resume.emprunts.reduce(function (s, d) { return s + (parseFloat(d.montant) || 0); }, 0);
+  const mensualitesTotales = resume.emprunts.reduce(function (s, d) {
+    // Mensualité estimée basique = montant / duree (amortissement linéaire)
+    const mens = d.mensualite ? parseFloat(d.mensualite) : (d.montant && d.duree ? d.montant / d.duree : 0);
+    return s + (mens || 0);
+  }, 0) + resume.leasings.reduce(function (s, d) { return s + (parseFloat(d.loyer) || 0); }, 0);
+
+  return {
+    nombre_total: actives.length,
+    total_capital_emprunte: Math.round(totalCapitalEmpruntes * 100) / 100,
+    mensualites_totales_estimees: Math.round(mensualitesTotales * 100) / 100,
+    emprunts: resume.emprunts.map(function (d) {
+      return {
+        nom: d.nom, montant: d.montant, taux: d.taux, duree_mois: d.duree,
+        debut: d.debut, mensualite: d.mensualite || null,
+        paiements_realises: (d.paiements || []).length,
+      };
+    }),
+    leasings: resume.leasings.map(function (d) {
+      return { nom: d.nom, loyer: d.loyer, duree_mois: d.duree, debut: d.debut };
+    }),
+    dettes_fournisseurs: resume.fournisseurs.map(function (d) {
+      return { nom: d.nom, montant: d.montant, echeance: d.echeance, ref: d.ref };
+    }),
+    decouverts: resume.decouverts.map(function (d) {
+      return { nom: d.nom, plafond: d.plafond, taux: d.tauxDec };
+    }),
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_lire_profil_entreprise
+// Infos légales et identité de l'entreprise
+// Structure : profil/{uid}/data/profil
+// ───────────────────────────────────────────────────────────────────
+async function tool_lire_profil_entreprise(uid, input) {
+  const doc = await fsGet(`profil/${uid}/data/profil`);
+  if (!doc) return { message: "Aucun profil entreprise configuré.", existe: false };
+  const p = docToObject(doc);
+  return {
+    existe: true,
+    raison_sociale: p.raisonSociale || p.nomEntreprise || null,
+    forme_juridique: p.formeJuridique || null,
+    siret: p.siret || null,
+    siren: p.siren || null,
+    tva_intracom: p.tvaIntracom || null,
+    naf: p.naf || p.codeNaf || null,
+    capital_social: parseFloat(p.capitalSocial) || null,
+    dirigeant: p.dirigeant || p.gerant || null,
+    adresse: p.adresse || null,
+    code_postal: p.codePostal || null,
+    ville: p.ville || null,
+    telephone: p.telephone || null,
+    email: p.email || null,
+    activite: p.activite || p.typeActivite || null,
+    secteur: p.secteur || null,
+    date_creation: p.dateCreation || null,
+    effectif: p.effectif || null,
+    ccn: p.ccn || p.idcc || null,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_lire_fournisseurs
+// Liste des fournisseurs + fiches fournisseurs (catalogue factures achat)
+// Structures : fournisseurs/{uid} (objet simple) + fiches/{uid}/items/{id}
+// ───────────────────────────────────────────────────────────────────
+async function tool_lire_fournisseurs(uid, input) {
+  // Liste de noms de fournisseurs (objet simple)
+  const fDoc = await fsGet(`fournisseurs/${uid}`);
+  const fObj = fDoc ? docToObject(fDoc) : {};
+  const listeNoms = Array.isArray(fObj.list) ? fObj.list : (Array.isArray(fObj.fournisseurs) ? fObj.fournisseurs : []);
+
+  // Fiches détaillées (type facture achat enregistrée)
+  const fichesRes = await fsList(`fiches/${uid}/items`, 200);
+  const fichesDocs = fichesRes?.documents || [];
+  const fiches = fichesDocs.map(function (d) {
+    const data = docToObject(d);
+    const id = (d.name || '').split('/').pop();
+    return {
+      id,
+      nom: data.nom || data.fournisseur || id,
+      categorie: data.categorie || null,
+      total_ht: parseFloat(data.totalHt) || parseFloat(data.ht) || null,
+      total_ttc: parseFloat(data.totalTtc) || parseFloat(data.ttc) || null,
+      date: data.date || null,
+      nombre_articles: (data.articles || data.lignes || []).length || null,
+    };
+  });
+
+  return {
+    nombre_noms: listeNoms.length,
+    noms_fournisseurs: listeNoms,
+    nombre_fiches: fiches.length,
+    fiches_recentes: fiches.sort(function (a, b) {
+      return (b.date || '').localeCompare(a.date || '');
+    }).slice(0, 30),
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_lire_cartes_cadeaux
+// Cartes cadeaux vendues (CA différé) + soldes restants
+// Structure : pilotage/{uid}/cartes_cadeaux/all → { cartes: [...] }
+// ───────────────────────────────────────────────────────────────────
+async function tool_lire_cartes_cadeaux(uid, input) {
+  const doc = await fsGet(`pilotage/${uid}/cartes_cadeaux/all`);
+  const obj = doc ? docToObject(doc) : {};
+  const cartes = Array.isArray(obj.cartes) ? obj.cartes : [];
+
+  const actives = cartes.filter(function (c) { return c.statut !== 'soldee'; });
+  const soldees = cartes.filter(function (c) { return c.statut === 'soldee'; });
+
+  const totalDifActif = actives.reduce(function (s, c) { return s + (parseFloat(c.solde) || 0); }, 0);
+  const totalVendu = cartes.reduce(function (s, c) { return s + (parseFloat(c.montantInitial) || 0); }, 0);
+
+  return {
+    nombre_total: cartes.length,
+    nombre_actives: actives.length,
+    nombre_soldees: soldees.length,
+    ca_differe_total: Math.round(totalDifActif * 100) / 100,
+    total_vendu_historique: Math.round(totalVendu * 100) / 100,
+    cartes_actives: actives.map(function (c) {
+      return {
+        id: c.id, label: c.label, date_vente: c.dateVente,
+        montant_initial: parseFloat(c.montantInitial) || 0,
+        solde_restant: parseFloat(c.solde) || 0,
+      };
+    }),
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_lire_panier_moyen
+// Panier moyen, nombre de clients, transactions par mois
+// Structure : panier/{uid}/data/all → { y{YEAR}: { months: [{cli, ca, txn}], cats: [] } }
+// Input : { annee?: number }
+// ───────────────────────────────────────────────────────────────────
+async function tool_lire_panier_moyen(uid, input) {
+  const annee = input.annee || new Date().getFullYear();
+  const doc = await fsGet(`panier/${uid}/data/all`);
+  if (!doc) return { message: "Aucune donnée panier moyen. Le dirigeant peut saisir dans la page Panier Moyen.", annee };
+  const obj = docToObject(doc);
+  const yearData = obj['y' + annee];
+  if (!yearData) return { message: "Pas de données panier moyen pour " + annee + ".", annee };
+
+  const months = Array.isArray(yearData.months) ? yearData.months : [];
+  const moisNom = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
+
+  const monthsDetails = months.slice(0, 12).map(function (m, idx) {
+    const cli = parseFloat(m.cli) || 0;
+    const ca = parseFloat(m.ca) || 0;
+    const txn = parseFloat(m.txn) || 0;
+    const panierMoyen = txn > 0 ? ca / txn : 0;
+    const txnParClient = cli > 0 ? txn / cli : 0;
+    return {
+      mois: moisNom[idx],
+      clients: cli, ca_ttc: ca, transactions: txn,
+      panier_moyen: Math.round(panierMoyen * 100) / 100,
+      transactions_par_client: Math.round(txnParClient * 100) / 100,
+    };
+  });
+
+  const totalCa = monthsDetails.reduce(function (s, m) { return s + m.ca_ttc; }, 0);
+  const totalTxn = monthsDetails.reduce(function (s, m) { return s + m.transactions; }, 0);
+  const totalClients = monthsDetails.reduce(function (s, m) { return s + m.clients; }, 0);
+
+  return {
+    annee: annee,
+    ca_ttc_annuel: Math.round(totalCa * 100) / 100,
+    transactions_annuelles: totalTxn,
+    clients_annuels: totalClients,
+    panier_moyen_annuel: totalTxn > 0 ? Math.round((totalCa / totalTxn) * 100) / 100 : 0,
+    mois: monthsDetails.filter(function (m) { return m.ca_ttc > 0 || m.clients > 0; }),
+    categories: yearData.cats || [],
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_lire_bilans
+// Bilans comptables annuels (si module bilan actif)
+// Structure : bilans/{uid}/years/{year}
+// Input : { annee?: number }
+// ───────────────────────────────────────────────────────────────────
+async function tool_lire_bilans(uid, input) {
+  const annee = input.annee || (new Date().getFullYear() - 1); // par défaut année précédente (dernier bilan clos)
+  const doc = await fsGet(`bilans/${uid}/years/${annee}`);
+  if (!doc) {
+    // Lister toutes les années dispo pour indiquer au dirigeant
+    try {
+      const list = await fsList(`bilans/${uid}/years`, 20);
+      const annees = (list?.documents || []).map(function (d) { return (d.name || '').split('/').pop(); });
+      return { message: "Aucun bilan pour " + annee + ".", annees_disponibles: annees, annee };
+    } catch (e) {
+      return { message: "Aucun bilan pour " + annee + ".", annee };
+    }
+  }
+  const b = docToObject(doc);
+  return {
+    annee: annee,
+    chiffre_affaires: parseFloat(b.chiffreAffaires) || parseFloat(b.ca) || null,
+    resultat_net: parseFloat(b.resultatNet) || parseFloat(b.resultat) || null,
+    ebitda: parseFloat(b.ebitda) || null,
+    capitaux_propres: parseFloat(b.capitauxPropres) || null,
+    total_bilan: parseFloat(b.totalBilan) || parseFloat(b.total) || null,
+    endettement: parseFloat(b.endettement) || null,
+    tresorerie: parseFloat(b.tresorerie) || null,
+    ratios: b.ratios || null,
+    analyse_ia: b.analyseIa || b.analyse || null,
+    points_forts: b.pointsForts || null,
+    points_vigilance: b.pointsVigilance || null,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_lire_objectifs_rh
+// Objectifs commerciaux par employé
+// Structure : rh_objectifs_public/{uid}/items/{itemId}
+// ───────────────────────────────────────────────────────────────────
+async function tool_lire_objectifs_rh(uid, input) {
+  // Employés
+  const empRes = await fsList(`rh/${uid}/employes`, 100);
+  const empDocs = empRes?.documents || [];
+  const employesMap = {};
+  for (const d of empDocs) {
+    const data = docToObject(d);
+    const id = (d.name || '').split('/').pop();
+    employesMap[id] = (data.prenom || '-') + ' ' + (data.nom || '-');
+  }
+
+  const res = await fsList(`rh_objectifs_public/${uid}/items`, 100);
+  const docs = res?.documents || [];
+  if (docs.length === 0) return { message: "Aucun objectif RH défini.", nombre_total: 0 };
+
+  const objectifs = docs.map(function (d) {
+    const data = docToObject(d);
+    const id = (d.name || '').split('/').pop();
+    return {
+      id,
+      employe: employesMap[data.employeId] || data.employeId || '?',
+      employe_id: data.employeId || '',
+      libelle: data.libelle || data.titre || id,
+      type: data.type || 'ca',
+      cible: parseFloat(data.cible) || parseFloat(data.objectif) || null,
+      realise: parseFloat(data.realise) || 0,
+      periode: data.periode || null,
+      statut: data.statut || 'en_cours',
+    };
+  });
+
+  return {
+    nombre_total: objectifs.length,
+    objectifs: objectifs,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_lire_recrutement_rh
+// Offres, candidats, entretiens
+// Structures : rh_recrutement/{uid}/{offres|candidats|entretiens}/{id}
+// ───────────────────────────────────────────────────────────────────
+async function tool_lire_recrutement_rh(uid, input) {
+  let offres = [], candidats = [], entretiens = [];
+
+  try {
+    const res = await fsList(`rh_recrutement/${uid}/offres`, 50);
+    const docs = res?.documents || [];
+    offres = docs.map(function (d) {
+      const data = docToObject(d);
+      const id = (d.name || '').split('/').pop();
+      return {
+        id,
+        intitule: data.intitule || data.titre || id,
+        type_contrat: data.typeContrat || data.contrat || null,
+        statut: data.statut || 'ouverte',
+        date_publication: data.datePublication || null,
+        nombre_candidats: parseInt(data.nbCandidats) || 0,
+      };
+    });
+  } catch (e) { /* skip */ }
+
+  try {
+    const res = await fsList(`rh_recrutement/${uid}/candidats`, 100);
+    const docs = res?.documents || [];
+    candidats = docs.map(function (d) {
+      const data = docToObject(d);
+      const id = (d.name || '').split('/').pop();
+      return {
+        id,
+        nom: (data.prenom || '') + ' ' + (data.nom || ''),
+        email: data.email || null,
+        poste: data.poste || data.offreIntitule || null,
+        statut: data.statut || 'a_contacter',
+        score: data.score || null,
+      };
+    });
+  } catch (e) { /* skip */ }
+
+  try {
+    const res = await fsList(`rh_recrutement/${uid}/entretiens`, 50);
+    const docs = res?.documents || [];
+    entretiens = docs.map(function (d) {
+      const data = docToObject(d);
+      const id = (d.name || '').split('/').pop();
+      return {
+        id,
+        candidat: data.candidatNom || data.candidat || '?',
+        date: data.date || null,
+        type: data.type || 'telephonique',
+        statut: data.statut || 'planifie',
+      };
+    });
+  } catch (e) { /* skip */ }
+
+  return {
+    nombre_offres_ouvertes: offres.filter(function (o) { return o.statut === 'ouverte'; }).length,
+    nombre_candidats_actifs: candidats.filter(function (c) { return c.statut !== 'refuse' && c.statut !== 'embauche'; }).length,
+    nombre_entretiens_planifies: entretiens.filter(function (e) { return e.statut === 'planifie'; }).length,
+    offres: offres,
+    candidats: candidats.slice(0, 30),
+    entretiens: entretiens,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // MÉMOIRE LONG TERME (Wave 3)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1084,6 +1867,19 @@ async function executeTool(toolName, input, uid) {
       case 'lire_rh':            result = await tool_lire_rh(uid, input || {}); break;
       case 'lire_fidelisation':  result = await tool_lire_fidelisation(uid, input || {}); break;
       case 'lire_marges':        result = await tool_lire_marges(uid, input || {}); break;
+      // ── Wave 3.8 : lecture étendue ──
+      case 'lire_planning_rh':     result = await tool_lire_planning_rh(uid, input || {}); break;
+      case 'lire_emargements_rh':  result = await tool_lire_emargements_rh(uid, input || {}); break;
+      case 'lire_conges_complets': result = await tool_lire_conges_complets(uid, input || {}); break;
+      case 'lire_cashflow':        result = await tool_lire_cashflow(uid, input || {}); break;
+      case 'lire_dettes':          result = await tool_lire_dettes(uid, input || {}); break;
+      case 'lire_profil_entreprise': result = await tool_lire_profil_entreprise(uid, input || {}); break;
+      case 'lire_fournisseurs':    result = await tool_lire_fournisseurs(uid, input || {}); break;
+      case 'lire_cartes_cadeaux':  result = await tool_lire_cartes_cadeaux(uid, input || {}); break;
+      case 'lire_panier_moyen':    result = await tool_lire_panier_moyen(uid, input || {}); break;
+      case 'lire_bilans':          result = await tool_lire_bilans(uid, input || {}); break;
+      case 'lire_objectifs_rh':    result = await tool_lire_objectifs_rh(uid, input || {}); break;
+      case 'lire_recrutement_rh':  result = await tool_lire_recrutement_rh(uid, input || {}); break;
       case 'enregistrer_fait_business': result = await tool_enregistrer_fait_business(uid, input || {}); break;
       case 'enregistrer_preference':    result = await tool_enregistrer_preference(uid, input || {}); break;
       case 'ajouter_ca':         result = await tool_ajouter_ca(uid, input || {}); break;
@@ -1299,6 +2095,18 @@ Lecture :
 - **lire_rh** : employés, masse salariale, congés en attente
 - **lire_fidelisation** : clients fid, segmentation, top clients
 - **lire_marges** : fiches marges produits, top/bottom rentabilité
+- **lire_planning_rh** : planning/horaires/shifts des employés sur une période (défaut: 2 prochaines semaines)
+- **lire_emargements_rh** : heures pointées, fiches mensuelles, écarts planning/réel
+- **lire_conges_complets** : tous les congés (approuvés, en attente, refusés, historique)
+- **lire_cashflow** : trésorerie actuelle + projection mois courant
+- **lire_dettes** : emprunts, leasings, dettes fournisseurs, découverts
+- **lire_profil_entreprise** : SIRET, forme juridique, CCN/IDCC, dirigeant, adresse
+- **lire_fournisseurs** : liste fournisseurs + fiches factures achat archivées
+- **lire_cartes_cadeaux** : cartes cadeaux vendues (CA différé), soldes
+- **lire_panier_moyen** : panier moyen et transactions mois par mois
+- **lire_bilans** : bilans comptables annuels (CA, résultat, ratios, analyse IA)
+- **lire_objectifs_rh** : objectifs commerciaux par employé (cible vs réalisé)
+- **lire_recrutement_rh** : offres, candidats, entretiens en cours
 
 Écriture mémoire :
 - **enregistrer_fait_business** : mémoriser un fait important sur le business
