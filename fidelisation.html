@@ -2429,6 +2429,23 @@ function copBuildSnapshot(){
 
 // ─── Envoi d'un message ───
 
+// Diagnostic exposable en console : window._copDiag()
+window._copDiag = function(){
+  const out = {
+    window_auth_exists: !!window._auth,
+    window_auth_currentUser: !!window._auth?.currentUser,
+    window_auth_currentUser_uid: window._auth?.currentUser?.uid || null,
+    window_uid: window._uid || null,
+    window_firebaseReady: !!window._firebaseReady,
+    window_db: !!window._db,
+    window_FidAI: !!window._FidAI,
+    clients_count: (typeof clients !== 'undefined') ? clients.length : 'undefined',
+    cfg_exists: (typeof cfg !== 'undefined') && !!cfg
+  };
+  console.table(out);
+  return out;
+};
+
 // Attend que Firebase Auth soit prêt. On utilise window._uid comme signal
 // car il est défini par onAuthStateChanged après qu'auth.currentUser soit fiable.
 function copWaitAuth(){
@@ -2437,23 +2454,30 @@ function copWaitAuth(){
     if(window._uid && window._auth?.currentUser){
       return resolve(window._auth.currentUser);
     }
-    // Sinon poll
+    // Sinon poll jusqu'à 20 secondes
     let attempts = 0;
     const tick = setInterval(() => {
       attempts++;
+      // Essai 1 : état complet normal
       if(window._uid && window._auth?.currentUser){
         clearInterval(tick);
         return resolve(window._auth.currentUser);
       }
-      if(attempts >= 80){ // 80 × 100ms = 8s
+      // Essai 2 (fallback) : si _auth.currentUser est là mais _uid manque (edge case)
+      if(window._auth?.currentUser?.uid){
         clearInterval(tick);
-        // Diagnostic pour debug
+        console.log('[Copilot] fallback: found currentUser without _uid set');
+        return resolve(window._auth.currentUser);
+      }
+      if(attempts >= 200){ // 200 × 100ms = 20s
+        clearInterval(tick);
         console.warn('[Copilot] auth timeout. State:', {
           hasAuth: !!window._auth,
           hasCurrentUser: !!window._auth?.currentUser,
           uid: window._uid,
           firebaseReady: window._firebaseReady
         });
+        console.warn('[Copilot] Tape window._copDiag() dans la console pour un diagnostic complet');
         return resolve(null);
       }
     }, 100);
