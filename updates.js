@@ -356,11 +356,33 @@
   }
 
   async function getUserLastRead() {
+    // 1. localStorage d'abord (instantané, fiable, survit aux reloads)
+    var localId = null;
+    try { localId = localStorage.getItem('alteoreLastReadUpdateId'); } catch (e) {}
+
+    // 2. Firestore ensuite (sync cross-devices)
+    var remoteId = null;
     try {
       var snap = await window._getDoc(window._doc(window._db, 'users', window._uid));
-      if (snap.exists()) return snap.data().lastReadUpdateId || null;
+      if (snap.exists()) remoteId = snap.data().lastReadUpdateId || null;
     } catch (e) { /* silent */ }
-    return null;
+
+    // 3. Politique de merge : on prend le plus récent des deux
+    //    (si l'un est plus récent dans _allUpdates, c'est lui qui gagne)
+    //    Si on ne peut pas comparer (index inconnu), on prend celui qui existe.
+    if (!localId && !remoteId) return null;
+    if (localId && !remoteId) return localId;
+    if (!localId && remoteId) return remoteId;
+    if (localId === remoteId) return localId;
+
+    // Les deux sont différents → prendre le plus récent d'après _allUpdates
+    var iLocal = _allUpdates.findIndex(function (u) { return u.id === localId; });
+    var iRemote = _allUpdates.findIndex(function (u) { return u.id === remoteId; });
+    if (iLocal === -1 && iRemote === -1) return localId; // arbitraire
+    if (iLocal === -1) return remoteId;
+    if (iRemote === -1) return localId;
+    // index plus petit = plus récent (tri desc)
+    return iLocal <= iRemote ? localId : remoteId;
   }
 
   async function setUserLastRead(updateId) {
@@ -372,7 +394,7 @@
         lastReadUpdateId: updateId,
         lastReadUpdateAt: new Date().toISOString(),
       });
-    } catch (e) { console.warn('[updates] setUserLastRead failed:', e.message); }
+    } catch (e) { console.warn('[updates] setUserLastRead failed (non-bloquant, localStorage gère):', e.message); }
   }
 
   // ────────────────────────────────────────────────────────────
@@ -514,6 +536,7 @@
       var newestId = _allUpdates[0].id;
       if (newestId !== _lastReadId) {
         _lastReadId = newestId;
+        try { localStorage.setItem('alteoreLastReadUpdateId', newestId); } catch (e) {}
         setUserLastRead(newestId);
         updateBellBadge(0);
       }
@@ -538,6 +561,16 @@
   function showPopup(update) {
     var existing = document.getElementById('alt-popup-overlay');
     if (existing) existing.remove();
+
+    // ── IMPORTANT : marquer comme lu IMMÉDIATEMENT à l'affichage ──
+    // Même si l'user ferme l'onglet sans cliquer sur Plus tard / Voir tout,
+    // la news ne reviendra pas au prochain chargement.
+    // - localStorage : fix instantané et durable côté navigateur
+    // - Firestore : écriture en background (peut échouer, pas grave grâce à localStorage)
+    _lastReadId = update.id;
+    try { localStorage.setItem('alteoreLastReadUpdateId', update.id); } catch (e) { /* quota / private mode */ }
+    setUserLastRead(update.id); // fire-and-forget, localStorage compense si échec
+    updateBellBadge(0);
 
     var overlay = document.createElement('div');
     overlay.id = 'alt-popup-overlay';
@@ -578,14 +611,8 @@
     if (!overlay) return;
     overlay.classList.remove('show');
     setTimeout(function () { overlay.remove(); }, 300);
-
-    // Marquer la dernière news comme lue
-    if (_allUpdates.length > 0) {
-      var newestId = _allUpdates[0].id;
-      _lastReadId = newestId;
-      setUserLastRead(newestId);
-      updateBellBadge(0);
-    }
+    // NB : le marquage "lu" a déjà été fait à l'affichage (showPopup).
+    // Pas besoin de réécrire ici.
   }
 
   // ────────────────────────────────────────────────────────────
