@@ -400,10 +400,67 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
 .alteore-hamburger.open span:nth-child(3){transform:translateY(-7.5px) rotate(-45deg)}
 .alteore-nav-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000}
 .alteore-nav-overlay.show{display:block}
-@media(max-width:768px){
+/* ═════════════════════════════════════════════════════════
+   RESPONSIVE GLOBAL — v1 (19/04/2026)
+   Breakpoint 900px : laptop 13" réduit → hamburger
+   Breakpoint 600px : mobile / tablette portrait
+   Classes utilitaires : .col-hide-md (<900), .col-hide-sm (<600)
+   ═════════════════════════════════════════════════════════ */
+@media(max-width:900px){
+  /* ── Sidebar en drawer ── */
   .alteore-hamburger{display:flex!important}
-  nav#alteore-nav{position:fixed!important;top:0!important;left:0!important;height:100vh!important;width:min(280px,84vw)!important;z-index:1001!important;transform:translateX(-105%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1)!important;overflow-y:auto!important}
+  nav#alteore-nav{position:fixed!important;top:0!important;left:0!important;height:100vh!important;width:min(280px,84vw)!important;z-index:1001!important;transform:translateX(-105%)!important;transition:transform .3s cubic-bezier(.4,0,.2,1)!important;overflow-y:auto!important;margin:0!important}
   nav#alteore-nav.open{transform:translateX(0)!important;box-shadow:8px 0 32px rgba(0,0,0,.3)!important}
+
+  /* ── Main récupère toute la largeur ── */
+  .main,main,div.main{margin-left:0!important;width:100%!important;max-width:100vw!important;overflow-x:hidden}
+  html,body{overflow-x:hidden;max-width:100vw}
+
+  /* ── Topbar wrap + espace pour le hamburger ── */
+  .topbar{flex-wrap:wrap!important;gap:10px!important;padding:14px 14px 14px 64px!important;min-height:60px;align-items:center}
+  .topbar-left{min-width:0;flex:1 1 auto!important}
+  .topbar-left h1,.topbar h1{font-size:16px!important;margin:0;line-height:1.2}
+  .topbar-left p,.topbar-left .subtitle{font-size:11px!important}
+  .topbar-right{flex-wrap:wrap!important;gap:6px!important;justify-content:flex-start!important}
+  .topbar-right .btn,.topbar .btn{font-size:12px!important;padding:8px 10px!important;white-space:nowrap}
+
+  /* ── Content padding ── */
+  .content{padding:14px 12px!important}
+
+  /* ── Grids KPI : 2 cols ── */
+  .summary-grid,.kpi-grid,.kpi-grid-4,.kpi-grid-5,.kpi-grid-3,.hero-kpis,.fact-kpis,.fiche-kpis,.fiche-stats-grid,.comp-kpi-grid,.score-kpis,.seuil-kpis,.mk-kpis,.sum-cards{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:10px!important}
+
+  /* ── Grids sections 2-cols → 1 col ── */
+  .sections-grid,.main-grid,.grid-2,.charts-grid,.charts-grid-2,.charts-grid-3,.form-grid-2,.widget-row,.prev-grid,.cashflow-grid,.tva-result,.seuil-compare,#widgets-row{grid-template-columns:1fr!important;gap:12px!important}
+
+  /* ── Tables : scroll horizontal ── */
+  .table-card,.table-wrap,.ex-table-wrap,.card-table-wrap,.prod-list-wrap,.tbl-wrap{overflow-x:auto!important;-webkit-overflow-scrolling:touch}
+  .table-card table,.table-wrap table{min-width:480px}
+  /* Card générique qui contient un tableau → scroll horizontal (supporté Chrome 105+, Safari 15.4+, Firefox 121+) */
+  .card:has(>table),.card:has(>.table-wrap),.block:has(>table),section.card:has(table){overflow-x:auto!important;-webkit-overflow-scrolling:touch}
+
+  /* ── Utility : masquer colonnes non critiques ── */
+  .col-hide-md{display:none!important}
+}
+
+@media(max-width:600px){
+  /* ── KPIs en 1 col ── */
+  .summary-grid,.kpi-grid,.kpi-grid-4,.kpi-grid-5,.kpi-grid-3,.hero-kpis,.fact-kpis,.fiche-kpis,.fiche-stats-grid,.comp-kpi-grid,.score-kpis,.seuil-kpis,.mk-kpis,.sum-cards{grid-template-columns:1fr!important}
+
+  /* ── Topbar encore plus compact ── */
+  .topbar{padding:12px 10px 12px 60px!important}
+  .topbar-left h1,.topbar h1{font-size:14px!important}
+  .topbar-right .btn,.topbar .btn{font-size:11px!important;padding:7px 9px!important}
+
+  .content{padding:10px 8px!important}
+
+  /* ── Tailles réduites ── */
+  .kpi-value,.kpi-card .kpi-value{font-size:18px!important}
+  .kpi-label,.kpi-card .kpi-label{font-size:10px!important}
+  table{font-size:12px!important}
+
+  /* ── Utility : masquer colonnes non critiques petit écran ── */
+  .col-hide-sm{display:none!important}
 }
 </style>`;
 
