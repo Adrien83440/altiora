@@ -474,6 +474,18 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       document.head.insertAdjacentHTML('beforeend', NAV_CSS);
     }
 
+    // ── CSS overrides en FIN de <head> pour battre les <style> inline des pages ──
+    // Utilise appendChild (pas insertAdjacentHTML) pour garantir l'ordre de cascade :
+    // parsé APRÈS tout ce qui existait déjà dans <head>. Les sélecteurs du fichier
+    // utilisent `html body` pour une spécificité de 12 (vs 10 pour une classe seule).
+    if (!document.getElementById('alteore-responsive-overrides')) {
+      var ovLink = document.createElement('link');
+      ovLink.id = 'alteore-responsive-overrides';
+      ovLink.rel = 'stylesheet';
+      ovLink.href = 'responsive-overrides.css';
+      document.head.appendChild(ovLink);
+    }
+
     // Hamburger
     if (!document.querySelector('.alteore-hamburger')) {
       document.body.insertAdjacentHTML('afterbegin',
