@@ -291,7 +291,7 @@
       position:fixed;inset:0;z-index:500;
       background:rgba(15,10,30,0.96);backdrop-filter:blur(20px);
       display:none;flex-direction:column;align-items:center;justify-content:center;
-      padding:32px;gap:20px;
+      padding:32px;gap:18px;
     }
     .rec-overlay.show{display:flex}
     .rec-ring{
@@ -301,17 +301,55 @@
       display:flex;align-items:center;justify-content:center;
       font-size:60px;
       animation:rec-pulse 1.3s infinite;
+      transition:border-color .3s, background .3s;
+    }
+    .rec-ring.thinking{
+      border-color:rgba(245,158,11,0.4);
+      background:rgba(245,158,11,0.1);
+      animation:rec-pulse-thinking 1.6s infinite;
+    }
+    .rec-ring.speaking{
+      border-color:rgba(16,185,129,0.4);
+      background:rgba(16,185,129,0.1);
+      animation:rec-pulse-speaking 1.4s infinite;
     }
     @keyframes rec-pulse{
       0%{box-shadow:0 0 0 0 rgba(239,68,68,0.5);transform:scale(1)}
       70%{box-shadow:0 0 0 25px rgba(239,68,68,0);transform:scale(1.03)}
       100%{box-shadow:0 0 0 0 rgba(239,68,68,0);transform:scale(1)}
     }
+    @keyframes rec-pulse-thinking{
+      0%{box-shadow:0 0 0 0 rgba(245,158,11,0.4);transform:scale(1)}
+      70%{box-shadow:0 0 0 25px rgba(245,158,11,0);transform:scale(1.03)}
+      100%{box-shadow:0 0 0 0 rgba(245,158,11,0);transform:scale(1)}
+    }
+    @keyframes rec-pulse-speaking{
+      0%{box-shadow:0 0 0 0 rgba(16,185,129,0.4);transform:scale(1)}
+      70%{box-shadow:0 0 0 28px rgba(16,185,129,0);transform:scale(1.05)}
+      100%{box-shadow:0 0 0 0 rgba(16,185,129,0);transform:scale(1)}
+    }
     .rec-status{font-size:17px;font-weight:800;text-align:center}
     .rec-transcript{
       font-size:14px;color:var(--muted);text-align:center;
       max-width:320px;line-height:1.55;min-height:40px;padding:0 8px;
     }
+    /* Zone dernière Q/R en overlay vocal (Wave 3.10) */
+    .rec-last-q{
+      font-size:13px;color:rgba(255,255,255,0.6);text-align:center;
+      max-width:320px;line-height:1.5;font-style:italic;
+      padding:6px 14px;border-radius:14px;background:rgba(255,255,255,0.05);
+      display:none;
+    }
+    .rec-last-q.show{display:block}
+    .rec-last-a{
+      font-size:15px;color:#fff;text-align:center;
+      max-width:340px;line-height:1.55;font-weight:500;
+      padding:10px 16px;border-radius:16px;
+      background:linear-gradient(135deg,rgba(124,58,237,0.3),rgba(91,33,182,0.3));
+      border:1px solid rgba(167,139,250,0.3);
+      display:none;
+    }
+    .rec-last-a.show{display:block}
     .rec-stop{
       margin-top:18px;padding:16px 40px;border-radius:99px;
       background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.25);
@@ -326,6 +364,18 @@
       touch-action:manipulation;
     }
     .rec-stop:active{background:rgba(255,255,255,0.22);transform:scale(0.97)}
+
+    /* Séparateur conversation vocale dans le chat (Wave 3.10) */
+    .vocal-separator{
+      display:flex;align-items:center;justify-content:center;gap:10px;
+      margin:16px 8px 10px;
+      font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);
+      text-transform:uppercase;letter-spacing:1.2px;
+    }
+    .vocal-separator::before,.vocal-separator::after{
+      content:'';flex:1;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(167,139,250,0.3),transparent);
+    }
 
     /* Install banner iOS */
     .ios-banner{
@@ -398,9 +448,12 @@
 
   <!-- Recording overlay -->
   <div id="rec-overlay" class="rec-overlay">
-    <div class="rec-ring">🎤</div>
-    <div class="rec-status">Léa t'écoute…</div>
+    <div id="rec-ring" class="rec-ring">🎤</div>
+    <div id="rec-status" class="rec-status">Léa t'écoute…</div>
     <div id="rec-transcript" class="rec-transcript">Parle maintenant</div>
+    <!-- Wave 3.10 : zones d'affichage du dernier échange vocal (minimaliste, Siri-like) -->
+    <div id="rec-last-q" class="rec-last-q"></div>
+    <div id="rec-last-a" class="rec-last-a"></div>
     <button class="rec-stop" onclick="stopRecording()">Terminer</button>
   </div>
 
@@ -758,35 +811,150 @@ window.doLogout = async function() {
     setTimeout(function(){ msgs.scrollTop = msgs.scrollHeight; }, 50);
   }
 
-  // ══════════════════════════════════════════════════════
-  // VOCAL : speech-to-text via Web Speech API, puis vocal-ai
-  // ══════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════
+  // VOCAL WAVE 3.10 — Conversation continue isolée
+  // ══════════════════════════════════════════════════════════════════
+  // Principe clé :
+  //   1. Tap micro → overlay prend la main, rien n'apparaît dans le chat derrière
+  //   2. Silence 2.5s = envoi auto (pas besoin de taper Terminer)
+  //   3. Léa répond → speechSynthesis navigateur (Amélie) parle IMMÉDIATEMENT
+  //      (autoplay OK car session user gesture encore fraîche)
+  //   4. Pendant qu'elle parle, Nova OpenAI est généré en arrière-plan
+  //   5. Après qu'elle a fini → micro se relance auto pour conversation continue
+  //   6. Tap Terminer → overlay se ferme + TOUT le buffer d'échanges est flush
+  //      dans le chat principal avec séparateur "🎙 Conversation vocale"
+  //      et badges d'actions normaux
+  //
+  // Les bulles du buffer conservent toolsUsed/toolTraces pour afficher les badges
+  // et le debug après flush.
+  // ══════════════════════════════════════════════════════════════════
   var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var _convActive = false;           // on est dans une conversation vocale
+  var _isProcessing = false;         // verrou anti double-envoi
+  var _silenceTimer = null;
+  var SILENCE_MS = 2500;             // 2.5s de silence = fin de question
+  var _convBuffer = [];              // tous les échanges de la session vocale en cours
+  var _browserSynth = window.speechSynthesis || null;
+  var _browserVoice = null;
+  var _voiceLoaded = false;
 
+  function selectBrowserVoice() {
+    if (!_browserSynth) return null;
+    var voices = _browserSynth.getVoices();
+    if (!voices.length) return null;
+    var preferred = ['Amélie', 'Amelie', 'Audrey', 'Thomas', 'Marie', 'Virginie', 'Google français'];
+    for (var i = 0; i < preferred.length; i++) {
+      var v = voices.find(function(vo){ return vo.name && vo.name.indexOf(preferred[i]) !== -1 && vo.lang && vo.lang.indexOf('fr') === 0; });
+      if (v) return v;
+    }
+    return voices.find(function(vo){ return vo.lang && vo.lang.indexOf('fr') === 0; }) || null;
+  }
+
+  if (_browserSynth) {
+    _browserVoice = selectBrowserVoice();
+    _voiceLoaded = !!_browserVoice;
+    _browserSynth.onvoiceschanged = function() {
+      _browserVoice = selectBrowserVoice();
+      _voiceLoaded = !!_browserVoice;
+    };
+  }
+
+  // Helpers d'état visuel
+  function setRingState(state, status) {
+    var ring = document.getElementById('rec-ring');
+    var statusEl = document.getElementById('rec-status');
+    if (!ring) return;
+    ring.className = 'rec-ring' + (state ? ' ' + state : '');
+    if (state === 'thinking') ring.textContent = '💭';
+    else if (state === 'speaking') ring.textContent = '🗣';
+    else ring.textContent = '🎤';
+    if (statusEl && status !== undefined) statusEl.textContent = status;
+  }
+
+  function setOverlayText(transcript, lastQ, lastA) {
+    var t = document.getElementById('rec-transcript');
+    var q = document.getElementById('rec-last-q');
+    var a = document.getElementById('rec-last-a');
+    if (t && transcript !== undefined) t.textContent = transcript;
+    if (q && lastQ !== undefined) {
+      if (lastQ) { q.textContent = '« ' + lastQ + ' »'; q.classList.add('show'); }
+      else { q.classList.remove('show'); }
+    }
+    if (a && lastA !== undefined) {
+      if (lastA) { a.textContent = lastA; a.classList.add('show'); }
+      else { a.classList.remove('show'); }
+    }
+  }
+
+  function clearSilenceTimer() {
+    if (_silenceTimer) { clearTimeout(_silenceTimer); _silenceTimer = null; }
+  }
+
+  function cleanupRecognition() {
+    if (_recognition) {
+      try { _recognition.onresult = null; _recognition.onerror = null; _recognition.onend = null; } catch(e) {}
+      try { _recognition.abort(); } catch(e) {}
+      _recognition = null;
+    }
+  }
+
+  // ───────────────────────────────────────────────────────
+  // Entry points
+  // ───────────────────────────────────────────────────────
   window.toggleRecording = function() {
-    if (_isRecording) { stopRecording(); return; }
-    startRecording();
+    if (_convActive) { stopRecording(); return; }
+    startConversation();
+  };
+  window.startRecording = function() { startConversation(); };
+
+  window.stopRecording = function() {
+    // Fermeture manuelle : stopper tout + flush buffer dans le chat
+    _convActive = false;
+    _isProcessing = false;
+    clearSilenceTimer();
+    cleanupRecognition();
+    if (_browserSynth) try { _browserSynth.cancel(); } catch(e) {}
+    document.getElementById('input-mic').classList.remove('recording');
+    document.getElementById('rec-overlay').classList.remove('show');
+    setRingState('', 'Léa t\'écoute…');
+    setOverlayText('Parle maintenant', '', '');
+    flushConversationBuffer();
   };
 
-  window.startRecording = function() {
-    // Priming audio iOS : exploiter le tap user pour débloquer la session audio
-    // afin que l'autoplay vocal-ai marche ensuite
-    primeAudioForIOS();
-
+  // Démarre une session conversation complète
+  function startConversation() {
     if (!SR) {
-      // Pas de speech recognition → focus input texte
       document.getElementById('input-text').focus();
       alert("La saisie vocale n'est pas disponible sur ce navigateur. Tape ta question.");
       return;
     }
-    _isRecording = true;
+    _convActive = true;
+    _convBuffer = [];
     document.getElementById('input-mic').classList.add('recording');
     document.getElementById('rec-overlay').classList.add('show');
-    document.getElementById('rec-transcript').textContent = 'Parle maintenant';
+    setRingState('', 'Léa t\'écoute…');
+    setOverlayText('Parle maintenant', '', '');
+    startListeningCycle();
+  }
 
-    _recognition = new SR();
+  // Démarre UN cycle d'écoute (créé à neuf à chaque tour pour éviter bugs iOS)
+  function startListeningCycle() {
+    if (!_convActive || _isProcessing) return;
+    cleanupRecognition();
+    clearSilenceTimer();
+
+    setRingState('', 'Léa t\'écoute…');
+
+    try { _recognition = new SR(); }
+    catch(e) {
+      console.warn('[lea] SR constructor failed:', e);
+      setOverlayText('Impossible de lancer le micro', undefined, undefined);
+      setTimeout(window.stopRecording, 1500);
+      return;
+    }
+
     _recognition.lang = 'fr-FR';
-    _recognition.continuous = false;
+    _recognition.continuous = true;
     _recognition.interimResults = true;
     _recognition.maxAlternatives = 1;
 
@@ -796,66 +964,73 @@ window.doLogout = async function() {
       var interim = '';
       for (var i = event.resultIndex; i < event.results.length; i++) {
         var res = event.results[i];
-        if (res.isFinal) finalTranscript += res[0].transcript;
+        if (res.isFinal) finalTranscript += res[0].transcript + ' ';
         else interim += res[0].transcript;
       }
-      var display = finalTranscript || interim;
-      if (display) document.getElementById('rec-transcript').textContent = '"' + display + '"';
+      var display = (finalTranscript + interim).trim();
+      if (display) setOverlayText('« ' + display + ' »', undefined, undefined);
+      // Reset timer silence à chaque nouveau mot
+      clearSilenceTimer();
+      _silenceTimer = setTimeout(function() {
+        // Fin de parole détectée après 2.5s de silence
+        var q = finalTranscript.trim() || interim.trim();
+        if (q && _convActive && !_isProcessing) {
+          _isProcessing = true;
+          cleanupRecognition();
+          processVocalTurn(q);
+        }
+      }, SILENCE_MS);
     };
 
     _recognition.onerror = function(event) {
       console.warn('[lea] speech error:', event.error);
-      document.getElementById('rec-transcript').textContent = '⚠️ ' + (event.error === 'no-speech' ? 'Aucune voix détectée' : 'Erreur micro');
-      setTimeout(stopRecording, 1500);
+      clearSilenceTimer();
+      if (!_convActive) return;
+      if (event.error === 'no-speech' || event.error === 'aborted') {
+        // Pas grave — redémarrer une nouvelle écoute
+        setTimeout(function() { if (_convActive && !_isProcessing) startListeningCycle(); }, 300);
+        return;
+      }
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setOverlayText('Micro refusé. Vérifie les réglages.', undefined, undefined);
+        setTimeout(window.stopRecording, 2500);
+        return;
+      }
+      // Autre → retry une fois
+      setTimeout(function() { if (_convActive && !_isProcessing) startListeningCycle(); }, 500);
     };
 
     _recognition.onend = function() {
-      _isRecording = false;
-      document.getElementById('input-mic').classList.remove('recording');
-      document.getElementById('rec-overlay').classList.remove('show');
-      // Toujours envoyer la transcription si elle existe, que le stop soit manuel ou auto
-      if (finalTranscript.trim()) {
-        processVocalQuestion(finalTranscript.trim());
+      clearSilenceTimer();
+      if (!_convActive || _isProcessing) return;
+      var q = finalTranscript.trim();
+      if (q) {
+        _isProcessing = true;
+        processVocalTurn(q);
+      } else {
+        // Rien capté, redémarrer
+        setTimeout(function() { if (_convActive && !_isProcessing) startListeningCycle(); }, 250);
       }
     };
 
     try { _recognition.start(); }
-    catch(e) { console.warn(e); stopRecording(); }
-  };
-
-  window.stopRecording = function() {
-    // Feedback visuel immédiat pour confirmer à l'user que le tap a été reçu
-    var overlay = document.getElementById('rec-overlay');
-    var transcript = document.getElementById('rec-transcript');
-    if (transcript) transcript.textContent = 'Envoi en cours…';
-    _isRecording = false;
-    document.getElementById('input-mic').classList.remove('recording');
-    // Fermer l'overlay après un léger délai pour que l'user voie le feedback
-    setTimeout(function() {
-      if (overlay) overlay.classList.remove('show');
-    }, 150);
-    // Stop proprement la reconnaissance
-    if (_recognition) {
-      try { _recognition.stop(); } catch(e) {}
+    catch(e) {
+      console.warn('[lea] recognition.start() failed:', e);
+      // iOS peut throw "already started" → cleanup + retry
+      setTimeout(function() { if (_convActive && !_isProcessing) startListeningCycle(); }, 300);
     }
-  };
+  }
 
-  // ── Process question vocale ──
-  // Stratégie : on envoie via /api/agent-chat (avec flag mobile) pour bénéficier des tools
-  // d'écriture (ajouter_ca, etc.), puis on lit la réponse à voix haute via vocal-ai (TTS seulement).
-  async function processVocalQuestion(question) {
-    if (_isSending) return;
-    _isSending = true;
+  // Traite un tour de conversation vocale (question → réponse + audio)
+  async function processVocalTurn(question) {
+    if (!_convActive) { _isProcessing = false; return; }
 
-    // Masquer empty state
-    var empty = document.getElementById('empty-state');
-    if (empty) empty.style.display = 'none';
+    setRingState('thinking', 'Léa réfléchit…');
+    setOverlayText('', '« ' + question + ' »', '');
 
-    appendMessage('user', question);
-    scrollToBottom();
-
-    var thinkingId = appendThinking();
-    scrollToBottom();
+    var answerText = null;
+    var toolsUsed = null;
+    var toolTraces = null;
 
     try {
       var token = await window._auth.currentUser.getIdToken();
@@ -864,58 +1039,147 @@ window.doLogout = async function() {
         headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
         body: JSON.stringify({ message: question, mobile: true }),
       });
-      removeThinking(thinkingId);
       var data = await r.json();
 
       if (!r.ok) {
-        appendMessage('assistant', '⚠️ ' + (data.error || 'Erreur inconnue'));
-        _isSending = false;
-        scrollToBottom();
+        answerText = '⚠️ ' + (data.error || 'Erreur inconnue');
+        _convBuffer.push({ role: 'user', text: question });
+        _convBuffer.push({ role: 'assistant', text: answerText });
+        setOverlayText('', '« ' + question + ' »', answerText);
+        // Redémarrer l'écoute
+        _isProcessing = false;
+        if (_convActive) setTimeout(startListeningCycle, 1500);
         return;
       }
 
-      var answerText = data.response || 'Pas de réponse';
-      // On garde le rowElement pour pouvoir y attacher le bouton 🔊 ensuite
-      var leaRow = appendMessage('assistant', answerText, data.toolsUsed, data.toolTraces);
-      scrollToBottom();
+      answerText = data.response || 'Pas de réponse';
+      toolsUsed = data.toolsUsed || [];
+      toolTraces = data.toolTraces || [];
 
-      // ── Lecture audio via vocal-ai TTS ──
-      // On appelle vocal-ai avec une flag "tts_only" pour ne pas regénérer la réponse mais juste l'audio.
-      // Stratégie double : (1) tente autoplay, (2) si bloqué, bouton 🔊 Écouter qui pulse dans la bulle.
-      try {
-        var tokenTts = await window._auth.currentUser.getIdToken();
-        var rTts = await fetch('/api/vocal-ai', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tokenTts },
-          body: JSON.stringify({
-            question: question,
-            metrics: {},
-            prenom: '',
-            tts_only: true,
-            text_to_speak: answerText,
-          }),
-        });
-        var dataTts = await rTts.json();
-        if (dataTts.audioUrl) {
-          // Tentative autoplay
-          var ok = await playAudio(dataTts.audioUrl, function onEnded() {
-            // Callback quand l'audio se termine : rien à faire (le bouton d'écoute sera déjà posé)
+      // Bufferiser le tour (sera flush dans le chat à la fermeture)
+      _convBuffer.push({ role: 'user', text: question });
+      _convBuffer.push({
+        role: 'assistant',
+        text: answerText,
+        toolsUsed: toolsUsed,
+        toolTraces: toolTraces,
+        novaAudioUrl: null, // rempli en arrière-plan si généré
+      });
+
+      // Affichage minimal dans l'overlay (Q1=A)
+      setRingState('speaking', 'Léa te répond');
+      setOverlayText('', '« ' + question + ' »', answerText);
+
+      // ── Lecture IMMÉDIATE via speechSynthesis (autoplay iOS OK) ──
+      speakWithBrowser(answerText, function onSpeechEnd() {
+        if (!_convActive) return;
+        // Conversation continue : relancer le micro pour le tour suivant
+        setRingState('', 'Léa t\'écoute…');
+        _isProcessing = false;
+        setTimeout(startListeningCycle, 400);
+      });
+
+      // ── En parallèle : Nova OpenAI en arrière-plan (pour bouton 🔊 après flush) ──
+      (async function genNova() {
+        try {
+          var tt = await window._auth.currentUser.getIdToken();
+          var rN = await fetch('/api/vocal-ai', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tt },
+            body: JSON.stringify({
+              question: question, metrics: {}, prenom: '',
+              tts_only: true, text_to_speak: answerText,
+            }),
           });
-          // Toujours attacher le bouton 🔊 :
-          // - Si autoplay a marché : bouton discret pour ré-écouter
-          // - Si autoplay bloqué : bouton qui pulse pour attirer l'œil
-          attachAudioButton(leaRow, dataTts.audioUrl, !ok);
-        }
-      } catch(e) { console.warn('[lea] tts failed:', e); }
+          var dN = await rN.json();
+          if (dN.audioUrl) {
+            // Attacher à la dernière entrée du buffer
+            var lastAssistant = null;
+            for (var i = _convBuffer.length - 1; i >= 0; i--) {
+              if (_convBuffer[i].role === 'assistant' && _convBuffer[i].text === answerText) {
+                lastAssistant = _convBuffer[i];
+                break;
+              }
+            }
+            if (lastAssistant) lastAssistant.novaAudioUrl = dN.audioUrl;
+          }
+        } catch(e) { console.warn('[lea] Nova bg failed:', e); }
+      })();
 
     } catch(e) {
-      removeThinking(thinkingId);
-      console.error('[lea] vocal process error:', e);
-      appendMessage('assistant', '⚠️ Erreur réseau.');
-    } finally {
-      _isSending = false;
-      scrollToBottom();
+      console.error('[lea] processVocalTurn error:', e);
+      _convBuffer.push({ role: 'user', text: question });
+      _convBuffer.push({ role: 'assistant', text: '⚠️ Erreur réseau.' });
+      _isProcessing = false;
+      if (_convActive) setTimeout(startListeningCycle, 1500);
     }
+  }
+
+  // Fait parler Léa via speechSynthesis navigateur (auto-play iOS compatible
+  // quand déclenché dans session user gesture récente)
+  function speakWithBrowser(text, onEnd) {
+    if (!_browserSynth || !text) { if (onEnd) onEnd(); return; }
+    try { _browserSynth.cancel(); } catch(e) {}
+
+    // Nettoyer le markdown pour la synthèse
+    var clean = text.replace(/\*\*([^*]+)\*\*/g, '$1')
+                    .replace(/\*([^*]+)\*/g, '$1')
+                    .replace(/`([^`]+)`/g, '$1')
+                    .replace(/[#\[\]]/g, '')
+                    .replace(/✅|⚠️|🔊|👩‍💼|🧠|📱|💡|🗣|💭/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+
+    try {
+      var utt = new SpeechSynthesisUtterance(clean);
+      utt.lang = 'fr-FR';
+      utt.rate = 1.0;
+      utt.pitch = 1.05;
+      utt.volume = 1.0;
+      if (_browserVoice) utt.voice = _browserVoice;
+      utt.onend = function() { if (onEnd) onEnd(); };
+      utt.onerror = function() { if (onEnd) onEnd(); };
+      _browserSynth.speak(utt);
+    } catch(e) {
+      console.warn('[lea] synth error:', e);
+      if (onEnd) onEnd();
+    }
+  }
+
+  // Flush le buffer de conversation vocale dans le chat principal à la fermeture
+  function flushConversationBuffer() {
+    if (!_convBuffer.length) return;
+
+    // Masquer empty state
+    var empty = document.getElementById('empty-state');
+    if (empty) empty.style.display = 'none';
+
+    // Séparateur visuel (Q2=C)
+    var msgsZone = document.getElementById('msgs-zone');
+    var sep = document.createElement('div');
+    sep.className = 'vocal-separator';
+    var now = new Date();
+    var hh = String(now.getHours()).padStart(2, '0');
+    var mm = String(now.getMinutes()).padStart(2, '0');
+    sep.textContent = '🎙 Conversation vocale de ' + hh + 'h' + mm;
+    msgsZone.appendChild(sep);
+
+    // Écrire chaque tour comme une bulle normale (Q3=A : avec badges d'actions)
+    for (var i = 0; i < _convBuffer.length; i++) {
+      var entry = _convBuffer[i];
+      if (entry.role === 'user') {
+        appendMessage('user', entry.text);
+      } else {
+        var row = appendMessage('assistant', entry.text, entry.toolsUsed, entry.toolTraces);
+        // Si Nova a généré l'audio → bouton 🔊 pour réécouter
+        if (entry.novaAudioUrl) {
+          attachAudioButton(row, entry.novaAudioUrl, false);
+        }
+      }
+    }
+
+    _convBuffer = [];
+    scrollToBottom();
   }
 
   // Lit un audio (data URL base64 ou URL classique).
