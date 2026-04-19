@@ -20,9 +20,46 @@ const PRICE_TO_PLAN = {
   'price_1TGEOcRZYcAavmfvrOqqrjQu': 'master',  // Master annuel
 };
 
+// ── Price IDs de l'addon Léa (via env vars pour rester flexibles) ──
+// STRIPE_PRICE_ADDON_LEA_MONTHLY = price_1TNpWsRZYcAavmfvtTd2vcqy
+// STRIPE_PRICE_ADDON_LEA_YEARLY  = price_1TNpWsRZYcAavmfvbbHtMCFX
+function getAgentPriceIds() {
+  return [
+    process.env.STRIPE_PRICE_ADDON_LEA_MONTHLY,
+    process.env.STRIPE_PRICE_ADDON_LEA_YEARLY,
+  ].filter(Boolean);
+}
+
+// ── Analyser les items d'une subscription (plan principal + addon Léa) ──
+// Une sub peut contenir 1 item (plan seul) ou 2 items (plan + addon Léa).
+function analyzeSubscriptionItems(subscription) {
+  const items = subscription?.items?.data || [];
+  const agentPriceIds = getAgentPriceIds();
+  let planItem = null;
+  let agentItem = null;
+
+  for (const item of items) {
+    const priceId = item?.price?.id;
+    if (!priceId) continue;
+    if (agentPriceIds.includes(priceId)) {
+      agentItem = item;
+    } else if (PRICE_TO_PLAN[priceId]) {
+      planItem = item;
+    }
+  }
+
+  return {
+    plan: planItem ? PRICE_TO_PLAN[planItem.price.id] : null,
+    planSubscriptionItemId: planItem?.id || '',
+    agentEnabled: !!agentItem,
+    agentSubscriptionItemId: agentItem?.id || '',
+    agentPriceId: agentItem?.price?.id || '',
+  };
+}
+
+// Conservé pour rétro-compat (utilisé dans tout le fichier) :
 function getPlanFromSubscription(subscription) {
-  const priceId = subscription?.items?.data?.[0]?.price?.id;
-  return PRICE_TO_PLAN[priceId] || null;
+  return analyzeSubscriptionItems(subscription).plan;
 }
 
 // ── Cache du token admin Firebase ──
@@ -348,6 +385,7 @@ module.exports = async (req, res) => {
         // Récupérer les détails de la subscription
         let trialEnd = null;
         let subStatus = 'trialing';
+        let agentFields = {};
         if (subscriptionId && stripeKey) {
           const subRes = await fetch(`https://api.stripe.com/v1/subscriptions/${subscriptionId}`, {
             headers: { Authorization: 'Bearer ' + stripeKey }
@@ -355,6 +393,18 @@ module.exports = async (req, res) => {
           const sub = await subRes.json();
           if (sub.trial_end) trialEnd = new Date(sub.trial_end * 1000).toISOString().split('T')[0];
           subStatus = sub.status || 'trialing';
+
+          // Analyser les items pour détecter l'addon Léa (si paiement direct avec 2 items)
+          const analysis = analyzeSubscriptionItems(sub);
+          if (analysis.agentEnabled) {
+            agentFields = {
+              agentEnabled:              true,
+              agentAddonStatus:          'active',
+              agentSubscriptionItemId:   analysis.agentSubscriptionItemId,
+              agentActivatedAt:          new Date().toISOString(),
+              agentDegradedMode:         false,
+            };
+          }
         }
 
         // Si pas de trial (abonnement direct) → plan actif immédiatement
@@ -369,6 +419,7 @@ module.exports = async (req, res) => {
           ...(isTrial && trialEnd ? { trialEnd } : {}),
           ...(isTrial ? { pendingPlan: plan } : { pendingPlan: '' }),
           subscriptionStatus:   subStatus,
+          ...agentFields,
         });
 
         console.log(`[Webhook] checkout.session.completed uid=${uid} plan=${activePlan} status=${subStatus}`);
@@ -423,8 +474,12 @@ module.exports = async (req, res) => {
       const uid = await getUidFromCustomer(customerId);
       if (!uid) { console.warn('[Webhook] uid non trouvé pour customer:', customerId); return res.status(200).end(); }
 
-      const plan = getPlanFromSubscription(sub);
-      if (!plan) { console.warn('[Webhook] plan non reconnu pour sub:', sub.id); return res.status(200).end(); }
+      const analysis = analyzeSubscriptionItems(sub);
+      const plan = analysis.plan;
+
+      // Si plus aucun plan reconnu (cas théorique : il ne reste que l'item Léa tout seul,
+      // ce qui ne devrait jamais arriver vu qu'on force un plan pour avoir Léa), on log et on sort
+      if (!plan) { console.warn('[Webhook] plan non reconnu pour sub:', sub.id, 'items=', (sub.items?.data||[]).map(i=>i.price?.id)); return res.status(200).end(); }
 
       let newPlan = plan;
       if (sub.status === 'trialing')             newPlan = 'trial';
@@ -434,14 +489,45 @@ module.exports = async (req, res) => {
       else if (sub.status === 'incomplete')      newPlan = 'trial'; // CB pas encore fournie
       else if (sub.status === 'incomplete_expired') newPlan = 'free'; // jamais fourni la CB
 
+      // ── Gestion addon Léa ──
+      // Lire l'état précédent pour détecter transitions (activation / désactivation)
+      const prevUserDoc = await fsGet(`users/${uid}`);
+      const wasAgentEnabled = fv(prevUserDoc, 'agentEnabled') === true;
+      const nowAgentEnabled = analysis.agentEnabled && ['active','trialing','past_due'].includes(sub.status);
+
+      const agentFields = {};
+      if (nowAgentEnabled) {
+        // Addon présent et sub active → Léa active
+        agentFields.agentEnabled            = true;
+        agentFields.agentAddonStatus        = sub.status === 'past_due' ? 'past_due' : 'active';
+        agentFields.agentSubscriptionItemId = analysis.agentSubscriptionItemId;
+        agentFields.agentDegradedMode       = false;
+        if (!wasAgentEnabled) {
+          agentFields.agentActivatedAt = new Date().toISOString();
+        }
+      } else if (wasAgentEnabled && !analysis.agentEnabled) {
+        // Item Léa retiré de la sub → désactivation
+        agentFields.agentEnabled          = false;
+        agentFields.agentAddonStatus      = 'canceled';
+        agentFields.agentCanceledAt       = new Date().toISOString();
+        agentFields.agentSubscriptionItemId = '';
+        // Le mode dégradé sera géré par le cron trial-check à J15, pas ici
+      } else if (wasAgentEnabled && sub.status === 'canceled') {
+        // Sub entière annulée → Léa aussi
+        agentFields.agentEnabled          = false;
+        agentFields.agentAddonStatus      = 'canceled';
+        agentFields.agentCanceledAt       = new Date().toISOString();
+      }
+
       await updateFirestore(uid, {
         plan:                 newPlan,
         stripeSubscriptionId: sub.id,
         subscriptionStatus:   sub.status,
         ...(newPlan !== 'trial' ? { pendingPlan: '' } : {}),
+        ...agentFields,
       });
 
-      console.log(`[Webhook] Subscription updated uid=${uid} plan=${newPlan} status=${sub.status}`);
+      console.log(`[Webhook] Subscription updated uid=${uid} plan=${newPlan} status=${sub.status} agent=${nowAgentEnabled}`);
     }
 
     // ════════════════════════════════════════════
@@ -457,9 +543,13 @@ module.exports = async (req, res) => {
         plan:               'free',
         subscriptionStatus: 'canceled',
         stripeSubscriptionId: '',
+        agentEnabled:       false,
+        agentAddonStatus:   'canceled',
+        agentCanceledAt:    new Date().toISOString(),
+        agentSubscriptionItemId: '',
       });
 
-      console.log(`[Webhook] Subscription annulée uid=${uid}`);
+      console.log(`[Webhook] Subscription annulée uid=${uid} (plan + addon Léa)`);
     }
 
     // ════════════════════════════════════════════
@@ -506,13 +596,31 @@ module.exports = async (req, res) => {
 
       // Récupérer la subscription pour connaître le plan
       let plan = null;
+      let agentFields = {};
       if (invoiceSubscriptionId && stripeKey) {
         const subRes = await fetch(`https://api.stripe.com/v1/subscriptions/${invoiceSubscriptionId}`, {
           headers: { Authorization: 'Bearer ' + stripeKey }
         });
         const sub = await subRes.json();
-        plan = getPlanFromSubscription(sub);
+        const analysis = analyzeSubscriptionItems(sub);
+        plan = analysis.plan;
         if (!plan) console.warn(`[Webhook] getPlanFromSubscription returned null. priceId=${sub?.items?.data?.[0]?.price?.id}, sub.plan=${sub?.plan?.id}`);
+
+        // Gestion addon Léa : on synchronise à chaque paiement
+        const prevUserDoc = await fsGet(`users/${uid}`);
+        const wasAgentEnabled = fv(prevUserDoc, 'agentEnabled') === true;
+
+        if (analysis.agentEnabled) {
+          agentFields = {
+            agentEnabled:              true,
+            agentAddonStatus:          'active',
+            agentSubscriptionItemId:   analysis.agentSubscriptionItemId,
+            agentDegradedMode:         false,
+          };
+          if (!wasAgentEnabled) {
+            agentFields.agentActivatedAt = new Date().toISOString();
+          }
+        }
       } else {
         console.warn(`[Webhook] Skipping subscription fetch: invoiceSubId=${invoiceSubscriptionId} stripeKey=${!!stripeKey}`);
       }
@@ -523,8 +631,9 @@ module.exports = async (req, res) => {
           subscriptionStatus: 'active',
           lastPayment:        new Date().toISOString().split('T')[0],
           pendingPlan:        '',
+          ...agentFields,
         });
-        console.log(`[Webhook] Paiement OK uid=${uid} plan=${plan} montant=${invoice.amount_paid}`);
+        console.log(`[Webhook] Paiement OK uid=${uid} plan=${plan} montant=${invoice.amount_paid} agent=${!!agentFields.agentEnabled}`);
 
         // ── PARRAINAGE : récompenser le parrain à la 1ère vraie facture du filleul ──
         // On ne récompense que sur billing_reason = 'subscription_create' ou 'subscription_cycle'
@@ -558,12 +667,18 @@ module.exports = async (req, res) => {
       const uid = await getUidFromCustomer(invoice.customer);
       if (!uid) return res.status(200).end();
 
+      // Si un addon Léa est actif, on le passe aussi en past_due (pas de désactivation,
+      // Stripe fera ses 3 tentatives avant subscription.deleted)
+      const prevUserDoc = await fsGet(`users/${uid}`);
+      const hadAgent = fv(prevUserDoc, 'agentEnabled') === true;
+
       await updateFirestore(uid, {
         plan:               'past_due',
         subscriptionStatus: 'past_due',
+        ...(hadAgent ? { agentAddonStatus: 'past_due' } : {}),
       });
 
-      console.log(`[Webhook] Paiement échoué uid=${uid}`);
+      console.log(`[Webhook] Paiement échoué uid=${uid} agentHad=${hadAgent}`);
     }
 
     return res.status(200).json({ received: true });
