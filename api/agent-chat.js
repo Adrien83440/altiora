@@ -185,6 +185,20 @@ async function fsPatch(path, data) {
   return res.json();
 }
 
+// Supprime un document Firestore (Wave 3.9)
+async function fsDelete(path) {
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}`;
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: await _fsHeaders(),
+  });
+  // 404 est OK (déjà supprimé), les autres codes >= 400 sont des erreurs
+  if (!res.ok && res.status !== 404) {
+    throw new Error('fsDelete failed: ' + (await res.text()).slice(0, 200));
+  }
+  return { deleted: res.ok };
+}
+
 function currentYearMonth() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -542,6 +556,169 @@ const TOOLS = [
         categorie: { type: 'string', description: "'rappel', 'reunion', 'idee', 'todo', 'autre'" },
       },
       required: ['contenu'],
+    },
+  },
+
+  // ── WAVE 3.9 : écriture étendue (pilotage/stock/marges) ──
+  {
+    name: 'modifier_ligne_ca',
+    description: "CORRIGER une ligne CA existante en remplaçant le montant sur une TVA à une date donnée. Le nouveau montant REMPLACE l'ancien (pas d'accumulation, contrairement à ajouter_ca). Utiliser quand l'utilisateur dit 'corrige', 'remplace', 'modifie', 'change' un CA existant. Pour simplement ajouter du CA, utiliser ajouter_ca.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: "Date JJ/MM/AAAA" },
+        taux_tva: { type: 'number', description: "Taux TVA : 5.5, 10, 20, 2.1 ou 8.5" },
+        nouveau_montant_ht: { type: 'number', description: "Nouveau montant HT (positif ou 0 pour effacer)" },
+      },
+      required: ['date', 'taux_tva', 'nouveau_montant_ht'],
+    },
+  },
+  {
+    name: 'supprimer_ligne_ca',
+    description: "Remet à ZÉRO tous les champs TVA d'une ligne CA à une date donnée. Utiliser quand l'utilisateur dit 'supprime', 'efface', 'enlève' une ligne CA entière. Exige confirmer:true explicite pour éviter tout accident. DEMANDE TOUJOURS CONFIRMATION AVANT d'appeler ce tool.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        date: { type: 'string', description: "Date JJ/MM/AAAA" },
+        confirmer: { type: 'boolean', description: "DOIT être true pour valider la suppression" },
+      },
+      required: ['date', 'confirmer'],
+    },
+  },
+  {
+    name: 'modifier_ligne_charge',
+    description: "Modifier ou supprimer une ligne de charge (fixe ou variable) dans un mois donné. Utiliser pour corriger une charge mal saisie, changer son montant, changer son fournisseur, ou supprimer carrément la ligne. Si plusieurs charges correspondent, le tool renvoie la liste pour désambiguïser.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        mois: { type: 'string', description: "Format YYYY-MM (défaut: mois courant)" },
+        type: { type: 'string', description: "'fixe' ou 'variable'" },
+        identifier: {
+          type: 'object',
+          description: "Comment identifier la charge : par index (position 0-based) ou par fournisseur (+ montant si ambiguïté)",
+          properties: {
+            index: { type: 'integer' },
+            fournisseur: { type: 'string' },
+            montant_ht: { type: 'number' },
+          },
+        },
+        action: { type: 'string', description: "'modifier' ou 'supprimer'" },
+        nouvelles_valeurs: {
+          type: 'object',
+          description: "Requis si action=modifier. Champs à modifier : fournisseur, type, montant_ht, tva_rate, deductible (bool), pointe (bool)",
+          properties: {
+            fournisseur: { type: 'string' },
+            type: { type: 'string' },
+            montant_ht: { type: 'number' },
+            tva_rate: { type: 'number' },
+            deductible: { type: 'boolean' },
+            pointe: { type: 'boolean' },
+          },
+        },
+      },
+      required: ['type', 'identifier', 'action'],
+    },
+  },
+  {
+    name: 'ajouter_produit_stock',
+    description: "Créer un NOUVEAU produit dans le module Stock. Utiliser quand l'utilisateur veut référencer un nouvel article (ex: 'ajoute un produit pain de campagne à 2,50€', 'crée la référence CHEM-BLA pour une chemise blanche'). Si un produit similaire existe déjà (même nom/ref/EAN), proposer d'ajuster sa quantité plutôt que créer un doublon.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        nom: { type: 'string', description: "Nom du produit (requis, max 200 chars)" },
+        ref: { type: 'string', description: "Référence/SKU (généré si absent)" },
+        ean: { type: 'string', description: "Code-barres EAN (optionnel)" },
+        stock_initial: { type: 'number', description: "Quantité initiale en stock (défaut 0)" },
+        prix_achat: { type: 'number', description: "Prix d'achat HT unitaire" },
+        prix_vente: { type: 'number', description: "Prix de vente HT unitaire" },
+        categorie: { type: 'string' },
+        unite: { type: 'string', description: "Ex: pièce, kg, litre" },
+        stock_type: { type: 'string', description: "'marchandise' (défaut), 'matiere', 'fini'" },
+        fournisseur: { type: 'string' },
+        notes: { type: 'string' },
+      },
+      required: ['nom'],
+    },
+  },
+  {
+    name: 'ajuster_quantite_stock',
+    description: "Modifier la quantité en stock d'un produit EXISTANT. Crée un mouvement d'ajustement (ADJUST) qui établit le nouveau stock absolu. Utiliser pour un inventaire, une casse, une correction d'erreur. Pour créer un nouveau produit, utiliser ajouter_produit_stock.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: "Référence/SKU du produit" },
+        ean: { type: 'string', description: "Code-barres EAN" },
+        nom: { type: 'string', description: "Nom du produit (match partiel autorisé)" },
+        nouvelle_quantite: { type: 'number', description: "Quantité absolue après ajustement (>= 0)" },
+        motif: { type: 'string', description: "Raison de l'ajustement (inventaire, casse, etc.)" },
+      },
+      required: ['nouvelle_quantite'],
+    },
+  },
+  {
+    name: 'marquer_rupture_stock',
+    description: "Raccourci pour mettre un produit à 0 en stock (rupture). Équivalent à ajuster_quantite_stock avec nouvelle_quantite:0.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string' },
+        ean: { type: 'string' },
+        nom: { type: 'string' },
+        motif: { type: 'string' },
+      },
+    },
+  },
+  {
+    name: 'creer_fiche_marge',
+    description: "Créer une fiche marge dans le module Marges. Calcule automatiquement la marge brute (€ et %) à partir du prix de vente et des coûts. Utiliser quand l'utilisateur veut analyser la rentabilité d'un produit/plat/prestation qu'il est en train de définir.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        nom: { type: 'string', description: "Nom du produit/plat/service (requis)" },
+        prix_vente: { type: 'number', description: "Prix de vente HT unitaire (requis)" },
+        matiere_premiere: { type: 'number', description: "Coût matière première par unité" },
+        main_oeuvre: { type: 'number', description: "Coût main d'œuvre par unité" },
+        emballage: { type: 'number', description: "Coût emballage par unité" },
+        livraison: { type: 'number', description: "Coût livraison par unité" },
+        charges_fixes: { type: 'number', description: "Quote-part charges fixes par unité" },
+        quantite: { type: 'number', description: "Quantité de référence (défaut 1)" },
+        categorie: { type: 'string' },
+        emoji: { type: 'string', description: "Emoji visuel (défaut 📦)" },
+      },
+      required: ['nom', 'prix_vente'],
+    },
+  },
+  {
+    name: 'modifier_fiche_marge',
+    description: "Modifier les prix, coûts ou infos d'une fiche marge EXISTANTE. Utiliser pour mettre à jour un prix de vente, revoir un coût de matière, etc.",
+    input_schema: {
+      type: 'object',
+      properties: {
+        identifier: {
+          type: 'object',
+          description: "Identifier la fiche par id ou par nom (match partiel autorisé sur nom)",
+          properties: {
+            id: { type: 'string' },
+            nom: { type: 'string' },
+          },
+        },
+        nouvelles_valeurs: {
+          type: 'object',
+          properties: {
+            nom: { type: 'string' },
+            prix_vente: { type: 'number' },
+            matiere_premiere: { type: 'number' },
+            main_oeuvre: { type: 'number' },
+            emballage: { type: 'number' },
+            livraison: { type: 'number' },
+            charges_fixes: { type: 'number' },
+            quantite: { type: 'number' },
+            categorie: { type: 'string' },
+            emoji: { type: 'string' },
+          },
+        },
+      },
+      required: ['identifier', 'nouvelles_valeurs'],
     },
   },
 ];
@@ -1855,6 +2032,583 @@ async function tool_ajouter_note(uid, input) {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// WAVE 3.9 — ÉCRITURE ÉTENDUE (mobile uniquement)
+// 8 tools pour que Léa puisse modifier/supprimer dans pilotage/stock/marges
+// NB : RH, fidélisation et banque restent exclus (choix produit du dirigeant)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Helper commun : charger pilotage d'un mois + garantir structure standard
+async function loadPilotageMonth(uid, dateIso) {
+  const monthKey = monthKeyFromDate(dateIso);
+  const path = `pilotage/${uid}/months/${monthKey}`;
+  const doc = await fsGet(path);
+  const existing = doc ? docToObject(doc) : {};
+
+  const parts = dateIso.split('/');
+  const monthNum = parseInt(parts[1]);
+  const yearNum = parseInt(parts[2]);
+  const daysInMonth = new Date(yearNum, monthNum, 0).getDate();
+
+  // Garantir structure ca[] de 1 ligne par jour
+  let ca;
+  if (Array.isArray(existing.ca) && existing.ca.length === daysInMonth) {
+    ca = existing.ca.map(r => ({ ...r }));
+  } else {
+    ca = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      ca.push({ date: `${d}/${monthNum}/${yearNum}`, ht055: '', ht10: '', ht20: '' });
+    }
+    if (Array.isArray(existing.ca)) {
+      for (const oldRow of existing.ca) {
+        if (!oldRow.date) continue;
+        const oldParts = String(oldRow.date).split('/');
+        const oldDay = parseInt(oldParts[0]);
+        if (oldDay >= 1 && oldDay <= daysInMonth) {
+          ca[oldDay - 1] = { ...ca[oldDay - 1], ...oldRow };
+        }
+      }
+    }
+  }
+
+  return { path, existing, ca, daysInMonth, monthNum, yearNum };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_modifier_ligne_ca
+// Modifie le montant HT d'une ligne CA à une date donnée, sur une TVA donnée.
+// Utile pour CORRIGER une erreur, pas pour ajouter (utiliser ajouter_ca pour ajouter).
+// Input : { date: "JJ/MM/AAAA", taux_tva: 5.5|10|20|2.1|8.5, nouveau_montant_ht: number }
+// Le nouveau montant REMPLACE la valeur existante sur cette TVA (pas d'accumulation)
+// ───────────────────────────────────────────────────────────────────
+async function tool_modifier_ligne_ca(uid, input) {
+  const montantHt = parseFloat(input.nouveau_montant_ht);
+  if (isNaN(montantHt) || montantHt < 0) {
+    return { error: "Le nouveau montant HT doit être un nombre positif ou zéro.", success: false };
+  }
+  if (montantHt > 1000000) {
+    return { error: "Montant trop élevé, vérifie.", success: false };
+  }
+  const dateIso = parseDateFrToIso(input.date);
+  if (!dateIso) return { error: "Date invalide. Format JJ/MM/AAAA.", success: false };
+  const tvaField = normalizeTva(input.taux_tva);
+
+  const { path, ca } = await loadPilotageMonth(uid, dateIso);
+
+  // Trouver la ligne du jour
+  const parts = dateIso.split('/');
+  const dayOfMonth = parseInt(parts[0]);
+  let targetIdx = dayOfMonth - 1;
+  if (!ca[targetIdx] || ca[targetIdx].date !== dateIso) {
+    targetIdx = ca.findIndex(r => r && r.date === dateIso);
+    if (targetIdx === -1) return { error: `Ligne du ${dateIso} introuvable.`, success: false };
+  }
+
+  const ancienVal = parseFloat(ca[targetIdx][tvaField]) || 0;
+  ca[targetIdx][tvaField] = montantHt === 0 ? '' : String(montantHt);
+
+  // Traçabilité
+  if (!ca[targetIdx]._leaModifications) ca[targetIdx]._leaModifications = [];
+  ca[targetIdx]._leaModifications.push({
+    action: 'modification',
+    ancien: ancienVal,
+    nouveau: montantHt,
+    tva: tvaField,
+    modifiedAt: new Date().toISOString(),
+  });
+
+  await fsPatch(path, { ca });
+
+  const tvaDisplay = tvaField === 'ht055' ? '5,5%' : tvaField === 'ht10' ? '10%' : tvaField === 'ht21' ? '2,1%' : tvaField === 'ht85' ? '8,5%' : '20%';
+  return {
+    success: true,
+    message: `Ligne CA du ${dateIso} en TVA ${tvaDisplay} : ${ancienVal}€ → ${montantHt}€`,
+    ancien_montant: ancienVal,
+    nouveau_montant: montantHt,
+    date: dateIso,
+    tva: tvaDisplay,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_supprimer_ligne_ca
+// Remet à zéro TOUS les champs TVA d'une ligne CA à une date donnée.
+// Input : { date: "JJ/MM/AAAA", confirmer: true }
+// Exige explicitement confirmer:true pour éviter toute suppression accidentelle.
+// ───────────────────────────────────────────────────────────────────
+async function tool_supprimer_ligne_ca(uid, input) {
+  if (input.confirmer !== true) {
+    return { error: "Confirmation requise. Mets 'confirmer: true' pour valider la suppression.", success: false };
+  }
+  const dateIso = parseDateFrToIso(input.date);
+  if (!dateIso) return { error: "Date invalide. Format JJ/MM/AAAA.", success: false };
+
+  const { path, ca } = await loadPilotageMonth(uid, dateIso);
+
+  const parts = dateIso.split('/');
+  const dayOfMonth = parseInt(parts[0]);
+  let targetIdx = dayOfMonth - 1;
+  if (!ca[targetIdx] || ca[targetIdx].date !== dateIso) {
+    targetIdx = ca.findIndex(r => r && r.date === dateIso);
+    if (targetIdx === -1) return { error: `Ligne du ${dateIso} introuvable.`, success: false };
+  }
+
+  // Snapshot avant pour traçabilité
+  const snapshot = {
+    ht055: ca[targetIdx].ht055 || '',
+    ht10: ca[targetIdx].ht10 || '',
+    ht20: ca[targetIdx].ht20 || '',
+    ht21: ca[targetIdx].ht21 || '',
+    ht85: ca[targetIdx].ht85 || '',
+    montantHT: ca[targetIdx].montantHT || '',
+  };
+  const avaitContenu = Object.values(snapshot).some(v => parseFloat(v) > 0);
+
+  // Remettre à vide tous les champs de montant
+  ca[targetIdx].ht055 = '';
+  ca[targetIdx].ht10 = '';
+  ca[targetIdx].ht20 = '';
+  if ('ht21' in ca[targetIdx]) ca[targetIdx].ht21 = '';
+  if ('ht85' in ca[targetIdx]) ca[targetIdx].ht85 = '';
+  if ('montantHT' in ca[targetIdx]) ca[targetIdx].montantHT = '';
+
+  if (!ca[targetIdx]._leaModifications) ca[targetIdx]._leaModifications = [];
+  ca[targetIdx]._leaModifications.push({
+    action: 'suppression',
+    avant: snapshot,
+    modifiedAt: new Date().toISOString(),
+  });
+
+  await fsPatch(path, { ca });
+
+  return {
+    success: true,
+    message: avaitContenu
+      ? `Ligne CA du ${dateIso} remise à zéro.`
+      : `Ligne CA du ${dateIso} déjà vide, rien à faire.`,
+    date: dateIso,
+    avait_contenu: avaitContenu,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_modifier_ligne_charge
+// Modifie ou supprime une ligne de charge (fixe ou variable) dans le mois courant.
+// Comme les charges n'ont pas d'ID stable (c'est un tableau), on identifie par
+// position dans la liste (index) OU par fournisseur+montant si fourni.
+// Input : {
+//   mois?: "YYYY-MM" (défaut: courant),
+//   type: "fixe" | "variable",
+//   identifier: { index?: number, fournisseur?: string, montant_ht?: number },
+//   action: "modifier" | "supprimer",
+//   nouvelles_valeurs?: { fournisseur?, type?, montant_ht?, tva_rate?, deductible?, pointe? }
+// }
+// ───────────────────────────────────────────────────────────────────
+async function tool_modifier_ligne_charge(uid, input) {
+  const monthKey = input.mois || currentYearMonth();
+  if (!/^\d{4}-\d{2}$/.test(monthKey)) {
+    return { error: "Format mois invalide. Format : YYYY-MM.", success: false };
+  }
+
+  const typeCharge = (input.type || '').toLowerCase();
+  if (typeCharge !== 'fixe' && typeCharge !== 'variable') {
+    return { error: "Le champ 'type' doit être 'fixe' ou 'variable'.", success: false };
+  }
+  const champ = typeCharge === 'fixe' ? 'chargesFixe' : 'chargesVar';
+
+  const action = (input.action || '').toLowerCase();
+  if (action !== 'modifier' && action !== 'supprimer') {
+    return { error: "Le champ 'action' doit être 'modifier' ou 'supprimer'.", success: false };
+  }
+
+  const path = `pilotage/${uid}/months/${monthKey}`;
+  const doc = await fsGet(path);
+  if (!doc) return { error: `Aucun doc pilotage pour le mois ${monthKey}.`, success: false };
+  const existing = docToObject(doc);
+  const charges = Array.isArray(existing[champ]) ? existing[champ].map(c => ({ ...c })) : [];
+
+  if (charges.length === 0) {
+    return { error: `Aucune charge ${typeCharge} dans ${monthKey}.`, success: false };
+  }
+
+  // Identifier la ligne
+  const id = input.identifier || {};
+  let targetIdx = -1;
+  if (typeof id.index === 'number' && id.index >= 0 && id.index < charges.length) {
+    targetIdx = id.index;
+  } else if (id.fournisseur) {
+    const srch = String(id.fournisseur).toLowerCase();
+    // Match exact d'abord, puis partial
+    targetIdx = charges.findIndex(c => (c.fournisseur || '').toLowerCase() === srch);
+    if (targetIdx === -1) {
+      targetIdx = charges.findIndex(c => (c.fournisseur || '').toLowerCase().includes(srch));
+    }
+    if (targetIdx !== -1 && id.montant_ht !== undefined) {
+      // Vérifier que le montant colle (désambiguïsation)
+      const got = parseFloat(charges[targetIdx].montantHT) || 0;
+      if (Math.abs(got - parseFloat(id.montant_ht)) > 0.01) {
+        // Chercher une autre ligne avec le bon montant
+        const altIdx = charges.findIndex(c =>
+          (c.fournisseur || '').toLowerCase().includes(srch) &&
+          Math.abs((parseFloat(c.montantHT) || 0) - parseFloat(id.montant_ht)) < 0.01
+        );
+        if (altIdx !== -1) targetIdx = altIdx;
+      }
+    }
+  }
+
+  if (targetIdx === -1) {
+    return {
+      error: "Ligne introuvable. Précise l'index (0-based) ou le fournisseur exact.",
+      success: false,
+      charges_disponibles: charges.map((c, i) => ({
+        index: i,
+        fournisseur: c.fournisseur,
+        type: c.type,
+        montant_ht: c.montantHT,
+      })),
+    };
+  }
+
+  const avant = { ...charges[targetIdx] };
+
+  if (action === 'supprimer') {
+    charges.splice(targetIdx, 1);
+    await fsPatch(path, { [champ]: charges });
+    return {
+      success: true,
+      message: `Charge ${typeCharge} "${avant.fournisseur || 'sans nom'}" (${avant.montantHT}€) supprimée.`,
+      charge_supprimee: avant,
+    };
+  }
+
+  // action === 'modifier'
+  const nv = input.nouvelles_valeurs || {};
+  if (nv.fournisseur !== undefined) charges[targetIdx].fournisseur = String(nv.fournisseur);
+  if (nv.type !== undefined) charges[targetIdx].type = String(nv.type);
+  if (nv.montant_ht !== undefined) {
+    const m = parseFloat(nv.montant_ht);
+    if (isNaN(m) || m < 0) return { error: "montant_ht invalide.", success: false };
+    charges[targetIdx].montantHT = String(m);
+  }
+  if (nv.tva_rate !== undefined) charges[targetIdx].tvaRate = parseFloat(nv.tva_rate) || 20;
+  if (nv.deductible !== undefined) charges[targetIdx].deductible = nv.deductible ? 'Oui' : 'Non';
+  if (nv.pointe !== undefined) charges[targetIdx].pointe = nv.pointe ? 'Oui' : 'Non';
+
+  await fsPatch(path, { [champ]: charges });
+
+  return {
+    success: true,
+    message: `Charge ${typeCharge} modifiée.`,
+    avant: avant,
+    apres: charges[targetIdx],
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STOCK — Wave 3.9
+// ═══════════════════════════════════════════════════════════════════════════
+
+function genUid() {
+  return 'p_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_ajouter_produit_stock
+// Crée un nouveau produit dans stock/{uid}/products/{id}
+// Input : {
+//   nom: string (requis), ref?: string (SKU, généré si absent),
+//   ean?: string, stock_initial?: number (défaut 0), prix_achat?: number,
+//   prix_vente?: number, categorie?: string, unite?: string, notes?: string,
+//   stock_type?: "marchandise"|"matiere"|"fini" (défaut "marchandise")
+// }
+// ───────────────────────────────────────────────────────────────────
+async function tool_ajouter_produit_stock(uid, input) {
+  const nom = (input.nom || '').trim();
+  if (!nom) return { error: "Le nom du produit est requis.", success: false };
+  if (nom.length > 200) return { error: "Nom trop long (max 200).", success: false };
+
+  const id = genUid();
+  const ref = (input.ref || '').trim() || id.slice(-6).toUpperCase();
+  const stockType = ['marchandise', 'matiere', 'fini'].includes(input.stock_type) ? input.stock_type : 'marchandise';
+
+  const product = {
+    id,
+    ref,
+    name: nom,
+    stockType,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (input.ean) product.ean = String(input.ean);
+  if (input.stock_initial !== undefined) product.stockBase = parseFloat(input.stock_initial) || 0;
+  if (input.prix_achat !== undefined) product.pa = parseFloat(input.prix_achat) || 0;
+  if (input.prix_vente !== undefined) product.pv = parseFloat(input.prix_vente) || 0;
+  if (input.categorie) product.categorie = String(input.categorie);
+  if (input.unite) product.unite = String(input.unite);
+  if (input.notes) product.notes = String(input.notes).slice(0, 500);
+  if (input.fournisseur) product.fournisseur = String(input.fournisseur);
+
+  await fsCreateWithId(`stock/${uid}/products`, id, product);
+
+  return {
+    success: true,
+    message: `Produit "${nom}" (réf ${ref}) ajouté au stock.`,
+    produit: {
+      id, ref, nom, stock_initial: product.stockBase || 0,
+      prix_achat: product.pa || 0, prix_vente: product.pv || 0,
+      stock_type: stockType,
+    },
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_ajuster_quantite_stock
+// Ajuste la quantité d'un produit existant en créant un mouvement ADJUST.
+// Ne modifie PAS le produit — le stock effectif est recalculé dynamiquement
+// à partir de stockBase + tous les mouvements.
+// Input : {
+//   ref?: string (SKU) OU ean?: string OU nom?: string (l'un des 3 requis),
+//   nouvelle_quantite: number (requis, >= 0),
+//   motif?: string (recommandé: "inventaire", "casse", "correction", etc.)
+// }
+// ───────────────────────────────────────────────────────────────────
+async function tool_ajuster_quantite_stock(uid, input) {
+  const newQty = parseFloat(input.nouvelle_quantite);
+  if (isNaN(newQty) || newQty < 0) {
+    return { error: "nouvelle_quantite doit être >= 0.", success: false };
+  }
+  if (newQty > 1000000) {
+    return { error: "Quantité trop élevée, vérifie.", success: false };
+  }
+
+  // Trouver le produit
+  const prodList = await fsList(`stock/${uid}/products`, 2000);
+  const prodDocs = prodList?.documents || [];
+  let found = null;
+  const srchRef = (input.ref || '').trim().toLowerCase();
+  const srchEan = (input.ean || '').trim();
+  const srchNom = (input.nom || '').trim().toLowerCase();
+  if (!srchRef && !srchEan && !srchNom) {
+    return { error: "Précise au moins un identifiant : ref, ean ou nom.", success: false };
+  }
+
+  for (const d of prodDocs) {
+    const p = docToObject(d);
+    const id = (d.name || '').split('/').pop();
+    if (srchRef && (p.ref || '').toLowerCase() === srchRef) { found = { ...p, id }; break; }
+    if (srchEan && (p.ean || '') === srchEan) { found = { ...p, id }; break; }
+    if (srchNom && (p.name || '').toLowerCase() === srchNom) { found = { ...p, id }; break; }
+  }
+  // Fallback : match partiel sur nom
+  if (!found && srchNom) {
+    for (const d of prodDocs) {
+      const p = docToObject(d);
+      const id = (d.name || '').split('/').pop();
+      if ((p.name || '').toLowerCase().includes(srchNom)) { found = { ...p, id }; break; }
+    }
+  }
+
+  if (!found) {
+    return { error: `Produit introuvable. Essaie avec une autre référence ou vérifie l'inventaire.`, success: false };
+  }
+
+  // Calculer le stock actuel = stockBase + sum(mouvements)
+  const movList = await fsList(`stock/${uid}/movements`, 1000);
+  const movDocs = movList?.documents || [];
+  let currentQty = parseFloat(found.stockBase) || 0;
+  let lastAdjustQty = null;
+  for (const d of movDocs) {
+    const m = docToObject(d);
+    if ((m.ref || '').toLowerCase() !== (found.ref || '').toLowerCase()) continue;
+    if (m.type === 'ADJUST') {
+      // ADJUST définit la quantité absolue
+      currentQty = parseFloat(m.qty) || 0;
+      lastAdjustQty = currentQty;
+    } else if (m.type === 'IN' || m.type === 'RETURN_IN') {
+      currentQty += parseFloat(m.qty) || 0;
+    } else if (m.type === 'OUT' || m.type === 'LOSS' || m.type === 'RETURN_OUT') {
+      currentQty -= parseFloat(m.qty) || 0;
+    }
+  }
+
+  // Créer le mouvement ADJUST
+  const movId = genUid();
+  const motif = (input.motif || 'Ajustement par Léa').slice(0, 200);
+  const mov = {
+    id: movId,
+    date: new Date().toISOString().slice(0, 10),
+    type: 'ADJUST',
+    ref: found.ref,
+    qty: newQty,
+    pa: parseFloat(found.pa) || 0,
+    note: `${motif} (${currentQty} → ${newQty}, via Léa)`,
+  };
+  await fsCreateWithId(`stock/${uid}/movements`, movId, mov);
+
+  return {
+    success: true,
+    message: `Stock "${found.name}" ajusté : ${currentQty} → ${newQty} (${motif})`,
+    produit: { id: found.id, ref: found.ref, nom: found.name },
+    ancien_stock: currentQty,
+    nouveau_stock: newQty,
+    difference: newQty - currentQty,
+    motif,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_marquer_rupture_stock
+// Raccourci : met un produit à 0 (équivalent ajuster_quantite_stock avec 0)
+// Input : { ref?: string, ean?: string, nom?: string (un requis) }
+// ───────────────────────────────────────────────────────────────────
+async function tool_marquer_rupture_stock(uid, input) {
+  return tool_ajuster_quantite_stock(uid, {
+    ref: input.ref,
+    ean: input.ean,
+    nom: input.nom,
+    nouvelle_quantite: 0,
+    motif: input.motif || 'Rupture de stock',
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MARGES — Wave 3.9
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ───────────────────────────────────────────────────────────────────
+// tool_creer_fiche_marge
+// Crée une fiche marge produit dans marges/{uid}/produits/{id}
+// Input : {
+//   nom: string (requis),
+//   prix_vente: number (requis, HT),
+//   matiere_premiere?: number, main_oeuvre?: number,
+//   emballage?: number, livraison?: number,
+//   charges_fixes?: number, quantite?: number (défaut 1),
+//   categorie?: string, emoji?: string
+// }
+// ───────────────────────────────────────────────────────────────────
+async function tool_creer_fiche_marge(uid, input) {
+  const nom = (input.nom || '').trim();
+  if (!nom) return { error: "Le nom du produit est requis.", success: false };
+  if (nom.length > 200) return { error: "Nom trop long.", success: false };
+
+  const pv = parseFloat(input.prix_vente);
+  if (isNaN(pv) || pv < 0) return { error: "prix_vente doit être un nombre >= 0.", success: false };
+
+  const id = 'prod_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+  const fiche = {
+    nom,
+    pv: String(pv),
+    qte: String(parseFloat(input.quantite) || 1),
+    mp: String(parseFloat(input.matiere_premiere) || 0),
+    mo: String(parseFloat(input.main_oeuvre) || 0),
+    emb: String(parseFloat(input.emballage) || 0),
+    liv: String(parseFloat(input.livraison) || 0),
+    cfTotal: String(parseFloat(input.charges_fixes) || 0),
+    categorie: String(input.categorie || '').slice(0, 80),
+    emoji: String(input.emoji || '📦').slice(0, 4),
+    createdAt: new Date().toISOString(),
+    source: 'lea',
+  };
+
+  await fsCreateWithId(`marges/${uid}/produits`, id, fiche);
+
+  // Calcul indicatif de marge pour retour immédiat
+  const coutTotal = parseFloat(fiche.mp) + parseFloat(fiche.mo) + parseFloat(fiche.emb) + parseFloat(fiche.liv) + parseFloat(fiche.cfTotal);
+  const margeEur = pv - coutTotal;
+  const margePct = pv > 0 ? (margeEur / pv) * 100 : 0;
+
+  return {
+    success: true,
+    message: `Fiche marge "${nom}" créée (PV ${pv}€, marge brute ${Math.round(margeEur * 100) / 100}€ soit ${Math.round(margePct * 10) / 10}%).`,
+    fiche: {
+      id, nom, prix_vente: pv,
+      cout_total: Math.round(coutTotal * 100) / 100,
+      marge_eur: Math.round(margeEur * 100) / 100,
+      marge_pct: Math.round(margePct * 10) / 10,
+    },
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────
+// tool_modifier_fiche_marge
+// Modifie les prix/coûts d'une fiche existante.
+// Input : {
+//   identifier: { id?: string, nom?: string (un requis) },
+//   nouvelles_valeurs: {
+//     nom?, prix_vente?, matiere_premiere?, main_oeuvre?,
+//     emballage?, livraison?, charges_fixes?, quantite?, categorie?, emoji?
+//   }
+// }
+// ───────────────────────────────────────────────────────────────────
+async function tool_modifier_fiche_marge(uid, input) {
+  const id = input.identifier || {};
+  const nv = input.nouvelles_valeurs || {};
+
+  // Trouver la fiche
+  let ficheId = (id.id || '').trim();
+  let existingDoc = null;
+
+  if (ficheId) {
+    existingDoc = await fsGet(`marges/${uid}/produits/${ficheId}`);
+    if (!existingDoc) return { error: `Fiche id "${ficheId}" introuvable.`, success: false };
+  } else if (id.nom) {
+    const srchNom = String(id.nom).toLowerCase().trim();
+    const list = await fsList(`marges/${uid}/produits`, 500);
+    const docs = list?.documents || [];
+    const found = docs.find(d => {
+      const data = docToObject(d);
+      return (data.nom || '').toLowerCase() === srchNom;
+    }) || docs.find(d => {
+      const data = docToObject(d);
+      return (data.nom || '').toLowerCase().includes(srchNom);
+    });
+    if (!found) return { error: `Aucune fiche marge trouvée pour "${id.nom}".`, success: false };
+    ficheId = (found.name || '').split('/').pop();
+    existingDoc = found;
+  } else {
+    return { error: "Précise un identifier : id ou nom.", success: false };
+  }
+
+  const existing = docToObject(existingDoc);
+  const updated = { ...existing };
+
+  if (nv.nom !== undefined) updated.nom = String(nv.nom);
+  if (nv.prix_vente !== undefined) updated.pv = String(parseFloat(nv.prix_vente) || 0);
+  if (nv.matiere_premiere !== undefined) updated.mp = String(parseFloat(nv.matiere_premiere) || 0);
+  if (nv.main_oeuvre !== undefined) updated.mo = String(parseFloat(nv.main_oeuvre) || 0);
+  if (nv.emballage !== undefined) updated.emb = String(parseFloat(nv.emballage) || 0);
+  if (nv.livraison !== undefined) updated.liv = String(parseFloat(nv.livraison) || 0);
+  if (nv.charges_fixes !== undefined) updated.cfTotal = String(parseFloat(nv.charges_fixes) || 0);
+  if (nv.quantite !== undefined) updated.qte = String(parseFloat(nv.quantite) || 1);
+  if (nv.categorie !== undefined) updated.categorie = String(nv.categorie).slice(0, 80);
+  if (nv.emoji !== undefined) updated.emoji = String(nv.emoji).slice(0, 4);
+  updated.updatedAt = new Date().toISOString();
+
+  await fsPatch(`marges/${uid}/produits/${ficheId}`, updated);
+
+  const pv = parseFloat(updated.pv) || 0;
+  const coutTotal = (parseFloat(updated.mp) || 0) + (parseFloat(updated.mo) || 0)
+                  + (parseFloat(updated.emb) || 0) + (parseFloat(updated.liv) || 0)
+                  + (parseFloat(updated.cfTotal) || 0);
+  const margeEur = pv - coutTotal;
+  const margePct = pv > 0 ? (margeEur / pv) * 100 : 0;
+
+  return {
+    success: true,
+    message: `Fiche marge "${updated.nom}" modifiée. Marge brute ${Math.round(margeEur * 100) / 100}€ (${Math.round(margePct * 10) / 10}%).`,
+    fiche: {
+      id: ficheId, nom: updated.nom, prix_vente: pv,
+      cout_total: Math.round(coutTotal * 100) / 100,
+      marge_eur: Math.round(margeEur * 100) / 100,
+      marge_pct: Math.round(margePct * 10) / 10,
+    },
+  };
+}
+
 // Dispatcher
 async function executeTool(toolName, input, uid) {
   try {
@@ -1885,6 +2639,15 @@ async function executeTool(toolName, input, uid) {
       case 'ajouter_ca':         result = await tool_ajouter_ca(uid, input || {}); break;
       case 'ajouter_charge':     result = await tool_ajouter_charge(uid, input || {}); break;
       case 'ajouter_note':       result = await tool_ajouter_note(uid, input || {}); break;
+      // ── Wave 3.9 : écriture étendue ──
+      case 'modifier_ligne_ca':       result = await tool_modifier_ligne_ca(uid, input || {}); break;
+      case 'supprimer_ligne_ca':      result = await tool_supprimer_ligne_ca(uid, input || {}); break;
+      case 'modifier_ligne_charge':   result = await tool_modifier_ligne_charge(uid, input || {}); break;
+      case 'ajouter_produit_stock':   result = await tool_ajouter_produit_stock(uid, input || {}); break;
+      case 'ajuster_quantite_stock':  result = await tool_ajuster_quantite_stock(uid, input || {}); break;
+      case 'marquer_rupture_stock':   result = await tool_marquer_rupture_stock(uid, input || {}); break;
+      case 'creer_fiche_marge':       result = await tool_creer_fiche_marge(uid, input || {}); break;
+      case 'modifier_fiche_marge':    result = await tool_modifier_fiche_marge(uid, input || {}); break;
       default: return { error: `Tool inconnu : ${toolName}` };
     }
     // Cap la taille du résultat
@@ -2018,32 +2781,68 @@ Quand tu appelles un tool d'écriture, tu DOIS lire la valeur de retour :
 
   const mobileHeader = isMobile ? `🚨 MODE APP MOBILE ACTIF — LIS CECI AVANT TOUT
 
-Tu es dans l'app mobile Léa. Le dirigeant peut te demander d'AJOUTER des ventes ou des charges dans son pilotage. Tu as 3 tools d'ÉCRITURE actifs :
+Tu es dans l'app mobile Léa. Le dirigeant peut te demander d'AJOUTER, MODIFIER ou SUPPRIMER des données dans Alteore. Tu as 11 tools d'ÉCRITURE actifs :
 
-- **ajouter_ca** : ajouter un chiffre d'affaires (montant HT, TVA, date)
-- **ajouter_charge** : ajouter une charge fixe ou variable
-- **ajouter_note** : ajouter une note/rappel
+**Pilotage :**
+- **ajouter_ca** — ajouter du CA (montant HT, TVA, date)
+- **modifier_ligne_ca** — CORRIGER une ligne CA existante (remplace le montant sur une TVA+date)
+- **supprimer_ligne_ca** — remettre à zéro une ligne CA (EXIGE confirmer:true)
+- **ajouter_charge** — ajouter une charge fixe ou variable
+- **modifier_ligne_charge** — modifier ou supprimer une charge existante
+
+**Stock :**
+- **ajouter_produit_stock** — créer un nouveau produit
+- **ajuster_quantite_stock** — ajuster le stock d'un produit existant
+- **marquer_rupture_stock** — mettre un produit à 0 (rupture)
+
+**Marges :**
+- **creer_fiche_marge** — créer une fiche marge avec calcul auto
+- **modifier_fiche_marge** — modifier prix/coûts d'une fiche
+
+**Autres :**
+- **ajouter_note** — noter un rappel dans le carnet de bord
 
 **INSTRUCTION IMPÉRATIVE — AUCUNE EXCEPTION :**
 
-Quand le dirigeant formule une demande comme :
-- "ajoute 1000€ de CA"
-- "note 250€ de charge pour le loyer"
-- "j'ai fait 1500 en TVA 20"
-- "inscris une vente de 800€"
-- ou toute variante claire d'ajout de données
+Quand le dirigeant formule une demande d'action (ajouter/modifier/supprimer/créer/corriger/remplacer), tu DOIS appeler le tool correspondant.
 
-→ **Tu DOIS appeler le tool correspondant**. Tu NE DOIS PAS répondre directement par du texte du genre "c'est fait" ou "je ne peux pas". Tu appelles le tool \`ajouter_ca\` / \`ajouter_charge\` / \`ajouter_note\`, tu attends son résultat, puis tu confirmes.
+Exemples avec leur tool :
+- "ajoute 1000€ de CA" → ajouter_ca
+- "corrige la ligne CA du 15 avril à 800€" → modifier_ligne_ca
+- "supprime la ligne CA du 10 mai" → DEMANDE CONFIRMATION puis supprimer_ligne_ca avec confirmer:true
+- "change le loyer du mois à 1200€" → modifier_ligne_charge action:modifier
+- "efface la charge de 250€ d'Amazon" → modifier_ligne_charge action:supprimer
+- "crée un produit pain de campagne à 2,50€" → ajouter_produit_stock
+- "ajuste le stock de CHEM-BLA à 20" → ajuster_quantite_stock
+- "plus de pain au chocolat" → marquer_rupture_stock
+- "crée une fiche marge burger à 12€ coûts 4€" → creer_fiche_marge
+- "change le prix de vente du burger à 15€" → modifier_fiche_marge
 
-**Si tu réponds à une demande d'ajout sans avoir appelé le tool, c'est un ÉCHEC GRAVE**. Le dirigeant te voit répondre "c'est noté" alors que RIEN n'est écrit dans son logiciel. C'est pire que de dire "je n'ai pas compris".
+→ **Tu DOIS appeler le tool correspondant**. Tu NE DOIS PAS répondre directement par du texte du genre "c'est fait" ou "je ne peux pas" sans avoir appelé de tool. Tu appelles le tool, tu attends son résultat, puis tu confirmes.
+
+**Si tu réponds à une demande d'action sans avoir appelé le tool, c'est un ÉCHEC GRAVE**. Le dirigeant te voit répondre "c'est noté" alors que RIEN n'est écrit dans son logiciel. C'est pire que de dire "je n'ai pas compris".
+
+**Modules EXCLUS de l'écriture (lecture seule) :**
+- **RH** (employés, planning, congés, émargements) — tu peux LIRE mais pas MODIFIER
+- **Fidélisation** (clients fidélité, points) — tu peux LIRE mais pas MODIFIER
+- **Banque** (connexions, transactions) — tu peux LIRE mais pas MODIFIER
+
+Si le dirigeant demande d'agir sur ces modules, dis gentiment que ces actions ne sont pas disponibles et proposent de le faire sur la page web correspondante.
+
+**Règles de prudence pour les actions destructrices :**
+- Avant un **supprimer_ligne_ca** : confirme verbalement le contenu qui va être effacé
+- Avant un **supprimer charge** : confirme le fournisseur et le montant
+- Avant un **marquer_rupture_stock** : vérifie que c'est bien le bon produit (match nom partiel)
 
 **Défauts quand non précisé :**
-- TVA non précisée → 20% (sauf si tu sais qu'il est dans la restauration → 10%)
+- TVA non précisée → 20% (sauf restauration → 10%)
 - Date non précisée → aujourd'hui
+- Mois non précisé pour une charge → mois courant
 - Type de charge non précisé → "variable"
+- Stock_type non précisé → "marchandise"
 
-**Après l'appel du tool :**
-- Si \`success: true\` → confirme brièvement avec le message retourné
+**Après chaque appel de tool :**
+- Si \`success: true\` → confirme brièvement avec le message retourné (le dirigeant aime les confirmations courtes : "C'est fait", "Noté", "Corrigé")
 - Si \`error\` ou \`success: false\` → signale l'erreur textuellement, ne prétends JAMAIS que ça a marché
 
 ────────────────────────────────────────────────
@@ -2113,14 +2912,29 @@ Lecture :
 - **enregistrer_preference** : mémoriser une préférence de style du dirigeant
 ${isMobile ? `
 Écriture données (app mobile uniquement) :
-- **ajouter_ca** : ajouter une ligne de CA dans le pilotage du mois
+Pilotage :
+- **ajouter_ca** : ajouter du CA (montant HT, TVA, date)
+- **modifier_ligne_ca** : corriger une ligne CA existante
+- **supprimer_ligne_ca** : remettre à zéro une ligne CA (confirmer:true obligatoire)
 - **ajouter_charge** : ajouter une charge fixe/variable
-- **ajouter_note** : ajouter une note/rappel dans le carnet de bord
+- **modifier_ligne_charge** : modifier ou supprimer une charge
+
+Stock :
+- **ajouter_produit_stock** : créer un nouveau produit
+- **ajuster_quantite_stock** : modifier le stock d'un produit existant
+- **marquer_rupture_stock** : passer un produit à 0
+
+Marges :
+- **creer_fiche_marge** : créer une fiche marge (calcul auto marge brute)
+- **modifier_fiche_marge** : modifier prix/coûts d'une fiche
+
+Autres :
+- **ajouter_note** : noter un rappel dans le carnet de bord
 ` : ''}
 # CE QUE TU NE FAIS PAS
 Tu ne peux pas encore :
 - Envoyer des emails, SMS, générer des contrats (Waves 4-6)
-- ${isMobile ? 'Modifier les données stock, RH, fidélisation ou banque (seulement CA, charges et notes en mode mobile)' : 'Modifier les données business (tu peux juste mémoriser des faits et préférences)'}
+- ${isMobile ? 'Modifier les données **RH** (employés/planning/congés), **fidélisation** (clients/points), **banque** (transactions). Tu peux LIRE ces modules mais pas y écrire.' : 'Modifier les données business (tu peux juste mémoriser des faits et préférences)'}
 - Programmer des rappels ou tâches récurrentes (Wave 4)
 
 Si on te demande ces actions : explique gentiment que ça arrive bientôt.${mobileSection}${memorySection}`;
@@ -2137,9 +2951,16 @@ async function runConversation(uid, userDoc, userEmail, userMessage, history, me
   const isMobile = opts?.mobile === true;
   const systemPrompt = buildSystemPrompt(userDoc, userEmail, memory, { mobile: isMobile });
 
-  // Filtrer les tools : tools d'écriture données (ajouter_ca etc.) uniquement en mode mobile
+  // Filtrer les tools : tools d'écriture données uniquement en mode mobile
   // pour éviter les écritures intempestives depuis le site web.
-  const WRITE_DATA_TOOLS = ['ajouter_ca', 'ajouter_charge', 'ajouter_note'];
+  const WRITE_DATA_TOOLS = [
+    // Wave 3.7 mobile
+    'ajouter_ca', 'ajouter_charge', 'ajouter_note',
+    // Wave 3.9 écriture étendue
+    'modifier_ligne_ca', 'supprimer_ligne_ca', 'modifier_ligne_charge',
+    'ajouter_produit_stock', 'ajuster_quantite_stock', 'marquer_rupture_stock',
+    'creer_fiche_marge', 'modifier_fiche_marge',
+  ];
   const activeTools = isMobile
     ? TOOLS
     : TOOLS.filter(t => !WRITE_DATA_TOOLS.includes(t.name));
@@ -2211,8 +3032,16 @@ async function runConversation(uid, userDoc, userEmail, userMessage, history, me
     // le même état initial → race condition → last write wins.
     //
     // Les tools de lecture restent en parallèle (pas d'effet de bord).
-    const WRITE_TOOLS = ['ajouter_ca', 'ajouter_charge', 'ajouter_note',
-                         'enregistrer_fait_business', 'enregistrer_preference'];
+    const WRITE_TOOLS = [
+      // Wave 3 mémoire
+      'enregistrer_fait_business', 'enregistrer_preference',
+      // Wave 3.7 mobile
+      'ajouter_ca', 'ajouter_charge', 'ajouter_note',
+      // Wave 3.9 écriture étendue
+      'modifier_ligne_ca', 'supprimer_ligne_ca', 'modifier_ligne_charge',
+      'ajouter_produit_stock', 'ajuster_quantite_stock', 'marquer_rupture_stock',
+      'creer_fiche_marge', 'modifier_fiche_marge',
+    ];
     const hasWriteTool = toolUses.some(tu => WRITE_TOOLS.includes(tu.name));
 
     let toolResults;
