@@ -692,6 +692,36 @@ module.exports = async (req, res) => {
     const result = await generateForUser(uid, adminToken);
     console.log(`[briefing] ✅ uid=${uid} score=${result.score} alertes=${result.nombre_alertes}`);
 
+    // ── Wave 4.2 : chaînage email si send:true ──
+    // Appel interne à /api/send-briefing avec le même secret cron pour éviter
+    // la double-authentification. Fait en fire-and-forget pour ne pas bloquer
+    // la réponse de génération si Resend rame.
+    let sendStatus = null;
+    if (req.body?.send === true) {
+      try {
+        const baseUrl = process.env.APP_URL || 'https://alteore.com';
+        const sendRes = await fetch(`${baseUrl}/api/send-briefing`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-cron-secret': process.env.CRON_SECRET || '',
+          },
+          body: JSON.stringify({ uid: result.uid, date: result.date, force: true }),
+        });
+        const sendData = await sendRes.json();
+        if (sendRes.ok) {
+          sendStatus = { sent: !sendData.skipped, email: sendData.email || result.email, skipped_reason: sendData.reason };
+          console.log(`[briefing] 📧 Email triggered for ${result.email}`);
+        } else {
+          sendStatus = { error: sendData.error || 'send failed' };
+          console.warn(`[briefing] Email failed: ${sendData.error}`);
+        }
+      } catch (e) {
+        sendStatus = { error: e.message };
+        console.warn(`[briefing] Email chain error: ${e.message}`);
+      }
+    }
+
     return res.status(200).json({
       ok: true,
       uid: result.uid,
@@ -699,6 +729,7 @@ module.exports = async (req, res) => {
       score: result.score,
       nombre_alertes: result.nombre_alertes,
       briefing: result.briefing,
+      send: sendStatus,
     });
   } catch (e) {
     console.error('[briefing] error:', e.message);
