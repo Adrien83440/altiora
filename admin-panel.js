@@ -247,54 +247,53 @@
     }
 
     /* Section admin injectée dans la sidebar nav.js */
+    /* Style cohérent avec les autres sections pliables (Module RH, Fidélisation…) */
     #alt-admin-sidebar {
-      margin: 12px 0 6px;
-      padding: 10px 0 6px;
+      margin: 10px 0 6px;
+      padding-top: 8px;
       border-top: 1px solid rgba(220, 38, 38, 0.18);
     }
-    #alt-admin-sidebar .admin-label {
-      font-size: 10px;
-      font-weight: 800;
-      color: #fca5a5;
-      letter-spacing: 1.5px;
-      padding: 4px 20px 8px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      text-transform: uppercase;
+    #alt-admin-sidebar .admin-ns {
+      /* Label "Administration" en rouge pâle */
+      color: #fca5a5 !important;
     }
-    #alt-admin-sidebar .admin-label::before {
-      content: '🛠️';
-      font-size: 11px;
-    }
-    #alt-admin-sidebar .admin-item {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 7px 20px;
-      color: rgba(254, 226, 226, 0.7);
-      font-size: 12.5px;
-      font-weight: 500;
-      cursor: pointer;
+    #alt-admin-sidebar .admin-ni {
+      /* L'item principal pliable */
       transition: all 0.15s;
-      border-left: 3px solid transparent;
-      user-select: none;
     }
-    #alt-admin-sidebar .admin-item:hover {
-      color: #fecaca;
-      background: rgba(239, 68, 68, 0.08);
-      border-left-color: #ef4444;
+    #alt-admin-sidebar .admin-ni:hover {
+      background: rgba(239, 68, 68, 0.08) !important;
     }
-    #alt-admin-sidebar .admin-item .admin-ico {
-      font-size: 13px;
+    #alt-admin-sidebar .admin-chev {
+      transition: transform 0.2s;
+    }
+    #alt-admin-sidebar .admin-ni.open .admin-chev {
+      transform: rotate(90deg);
+    }
+    /* Quand la sub est ouverte, on fait tourner le chevron */
+    #alt-admin-sidebar #admin-nav-sub[style*="max-height"]:not([style*="0px"]) ~ .admin-ni .admin-chev,
+    #alt-admin-sidebar .admin-ni + .sub[style*="max-height"]:not([style*="0px"]) {
+      /* fallback pour chevron animé */
+    }
+    #alt-admin-sidebar .admin-si {
+      /* Chaque lien admin dans la sub */
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #alt-admin-sidebar .admin-si .admin-dot {
+      background: #dc2626 !important;
+    }
+    #alt-admin-sidebar .admin-si .admin-si-ico {
+      font-size: 12px;
       width: 16px;
       text-align: center;
       flex-shrink: 0;
+      opacity: 0.85;
     }
-    #alt-admin-sidebar .admin-item .admin-ext {
-      margin-left: auto;
-      font-size: 9px;
-      opacity: 0.5;
+    #alt-admin-sidebar .admin-si:hover {
+      color: #fecaca !important;
+      background: rgba(239, 68, 68, 0.08) !important;
     }
   `;
   var styleEl = document.createElement('style');
@@ -454,38 +453,69 @@
     }
     if (slot.querySelector('#alt-admin-sidebar')) return; // déjà injecté
 
-    // Sélection des liens prioritaires pour la sidebar (pas tous)
-    // Les autres restent accessibles via le bouton flottant 🛠️
+    // Sélection des liens pour la sidebar (les plus utilisés)
+    // La liste complète reste accessible via "Tous les outils" qui ouvre le panneau flottant
     var sidebarLinks = [
-      { icon: '🔔', title: 'Nouveautés', href: '/admin-updates.html' },
-      { icon: '✍️', title: 'Blog', href: '/admin-blog.html' },
-      { icon: '🩺', title: 'Diagnostics', href: '/admin-debug-view.html' },
-      { icon: '🏥', title: 'Diagnostic général', href: '/diagnostic.html' },
-      { icon: '🔧', title: 'Correction crédits', href: '/fix-credits.html' },
-      { icon: '🛠️', title: 'Tous les outils', href: '#', onclick: 'openFloatingPanel' },
+      { icon: '🔔', title: 'Nouveautés',         href: '/admin-updates.html' },
+      { icon: '✍️', title: 'Blog',                href: '/admin-blog.html' },
+      { icon: '🩺', title: 'Diagnostics',         href: '/admin-debug-view.html' },
+      { icon: '🏥', title: 'Diagnostic général',  href: '/diagnostic.html' },
+      { icon: '🔧', title: 'Correction crédits',  href: '/fix-credits.html' },
+      { icon: '🛠️', title: 'Tous les outils',     href: '#', action: 'open-panel' },
     ];
 
     var itemsHtml = sidebarLinks.map(function (link) {
-      var onclick = link.onclick === 'openFloatingPanel'
+      var onClickAttr = link.action === 'open-panel'
         ? 'data-action="open-panel"'
         : 'onclick="location.href=\'' + link.href + '\'"';
       return (
-        '<div class="admin-item" ' + onclick + ' title="' + escapeHtml(link.title) + '">' +
-          '<span class="admin-ico">' + escapeHtml(link.icon) + '</span>' +
+        '<div class="si admin-si" ' + onClickAttr + '>' +
+          '<span class="dot admin-dot"></span>' +
+          '<span class="admin-si-ico">' + escapeHtml(link.icon) + '</span>' +
           '<span>' + escapeHtml(link.title) + '</span>' +
         '</div>'
       );
     }).join('');
 
+    // Item pliable style Module RH / Fidélisation
     slot.innerHTML =
       '<div id="alt-admin-sidebar">' +
-        '<div class="admin-label">Administration</div>' +
-        itemsHtml +
+        '<div class="ns admin-ns">Administration</div>' +
+        '<div class="ni admin-ni" id="nav-admin-toggle">' +
+          '<span>🛠️</span>' +
+          '<span style="flex:1;font-weight:700">Administration</span>' +
+          '<span style="font-size:9px;font-weight:700;background:rgba(220,38,38,0.25);color:#fca5a5;padding:2px 6px;border-radius:20px;margin-right:4px">Admin</span>' +
+          '<span class="chev admin-chev">›</span>' +
+        '</div>' +
+        '<div class="sub" id="admin-nav-sub">' +
+          itemsHtml +
+        '</div>' +
       '</div>';
+
+    // Wire le toggle (utilise la fonction de nav.js si dispo, sinon fallback maison)
+    var toggleBtn = document.getElementById('nav-admin-toggle');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', function () {
+        if (typeof window.toggleAlteoreNav === 'function') {
+          window.toggleAlteoreNav('admin-nav-sub', toggleBtn);
+        } else {
+          // Fallback simple si toggleAlteoreNav pas dispo
+          var sub = document.getElementById('admin-nav-sub');
+          var isOpen = sub.style.maxHeight && sub.style.maxHeight !== '0px';
+          sub.style.maxHeight = isOpen ? '0px' : '500px';
+        }
+        toggleBtn.classList.toggle('open');
+      });
+    }
 
     // Wire l'action "ouvrir panneau flottant"
     var openBtn = slot.querySelector('[data-action="open-panel"]');
-    if (openBtn) openBtn.addEventListener('click', openPanel);
+    if (openBtn) {
+      openBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openPanel();
+      });
+    }
   }
 
   // ══════════════════════════════════════════════════════════════
