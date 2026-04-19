@@ -194,6 +194,67 @@ async function loadLeaMemory(uid) {
 // PROMPTS
 // ═══════════════════════════════════════════════════════════════════════════
 
+// Liste blanche des pages de l'app que Claude peut proposer en action.
+// ⚠️ NE PAS inventer d'URL : si une page n'est pas ici, le link DOIT être null.
+// Cette liste est réinjectée dans les deux prompts (standard + Léa).
+const AVAILABLE_PAGES = `
+PAGES DISPONIBLES (utilise EXACTEMENT ces slugs dans "link", jamais d'invention) :
+
+CORE — saisie & analyse
+- pilotage.html            → saisir CA journalier, charges fixes/variables, masse salariale, crédits, leasing
+- suivi-ca.html            → historique CA, résultats mensuels, comparaisons
+- cashflow.html            → trésorerie, projection cash disponible
+- previsions.html          → prévisions annuelles
+- scenarios.html           → scénarios "Et si..." (embauche, investissement, hausse prix)
+- dashboard.html           → tableau de bord synthétique
+
+KPIs & marges
+- marges.html              → marges par produit
+- cout-revient.html        → calcul coût de revient
+- panier-moyen.html        → panier moyen
+- dettes.html              → dettes & emprunts
+
+STOCK & achats
+- gestion-stock.html       → gestion stock, rotation, valorisation, ABC (⚠️ PAS "stock.html")
+- import-facture-achat.html→ importer facture achat fournisseur
+
+RAPPORTS
+- rapport-annuel.html      → rapport annuel PDF
+- bilan.html               → analyse de bilan par IA (plan Master uniquement)
+
+BANQUE & imports
+- banque.html              → connexion bancaire Bridge, réconciliation
+- import.html              → import Google Sheets / CSV
+- import-releve.html       → import relevé bancaire PDF/CSV
+
+FIDÉLISATION
+- fidelisation.html        → clients fidèles, segments, SMS, avis Google
+
+RH (plan Master uniquement)
+- rh-dashboard.html        → vue d'ensemble RH
+- rh-employes.html         → fiches employés
+- rh-planning.html         → planning hebdo (incl. IA)
+- rh-conges.html           → congés & absences
+- rh-paie.html             → paie mensuelle
+- rh-temps.html            → pointages & heures
+- rh-objectifs.html        → objectifs employés
+- rh-entretiens.html       → entretiens annuels
+- rh-recrutement.html      → offres, candidats
+- rh-dirigeant.html        → rémunération dirigeant
+- rh-contrats.html         → contrats de travail (génération IA)
+
+COMPTE
+- profil.html              → paramètres compte, abonnement, préférences
+- tutoriels.html           → guides pas à pas
+- aide.html                → FAQ, glossaire, tickets support
+- agent.html               → chat complet avec Léa
+
+RÈGLE ABSOLUE pour "link" :
+- Si la page recommandée figure dans la liste ci-dessus → utilise son slug EXACT (ex: "gestion-stock.html")
+- Sinon → utilise null (pas de lien plutôt qu'un lien cassé)
+- N'utilise JAMAIS de slug qui n'est pas listé (pas de "stock.html", pas de "kpi.html", etc.)
+`;
+
 function buildStandardPrompt(metrics, prenom, jour) {
   return `Tu es le copilote IA d'un chef d'entreprise TPE/PME français. Tu analyses ses données et tu lui donnes un briefing quotidien concis, actionnable et personnalisé. Tutoie-le.
 
@@ -202,7 +263,7 @@ ${prenom ? 'Prénom : ' + prenom : ''}
 
 DONNÉES DE L'ENTREPRISE :
 ${JSON.stringify(metrics, null, 2)}
-
+${AVAILABLE_PAGES}
 CONSIGNES :
 - Réponds UNIQUEMENT en JSON valide (pas de markdown, pas de backticks)
 - Structure exacte requise :
@@ -259,7 +320,7 @@ ${memorySection}
 
 ## DONNÉES FINANCIÈRES DU JOUR
 ${JSON.stringify(metrics, null, 2)}
-
+${AVAILABLE_PAGES}
 ## TON RÔLE
 Tu n'es pas un copilote générique, tu es **Léa**. Tu connais déjà ce business grâce à ta mémoire. Utilise ce contexte pour :
 - Faire des références pertinentes à l'historique ("le CA d'avril est au-dessus de ta moyenne de ces 6 derniers mois")
@@ -383,6 +444,34 @@ export default async function handler(req, res) {
 
     // Injecter le flag leaMode pour que le front adapte l'UI
     result.leaMode = leaMode;
+
+    // ── Ceinture de sécurité : nettoyer les liens hallucinés ──
+    // Si Claude invente malgré tout une URL qui n'existe pas (ex: "stock.html"),
+    // on le passe à null plutôt que d'envoyer un lien cassé vers un 404.
+    const VALID_PAGES = new Set([
+      'pilotage.html','suivi-ca.html','cashflow.html','previsions.html','scenarios.html','dashboard.html',
+      'marges.html','cout-revient.html','panier-moyen.html','dettes.html',
+      'gestion-stock.html','import-facture-achat.html',
+      'rapport-annuel.html','bilan.html',
+      'banque.html','import.html','import-releve.html',
+      'fidelisation.html',
+      'rh-dashboard.html','rh-employes.html','rh-planning.html','rh-conges.html','rh-paie.html',
+      'rh-temps.html','rh-objectifs.html','rh-entretiens.html','rh-recrutement.html',
+      'rh-dirigeant.html','rh-contrats.html',
+      'profil.html','tutoriels.html','aide.html','agent.html',
+    ]);
+    if (Array.isArray(result.actions)) {
+      result.actions = result.actions.map(a => {
+        if (!a || !a.link) return a;
+        // Normaliser : garder juste le slug (retirer domaine, query, hash, slash initial)
+        const slug = String(a.link).trim().replace(/^https?:\/\/[^/]+\//, '').replace(/^\//, '').split('?')[0].split('#')[0];
+        if (!VALID_PAGES.has(slug)) {
+          console.warn('[copilote-ai] hallucinated link stripped:', a.link);
+          return { ...a, link: null };
+        }
+        return { ...a, link: slug };
+      });
+    }
 
     return res.status(200).json(result);
 
