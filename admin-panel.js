@@ -244,6 +244,57 @@
       #alt-admin-panel { max-width: 100%; }
       #alt-admin-fab { bottom: 16px; right: 16px; width: 46px; height: 46px; font-size: 18px; }
     }
+
+    /* Section admin injectée dans la sidebar nav.js */
+    #alt-admin-sidebar {
+      margin: 12px 0 6px;
+      padding: 10px 0 6px;
+      border-top: 1px solid rgba(220, 38, 38, 0.18);
+    }
+    #alt-admin-sidebar .admin-label {
+      font-size: 10px;
+      font-weight: 800;
+      color: #fca5a5;
+      letter-spacing: 1.5px;
+      padding: 4px 20px 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      text-transform: uppercase;
+    }
+    #alt-admin-sidebar .admin-label::before {
+      content: '🛠️';
+      font-size: 11px;
+    }
+    #alt-admin-sidebar .admin-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 20px;
+      color: rgba(254, 226, 226, 0.7);
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      border-left: 3px solid transparent;
+      user-select: none;
+    }
+    #alt-admin-sidebar .admin-item:hover {
+      color: #fecaca;
+      background: rgba(239, 68, 68, 0.08);
+      border-left-color: #ef4444;
+    }
+    #alt-admin-sidebar .admin-item .admin-ico {
+      font-size: 13px;
+      width: 16px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    #alt-admin-sidebar .admin-item .admin-ext {
+      margin-left: auto;
+      font-size: 9px;
+      opacity: 0.5;
+    }
   `;
   var styleEl = document.createElement('style');
   styleEl.id = 'alt-admin-panel-style';
@@ -374,6 +425,53 @@
   }
 
   // ══════════════════════════════════════════════════════════════
+  // INJECTION DANS LA SIDEBAR (nav.js)
+  // Remplit le slot #nav-admin-slot avec les principaux liens admin
+  // La liste complète reste dans le panneau flottant (bouton 🛠️).
+  // ══════════════════════════════════════════════════════════════
+  function injectSidebarSection() {
+    var slot = document.getElementById('nav-admin-slot');
+    if (!slot) {
+      // Pas de slot → la page ne charge pas nav.js, pas grave on reste silencieux
+      return;
+    }
+    if (slot.querySelector('#alt-admin-sidebar')) return; // déjà injecté
+
+    // Sélection des liens prioritaires pour la sidebar (pas tous)
+    // Les autres restent accessibles via le bouton flottant 🛠️
+    var sidebarLinks = [
+      { icon: '🔔', title: 'Nouveautés', href: '/admin-updates.html' },
+      { icon: '✍️', title: 'Blog', href: '/admin-blog.html' },
+      { icon: '🩺', title: 'Diagnostics', href: '/admin-debug-view.html' },
+      { icon: '🏥', title: 'Diagnostic général', href: '/diagnostic.html' },
+      { icon: '🔧', title: 'Correction crédits', href: '/fix-credits.html' },
+      { icon: '🛠️', title: 'Tous les outils', href: '#', onclick: 'openFloatingPanel' },
+    ];
+
+    var itemsHtml = sidebarLinks.map(function (link) {
+      var onclick = link.onclick === 'openFloatingPanel'
+        ? 'data-action="open-panel"'
+        : 'onclick="location.href=\'' + link.href + '\'"';
+      return (
+        '<div class="admin-item" ' + onclick + ' title="' + escapeHtml(link.title) + '">' +
+          '<span class="admin-ico">' + escapeHtml(link.icon) + '</span>' +
+          '<span>' + escapeHtml(link.title) + '</span>' +
+        '</div>'
+      );
+    }).join('');
+
+    slot.innerHTML =
+      '<div id="alt-admin-sidebar">' +
+        '<div class="admin-label">Administration</div>' +
+        itemsHtml +
+      '</div>';
+
+    // Wire l'action "ouvrir panneau flottant"
+    var openBtn = slot.querySelector('[data-action="open-panel"]');
+    if (openBtn) openBtn.addEventListener('click', openPanel);
+  }
+
+  // ══════════════════════════════════════════════════════════════
   // INIT
   // ══════════════════════════════════════════════════════════════
   async function init() {
@@ -381,7 +479,11 @@
       var admin = await isUserAdmin();
       if (!admin) return; // ne rien faire si pas admin
       injectFab();
-      console.log('[admin-panel] ✅ Initialized for admin');
+      injectSidebarSection();
+      // Re-tenter l'injection sidebar si nav.js injecte après nous (race condition)
+      setTimeout(injectSidebarSection, 500);
+      setTimeout(injectSidebarSection, 1500);
+      console.log('[admin-panel] ✅ Initialized for admin (fab + sidebar)');
     } catch (e) {
       console.warn('[admin-panel] init failed:', e);
     }

@@ -264,6 +264,8 @@
     <div class="ni${a('aide.html')}" id="nav-aide" onclick="location.href='aide.html'" style="padding:8px 0;margin:0">
       <span>❓</span><span>Centre d'aide</span>
     </div>
+    <!-- Slot admin : rempli dynamiquement si role === 'admin' -->
+    <div id="nav-admin-slot"></div>
     <div class="ucard" onclick="location.href='profil.html'" style="cursor:pointer;transition:.15s" title="Mon compte">
       <div class="uav" id="av">A</div>
       <div>
