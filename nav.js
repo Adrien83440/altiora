@@ -19,6 +19,15 @@
     document.head.appendChild(upd);
   }
 
+  // ── admin-panel.js : bouton flottant admin (uniquement pour role=admin) ──
+  // S'injecte uniquement si l'utilisateur a le rôle admin. Sinon zéro impact.
+  if (!document.querySelector('script[src*="admin-panel.js"]')) {
+    var adm = document.createElement('script');
+    adm.defer = true;
+    adm.src = '/admin-panel.js';
+    document.head.appendChild(adm);
+  }
+
   // ════════════════════════════════════════════════
   // CONFIG PLANS
   // ════════════════════════════════════════════════
