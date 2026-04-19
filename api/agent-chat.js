@@ -1303,6 +1303,8 @@ async function runConversation(uid, userDoc, userEmail, userMessage, history, me
     ? TOOLS
     : TOOLS.filter(t => !WRITE_DATA_TOOLS.includes(t.name));
 
+  console.log(`[agent-chat DEBUG] isMobile=${isMobile} activeTools.length=${activeTools.length} tools_names=[${activeTools.map(t=>t.name).join(',')}]`);
+
   // Historique → format Claude : on ne garde que des messages TEXT propres
   // (pas de tool_use/tool_result persistés, cf. architecture)
   let messages = history
@@ -1413,6 +1415,8 @@ module.exports = async (req, res) => {
 
   // Body
   const { message, mobile } = req.body || {};
+  // LOG DEBUG Wave 3.7 — voir si le flag mobile arrive bien
+  console.log(`[agent-chat DEBUG] mobile=${mobile} typeof=${typeof mobile} message="${(message || '').slice(0, 80)}"`);
   if (!message || typeof message !== 'string' || message.trim().length === 0) {
     return res.status(400).json({ error: "Paramètre 'message' requis (string non vide)" });
   }
