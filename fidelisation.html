@@ -2446,38 +2446,56 @@ window._copDiag = function(){
   return out;
 };
 
-// Attend que Firebase Auth soit prêt. On utilise window._uid comme signal
-// car il est défini par onAuthStateChanged après qu'auth.currentUser soit fiable.
+// Attend que Firebase Auth soit prêt.
+// Stratégie : on s'abonne directement à onAuthStateChanged sur l'instance auth —
+// c'est la méthode officielle Firebase qui force un callback immédiat avec
+// l'état d'auth, qu'il soit déjà restauré ou en cours.
 function copWaitAuth(){
   return new Promise(resolve => {
-    // Si déjà prêt
-    if(window._uid && window._auth?.currentUser){
+    // Cas 1 : déjà prêt (chemin rapide)
+    if(window._auth?.currentUser){
       return resolve(window._auth.currentUser);
     }
-    // Sinon poll jusqu'à 20 secondes
+    // Cas 2 : on s'abonne à onAuthStateChanged si dispo
+    if(window._onAuthStateChanged && window._auth){
+      let resolved = false;
+      const timeoutId = setTimeout(() => {
+        if(resolved) return;
+        resolved = true;
+        try { unsub && unsub(); } catch(e){}
+        console.warn('[Copilot] auth timeout after onAuthStateChanged subscribe. State:', {
+          hasAuth: !!window._auth,
+          hasCurrentUser: !!window._auth?.currentUser,
+          uid: window._uid
+        });
+        resolve(null);
+      }, 15000);
+      const unsub = window._onAuthStateChanged(window._auth, (user) => {
+        if(resolved) return;
+        if(user){
+          resolved = true;
+          clearTimeout(timeoutId);
+          try { unsub && unsub(); } catch(e){}
+          // Propager _uid si manquant (en cas de timing bizarre)
+          if(!window._uid) window._uid = user.uid;
+          resolve(user);
+        }
+        // Si user est null on continue d'attendre jusqu'au timeout
+      });
+      return;
+    }
+    // Cas 3 (fallback) : _onAuthStateChanged absent, on poll
     let attempts = 0;
     const tick = setInterval(() => {
       attempts++;
-      // Essai 1 : état complet normal
-      if(window._uid && window._auth?.currentUser){
+      if(window._auth?.currentUser){
         clearInterval(tick);
+        if(!window._uid) window._uid = window._auth.currentUser.uid;
         return resolve(window._auth.currentUser);
       }
-      // Essai 2 (fallback) : si _auth.currentUser est là mais _uid manque (edge case)
-      if(window._auth?.currentUser?.uid){
+      if(attempts >= 100){ // 10s
         clearInterval(tick);
-        console.log('[Copilot] fallback: found currentUser without _uid set');
-        return resolve(window._auth.currentUser);
-      }
-      if(attempts >= 200){ // 200 × 100ms = 20s
-        clearInterval(tick);
-        console.warn('[Copilot] auth timeout. State:', {
-          hasAuth: !!window._auth,
-          hasCurrentUser: !!window._auth?.currentUser,
-          uid: window._uid,
-          firebaseReady: window._firebaseReady
-        });
-        console.warn('[Copilot] Tape window._copDiag() dans la console pour un diagnostic complet');
+        console.warn('[Copilot] poll fallback timeout');
         return resolve(null);
       }
     }, 100);
@@ -4970,6 +4988,7 @@ window._fbLoadAll=fbLoadAll;
 window._db = db;
 window._auth = auth;
 window._signOut = signOut;
+window._onAuthStateChanged = onAuthStateChanged;
 window._copFirestoreMods = function(){
   return Promise.resolve({ doc, setDoc, getDoc });
 };
