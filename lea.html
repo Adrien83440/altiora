@@ -761,10 +761,6 @@ window.doLogout = async function() {
   };
 
   window.startRecording = function() {
-    // Priming audio iOS : exploiter le tap user pour débloquer la session audio
-    // afin que l'autoplay vocal-ai marche ensuite
-    primeAudioForIOS();
-
     if (!SR) {
       // Pas de speech recognition → focus input texte
       document.getElementById('input-text').focus();
@@ -936,27 +932,13 @@ window.doLogout = async function() {
   // Priming iOS : certains navigateurs (Safari iOS surtout) exigent qu'un élément audio
   // ait été "débloqué" par un tap user récent pour jouer automatiquement plus tard.
   // On crée un Audio silencieux qu'on tente de jouer brièvement au moment du tap micro :
-  // ça autorise la session audio pour la suite (jusqu'à 60s environ).
+  // Priming iOS : désactivé en Wave 3.7 fix #2
+  // Le priming audio créait un conflit avec la MediaStream de la reconnaissance vocale
+  // sur iOS Safari. On s'appuie désormais uniquement sur le bouton 🔊 qui pulse
+  // quand l'autoplay est bloqué — c'est 100% fiable et sans effet de bord.
   var _audioPrimed = false;
   function primeAudioForIOS() {
-    if (_audioPrimed) return;
-    try {
-      // Data URL d'un WAV silencieux de 0.1s (~44 bytes)
-      var silentWav = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-      var primer = new Audio(silentWav);
-      primer.volume = 0.01;
-      var p = primer.play();
-      if (p && typeof p.then === 'function') {
-        p.then(function(){
-          _audioPrimed = true;
-          // Arrêter et libérer
-          try { primer.pause(); primer.src = ''; } catch(e) {}
-          console.log('[lea] audio session primed');
-        }).catch(function(){
-          console.log('[lea] audio priming failed — iOS might still block autoplay later');
-        });
-      }
-    } catch(e) { /* silent */ }
+    // no-op volontaire. Ne rien faire qui pourrait perturber la MediaStream du micro.
   }
 
   // ══════════════════════════════════════════════════════
