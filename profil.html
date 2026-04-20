@@ -2014,14 +2014,36 @@ onAuthStateChanged(auth, async function(user) {
   } catch(e) { console.error('Erreur plan/prefs:', e); }
 
   // ── CHARGER LE PROFIL ──
+  // ⚠️ Ce bloc DOIT rester synchronisé avec tryFirebase() ligne ~1851.
+  // Bugfix : avant, on faisait un forEach simplifié qui ne restaurait NI le logo
+  // NI customTvaRate. Résultat : les boutons .tva-opt-btn restaient inactifs,
+  // _customTvaRate restait à null, et au prochain autosave, saveProfile()
+  // écrivait customTvaRate: null → écrasait la valeur en Firestore →
+  // la colonne TVA custom disparaissait du pilotage.
   try {
     const snap = await getDoc(doc(db, 'profil', user.uid, 'data', 'profil'));
     if (snap.exists()) {
       const data = snap.data();
-      Object.keys(data).forEach(function(f) { const el = document.getElementById('p-'+f); if (el) el.value = data[f]||''; });
+      Object.keys(data).forEach(function(f) {
+        if (f === 'logo') {
+          if (typeof window.applyLogo === 'function') window.applyLogo(data[f]);
+          return;
+        }
+        if (f === 'customTvaRate') return; // handled separately ci-dessous
+        const el = document.getElementById('p-'+f);
+        if (el) el.value = data[f]||'';
+      });
+      // Restaurer la TVA personnalisée (0% exo / 2,1% presse / 8,5% DOM-TOM)
+      // AVANT tout autosave potentiel, sinon _customTvaRate reste null et saveProfile écrase.
+      if (data.customTvaRate !== undefined && data.customTvaRate !== null
+          && typeof window.setCustomTva === 'function') {
+        window.setCustomTva(data.customTvaRate, null);
+      } else if (typeof window.setCustomTva === 'function') {
+        window.setCustomTva(null, null);
+      }
       if (typeof window.updateHero === 'function') window.updateHero();
     }
-  } catch(e) {}
+  } catch(e) { console.warn('profil load error:', e); }
 
   // ── AUTOSAVE — brancher après chargement ──
   if (typeof initAutosave === 'function') initAutosave();
