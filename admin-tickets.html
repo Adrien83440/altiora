@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>ALTEORE — Tickets support</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Plus Jakarta Sans',sans-serif;background:#f3f4f6;color:#0f172a;font-size:13px;min-height:100vh}
+
+    /* ── Topbar ── */
+    .topbar{background:linear-gradient(135deg,#0f1f5c,#2563eb);color:white;padding:18px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+    .topbar .brand h1{font-size:18px;font-weight:800;margin:0}
+    .topbar .brand .small{font-size:11px;opacity:.75;margin-top:2px}
+    .topbar-actions{display:flex;gap:10px;align-items:center}
+    .topbar-btn{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:white;font-weight:600;padding:7px 14px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:12px;transition:background .15s}
+    .topbar-btn:hover{background:rgba(255,255,255,.25)}
+
+    /* ── Stats cards ── */
+    .stats-row{max-width:1280px;margin:20px auto 0;padding:0 24px;display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
+    .stat-card{background:white;border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px}
+    .stat-label{font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px}
+    .stat-value{font-size:22px;font-weight:800;margin-top:4px;color:#0f172a}
+    .stat-card.urgent{border-color:#fca5a5;background:linear-gradient(135deg,#fef2f2,#ffffff)}
+    .stat-card.urgent .stat-value{color:#dc2626}
+    .stat-card.master{border-color:#c4b5fd;background:linear-gradient(135deg,#faf5ff,#ffffff)}
+    .stat-card.master .stat-value{color:#7c3aed}
+
+    /* ── Container ── */
+    .container{max-width:1280px;margin:18px auto 40px;padding:0 24px;display:grid;grid-template-columns:360px 1fr;gap:18px}
+
+    /* ── Sidebar ── */
+    .sidebar{background:white;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;max-height:calc(100vh - 200px);display:flex;flex-direction:column;position:sticky;top:18px}
+    .filters{padding:14px 16px;border-bottom:1px solid #e5e7eb}
+    .filters input[type="text"]{width:100%;padding:8px 10px;border:1.5px solid #e5e7eb;border-radius:8px;font-family:inherit;font-size:12px;outline:none;margin-bottom:10px}
+    .filters input[type="text"]:focus{border-color:#2563eb}
+    .filter-chips{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+    .chip{font-size:10px;font-weight:700;padding:4px 8px;border-radius:20px;cursor:pointer;background:#f1f5f9;color:#64748b;border:1px solid transparent;user-select:none;transition:all .15s;white-space:nowrap}
+    .chip:hover{background:#e2e8f0}
+    .chip.active{background:#2563eb;color:white;border-color:#1d4ed8}
+    .filter-group-title{font-size:9px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px}
+
+    .tickets-list{overflow-y:auto;flex:1}
+    .ticket-row{padding:12px 14px;border-bottom:1px solid #f1f5f9;cursor:pointer;transition:background .15s;position:relative}
+    .ticket-row:hover{background:#f9fafb}
+    .ticket-row.active{background:#eff6ff;border-left:3px solid #2563eb;padding-left:11px}
+    .ticket-row.unread::before{content:'';position:absolute;top:16px;right:10px;width:8px;height:8px;background:#dc2626;border-radius:50%;box-shadow:0 0 0 2px rgba(220,38,38,.15)}
+    .ticket-row.unread .row-title{font-weight:800}
+    .row-title{font-size:13px;font-weight:700;color:#0f172a;line-height:1.3;margin-bottom:3px;padding-right:18px}
+    .row-subject{font-size:11px;color:#64748b;margin-bottom:5px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+    .row-meta{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+    .row-date{font-size:10px;color:#94a3b8;margin-left:auto}
+
+    /* Badges */
+    .badge{font-size:9px;font-weight:700;padding:2px 7px;border-radius:20px;display:inline-block;white-space:nowrap}
+    .badge.plan-master{background:#f5f3ff;color:#7c3aed;border:1px solid #e9d5ff}
+    .badge.plan-max{background:#eff6ff;color:#1a3dce;border:1px solid #bfdbfe}
+    .badge.plan-pro{background:#f0fdf4;color:#10b981;border:1px solid #bbf7d0}
+    .badge.plan-trial{background:#fffbeb;color:#d97706;border:1px solid #fde68a}
+    .badge.plan-unknown{background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0}
+    .badge.st-open{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
+    .badge.st-in_progress{background:#fff7ed;color:#ea580c;border:1px solid #fed7aa}
+    .badge.st-resolved{background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0}
+    .badge.st-closed{background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1}
+    .badge.priority{background:#7c3aed;color:white;border:1px solid #6d28d9;font-weight:800}
+
+    .empty{text-align:center;padding:60px 20px;color:#94a3b8;font-size:13px}
+
+    /* ── Main ── */
+    .main{background:white;border:1px solid #e5e7eb;border-radius:14px;padding:0;min-height:600px;display:flex;flex-direction:column}
+    .main-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:600px;color:#94a3b8;font-size:14px;padding:40px}
+    .main-empty .emo{font-size:48px;margin-bottom:12px;opacity:.6}
+
+    .ticket-header{padding:24px 28px;border-bottom:1px solid #f1f5f9}
+    .ticket-header .ticket-id{font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:.5px;text-transform:uppercase}
+    .ticket-header h2{font-size:18px;font-weight:800;margin:4px 0 8px;color:#0f172a;line-height:1.3}
+    .ticket-header .hdr-badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+    .status-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+    .status-btn{font-size:11px;font-weight:700;padding:6px 12px;border-radius:8px;cursor:pointer;border:1.5px solid #e5e7eb;background:white;color:#475569;transition:all .15s;font-family:inherit}
+    .status-btn:hover{background:#f8fafc;border-color:#94a3b8}
+    .status-btn.active{background:#0f172a;color:white;border-color:#0f172a}
+    .status-btn.resolved.active{background:#16a34a;border-color:#15803d}
+    .status-btn.closed.active{background:#64748b;border-color:#475569}
+    .status-btn.open.active{background:#dc2626;border-color:#b91c1c}
+    .status-btn.in_progress.active{background:#ea580c;border-color:#c2410c}
+
+    .ticket-body{padding:20px 28px;overflow-y:auto;flex:1}
+
+    .section{margin-bottom:22px}
+    .section-title{font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+
+    .info-grid{display:grid;grid-template-columns:140px 1fr;gap:8px 14px;font-size:13px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px}
+    .info-grid .k{color:#64748b;font-weight:600}
+    .info-grid .v{color:#0f172a;word-break:break-word}
+    .info-grid .v a{color:#2563eb;text-decoration:none}
+    .info-grid .v a:hover{text-decoration:underline}
+
+    .description-box{background:white;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;font-size:13px;line-height:1.6;white-space:pre-wrap;color:#0f172a}
+
+    /* Replies timeline */
+    .reply-item{background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:12px 14px;margin-bottom:10px;position:relative}
+    .reply-item::before{content:'💬';position:absolute;top:-8px;left:14px;background:white;padding:0 4px;font-size:13px}
+    .reply-head{font-size:10px;color:#0369a1;font-weight:700;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px;padding-left:20px}
+    .reply-text{font-size:13px;line-height:1.6;color:#0c4a6e;white-space:pre-wrap}
+
+    /* Notes admin */
+    .note-item{background:#fef9c3;border:1px solid #fde68a;border-radius:10px;padding:10px 14px;margin-bottom:8px;font-size:12px;position:relative}
+    .note-head{font-size:10px;color:#92400e;font-weight:700;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+    .note-text{color:#713f12;line-height:1.5;white-space:pre-wrap}
+
+    /* Forms */
+    .form-row{margin-bottom:10px}
+    .form-row label{display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px}
+    .form-row textarea{width:100%;min-height:90px;padding:10px 12px;border:1.5px solid #e5e7eb;border-radius:10px;font-family:inherit;font-size:13px;line-height:1.5;outline:none;resize:vertical;transition:border-color .15s}
+    .form-row textarea:focus{border-color:#2563eb}
+    .form-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .btn{font-family:inherit;font-size:13px;font-weight:700;padding:10px 18px;border-radius:10px;cursor:pointer;border:none;transition:all .15s}
+    .btn-primary{background:linear-gradient(135deg,#2563eb,#4f7ef8);color:white;box-shadow:0 2px 8px rgba(37,99,235,.3)}
+    .btn-primary:hover{transform:translateY(-1px);box-shadow:0 4px 14px rgba(37,99,235,.4)}
+    .btn-primary:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none}
+    .btn-secondary{background:#f1f5f9;color:#334155;border:1px solid #e2e8f0}
+    .btn-secondary:hover{background:#e2e8f0}
+    .btn-warn{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
+    .btn-warn:hover{background:#fde68a}
+    .btn-ghost{background:transparent;color:#64748b;font-weight:600;padding:8px 12px}
+    .btn-ghost:hover{background:#f1f5f9;color:#334155}
+
+    .hint{font-size:11px;color:#94a3b8;margin-top:4px;line-height:1.5}
+
+    /* Login gate */
+    .gate{max-width:420px;margin:100px auto;background:white;border-radius:14px;padding:32px;box-shadow:0 8px 24px rgba(0,0,0,.06);text-align:center}
+    .gate h2{font-size:20px;font-weight:800;margin-bottom:6px}
+    .gate p{font-size:13px;color:#64748b;margin-bottom:20px;line-height:1.6}
+    .gate .btn{margin-top:12px}
+
+    /* Toast */
+    .toast{position:fixed;top:20px;right:20px;background:#0f172a;color:white;padding:12px 18px;border-radius:10px;font-size:13px;font-weight:600;box-shadow:0 10px 30px rgba(0,0,0,.2);z-index:9999;opacity:0;transform:translateX(20px);transition:all .2s;pointer-events:none}
+    .toast.show{opacity:1;transform:translateX(0)}
+    .toast.ok{background:#16a34a}
+    .toast.err{background:#dc2626}
+
+    /* Responsive */
+    @media (max-width:960px){
+      .container{grid-template-columns:1fr}
+      .sidebar{max-height:none;position:static}
+      .stats-row{grid-template-columns:repeat(2,1fr)}
+    }
+  </style>
+</head>
+<body>
+
+<!-- Gate (accès refusé / non connecté) -->
+<div id="gate" style="display:none">
+  <div class="gate">
+    <div style="font-size:40px;margin-bottom:12px">🔒</div>
+    <h2>Accès admin requis</h2>
+    <p id="gateMsg">Chargement…</p>
+    <button class="btn btn-primary" id="gateBtn" style="display:none" onclick="location.href='login.html'">Se connecter</button>
+  </div>
+</div>
+
+<!-- App principale -->
+<div id="app" style="display:none">
+
+  <div class="topbar">
+    <div class="brand">
+      <h1>📬 Tickets support ALTEORE</h1>
+      <div class="small" id="hdrInfo">—</div>
+    </div>
+    <div class="topbar-actions">
+      <button class="topbar-btn" onclick="loadTickets()">🔄 Actualiser</button>
+      <button class="topbar-btn" onclick="location.href='dashboard.html'">← Dashboard</button>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">Total</div>
+      <div class="stat-value" id="stat-total">—</div>
+    </div>
+    <div class="stat-card urgent">
+      <div class="stat-label">À traiter</div>
+      <div class="stat-value" id="stat-open">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">En cours</div>
+      <div class="stat-value" id="stat-progress">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Résolus</div>
+      <div class="stat-value" id="stat-resolved">—</div>
+    </div>
+    <div class="stat-card master">
+      <div class="stat-label">👑 Master en attente</div>
+      <div class="stat-value" id="stat-master">—</div>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <!-- Sidebar : filtres + liste -->
+    <aside class="sidebar">
+      <div class="filters">
+        <input type="text" id="f-search" placeholder="🔍 Rechercher (nom, email, sujet)" oninput="applyFilters()"/>
+
+        <div class="filter-group-title">Statut</div>
+        <div class="filter-chips" id="chips-status">
+          <span class="chip active" data-status="all">Tous</span>
+          <span class="chip" data-status="open">🔴 À traiter</span>
+          <span class="chip" data-status="in_progress">🟠 En cours</span>
+          <span class="chip" data-status="resolved">🟢 Résolus</span>
+          <span class="chip" data-status="closed">⚪ Fermés</span>
+        </div>
+
+        <div class="filter-group-title">Plan</div>
+        <div class="filter-chips" id="chips-plan">
+          <span class="chip active" data-plan="all">Tous</span>
+          <span class="chip" data-plan="master">👑 Master</span>
+          <span class="chip" data-plan="max">🚀 Max</span>
+          <span class="chip" data-plan="pro">📊 Pro</span>
+          <span class="chip" data-plan="trial">⏳ Essai</span>
+        </div>
+      </div>
+
+      <div class="tickets-list" id="tickets-list">
+        <div class="empty">Chargement…</div>
+      </div>
+    </aside>
+
+    <!-- Main : détail -->
+    <main class="main" id="main-content">
+      <div class="main-empty">
+        <div class="emo">📬</div>
+        <div>Sélectionne un ticket dans la liste<br/>pour voir le détail et y répondre.</div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- Toast notifications -->
+<div class="toast" id="toast"></div>
+
+
+<!-- ═════════════════════════════════════════════
+     FIREBASE ES6 MODULE
+     ═════════════════════════════════════════════ -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, getDoc, updateDoc, collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey: "AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+  authDomain: "altiora-70599.firebaseapp.com",
+  projectId: "altiora-70599",
+  storageBucket: "altiora-70599.firebasestorage.app",
+  messagingSenderId: "120905555746",
+  appId: "1:120905555746:web:618460c65cdc9e57cc8f7b"
+});
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+window._auth = auth;
+window._db = db;
+window._doc = doc;
+window._getDoc = getDoc;
+window._updateDoc = updateDoc;
+window._collection = collection;
+window._getDocs = getDocs;
+window._query = query;
+window._orderBy = orderBy;
+window._limit = limit;
+window._signOut = signOut;
+
+const ADMIN_EMAIL = 'contact@adrienemily.com';
+
+onAuthStateChanged(auth, function(user) {
+  const gate = document.getElementById('gate');
+  const app = document.getElementById('app');
+
+  if (!user) {
+    gate.style.display = 'block';
+    app.style.display = 'none';
+    document.getElementById('gateMsg').innerHTML = 'Tu dois être connecté avec le compte admin.';
+    document.getElementById('gateBtn').style.display = 'inline-block';
+    return;
+  }
+
+  if ((user.email || '').toLowerCase() !== ADMIN_EMAIL) {
+    gate.style.display = 'block';
+    app.style.display = 'none';
+    document.getElementById('gateMsg').innerHTML =
+      'Accès refusé. Cette interface est réservée à l\'admin ALTEORE.<br/>Connecté en tant que <strong>' + user.email + '</strong>';
+    return;
+  }
+
+  gate.style.display = 'none';
+  app.style.display = 'block';
+  window._uid = user.uid;
+  window._adminEmail = user.email;
+  document.getElementById('hdrInfo').textContent = user.email;
+  window._firebaseReady = true;
+
+  if (typeof window.initTicketsApp === 'function') window.initTicketsApp();
+});
+</script>
+
+
+<!-- ═════════════════════════════════════════════
+     CODE APPLICATIF
+     ═════════════════════════════════════════════ -->
+<script>
+(function() {
+  'use strict';
+
+  // État global
+  let _tickets = [];          // cache complet des tickets
+  let _filteredTickets = [];  // après filtres
+  let _activeTicketId = null;
+  let _filterStatus = 'all';
+  let _filterPlan = 'all';
+  let _filterSearch = '';
+
+  // ── Utilitaires ──
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function toast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast show' + (type ? ' ' + type : '');
+    setTimeout(function() { t.classList.remove('show'); }, 3000);
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '—';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('fr-FR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', timeZone:'Europe/Paris' });
+    } catch(e) { return iso; }
+  }
+
+  function formatRelative(iso) {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso);
+      const diffMs = Date.now() - d.getTime();
+      const mins = Math.floor(diffMs / 60000);
+      if (mins < 1) return 'à l\'instant';
+      if (mins < 60) return 'il y a ' + mins + ' min';
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return 'il y a ' + hrs + 'h';
+      const days = Math.floor(hrs / 24);
+      if (days < 7) return 'il y a ' + days + 'j';
+      return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'short' });
+    } catch(e) { return ''; }
+  }
+
+  // ── Init (appelé après auth OK) ──
+  window.initTicketsApp = async function() {
+    // Wire filter chips
+    document.querySelectorAll('#chips-status .chip').forEach(function(c) {
+      c.addEventListener('click', function() {
+        document.querySelectorAll('#chips-status .chip').forEach(function(x) { x.classList.remove('active'); });
+        c.classList.add('active');
+        _filterStatus = c.dataset.status;
+        renderList();
+      });
+    });
+    document.querySelectorAll('#chips-plan .chip').forEach(function(c) {
+      c.addEventListener('click', function() {
+        document.querySelectorAll('#chips-plan .chip').forEach(function(x) { x.classList.remove('active'); });
+        c.classList.add('active');
+        _filterPlan = c.dataset.plan;
+        renderList();
+      });
+    });
+
+    await loadTickets();
+
+    // Si un id est passé en URL, ouvrir direct
+    const params = new URLSearchParams(location.search);
+    const id = params.get('id');
+    if (id) loadTicketDetail(id);
+  };
+
+  // ── Charger tous les tickets ──
+  window.loadTickets = async function() {
+    try {
+      const listEl = document.getElementById('tickets-list');
+      listEl.innerHTML = '<div class="empty">Chargement…</div>';
+
+      const colRef = window._collection(window._db, 'tickets');
+      // On trie côté JS car le champ createdAt est un string ISO — orderBy marche
+      // mais certains anciens tickets peuvent avoir un format différent, donc tri local safe
+      const snap = await window._getDocs(colRef);
+
+      _tickets = [];
+      snap.forEach(function(docSnap) {
+        const d = docSnap.data() || {};
+        _tickets.push({
+          id: docSnap.id,
+          ticketId: d.ticketId || docSnap.id,
+          nom: d.nom || '',
+          prenom: d.prenom || '',
+          email: d.email || '',
+          telephone: d.telephone || '',
+          sujet: d.sujet || '(sans sujet)',
+          description: d.description || '',
+          page: d.page || '',
+          uid: d.uid || '',
+          plan: (d.plan || 'unknown').toLowerCase(),
+          status: d.status || 'open',
+          createdAt: d.createdAt || '',
+          updatedAt: d.updatedAt || d.createdAt || '',
+          resolvedAt: d.resolvedAt || '',
+          isRead: d.isRead === true,
+          replies: Array.isArray(d.replies) ? d.replies : [],
+          adminNotes: Array.isArray(d.adminNotes) ? d.adminNotes : []
+        });
+      });
+
+      updateStats();
+      renderList();
+    } catch(e) {
+      console.error('[admin-tickets] load failed:', e);
+      document.getElementById('tickets-list').innerHTML =
+        '<div class="empty" style="color:#dc2626">❌ Erreur de chargement<br/><span style="font-size:11px">' + esc(e.message || e) + '</span></div>';
+    }
+  };
+
+  // ── Stats cards ──
+  function updateStats() {
+    const total = _tickets.length;
+    const open = _tickets.filter(function(t) { return t.status === 'open'; }).length;
+    const inprog = _tickets.filter(function(t) { return t.status === 'in_progress'; }).length;
+    const resolved = _tickets.filter(function(t) { return t.status === 'resolved'; }).length;
+    const masterOpen = _tickets.filter(function(t) { return t.plan === 'master' && (t.status === 'open' || t.status === 'in_progress'); }).length;
+
+    document.getElementById('stat-total').textContent = total;
+    document.getElementById('stat-open').textContent = open;
+    document.getElementById('stat-progress').textContent = inprog;
+    document.getElementById('stat-resolved').textContent = resolved;
+    document.getElementById('stat-master').textContent = masterOpen;
+  }
+
+  // ── Filtrage + tri + rendu liste ──
+  window.applyFilters = function() {
+    _filterSearch = (document.getElementById('f-search').value || '').toLowerCase().trim();
+    renderList();
+  };
+
+  function renderList() {
+    let list = _tickets.slice();
+
+    // Filtres
+    if (_filterStatus !== 'all') list = list.filter(function(t) { return t.status === _filterStatus; });
+    if (_filterPlan !== 'all')   list = list.filter(function(t) { return t.plan === _filterPlan; });
+    if (_filterSearch) {
+      const q = _filterSearch;
+      list = list.filter(function(t) {
+        return (t.nom + ' ' + t.prenom + ' ' + t.email + ' ' + t.sujet + ' ' + t.description + ' ' + t.ticketId).toLowerCase().indexOf(q) !== -1;
+      });
+    }
+
+    // Tri : master + non-lu en haut, puis open, puis date desc
+    list.sort(function(a, b) {
+      // 1. Master en attente (open/in_progress) en premier
+      const aM = a.plan === 'master' && (a.status === 'open' || a.status === 'in_progress');
+      const bM = b.plan === 'master' && (b.status === 'open' || b.status === 'in_progress');
+      if (aM !== bM) return aM ? -1 : 1;
+
+      // 2. Non-lu (open + isRead=false) en premier
+      const aU = a.status === 'open' && !a.isRead;
+      const bU = b.status === 'open' && !b.isRead;
+      if (aU !== bU) return aU ? -1 : 1;
+
+      // 3. Status open avant in_progress avant resolved avant closed
+      const order = { 'open': 0, 'in_progress': 1, 'resolved': 2, 'closed': 3 };
+      const aO = order[a.status] != null ? order[a.status] : 4;
+      const bO = order[b.status] != null ? order[b.status] : 4;
+      if (aO !== bO) return aO - bO;
+
+      // 4. Date desc
+      return (b.createdAt || '').localeCompare(a.createdAt || '');
+    });
+
+    _filteredTickets = list;
+
+    const listEl = document.getElementById('tickets-list');
+    if (list.length === 0) {
+      listEl.innerHTML = '<div class="empty">Aucun ticket ne correspond aux filtres.</div>';
+      return;
+    }
+
+    listEl.innerHTML = list.map(function(t) {
+      const isMaster = t.plan === 'master';
+      const unread = t.status === 'open' && !t.isRead;
+      const isMasterUrgent = isMaster && (t.status === 'open' || t.status === 'in_progress');
+      const planLabel = ({ master:'👑 Master', max:'🚀 Max', pro:'📊 Pro', trial:'⏳ Essai' })[t.plan] || t.plan;
+      const statusLabel = ({ open:'À traiter', in_progress:'En cours', resolved:'Résolu', closed:'Fermé' })[t.status] || t.status;
+
+      return '' +
+        '<div class="ticket-row' + (t.id === _activeTicketId ? ' active' : '') + (unread ? ' unread' : '') + '" data-id="' + esc(t.id) + '">' +
+          '<div class="row-title">' + esc((t.prenom + ' ' + t.nom).trim() || '(sans nom)') + '</div>' +
+          '<div class="row-subject">' + esc(t.sujet) + '</div>' +
+          '<div class="row-meta">' +
+            (isMasterUrgent ? '<span class="badge priority">👑 PRIO</span>' : '') +
+            '<span class="badge plan-' + esc(t.plan) + '">' + esc(planLabel) + '</span>' +
+            '<span class="badge st-' + esc(t.status) + '">' + esc(statusLabel) + '</span>' +
+            '<span class="row-date">' + esc(formatRelative(t.createdAt)) + '</span>' +
+          '</div>' +
+        '</div>';
+    }).join('');
+
+    // Wire clicks
+    listEl.querySelectorAll('.ticket-row').forEach(function(row) {
+      row.addEventListener('click', function() {
+        loadTicketDetail(row.dataset.id);
+      });
+    });
+  }
+
+  // ── Charger le détail d'un ticket ──
+  async function loadTicketDetail(id) {
+    _activeTicketId = id;
+    renderList(); // met à jour l'état "active" dans la liste
+
+    const t = _tickets.find(function(x) { return x.id === id; });
+    if (!t) {
+      document.getElementById('main-content').innerHTML = '<div class="main-empty"><div class="emo">❓</div>Ticket introuvable.</div>';
+      return;
+    }
+
+    renderDetail(t);
+
+    // Marquer comme lu s'il ne l'était pas
+    if (!t.isRead) {
+      try {
+        await window._updateDoc(window._doc(window._db, 'tickets', id), { isRead: true });
+        t.isRead = true;
+        updateStats();
+        renderList();
+        // Rafraîchit le badge du FAB admin si dispo
+        if (typeof window.refreshAdminTicketsBadge === 'function') window.refreshAdminTicketsBadge();
+      } catch(e) {
+        console.warn('[admin-tickets] mark as read failed:', e);
+      }
+    }
+  }
+
+  function renderDetail(t) {
+    const isMaster = t.plan === 'master';
+    const isMasterUrgent = isMaster && (t.status === 'open' || t.status === 'in_progress');
+    const planLabel = ({ master:'👑 Master', max:'🚀 Max', pro:'📊 Pro', trial:'⏳ Essai' })[t.plan] || t.plan;
+    const statusLabel = ({ open:'À traiter', in_progress:'En cours', resolved:'Résolu', closed:'Fermé' })[t.status] || t.status;
+
+    // Fil des réponses
+    const repliesHtml = t.replies.length === 0
+      ? '<div style="font-size:12px;color:#94a3b8;padding:8px 0;font-style:italic">Aucune réponse envoyée pour l\'instant.</div>'
+      : t.replies.map(function(r) {
+          return '<div class="reply-item">' +
+            '<div class="reply-head">' + esc(r.from || 'admin') + ' · ' + esc(formatDate(r.sentAt)) + '</div>' +
+            '<div class="reply-text">' + esc(r.text || '') + '</div>' +
+          '</div>';
+        }).join('');
+
+    // Notes admin
+    const notesHtml = t.adminNotes.length === 0
+      ? '<div style="font-size:12px;color:#94a3b8;padding:8px 0;font-style:italic">Aucune note interne.</div>'
+      : t.adminNotes.map(function(n) {
+          return '<div class="note-item">' +
+            '<div class="note-head">🗒️ ' + esc(n.author || 'admin') + ' · ' + esc(formatDate(n.createdAt)) + '</div>' +
+            '<div class="note-text">' + esc(n.text || '') + '</div>' +
+          '</div>';
+        }).join('');
+
+    const safePage = esc(t.page || '—');
+    const mainEl = document.getElementById('main-content');
+    mainEl.innerHTML =
+      '<div class="ticket-header">' +
+        '<div class="ticket-id">' + esc(t.ticketId) + '</div>' +
+        '<h2>' + esc(t.sujet) + '</h2>' +
+        '<div class="hdr-badges">' +
+          (isMasterUrgent ? '<span class="badge priority">👑 PRIORITAIRE</span>' : '') +
+          '<span class="badge plan-' + esc(t.plan) + '">' + esc(planLabel) + '</span>' +
+          '<span class="badge st-' + esc(t.status) + '">' + esc(statusLabel) + '</span>' +
+          '<span style="font-size:11px;color:#64748b;margin-left:8px">Reçu ' + esc(formatRelative(t.createdAt)) + '</span>' +
+        '</div>' +
+        '<div class="status-actions">' +
+          '<span style="font-size:11px;color:#64748b;font-weight:600;align-self:center;margin-right:4px">Statut :</span>' +
+          '<button class="status-btn open' + (t.status === 'open' ? ' active' : '') + '" data-status="open">🔴 À traiter</button>' +
+          '<button class="status-btn in_progress' + (t.status === 'in_progress' ? ' active' : '') + '" data-status="in_progress">🟠 En cours</button>' +
+          '<button class="status-btn resolved' + (t.status === 'resolved' ? ' active' : '') + '" data-status="resolved">🟢 Résolu</button>' +
+          '<button class="status-btn closed' + (t.status === 'closed' ? ' active' : '') + '" data-status="closed">⚪ Fermer</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="ticket-body">' +
+
+        '<div class="section">' +
+          '<div class="section-title">👤 Informations client</div>' +
+          '<div class="info-grid">' +
+            '<div class="k">Nom complet</div><div class="v">' + esc((t.prenom + ' ' + t.nom).trim() || '—') + '</div>' +
+            '<div class="k">Email</div><div class="v"><a href="mailto:' + esc(t.email) + '">' + esc(t.email || '—') + '</a></div>' +
+            '<div class="k">Téléphone</div><div class="v">' + (t.telephone ? '<a href="tel:' + esc(t.telephone) + '">' + esc(t.telephone) + '</a>' : '—') + '</div>' +
+            '<div class="k">Plan</div><div class="v"><span class="badge plan-' + esc(t.plan) + '">' + esc(planLabel) + '</span></div>' +
+            '<div class="k">Page d\'envoi</div><div class="v"><code style="font-size:11px;background:#f1f5f9;padding:1px 6px;border-radius:4px">' + safePage + '</code></div>' +
+            '<div class="k">UID</div><div class="v"><code style="font-size:11px;background:#f1f5f9;padding:1px 6px;border-radius:4px">' + esc(t.uid || '—') + '</code></div>' +
+            '<div class="k">Reçu le</div><div class="v">' + esc(formatDate(t.createdAt)) + '</div>' +
+            (t.updatedAt && t.updatedAt !== t.createdAt ? '<div class="k">Dernière MAJ</div><div class="v">' + esc(formatDate(t.updatedAt)) + '</div>' : '') +
+          '</div>' +
+        '</div>' +
+
+        '<div class="section">' +
+          '<div class="section-title">📝 Description</div>' +
+          '<div class="description-box">' + esc(t.description) + '</div>' +
+        '</div>' +
+
+        '<div class="section">' +
+          '<div class="section-title">💬 Fil des réponses (' + t.replies.length + ')</div>' +
+          repliesHtml +
+          '<div style="margin-top:14px;padding:14px 16px;background:#f8fafc;border:1.5px dashed #cbd5e1;border-radius:10px">' +
+            '<div class="form-row">' +
+              '<label for="reply-textarea">Nouvelle réponse au client</label>' +
+              '<textarea id="reply-textarea" placeholder="Votre message à ' + esc(t.prenom || 'au client') + '..."></textarea>' +
+              '<div class="hint">Envoyée depuis <strong>support@alteore.com</strong> au client (' + esc(t.email) + '). Le ticket passera à "En cours" automatiquement.</div>' +
+            '</div>' +
+            '<div class="form-actions">' +
+              '<button class="btn btn-primary" id="btn-send-reply">📨 Envoyer la réponse</button>' +
+              '<button class="btn btn-ghost" onclick="document.getElementById(\'reply-textarea\').value=\'\'">Effacer</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="section">' +
+          '<div class="section-title">🗒️ Notes internes admin (' + t.adminNotes.length + ')</div>' +
+          notesHtml +
+          '<div style="margin-top:14px;padding:14px 16px;background:#fffbeb;border:1.5px dashed #fde68a;border-radius:10px">' +
+            '<div class="form-row">' +
+              '<label for="note-textarea">Nouvelle note interne (non visible par le client)</label>' +
+              '<textarea id="note-textarea" placeholder="Note pour moi-même ou l\'équipe…"></textarea>' +
+            '</div>' +
+            '<div class="form-actions">' +
+              '<button class="btn btn-warn" id="btn-add-note">🗒️ Ajouter note</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+
+      '</div>';
+
+    // Wire actions
+    mainEl.querySelectorAll('.status-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() { changeStatus(t.id, btn.dataset.status); });
+    });
+    const sendBtn = document.getElementById('btn-send-reply');
+    if (sendBtn) sendBtn.addEventListener('click', function() { sendReply(t.id); });
+    const noteBtn = document.getElementById('btn-add-note');
+    if (noteBtn) noteBtn.addEventListener('click', function() { addNote(t.id); });
+  }
+
+  // ── Changer de statut ──
+  async function changeStatus(id, newStatus) {
+    const t = _tickets.find(function(x) { return x.id === id; });
+    if (!t) return;
+    if (t.status === newStatus) return; // déjà ce statut
+
+    try {
+      const updatePayload = {
+        status: newStatus,
+        updatedAt: new Date().toISOString()
+      };
+      if (newStatus === 'resolved' || newStatus === 'closed') {
+        updatePayload.resolvedAt = new Date().toISOString();
+      }
+      await window._updateDoc(window._doc(window._db, 'tickets', id), updatePayload);
+
+      t.status = newStatus;
+      t.updatedAt = updatePayload.updatedAt;
+      if (updatePayload.resolvedAt) t.resolvedAt = updatePayload.resolvedAt;
+
+      toast('✅ Statut mis à jour', 'ok');
+      updateStats();
+      renderList();
+      renderDetail(t);
+      if (typeof window.refreshAdminTicketsBadge === 'function') window.refreshAdminTicketsBadge();
+    } catch(e) {
+      console.error('[admin-tickets] status update failed:', e);
+      toast('❌ Erreur : ' + (e.message || e), 'err');
+    }
+  }
+
+  // ── Envoyer une réponse (via API) ──
+  async function sendReply(id) {
+    const t = _tickets.find(function(x) { return x.id === id; });
+    if (!t) return;
+    const ta = document.getElementById('reply-textarea');
+    const text = (ta.value || '').trim();
+    if (!text) { toast('⚠️ Réponse vide', 'err'); return; }
+    if (text.length < 5) { toast('⚠️ Réponse trop courte', 'err'); return; }
+    if (!t.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t.email)) { toast('⚠️ Email client invalide', 'err'); return; }
+
+    const btn = document.getElementById('btn-send-reply');
+    btn.disabled = true;
+    btn.textContent = '⏳ Envoi…';
+
+    try {
+      // Récupérer le token admin pour authentifier l'API
+      const idToken = await window._auth.currentUser.getIdToken();
+
+      const resp = await fetch('/api/send-ticket-reply', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + idToken
+        },
+        body: JSON.stringify({
+          ticketId: t.ticketId,
+          to: t.email,
+          clientName: (t.prenom + ' ' + t.nom).trim() || t.prenom || '',
+          subject: t.sujet,
+          replyText: text
+        })
+      });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        console.error('[admin-tickets] reply API error:', data);
+        toast('❌ ' + (data.error || 'Erreur envoi'), 'err');
+        return;
+      }
+
+      // Succès : mettre à jour l'état local
+      const newReply = {
+        text: text,
+        sentAt: new Date().toISOString(),
+        from: window._adminEmail || 'admin',
+        emailId: data.emailId || ''
+      };
+      t.replies.push(newReply);
+      if (t.status === 'open') t.status = 'in_progress';
+      t.updatedAt = new Date().toISOString();
+
+      ta.value = '';
+      toast(data.firestoreUpdated ? '✅ Réponse envoyée' : '⚠️ Email envoyé (DB non synchro)', 'ok');
+
+      updateStats();
+      renderList();
+      renderDetail(t);
+      if (typeof window.refreshAdminTicketsBadge === 'function') window.refreshAdminTicketsBadge();
+    } catch(e) {
+      console.error('[admin-tickets] reply failed:', e);
+      toast('❌ ' + (e.message || e), 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '📨 Envoyer la réponse';
+    }
+  }
+
+  // ── Ajouter une note interne ──
+  async function addNote(id) {
+    const t = _tickets.find(function(x) { return x.id === id; });
+    if (!t) return;
+    const ta = document.getElementById('note-textarea');
+    const text = (ta.value || '').trim();
+    if (!text) { toast('⚠️ Note vide', 'err'); return; }
+
+    const btn = document.getElementById('btn-add-note');
+    btn.disabled = true;
+    btn.textContent = '⏳…';
+
+    try {
+      const newNote = {
+        text: text,
+        createdAt: new Date().toISOString(),
+        author: window._adminEmail || 'admin'
+      };
+      const updatedNotes = t.adminNotes.concat([newNote]);
+
+      await window._updateDoc(window._doc(window._db, 'tickets', id), {
+        adminNotes: updatedNotes,
+        updatedAt: new Date().toISOString()
+      });
+
+      t.adminNotes = updatedNotes;
+      t.updatedAt = new Date().toISOString();
+
+      ta.value = '';
+      toast('✅ Note ajoutée', 'ok');
+      renderDetail(t);
+    } catch(e) {
+      console.error('[admin-tickets] add note failed:', e);
+      toast('❌ ' + (e.message || e), 'err');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '🗒️ Ajouter note';
+    }
+  }
+
+})();
+</script>
+
+</body>
+</html>

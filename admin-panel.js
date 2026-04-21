@@ -23,6 +23,13 @@
   // ══════════════════════════════════════════════════════════════
   var ADMIN_LINKS = [
     {
+      category: '🎫 Support & tickets',
+      color: '#2563eb',
+      items: [
+        { icon: '📬', title: 'Tickets support', desc: 'Consulter, répondre et gérer les tickets des clients', href: '/admin-tickets.html' },
+      ],
+    },
+    {
       category: '📰 Contenu & communication',
       color: '#7c3aed',
       items: [
@@ -106,6 +113,55 @@
       border-radius: 6px;
       letter-spacing: 0.5px;
       border: 2px solid #0f172a;
+    }
+
+    /* Badge compteur tickets ouverts sur le FAB */
+    #alt-admin-tickets-badge {
+      position: absolute;
+      top: -8px; left: -8px;
+      min-width: 22px;
+      height: 22px;
+      padding: 0 6px;
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      border-radius: 12px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #0f172a;
+      box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
+      animation: alt-badge-pulse 2s ease-in-out infinite;
+      z-index: 1;
+    }
+    #alt-admin-tickets-badge.show {
+      display: flex;
+    }
+    @keyframes alt-badge-pulse {
+      0%, 100% { box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4); }
+      50%      { box-shadow: 0 4px 18px rgba(220, 38, 38, 0.7), 0 0 0 4px rgba(220, 38, 38, 0.15); }
+    }
+
+    /* Badge compteur dans la sidebar admin */
+    .admin-si-badge {
+      margin-left: auto;
+      min-width: 20px;
+      height: 20px;
+      padding: 0 6px;
+      background: #dc2626;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 800;
+      border-radius: 10px;
+      display: inline-flex !important;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+    .admin-si-badge[style*="display:none"],
+    .admin-si-badge[style*="display: none"] {
+      display: none !important;
     }
 
     /* Overlay */
@@ -354,9 +410,93 @@
     fab.id = 'alt-admin-fab';
     fab.type = 'button';
     fab.title = 'Panneau admin';
-    fab.innerHTML = '🛠️';
+    fab.innerHTML = '🛠️<span id="alt-admin-tickets-badge" title="Tickets à traiter"></span>';
     fab.addEventListener('click', openPanel);
     document.body.appendChild(fab);
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // BADGE COMPTEUR TICKETS À TRAITER
+  // Lit la collection /tickets et compte les status === 'open'
+  // Met à jour le badge sur le FAB + sur le lien sidebar.
+  // Auto-refresh toutes les 60s + exposé sur window pour refresh manuel
+  // depuis admin-tickets.html après un changement de statut.
+  // ══════════════════════════════════════════════════════════════
+  var _ticketsBadgeRefreshInterval = null;
+  var _firestoreLib = null; // { collection, query, where, getDocs, getCountFromServer }
+
+  async function loadFirestoreQueryLib() {
+    if (_firestoreLib) return _firestoreLib;
+    try {
+      var m = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+      _firestoreLib = {
+        collection: m.collection,
+        query: m.query,
+        where: m.where,
+        getDocs: m.getDocs,
+        getCountFromServer: m.getCountFromServer
+      };
+      return _firestoreLib;
+    } catch (e) {
+      console.warn('[admin-panel] ❌ failed to load firestore lib for badge:', e);
+      return null;
+    }
+  }
+
+  async function refreshAdminTicketsBadge() {
+    try {
+      if (!window._db) return;
+      var lib = await loadFirestoreQueryLib();
+      if (!lib) return;
+
+      var q = lib.query(lib.collection(window._db, 'tickets'), lib.where('status', '==', 'open'));
+      var count = 0;
+      // Essai 1 : getCountFromServer (plus efficient, 1 seule lecture facturée)
+      try {
+        var snap = await lib.getCountFromServer(q);
+        count = snap.data().count || 0;
+      } catch (e) {
+        // Fallback : getDocs
+        var docsSnap = await lib.getDocs(q);
+        count = docsSnap.size || 0;
+      }
+
+      // Met à jour le badge du FAB
+      var fabBadge = document.getElementById('alt-admin-tickets-badge');
+      if (fabBadge) {
+        if (count > 0) {
+          fabBadge.textContent = count > 99 ? '99+' : String(count);
+          fabBadge.classList.add('show');
+        } else {
+          fabBadge.classList.remove('show');
+          fabBadge.textContent = '';
+        }
+      }
+
+      // Met à jour le badge dans la sidebar
+      var sbBadge = document.getElementById('sidebar-tickets-badge');
+      if (sbBadge) {
+        if (count > 0) {
+          sbBadge.textContent = count > 99 ? '99+' : String(count);
+          sbBadge.style.display = 'inline-flex';
+        } else {
+          sbBadge.style.display = 'none';
+          sbBadge.textContent = '';
+        }
+      }
+
+      return count;
+    } catch (e) {
+      console.warn('[admin-panel] badge refresh failed:', e);
+    }
+  }
+  // Exposé pour que admin-tickets.html puisse forcer un refresh après action
+  window.refreshAdminTicketsBadge = refreshAdminTicketsBadge;
+
+  function startTicketsBadgePolling() {
+    refreshAdminTicketsBadge(); // Premier refresh immédiat
+    if (_ticketsBadgeRefreshInterval) clearInterval(_ticketsBadgeRefreshInterval);
+    _ticketsBadgeRefreshInterval = setInterval(refreshAdminTicketsBadge, 60000); // toutes les 60s
   }
 
   function renderPanel() {
@@ -456,6 +596,7 @@
     // Sélection des liens pour la sidebar (les plus utilisés)
     // La liste complète reste accessible via "Tous les outils" qui ouvre le panneau flottant
     var sidebarLinks = [
+      { icon: '📬', title: 'Tickets support',    href: '/admin-tickets.html', badgeId: 'sidebar-tickets-badge' },
       { icon: '🔔', title: 'Nouveautés',         href: '/admin-updates.html' },
       { icon: '✍️', title: 'Blog',                href: '/admin-blog.html' },
       { icon: '🩺', title: 'Diagnostics',         href: '/admin-debug-view.html' },
@@ -468,11 +609,15 @@
       var onClickAttr = link.action === 'open-panel'
         ? 'data-action="open-panel"'
         : 'onclick="location.href=\'' + link.href + '\'"';
+      var badgeHtml = link.badgeId
+        ? '<span id="' + link.badgeId + '" class="admin-si-badge" style="display:none"></span>'
+        : '';
       return (
         '<div class="si admin-si" ' + onClickAttr + '>' +
           '<span class="dot admin-dot"></span>' +
           '<span class="admin-si-ico">' + escapeHtml(link.icon) + '</span>' +
           '<span>' + escapeHtml(link.title) + '</span>' +
+          badgeHtml +
         '</div>'
       );
     }).join('');
@@ -530,7 +675,12 @@
       // Re-tenter l'injection sidebar si nav.js injecte après nous (race condition)
       setTimeout(injectSidebarSection, 500);
       setTimeout(injectSidebarSection, 1500);
-      console.log('[admin-panel] ✅ Initialized for admin (fab + sidebar)');
+      // Démarrer le polling du compteur de tickets (FAB + sidebar)
+      startTicketsBadgePolling();
+      // Re-refresh après injection retardée de la sidebar (pour badge sidebar)
+      setTimeout(refreshAdminTicketsBadge, 600);
+      setTimeout(refreshAdminTicketsBadge, 1600);
+      console.log('[admin-panel] ✅ Initialized for admin (fab + sidebar + tickets badge)');
     } catch (e) {
       console.warn('[admin-panel] init failed:', e);
     }
