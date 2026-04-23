@@ -1712,6 +1712,30 @@ async function loadCrForMonth(dateStr, untilVal=''){
   }catch(e){console.warn('[loadCrForMonth]',e);await loadCr();}
 }
 
+// ── HELPERS refresh élargi (fix multi-save hors scope) ──
+// Charge une liste de weekKeys en complément de _cr (merge, sans reset)
+async function loadCrForWeeks(weekKeysIter){
+  try{
+    for(const wk of weekKeysIter){
+      const s=await window._getDocs(window._col(window._db,'rh',window._uid,wk));
+      s.forEach(doc=>{_cr[doc.id]=doc.data();});
+    }
+  }catch(e){console.warn('[loadCrForWeeks]',e);}
+}
+
+// Retourne true si la date ISO (YYYY-MM-DD) est visible dans la vue courante
+function _isDateInCurrentScope(isoDate){
+  if(!isoDate)return false;
+  if(_view==='mois'){
+    // Inclut les jours padding (début/fin de grille mensuelle)
+    return monthDays(_cur).some(({date})=>fmt(date)===isoDate);
+  } else if(_view==='jour'){
+    return fmt(_cur)===isoDate;
+  } else {
+    return weekDays(_cur).some(d=>fmt(d)===isoDate);
+  }
+}
+
 // ── NAV ──
 function navPrev(){
   if(_view==='mois')_cur.setMonth(_cur.getMonth()-1);
@@ -2686,8 +2710,26 @@ async function saveCr(){
       await applyRecurrence(dates[0],eid,type,mPlages,note,recur,untilVal);
     }
 
-    closeCr();await loadCr();render();
-    showToast(`✅ ${saved} créneau(x) enregistrés`,'ok');
+    closeCr();
+    // Fix : élargir le refresh aux semaines de TOUTES les dates enregistrées
+    // (sinon un save hors de la vue courante reste invisible, bien qu'enregistré)
+    const _sortedDates=dates.slice().sort();
+    const _firstDate=_sortedDates[0];
+    const _touchedWeeks=new Set(_sortedDates.map(d=>weekKey(new Date(d+'T12:00:00'))));
+    const _firstInScope=_isDateInCurrentScope(_firstDate);
+    // Si la 1re date est hors de la vue actuelle, naviguer vers elle
+    if(!_firstInScope){
+      _cur=new Date(_firstDate+'T12:00:00');
+    }
+    await loadCr();
+    await loadCrForWeeks(_touchedWeeks);
+    render();
+    if(!_firstInScope){
+      const _navLbl=_firstDate.split('-').reverse().join('/');
+      showToast(`✅ ${saved} créneau(x) enregistrés — vue déplacée au ${_navLbl}`,'ok');
+    } else {
+      showToast(`✅ ${saved} créneau(x) enregistrés`,'ok');
+    }
     return;
   }
 
@@ -2720,13 +2762,27 @@ async function saveCr(){
     await saveKey(k,date);
     if(recur) await applyRecurrence(date,eid,type,plagesData,note,recur,untilForReload);
     closeCr();
+    // Fix : si date hors de la vue courante (date modifiée manuellement dans le modal),
+    // naviguer + élargir le refresh. Inoffensif sinon.
+    const _navNeeded = !hadRecur && !_editId && !_isDateInCurrentScope(date);
     if(hadRecur){
       await loadCrForMonth(date, untilForReload);
     } else {
-      await loadCr();
+      if(_navNeeded){
+        _cur=new Date(date+'T12:00:00');
+        await loadCr();
+        await loadCrForWeeks([weekKey(new Date(date+'T12:00:00'))]);
+      } else {
+        await loadCr();
+      }
     }
     render();
-    showToast(_editId?'Créneau modifié ✅':'Créneau ajouté ✅','ok');
+    if(_navNeeded){
+      const _navLbl=date.split('-').reverse().join('/');
+      showToast(`✅ Créneau ajouté — vue déplacée au ${_navLbl}`,'ok');
+    } else {
+      showToast(_editId?'Créneau modifié ✅':'Créneau ajouté ✅','ok');
+    }
     return;
   }
 
