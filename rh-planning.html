@@ -4,6 +4,10 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
 <title>ALTEORE — Planning RH Pro</title>
+<!-- Outil de diagnostic ALTEORE : FAB 🐛 + capture rolling 30s.
+     Chargé EN PREMIER (et défer=false) pour capturer toutes les erreurs
+     y compris celles qui surviennent pendant l'init de la page. -->
+<script src="debug-recorder.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
 <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -1424,6 +1428,82 @@ function isFerme(d){
 let _multiOpen=false, _filterPoste='', _infractions={}, _ccnDefault='droit_commun';
 let _plages=[{deb:'09:00',fin:'17:00'}], _crType='travail';
 
+// ═══════════════════════════════════════════════════════════════════════
+// HELPER DÉFENSIF — _safeCall
+// Wrap toute fonction critique exposée sur window (handlers onclick HTML).
+// • Capture les exceptions silencieuses (typiques du module RH planning)
+// • Loggue un état diagnostic avant chaque appel
+// • Ré-active automatiquement les boutons en .disabled après une erreur
+// • Affiche un toast intelligible plutôt qu'un freeze silencieux
+// • S'enregistre dans alteoreDebug si dispo (debug-recorder.js) pour
+//   que le rapport contienne tous les appels critiques + leurs erreurs
+// ═══════════════════════════════════════════════════════════════════════
+function _safeCall(fnName, fn, opts){
+  opts = opts || {};
+  return function(){
+    var args = Array.prototype.slice.call(arguments);
+    var ctx = {
+      view: typeof _view!=='undefined' ? _view : '?',
+      disp: typeof _disp!=='undefined' ? _disp : '?',
+      multiOpen: typeof _multiOpen!=='undefined' ? _multiOpen : '?',
+      editId: typeof _editId!=='undefined' ? _editId : '?',
+      argsCount: args.length
+    };
+    try { console.log('[' + fnName + '] called', ctx); } catch(_e) {}
+    try {
+      if (window.alteoreDebug && window.alteoreDebug.record) {
+        window.alteoreDebug.record(fnName + '.start', ctx);
+      }
+    } catch(_e) {}
+    try {
+      var ret = fn.apply(this, args);
+      if (ret && typeof ret.then === 'function') {
+        // Async function : attacher un catch pour les rejects silencieux
+        return ret.catch(function(err){ _safeCallHandleError(fnName, err, opts); throw err; });
+      }
+      return ret;
+    } catch(err) {
+      _safeCallHandleError(fnName, err, opts);
+      // Pour les sync, on swallow par défaut (sinon le onclick HTML throw aussi)
+      // sauf si opts.rethrow est explicite
+      if (opts.rethrow) throw err;
+    }
+  };
+}
+
+function _safeCallHandleError(fnName, err, opts){
+  try { console.error('[' + fnName + '] FATAL exception:', err); } catch(_e) {}
+  // Réactiver les boutons typiques
+  try {
+    var btnIds = (opts && opts.unlockBtns) || ['save-btn'];
+    btnIds.forEach(function(id){
+      var b = document.getElementById(id);
+      if (b && b.disabled) {
+        b.disabled = false;
+        if (opts && opts.unlockText && opts.unlockText[id]) b.textContent = opts.unlockText[id];
+      }
+    });
+  } catch(_e) {}
+  // Toast utilisateur
+  try {
+    if (typeof showToast === 'function') {
+      var msg = (err && err.message) || String(err) || 'inconnue';
+      var label = (opts && opts.userLabel) || 'opération';
+      showToast('Erreur ' + label + ' : ' + msg, 'warn');
+    }
+  } catch(_e) {}
+  // Push to debug recorder
+  try {
+    if (window.alteoreDebug && window.alteoreDebug.record) {
+      window.alteoreDebug.record(fnName + '.error', {
+        message: (err && err.message) || String(err),
+        stack: (err && err.stack) ? String(err.stack).substring(0, 1500) : ''
+      });
+    }
+  } catch(_e) {}
+}
+
+
 const COLS=['c0','c1','c2','c3','c4','c5','c6','c7','c8','c9'];
 // Couleurs pills par salarié (vue mois) — bg / texte / bordure gauche
 const EMP_PILL_COLORS=[
@@ -2793,34 +2873,13 @@ async function saveCrImpl(){
   render();
   showToast('Créneau modifié ✅','ok');
 }
-// Wrapper défensif autour de saveCrImpl :
-// • Log diagnostic au début (pour identifier les bugs en vue semaine vs mois etc.)
-// • try/catch global qui réactive le bouton et affiche un toast en cas d'exception
-//   silencieuse (sinon la modale resterait figée sans feedback à l'utilisateur)
-async function saveCr(){
-  console.log('[saveCr] called', {
-    view: typeof _view!=='undefined' ? _view : '?',
-    disp: typeof _disp!=='undefined' ? _disp : '?',
-    multiOpen: typeof _multiOpen!=='undefined' ? _multiOpen : '?',
-    editId: typeof _editId!=='undefined' ? _editId : '?',
-    crType: typeof _crType!=='undefined' ? _crType : '?',
-    plagesLen: (typeof _plages!=='undefined' && Array.isArray(_plages)) ? _plages.length : '?',
-    crEmp: document.getElementById('cr-emp')?.value || '',
-    crDate: document.getElementById('cr-date')?.value || '',
-    multiChecked: document.querySelectorAll('.mday-cb:checked').length
-  });
-  try {
-    await saveCrImpl();
-  } catch(err) {
-    console.error('[saveCr] FATAL exception:', err);
-    const _b = document.getElementById('save-btn');
-    if(_b){ _b.disabled = false; _b.textContent = '💾 Enregistrer'; }
-    if(typeof showToast === 'function'){
-      showToast('Erreur enregistrement : ' + ((err && err.message) || err || 'inconnue'), 'warn');
-    }
-  }
-}
-window.saveCr=saveCr;
+// saveCr est wrappé via _safeCall (helper défensif global défini plus haut)
+// → log diagnostic, try/catch, fallback bouton, toast d'erreur, push debug-recorder
+window.saveCr = _safeCall('saveCr', saveCrImpl, {
+  userLabel: 'enregistrement créneau',
+  unlockBtns: ['save-btn'],
+  unlockText: { 'save-btn': '💾 Enregistrer' }
+});
 
 async function applyRecurrence(startDate,eid,type,plages,note,recur,untilVal=''){
   // Générer un ID de groupe pour permettre la suppression groupée
@@ -3445,7 +3504,7 @@ async function delCr(){
   await saveKey(k,k.split('_')[0]);
   closeCr();await loadCr();render();showToast('Créneau supprimé');
 }
-window.delCr=delCr;
+window.delCr=_safeCall('delCr', delCr, { userLabel: 'suppression créneau' });
 
 // Modal de confirmation de suppression récurrence
 function showDelRecurModal(k,itemId,recurId){
@@ -3487,7 +3546,7 @@ async function delSingleOccurrence(k,itemId){
   await saveKey(k,k.split('_')[0]);
   closeCr();await loadCr();render();showToast('Créneau supprimé','ok');
 }
-window.delSingleOccurrence=delSingleOccurrence;
+window.delSingleOccurrence=_safeCall('delSingleOccurrence', delSingleOccurrence, { userLabel: 'suppression occurrence' });
 
 async function delAllRecurrence(recurId){
   document.getElementById('delRecurModal')?.remove();
@@ -3511,7 +3570,7 @@ async function delAllRecurrence(recurId){
   await loadCr();render();
   showToast(`🗑 Série supprimée (${done} créneau(x))`, 'ok');
 }
-window.delAllRecurrence=delAllRecurrence;
+window.delAllRecurrence=_safeCall('delAllRecurrence', delAllRecurrence, { userLabel: 'suppression récurrence' });
 
 // Purge Firebase : parcourt les semaines du mois courant et mois suivant
 async function deleteRecurFromFirebase(recurId){
@@ -3547,7 +3606,7 @@ async function qDel(k,id){
   await saveKey(k,k.split('_')[0]);
   await loadCr();render();showToast('Supprimé');
 }
-window.qDel=qDel;
+window.qDel=_safeCall('qDel', qDel, { userLabel: 'suppression rapide' });
 
 // ── IA ──
 function openAI(){
@@ -3591,7 +3650,7 @@ function loadAIForm(){
     return !!(d.schedule&&Array.isArray(d.schedule)&&d.schedule.length===7);
   }catch(e){return false}
 }
-window.saveAIForm=saveAIForm;
+window.saveAIForm=_safeCall('saveAIForm', saveAIForm, { userLabel: 'sauvegarde paramètres IA' });
 
 function initAISchedule(){
   if(loadAIForm()){renderAISchedule();return;}
@@ -3748,7 +3807,7 @@ Réponds UNIQUEMENT en JSON valide sans markdown :
   }catch(e){box.innerHTML=`<div style="color:#f87171;font-size:12px">❌ Erreur : ${e.message}. Réessayez.</div>`;}
   btn.disabled=false;btn.textContent='✨ Regénérer';
 }
-window.genAI=genAI;
+window.genAI=_safeCall('genAI', genAI, { userLabel: 'génération planning IA' });
 
 async function applyAI(){
   if(!_aiResult)return;
@@ -3767,7 +3826,7 @@ async function applyAI(){
   }
   closeAI();await loadCr();render();showToast(`✅ ${count} créneau(x) appliqués`,'ok');
 }
-window.applyAI=applyAI;
+window.applyAI=_safeCall('applyAI', applyAI, { userLabel: 'application planning IA' });
 
 // ── POLYVALENCE ──
 function openPolyPanel(){
@@ -4189,7 +4248,7 @@ function exportPDF(){
   w.document.write(html);
   w.document.close();
 }
-window.exportPDF=exportPDF;
+window.exportPDF=_safeCall('exportPDF', exportPDF, { userLabel: 'export PDF' });
 
 // ─────────────────────────────────────────────────────────────
 // IMPRESSION PLANNING MENSUEL INDIVIDUEL
@@ -4367,7 +4426,7 @@ function exportPlanningMensuelSalarie(){
   w.document.write(html);
   w.document.close();
 }
-window.exportPlanningMensuelSalarie=exportPlanningMensuelSalarie;
+window.exportPlanningMensuelSalarie=_safeCall('exportPlanningMensuelSalarie', exportPlanningMensuelSalarie, { userLabel: 'export planning salarié' });
 
 // ══════════════════════════════════════════════════════════════
 // PARAMÈTRES ENTREPRISE — JOURS FERMETURE & HORAIRES
@@ -4590,7 +4649,7 @@ async function saveFermetures(){
   render();
   showToast('✅ Paramètres enregistrés','ok');
 }
-window.saveFermetures=saveFermetures;
+window.saveFermetures=_safeCall('saveFermetures', saveFermetures, { userLabel: 'sauvegarde fermetures' });
 
 // ── PLAGES HORAIRES D'OUVERTURE ──
 function renderPlagesOuverture(){
@@ -4747,7 +4806,7 @@ async function publishPlanning(){
   }
   if(btn){btn.disabled=false;btn.textContent='📢 Communiquer';}
 }
-window.publishPlanning=publishPlanning;
+window.publishPlanning=_safeCall('publishPlanning', publishPlanning, { userLabel: 'publication planning' });
 
 function getISOWeek(d){
   const dt=new Date(d);dt.setHours(0,0,0,0);
