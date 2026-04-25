@@ -2670,7 +2670,7 @@ document.getElementById('cr-recur')?.addEventListener('change',onRecurChange);
 document.getElementById('cr-recur-until')?.addEventListener('change',updateRecurPreview);
 
 // ── SAVE ──
-async function saveCr(){
+async function saveCrImpl(){
   const eid=document.getElementById('cr-emp')?.value;
   const type=_crType;
   const note=document.getElementById('cr-note')?.value||'';
@@ -2792,6 +2792,33 @@ async function saveCr(){
   await loadCr();
   render();
   showToast('Créneau modifié ✅','ok');
+}
+// Wrapper défensif autour de saveCrImpl :
+// • Log diagnostic au début (pour identifier les bugs en vue semaine vs mois etc.)
+// • try/catch global qui réactive le bouton et affiche un toast en cas d'exception
+//   silencieuse (sinon la modale resterait figée sans feedback à l'utilisateur)
+async function saveCr(){
+  console.log('[saveCr] called', {
+    view: typeof _view!=='undefined' ? _view : '?',
+    disp: typeof _disp!=='undefined' ? _disp : '?',
+    multiOpen: typeof _multiOpen!=='undefined' ? _multiOpen : '?',
+    editId: typeof _editId!=='undefined' ? _editId : '?',
+    crType: typeof _crType!=='undefined' ? _crType : '?',
+    plagesLen: (typeof _plages!=='undefined' && Array.isArray(_plages)) ? _plages.length : '?',
+    crEmp: document.getElementById('cr-emp')?.value || '',
+    crDate: document.getElementById('cr-date')?.value || '',
+    multiChecked: document.querySelectorAll('.mday-cb:checked').length
+  });
+  try {
+    await saveCrImpl();
+  } catch(err) {
+    console.error('[saveCr] FATAL exception:', err);
+    const _b = document.getElementById('save-btn');
+    if(_b){ _b.disabled = false; _b.textContent = '💾 Enregistrer'; }
+    if(typeof showToast === 'function'){
+      showToast('Erreur enregistrement : ' + ((err && err.message) || err || 'inconnue'), 'warn');
+    }
+  }
 }
 window.saveCr=saveCr;
 
