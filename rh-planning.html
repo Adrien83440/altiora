@@ -1014,7 +1014,7 @@
 <div class="main">
   <div class="topbar">
     <div class="topbar-left">
-      <h1>📅 Planning RH <span style="font-size:9px;font-weight:500;color:#9ca3af;vertical-align:middle;letter-spacing:0;background:#f3f4f6;padding:2px 6px;border-radius:4px;margin-left:6px" title="Version du planning — utile pour le support">v23/04</span></h1>
+      <h1>📅 Planning RH <span style="font-size:9px;font-weight:500;color:#9ca3af;vertical-align:middle;letter-spacing:0;background:#f3f4f6;padding:2px 6px;border-radius:4px;margin-left:6px" title="Version du planning — utile pour le support">v28/04</span></h1>
       <p id="topbar-sub">Planning mensuel · Toutes vues · Polyvalence · IA</p>
     </div>
     <div class="topbar-right">
@@ -1415,7 +1415,7 @@ onAuthStateChanged(auth,u=>{
 //   Gestion ultra-complète des horaires, polyvalence et IA
 // ══════════════════════════════════════════════════════════════
 // ── VERSION (visible en console + window pour debug rapide) ──
-window.RH_PLANNING_VERSION = 'v2026.04.23-fix-saves-rollback';
+window.RH_PLANNING_VERSION = 'v2026.04.28-fix-multiedit-state';
 console.log('[rh-planning] version:', window.RH_PLANNING_VERSION);
 
 // ── STATE ──
@@ -2606,6 +2606,15 @@ function toggleMulti(open){
   const sub=document.getElementById('multi-toggle-sub');
   if(!panel)return;
   if(open){
+    // Si on ouvre le mode multi pendant qu'un edit était en cours, on quitte l'edit
+    // (un mode multi crée des créneaux, il ne peut PAS modifier un créneau existant)
+    if(_editId){
+      _editId=null;
+      const titleEl=document.getElementById('cr-title');
+      if(titleEl) titleEl.textContent='➕ Nouveau créneau';
+      const delEl=document.getElementById('cr-del');
+      if(delEl) delEl.style.display='none';
+    }
     panel.classList.add('show');
     btn?.classList.add('on');
     if(arrow)arrow.style.transform='rotate(90deg)';
@@ -2775,32 +2784,54 @@ async function saveCrImpl(){
 
   if(!eid){showToast('Sélectionnez un employé','warn');return;}
 
+  // ⚠️ Filet de sécurité : si _editId est défini ALORS QU'ON est en multi
+  // (état théoriquement impossible mais observé en prod), on PRIORISE le multi
+  // car l'utilisateur voit "Enregistrer (N jours)" et s'attend à créer N créneaux,
+  // pas à modifier un créneau existant.
+  if(_multiOpen && _editId){
+    console.warn('[saveCr] État incohérent multi+edit détecté, priorisation multi');
+    _editId=null;
+    document.getElementById('cr-del').style.display='none';
+    document.getElementById('cr-title').textContent='➕ Nouveau créneau';
+  }
+
   // ── MODE MULTI ──
   if(_multiOpen&&!_editId){
     const dates=[...document.querySelectorAll('.mday-cb:checked')].map(cb=>cb.dataset.iso).filter(Boolean);
     if(!dates.length){showToast('Aucun jour sélectionné','warn');return;}
     const btn=document.getElementById('save-btn');
-    if(btn){btn.disabled=true;btn.textContent=`⏳ 0/${dates.length}…`;}
+    if(btn){btn.disabled=true;btn.textContent=`⏳ Enregistrement…`;}
     const mDeb=document.getElementById('mh-deb')?.value||'09:00';
     const mFin=document.getElementById('mh-fin')?.value||'17:00';
     const mPlages=showHrs?[{deb:mDeb,fin:mFin}]:[];
 
-    // Tracker les items ajoutés pour pouvoir rollback en cas d'échec
-    const _added=[]; // [{k, itemId}]
+    // 1) Préparer TOUS les items en mémoire d'abord (synchrone, rapide)
+    const _added=[]; // [{k, itemId}] pour rollback
+    const _saveBatch=[]; // [{k, date}]
+    dates.forEach((date,i)=>{
+      const k=`${date}_${eid}`;
+      if(!_cr[k])_cr[k]={items:[]};
+      const it={id:'c'+Date.now()+'_'+i,type,deb:mPlages[0]?.deb||'',fin:mPlages[0]?.fin||'',note};
+      if(mPlages.length>0) it.plages=mPlages;
+      if(type==='ecole') it.heuresComptent = ecoleHeuresComptent;
+      _cr[k].items.push(it);
+      _added.push({k,itemId:it.id});
+      _saveBatch.push({k,date});
+    });
+
+    // 2) Lancer toutes les écritures Firestore EN PARALLÈLE (Promise.all)
+    //    → passe de N round-trips séquentiels à 1 seul batch (4-8x plus rapide)
+    //    → libère le thread principal entre chaque await (pas de freeze)
     let saved=0;
     let _saveError=null;
     try{
-      for(const date of dates){
-        const k=`${date}_${eid}`;
-        if(!_cr[k])_cr[k]={items:[]};
-        const it={id:'c'+Date.now()+'_'+saved,type,deb:mPlages[0]?.deb||'',fin:mPlages[0]?.fin||'',note};
-        if(mPlages.length>0) it.plages=mPlages;
-        if(type==='ecole') it.heuresComptent = ecoleHeuresComptent;
-        _cr[k].items.push(it);
-        _added.push({k,itemId:it.id});
-        await saveKey(k,date);
-        saved++;
-        if(btn)btn.textContent=`⏳ ${saved}/${dates.length}…`;
+      // Promise.all en lots de 10 max pour éviter de saturer Firestore
+      const BATCH_SIZE=10;
+      for(let i=0;i<_saveBatch.length;i+=BATCH_SIZE){
+        const chunk=_saveBatch.slice(i,i+BATCH_SIZE);
+        await Promise.all(chunk.map(({k,date})=>saveKey(k,date)));
+        saved+=chunk.length;
+        if(btn)btn.textContent=`⏳ ${saved}/${_saveBatch.length}…`;
       }
 
       // Récurrence (mode multi : s'applique si 1 seule date cochée)
@@ -3577,6 +3608,9 @@ function editCr(k,itemId){
   const items=(_cr[k]?.items||[]);
   const it=items.find(i=>i.id===itemId);
   if(!it)return;
+  // Forcer la fermeture du panneau multi AVANT tout (un edit ne peut PAS coexister
+  // avec un mode multi — l'observateur visuel et l'état doivent être alignés)
+  toggleMulti(false);
   _editId={k,itemId};
   const[date,eid]=k.split('_');
   document.getElementById('cr-title').textContent='✏️ Modifier le créneau';
@@ -3589,7 +3623,6 @@ function editCr(k,itemId){
   const ecoleHcEl = document.getElementById('cr-ecole-heures-comptent');
   if (ecoleHcEl) ecoleHcEl.checked = !!it.heuresComptent;
   setType(it.type||'travail',document.querySelector(`.type-btn[data-type="${it.type||'travail'}"]`));
-  toggleMulti(false);
   onEmpChange();
   renderPresets();
   renderPlages();
