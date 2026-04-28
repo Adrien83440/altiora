@@ -1014,7 +1014,7 @@
 <div class="main">
   <div class="topbar">
     <div class="topbar-left">
-      <h1>📅 Planning RH <span style="font-size:9px;font-weight:500;color:#9ca3af;vertical-align:middle;letter-spacing:0;background:#f3f4f6;padding:2px 6px;border-radius:4px;margin-left:6px" title="Version du planning — utile pour le support">v28/04</span></h1>
+      <h1>📅 Planning RH <span style="font-size:9px;font-weight:500;color:#9ca3af;vertical-align:middle;letter-spacing:0;background:#f3f4f6;padding:2px 6px;border-radius:4px;margin-left:6px" title="Version du planning — utile pour le support">v28/04b</span></h1>
       <p id="topbar-sub">Planning mensuel · Toutes vues · Polyvalence · IA</p>
     </div>
     <div class="topbar-right">
@@ -1180,15 +1180,9 @@
             </div>
             <div class="mday-list" id="mday-list"></div>
           </div>
-          <!-- Horaires multi -->
-          <div class="multi-hrs" id="multi-hrs" style="display:none">
-            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">⏰ Horaires appliqués à chaque jour</div>
-            <div style="display:flex;align-items:center;gap:8px">
-              <input type="time" class="plage-hl" id="mh-deb" value="09:00" oninput="updMultiDur()"/>
-              <span style="color:var(--muted)">→</span>
-              <input type="time" class="plage-hl" id="mh-fin" value="17:00" oninput="updMultiDur()"/>
-              <div class="plage-dur" id="mh-dur">8h</div>
-            </div>
+          <!-- Note d'info : les horaires saisis dans la section Plages s'appliqueront à chaque jour coché -->
+          <div id="multi-hrs-info" style="display:none;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 10px;font-size:11px;color:#1e3a8a;margin-top:6px">
+            ⏰ Les horaires définis ci-dessous (presets, plages et coupures) <strong>s'appliqueront identiquement à chaque jour coché</strong>.
           </div>
           <!-- Résumé -->
           <div id="multi-summary" style="display:none;background:#1a2035;border-radius:8px;padding:10px 12px;font-size:11px;color:rgba(255,255,255,.7);display:flex;align-items:center;gap:10px">
@@ -1415,7 +1409,7 @@ onAuthStateChanged(auth,u=>{
 //   Gestion ultra-complète des horaires, polyvalence et IA
 // ══════════════════════════════════════════════════════════════
 // ── VERSION (visible en console + window pour debug rapide) ──
-window.RH_PLANNING_VERSION = 'v2026.04.28-fix-multiedit-state';
+window.RH_PLANNING_VERSION = 'v2026.04.28b-multi-coupures';
 console.log('[rh-planning] version:', window.RH_PLANNING_VERSION);
 
 // ── STATE ──
@@ -2506,7 +2500,9 @@ function setType(type,btn){
   if(btn)btn.classList.add('active');
   const showHrs=['travail','partiel','formation','astreinte','ecole'].includes(type);
   document.getElementById('cr-hrs-section').style.display=showHrs?'block':'none';
-  document.getElementById('multi-hrs').style.display=showHrs?'block':'none';
+  // Bandeau "appliqué à chaque jour" : visible uniquement en multi ET avec horaires
+  const infoEl=document.getElementById('multi-hrs-info');
+  if(infoEl) infoEl.style.display=(showHrs && _multiOpen)?'block':'none';
   const ecoleOpts=document.getElementById('cr-ecole-opts');
   if(ecoleOpts) ecoleOpts.style.display = type==='ecole' ? '' : 'none';
   renderPresets();
@@ -2623,12 +2619,19 @@ function toggleMulti(open){
     const cd=document.getElementById('cr-date')?.value;
     if(dd&&!dd.value&&cd)dd.value=cd;
     buildMultiPreview();
+    // Afficher le bandeau "appliqué à chaque jour" si type avec horaires
+    const showHrs=['travail','partiel','formation','astreinte','ecole'].includes(_crType);
+    const infoEl=document.getElementById('multi-hrs-info');
+    if(infoEl) infoEl.style.display=showHrs?'block':'none';
   } else {
     panel.classList.remove('show');
     btn?.classList.remove('on');
     if(arrow)arrow.style.transform='';
     if(sub)sub.textContent='Cliquez pour ouvrir';
     document.getElementById('multi-summary').style.display='none';
+    // Cacher le bandeau d'info quand on quitte le multi
+    const infoEl=document.getElementById('multi-hrs-info');
+    if(infoEl) infoEl.style.display='none';
   }
 }
 window.toggleMulti=toggleMulti;
@@ -2720,11 +2723,10 @@ function updMultiSummary(){
   }
 }
 
+// updMultiDur : fonction historique conservée en no-op pour compatibilité.
+// Les éléments mh-deb/mh-fin/mh-dur ont été remplacés par les plages partagées (_plages).
 function updMultiDur(){
-  const deb=document.getElementById('mh-deb')?.value||'09:00';
-  const fin=document.getElementById('mh-fin')?.value||'17:00';
-  const dur=document.getElementById('mh-dur');
-  if(dur)dur.textContent=fmtDur(diffH(deb,fin));
+  // No-op : la durée est maintenant gérée via updTotalDur() sur _plages
 }
 window.updMultiDur=updMultiDur;
 
@@ -2801,9 +2803,9 @@ async function saveCrImpl(){
     if(!dates.length){showToast('Aucun jour sélectionné','warn');return;}
     const btn=document.getElementById('save-btn');
     if(btn){btn.disabled=true;btn.textContent=`⏳ Enregistrement…`;}
-    const mDeb=document.getElementById('mh-deb')?.value||'09:00';
-    const mFin=document.getElementById('mh-fin')?.value||'17:00';
-    const mPlages=showHrs?[{deb:mDeb,fin:mFin}]:[];
+    // Utiliser les VRAIES plages saisies par l'utilisateur (avec coupures, presets…)
+    // au lieu d'un input statique mh-deb/mh-fin qui ne supportait qu'une plage.
+    // plagesData a déjà été calculé en haut de saveCrImpl à partir de _plages.
 
     // 1) Préparer TOUS les items en mémoire d'abord (synchrone, rapide)
     const _added=[]; // [{k, itemId}] pour rollback
@@ -2811,8 +2813,18 @@ async function saveCrImpl(){
     dates.forEach((date,i)=>{
       const k=`${date}_${eid}`;
       if(!_cr[k])_cr[k]={items:[]};
-      const it={id:'c'+Date.now()+'_'+i,type,deb:mPlages[0]?.deb||'',fin:mPlages[0]?.fin||'',note};
-      if(mPlages.length>0) it.plages=mPlages;
+      // Copie profonde des plages pour chaque jour (évite le partage de référence)
+      const plagesCopy = plagesData.length>0
+        ? plagesData.map(p=>({deb:p.deb,fin:p.fin}))
+        : [];
+      const it={
+        id:'c'+Date.now()+'_'+i,
+        type,
+        deb:plagesCopy[0]?.deb||'',
+        fin:plagesCopy[plagesCopy.length-1]?.fin||'',
+        note
+      };
+      if(plagesCopy.length>0) it.plages=plagesCopy;
       if(type==='ecole') it.heuresComptent = ecoleHeuresComptent;
       _cr[k].items.push(it);
       _added.push({k,itemId:it.id});
@@ -2838,7 +2850,7 @@ async function saveCrImpl(){
       const recur=document.getElementById('cr-recur')?.value;
       if(recur&&dates.length===1){
         const untilVal=document.getElementById('cr-recur-until')?.value||'';
-        await applyRecurrence(dates[0],eid,type,mPlages,note,recur,untilVal);
+        await applyRecurrence(dates[0],eid,type,plagesData,note,recur,untilVal);
       }
     } catch(err){
       _saveError=err;
