@@ -1014,7 +1014,7 @@
 <div class="main">
   <div class="topbar">
     <div class="topbar-left">
-      <h1>📅 Planning RH</h1>
+      <h1>📅 Planning RH <span style="font-size:9px;font-weight:500;color:#9ca3af;vertical-align:middle;letter-spacing:0;background:#f3f4f6;padding:2px 6px;border-radius:4px;margin-left:6px" title="Version du planning — utile pour le support">v23/04</span></h1>
       <p id="topbar-sub">Planning mensuel · Toutes vues · Polyvalence · IA</p>
     </div>
     <div class="topbar-right">
@@ -1414,6 +1414,9 @@ onAuthStateChanged(auth,u=>{
 //   PLANNING RH PRO — ALTEORE
 //   Gestion ultra-complète des horaires, polyvalence et IA
 // ══════════════════════════════════════════════════════════════
+// ── VERSION (visible en console + window pour debug rapide) ──
+window.RH_PLANNING_VERSION = 'v2026.04.23-fix-saves-rollback';
+console.log('[rh-planning] version:', window.RH_PLANNING_VERSION);
 
 // ── STATE ──
 let _emps=[], _cr={}, _view='semaine', _disp='gantt';
@@ -1750,7 +1753,8 @@ async function loadEmps(){
 
 // Charge les créneaux pour la période affichée (semaine ou mois)
 async function loadCr(){
-  _cr={};
+  // Charger dans un buffer temporaire pour ne pas vider _cr en cas d'erreur réseau.
+  const buf={};
   try{
     if(_view==='mois'){
       // Utiliser TOUS les jours visibles dans la grille (y compris débordements
@@ -1760,14 +1764,20 @@ async function loadCr(){
       monthDays(_cur).forEach(({date})=>keys.add(weekKey(date)));
       for(const k of keys){
         const s=await window._getDocs(window._col(window._db,'rh',window._uid,k));
-        s.forEach(doc=>{_cr[doc.id]=doc.data();});
+        s.forEach(doc=>{buf[doc.id]=doc.data();});
       }
     } else {
       const k=weekKey(_cur);
       const s=await window._getDocs(window._col(window._db,'rh',window._uid,k));
-      s.forEach(doc=>{_cr[doc.id]=doc.data();});
+      s.forEach(doc=>{buf[doc.id]=doc.data();});
     }
-  }catch(e){console.warn(e);}
+    // Tout a réussi : on remplace atomiquement
+    _cr=buf;
+  }catch(e){
+    console.warn('[loadCr] erreur chargement, conservation du state précédent:',e);
+    if(typeof showToast==='function') showToast('⚠️ Erreur chargement planning — affichage figé','warn');
+    // ne pas écraser _cr — l'utilisateur garde sa vue
+  }
 }
 
 // Charge toutes les semaines du mois d'une date donnée (pour après récurrence depuis vue semaine)
@@ -2470,7 +2480,11 @@ function openCongeRapide(){
 }
 window.openCongeRapide=openCongeRapide;
 
-function closeCr(){document.getElementById('modalCr').classList.remove('show');}
+function closeCr(){
+  document.getElementById('modalCr').classList.remove('show');
+  // Reset _editId pour éviter toute fuite d'état entre éditions
+  _editId=null;
+}
 window.closeCr=closeCr;
 
 function onEmpChange(){
@@ -2656,7 +2670,7 @@ function buildMultiPreview(){
   if(list)list.innerHTML=days.map((d,i)=>{
     const tag=d.we?'<span class="mday-tag tag-we">WE</span>':d.fer?'<span class="mday-tag tag-fer">Férié</span>':d.deja?'<span class="mday-tag tag-deja">Déjà saisi</span>':'<span class="mday-tag tag-ouv">Ouvré</span>';
     return `<div class="mday-row ${d.autoExcl?'off':''}" onclick="toggleDay(${i})">
-      <input type="checkbox" class="mday-cb" id="mday-${i}" data-iso="${d.iso}" ${!d.autoExcl?'checked':''}/>
+      <input type="checkbox" class="mday-cb" id="mday-${i}" data-iso="${d.iso}" ${!d.autoExcl?'checked':''} onclick="event.stopPropagation();updMultiSummary();"/>
       <span class="mday-name">${d.lbl}</span>
       <span class="mday-date">${d.iso.split('-').reverse().join('/')}</span>
       ${tag}
@@ -2771,34 +2785,59 @@ async function saveCrImpl(){
     const mFin=document.getElementById('mh-fin')?.value||'17:00';
     const mPlages=showHrs?[{deb:mDeb,fin:mFin}]:[];
 
+    // Tracker les items ajoutés pour pouvoir rollback en cas d'échec
+    const _added=[]; // [{k, itemId}]
     let saved=0;
-    for(const date of dates){
-      const k=`${date}_${eid}`;
-      if(!_cr[k])_cr[k]={items:[]};
-      const it={id:'c'+Date.now()+'_'+saved,type,deb:mPlages[0]?.deb||'',fin:mPlages[0]?.fin||'',note};
-      if(mPlages.length>0) it.plages=mPlages;
-      if(type==='ecole') it.heuresComptent = ecoleHeuresComptent;
-      _cr[k].items.push(it);
-      await saveKey(k,date);
-      saved++;
-      if(btn)btn.textContent=`⏳ ${saved}/${dates.length}…`;
+    let _saveError=null;
+    try{
+      for(const date of dates){
+        const k=`${date}_${eid}`;
+        if(!_cr[k])_cr[k]={items:[]};
+        const it={id:'c'+Date.now()+'_'+saved,type,deb:mPlages[0]?.deb||'',fin:mPlages[0]?.fin||'',note};
+        if(mPlages.length>0) it.plages=mPlages;
+        if(type==='ecole') it.heuresComptent = ecoleHeuresComptent;
+        _cr[k].items.push(it);
+        _added.push({k,itemId:it.id});
+        await saveKey(k,date);
+        saved++;
+        if(btn)btn.textContent=`⏳ ${saved}/${dates.length}…`;
+      }
+
+      // Récurrence (mode multi : s'applique si 1 seule date cochée)
+      const recur=document.getElementById('cr-recur')?.value;
+      if(recur&&dates.length===1){
+        const untilVal=document.getElementById('cr-recur-until')?.value||'';
+        await applyRecurrence(dates[0],eid,type,mPlages,note,recur,untilVal);
+      }
+    } catch(err){
+      _saveError=err;
+      console.error('[saveCr multi] Échec sauvegarde:',err);
+      // ROLLBACK : retirer les items ajoutés du state local
+      _added.forEach(({k,itemId})=>{
+        if(_cr[k]?.items) _cr[k].items=_cr[k].items.filter(i=>i.id!==itemId);
+      });
+    } finally {
+      if(btn){btn.disabled=false;btn.textContent='💾 Enregistrer';}
     }
 
-    // Récurrence (mode multi : s'applique si 1 seule date cochée)
-    const recur=document.getElementById('cr-recur')?.value;
-    if(recur&&dates.length===1){
-      const untilVal=document.getElementById('cr-recur-until')?.value||'';
-      await applyRecurrence(dates[0],eid,type,mPlages,note,recur,untilVal);
+    if(_saveError){
+      // Afficher l'erreur claire et relancer un load propre pour resynchroniser
+      const msg=_saveError?.message||String(_saveError)||'inconnue';
+      const isPerm=msg.toLowerCase().includes('permission');
+      showToast(isPerm
+        ? `❌ Permission refusée par Firestore — vérifiez votre abonnement RH`
+        : `❌ Échec enregistrement (${saved}/${dates.length} ok) : ${msg.substring(0,80)}`
+        ,'warn');
+      try{await loadCr();render();}catch(_e){}
+      return;
     }
 
     closeCr();
-    // Fix : élargir le refresh aux semaines de TOUTES les dates enregistrées
-    // (sinon un save hors de la vue courante reste invisible, bien qu'enregistré)
+    // élargir le refresh aux semaines de TOUTES les dates enregistrées
     const _sortedDates=dates.slice().sort();
     const _firstDate=_sortedDates[0];
     const _touchedWeeks=new Set(_sortedDates.map(d=>weekKey(new Date(d+'T12:00:00'))));
     const _firstInScope=_isDateInCurrentScope(_firstDate);
-    // Si la 1re date est hors de la vue actuelle, naviguer vers elle
     if(!_firstInScope){
       _cur=new Date(_firstDate+'T12:00:00');
     }
@@ -2825,23 +2864,85 @@ async function saveCrImpl(){
 
   if(_editId){
     const {k:ok,itemId}=_editId;
-    if(ok!==k){
-      _cr[ok].items=(_cr[ok].items||[]).filter(i=>i.id!==itemId);
-      await saveKey(ok,ok.split('_')[0]);
-      _cr[k].items.push({...it,id:itemId});
-    } else {
-      const idx=(_cr[k].items||[]).findIndex(i=>i.id===itemId);
-      if(idx>=0)_cr[k].items[idx]={...it,id:itemId};
+    // Snapshot pour rollback
+    const _snapItemEdit = (_cr[ok]?.items||[]).find(i=>i.id===itemId);
+    const _snapItemEditCopy = _snapItemEdit ? JSON.parse(JSON.stringify(_snapItemEdit)) : null;
+    const btn=document.getElementById('save-btn');
+    if(btn){btn.disabled=true;btn.textContent='⏳…';}
+    let _editError=null;
+    try{
+      if(ok!==k){
+        _cr[ok].items=(_cr[ok].items||[]).filter(i=>i.id!==itemId);
+        await saveKey(ok,ok.split('_')[0]);
+        if(!_cr[k])_cr[k]={items:[]};
+        _cr[k].items.push({...it,id:itemId});
+        await saveKey(k,date);
+      } else {
+        const idx=(_cr[k].items||[]).findIndex(i=>i.id===itemId);
+        if(idx>=0)_cr[k].items[idx]={...it,id:itemId};
+        await saveKey(k,date);
+      }
+    } catch(err){
+      _editError=err;
+      console.error('[saveCr edit] Échec:',err);
+      // Rollback : restaurer l'item original
+      if(_snapItemEditCopy){
+        if(ok!==k && _cr[k]?.items){
+          _cr[k].items=_cr[k].items.filter(i=>i.id!==itemId);
+        }
+        if(!_cr[ok])_cr[ok]={items:[]};
+        if(!_cr[ok].items.find(i=>i.id===itemId)) _cr[ok].items.push(_snapItemEditCopy);
+      }
+    } finally {
+      if(btn){btn.disabled=false;btn.textContent='💾 Enregistrer';}
     }
+    if(_editError){
+      const msg=_editError?.message||String(_editError)||'inconnue';
+      const isPerm=msg.toLowerCase().includes('permission');
+      showToast(isPerm
+        ? `❌ Permission refusée — vérifiez votre abonnement RH`
+        : `❌ Échec modification : ${msg.substring(0,80)}`
+        ,'warn');
+      try{await loadCr();render();}catch(_e){}
+      return;
+    }
+    _editId=null;
+    closeCr();
+    await loadCr();
+    render();
+    showToast('Créneau modifié ✅','ok');
+    return;
   } else {
     _cr[k].items.push(it);
     // Lire les valeurs de récurrence AVANT closeCr() qui détruit le DOM
     const recur=document.getElementById('cr-recur')?.value;
     const untilForReload=document.getElementById('cr-recur-until')?.value||'';
     const hadRecur=!!recur;
-    // Sauvegarder le créneau INITIAL d'abord (avant applyRecurrence pour éviter doublons)
-    await saveKey(k,date);
-    if(recur) await applyRecurrence(date,eid,type,plagesData,note,recur,untilForReload);
+    const btn=document.getElementById('save-btn');
+    if(btn){btn.disabled=true;btn.textContent='⏳…';}
+    let _addError=null;
+    try{
+      // Sauvegarder le créneau INITIAL d'abord (avant applyRecurrence pour éviter doublons)
+      await saveKey(k,date);
+      if(recur) await applyRecurrence(date,eid,type,plagesData,note,recur,untilForReload);
+    } catch(err){
+      _addError=err;
+      console.error('[saveCr add] Échec:',err);
+      // Rollback : retirer l'item ajouté
+      if(_cr[k]?.items) _cr[k].items=_cr[k].items.filter(i=>i.id!==it.id);
+    } finally {
+      if(btn){btn.disabled=false;btn.textContent='💾 Enregistrer';}
+    }
+    if(_addError){
+      const msg=_addError?.message||String(_addError)||'inconnue';
+      const isPerm=msg.toLowerCase().includes('permission');
+      showToast(isPerm
+        ? `❌ Permission refusée — vérifiez votre abonnement RH`
+        : `❌ Échec enregistrement : ${msg.substring(0,80)}`
+        ,'warn');
+      try{await loadCr();render();}catch(_e){}
+      return;
+    }
     closeCr();
     // Fix : si date hors de la vue courante (date modifiée manuellement dans le modal),
     // naviguer + élargir le refresh. Inoffensif sinon.
@@ -2862,16 +2963,10 @@ async function saveCrImpl(){
       const _navLbl=date.split('-').reverse().join('/');
       showToast(`✅ Créneau ajouté — vue déplacée au ${_navLbl}`,'ok');
     } else {
-      showToast(_editId?'Créneau modifié ✅':'Créneau ajouté ✅','ok');
+      showToast('Créneau ajouté ✅','ok');
     }
     return;
   }
-
-  await saveKey(k,date);
-  closeCr();
-  await loadCr();
-  render();
-  showToast('Créneau modifié ✅','ok');
 }
 // saveCr est wrappé via _safeCall (helper défensif global défini plus haut)
 // → log diagnostic, try/catch, fallback bouton, toast d'erreur, push debug-recorder
@@ -2939,8 +3034,17 @@ async function applyRecurrence(startDate,eid,type,plages,note,recur,untilVal='')
         if(b)b.textContent=`⏳ ${done}/${saves.length}…`;
       }
     } catch(err){
-      console.error('[applyRecurrence saveKey]',err);
-      showToast('Erreur sauvegarde récurrence','warn');
+      // Rollback : retirer les items pas encore sauvegardés
+      for(let i=done;i<saves.length;i++){
+        const {k}=saves[i];
+        const it=(_cr[k]?.items||[]).find(x=>x.recurId===recurId && x===_cr[k].items[_cr[k].items.length-1]);
+        if(it && _cr[k]?.items) _cr[k].items=_cr[k].items.filter(x=>x.id!==it.id);
+      }
+      // Restaurer le bouton avant de remonter
+      const b=document.getElementById('save-btn');
+      if(b){b.disabled=false;b.textContent='💾 Enregistrer';}
+      // Remonter l'erreur pour que saveCr l'attrape et affiche un toast clair
+      throw err;
     } finally {
       // Toujours restaurer le bouton (même si fermé entre-temps)
       const b=document.getElementById('save-btn');
@@ -2951,16 +3055,18 @@ async function applyRecurrence(startDate,eid,type,plages,note,recur,untilVal='')
 }
 
 async function saveKey(k,date){
+  // ⚠️ Cette fonction THROW maintenant en cas d'erreur Firestore — les appelants
+  // sont responsables du try/catch ET du rollback du state local _cr.
+  // (Auparavant l'erreur était avalée → toasts de succès mensongers.)
+  const wk=weekKey(new Date((date||k.split('_')[0])+'T12:00:00'));
+  const data=_cr[k]||{items:[]};
+  // 1. Sauvegarder dans rh/{uid}/plan_{wk}/{k} (module admin) — peut throw
+  await window._setDoc(window._doc(window._db,'rh',window._uid,wk,k),data);
+  // 2. Miroir public dans rh_planning_public/{uid}/{wk}/{k} (lecture espace salarié)
+  //    Non bloquant : un échec ici ne doit pas faire perdre la sauvegarde principale.
   try{
-    const wk=weekKey(new Date((date||k.split('_')[0])+'T12:00:00'));
-    const data=_cr[k]||{items:[]};
-    // 1. Sauvegarder dans rh/{uid}/plan_{wk}/{k} (module admin)
-    await window._setDoc(window._doc(window._db,'rh',window._uid,wk,k),data);
-    // 2. Miroir public dans rh_planning_public/{uid}/{wk}/{k} (lecture espace salarié)
-    try{
-      await window._setDoc(window._doc(window._db,'rh_planning_public',window._uid,wk,k),data);
-    }catch(e2){console.warn('[planning public mirror]',e2.message);}
-  }catch(e){console.error(e);showToast('Erreur Firebase');}
+    await window._setDoc(window._doc(window._db,'rh_planning_public',window._uid,wk,k),data);
+  }catch(e2){console.warn('[planning public mirror]',e2.message);}
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -3500,9 +3606,24 @@ async function delCr(){
     showDelRecurModal(k,itemId,it.recurId);
     return;
   }
+  // Snapshot pour rollback en cas d'erreur Firestore
+  const _snapItem = it ? JSON.parse(JSON.stringify(it)) : null;
   _cr[k].items=(_cr[k].items||[]).filter(i=>i.id!==itemId);
-  await saveKey(k,k.split('_')[0]);
-  closeCr();await loadCr();render();showToast('Créneau supprimé');
+  try{
+    await saveKey(k,k.split('_')[0]);
+  } catch(err){
+    // Rollback
+    if(_snapItem){
+      if(!_cr[k])_cr[k]={items:[]};
+      if(!_cr[k].items.find(i=>i.id===itemId)) _cr[k].items.push(_snapItem);
+    }
+    const msg=err?.message||String(err)||'inconnue';
+    showToast(`❌ Échec suppression : ${msg.substring(0,80)}`,'warn');
+    render();
+    return;
+  }
+  _editId=null;
+  closeCr();await loadCr();render();showToast('Créneau supprimé','ok');
 }
 window.delCr=_safeCall('delCr', delCr, { userLabel: 'suppression créneau' });
 
@@ -3542,14 +3663,31 @@ window.showDelRecurModal=showDelRecurModal;
 async function delSingleOccurrence(k,itemId){
   document.getElementById('delRecurModal')?.remove();
   if(!_cr[k])return;
+  const _snap=(_cr[k].items||[]).find(i=>i.id===itemId);
+  const _snapCopy=_snap?JSON.parse(JSON.stringify(_snap)):null;
   _cr[k].items=(_cr[k].items||[]).filter(i=>i.id!==itemId);
-  await saveKey(k,k.split('_')[0]);
+  try{
+    await saveKey(k,k.split('_')[0]);
+  } catch(err){
+    // Rollback
+    if(_snapCopy){
+      if(!_cr[k])_cr[k]={items:[]};
+      if(!_cr[k].items.find(i=>i.id===itemId)) _cr[k].items.push(_snapCopy);
+    }
+    const msg=err?.message||String(err)||'inconnue';
+    showToast(`❌ Échec suppression : ${msg.substring(0,80)}`,'warn');
+    render();
+    return;
+  }
+  _editId=null;
   closeCr();await loadCr();render();showToast('Créneau supprimé','ok');
 }
 window.delSingleOccurrence=_safeCall('delSingleOccurrence', delSingleOccurrence, { userLabel: 'suppression occurrence' });
 
 async function delAllRecurrence(recurId){
   document.getElementById('delRecurModal')?.remove();
+  // Snapshot complet pour rollback
+  const _snap = JSON.parse(JSON.stringify(_cr));
   // Chercher TOUS les items avec ce recurId dans _cr (toutes semaines chargées)
   const toSave=new Set();
   Object.keys(_cr).forEach(k=>{
@@ -3558,17 +3696,25 @@ async function delAllRecurrence(recurId){
     if(_cr[k].items.length!==before) toSave.add(k);
   });
   // Sauvegarder les clés modifiées + recharger le mois pour rattraper les semaines non chargées
-  const btn=document.getElementById('save-btn');
   let done=0;
-  for(const k of toSave){
-    await saveKey(k,k.split('_')[0]);
-    done++;
+  try{
+    for(const k of toSave){
+      await saveKey(k,k.split('_')[0]);
+      done++;
+    }
+    closeCr();
+    // Recharger toutes les semaines du mois courant pour purger côté Firebase aussi
+    await deleteRecurFromFirebase(recurId);
+    _editId=null;
+    await loadCr();render();
+    showToast(`🗑 Série supprimée (${done} créneau(x))`, 'ok');
+  } catch(err){
+    // Rollback complet
+    _cr=_snap;
+    const msg=err?.message||String(err)||'inconnue';
+    showToast(`❌ Échec suppression série (${done}/${toSave.size} ok) : ${msg.substring(0,60)}`,'warn');
+    render();
   }
-  closeCr();
-  // Recharger toutes les semaines du mois courant pour purger côté Firebase aussi
-  await deleteRecurFromFirebase(recurId);
-  await loadCr();render();
-  showToast(`🗑 Série supprimée (${done} créneau(x))`, 'ok');
 }
 window.delAllRecurrence=_safeCall('delAllRecurrence', delAllRecurrence, { userLabel: 'suppression récurrence' });
 
@@ -3602,9 +3748,23 @@ window.deleteRecurFromFirebase=deleteRecurFromFirebase;
 
 async function qDel(k,id){
   if(!_cr[k])return;
+  const _snap=(_cr[k].items||[]).find(i=>i.id===id);
+  const _snapCopy=_snap?JSON.parse(JSON.stringify(_snap)):null;
   _cr[k].items=(_cr[k].items||[]).filter(i=>i.id!==id);
-  await saveKey(k,k.split('_')[0]);
-  await loadCr();render();showToast('Supprimé');
+  try{
+    await saveKey(k,k.split('_')[0]);
+  } catch(err){
+    // Rollback
+    if(_snapCopy){
+      if(!_cr[k])_cr[k]={items:[]};
+      if(!_cr[k].items.find(i=>i.id===id)) _cr[k].items.push(_snapCopy);
+    }
+    const msg=err?.message||String(err)||'inconnue';
+    showToast(`❌ Échec suppression : ${msg.substring(0,80)}`,'warn');
+    render();
+    return;
+  }
+  await loadCr();render();showToast('Supprimé','ok');
 }
 window.qDel=_safeCall('qDel', qDel, { userLabel: 'suppression rapide' });
 
