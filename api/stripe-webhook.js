@@ -114,6 +114,18 @@ module.exports = async (req, res) => {
   }
 
   const session = event.data && event.data.object;
+
+  // ── Filtre mode : ce webhook ne traite QUE les paiements one-shot (packs SMS) ──
+  // Stripe envoie checkout.session.completed à TOUS les endpoints webhook configurés.
+  // Les sessions d'abonnement (mode='subscription') sont gérées par stripe-subscription-webhook.js.
+  // On les ignore ici proprement (200 OK) au lieu de renvoyer 400 "Metadata manquante",
+  // ce qui pollue les logs Vercel et fait monter le compteur d'erreurs côté Stripe
+  // (risque de désactivation auto de l'endpoint si trop d'échecs).
+  if (session && session.mode !== 'payment') {
+    console.log('Session ignorée (mode=' + session.mode + ') — pas un pack SMS');
+    return res.status(200).json({ received: true, ignored: 'not a SMS payment' });
+  }
+
   const metadata = session && session.metadata;
   const uid = metadata && metadata.uid;
   const packId = metadata && metadata.packId;
