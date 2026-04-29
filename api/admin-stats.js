@@ -237,7 +237,7 @@ async function aggregateStats(token) {
   }
   promosActive.sort((a, b) => a.daysLeft - b.daysLeft);
 
-  // ── 8. Activité par module (combien d'users ont utilisé chaque module ces 30 derniers jours) ──
+  // ── 8. Activité par module (depuis tracking nav.js, 30 derniers jours) ──
   const modulesActivity = {
     pilotage: 0, marges: 0, fidelisation: 0, rh: 0, banque: 0,
     stock: 0, bilan: 0, agent: 0, cashflow: 0
@@ -252,14 +252,59 @@ async function aggregateStats(token) {
     }
   }
 
-  // ── 9. MRR estimé (basé sur les users avec plan payant actif) ──
+  // ── 8bis. Présence de données par module (calculable immédiatement, indépendant du tracking) ──
+  // Pour chaque user × chaque module, on check si une sous-collection contient au moins 1 doc.
+  // → Pour ~32 users × 9 modules = ~288 fetches en parallèle (~1-3s).
+  // → Donne une vue "qui a déjà touché ce module ?", complémentaire au tracking 30j.
+  const MODULE_PROBES = {
+    pilotage:     function (uid) { return `pilotage/${uid}/months`; },
+    marges:       function (uid) { return `marges/${uid}/produits`; },
+    fidelisation: function (uid) { return `fidelite/${uid}/clients`; },
+    rh:           function (uid) { return `rh/${uid}/employes`; },
+    banque:       function (uid) { return `bank_connections/${uid}/banks`; },
+    stock:        function (uid) { return `stock/${uid}/data`; },
+    bilan:        function (uid) { return `bilans/${uid}/years`; },
+    agent:        function (uid) { return `agent/${uid}/briefings`; },
+    cashflow:     function (uid) { return `cashflow/${uid}/config`; }
+  };
+  const modulesPresence = {};
+  for (const m of Object.keys(MODULE_PROBES)) modulesPresence[m] = 0;
+
+  // Lance toutes les vérifs en parallèle (en aplatissant pour Promise.all)
+  const probeJobs = [];
+  for (const u of users) {
+    for (const [moduleName, pathFn] of Object.entries(MODULE_PROBES)) {
+      probeJobs.push({
+        moduleName,
+        promise: fsListAll(pathFn(u.uid), token, 1).catch(function () { return []; })
+      });
+    }
+  }
+  const probeResults = await Promise.all(probeJobs.map(function (j) { return j.promise; }));
+  for (let i = 0; i < probeJobs.length; i++) {
+    if (probeResults[i] && probeResults[i].length > 0) {
+      modulesPresence[probeJobs[i].moduleName]++;
+    }
+  }
+
+  // ── 9. PAYANTS RÉELS + MRR (uniquement abonnés Stripe actifs, pas les promos) ──
+  // Critère "vrai payant" : plan payant + subscriptionStatus actif + stripeSubscriptionId rempli
+  // Les master en promo OFFRE2MOIS ont plan='master' mais PAS de stripeSubscriptionId actif
+  // → ils sont comptés dans promosActive uniquement, pas dans paying.
   let mrrMonthly = 0, mrrYearly = 0;
   let countMonthly = 0, countYearly = 0;
+  let realPaying = 0;
+  const realPayingByPlan = { pro: 0, max: 0, master: 0 };
   for (const u of users) {
     const p = u.plan;
     if (!PLAN_PRICING[p]) continue;
-    // Distinction mensuel / annuel : on regarde si pendingPlan ou metadata
-    // À défaut on regarde subscriptionStatus + on suppose mensuel (hypothèse conservatrice)
+    const status = u.subscriptionStatus || '';
+    const hasActiveSub = !!u.stripeSubscriptionId && (status === 'active' || status === 'trialing');
+    if (!hasActiveSub) continue; // promo ou test ou ancien compte → pas un vrai payant
+    realPaying++;
+    realPayingByPlan[p] = (realPayingByPlan[p] || 0) + 1;
+    // Distinction mensuel/annuel : champ `billing` rempli par le webhook (metadata Stripe)
+    // En son absence on considère mensuel (par défaut).
     const billing = (u.billing || u.pendingBilling || '').toLowerCase();
     const isYearly = billing === 'yearly' || billing === 'annual' || billing === 'annuel';
     if (isYearly) {
@@ -271,12 +316,23 @@ async function aggregateStats(token) {
     }
   }
 
-  // ── 10. Tickets support (parcours d'un échantillon de users) ──
+  // ── Comptage des master "non-payants" (promos + comptes admin/test/expirés) ──
+  // Utile pour qu'Adrien voie clairement la différence avec le donut
+  let masterNonPaying = 0;
+  for (const u of users) {
+    if (u.plan !== 'master') continue;
+    const status = u.subscriptionStatus || '';
+    const hasActiveSub = !!u.stripeSubscriptionId && (status === 'active' || status === 'trialing');
+    if (!hasActiveSub) masterNonPaying++;
+  }
+
+  // ── 10. Tickets support ──
   // Note : pas de collection-group query disponible via REST API + admin token,
-  // donc on prend un échantillon des 30 premiers users (l'admin a admin-tickets.html
-  // pour le détail complet). On parallélise pour rester sous le timeout 60s.
+  // donc on parcourt par user. Si <= 50 users, on prend tous (pas de sample).
+  // Au-delà, on échantillonne 50 pour rester dans le timeout (admin-tickets.html
+  // donne le détail complet).
   let openTickets = 0, totalTickets = 0;
-  const ticketUsers = users.slice(0, 30);
+  const ticketUsers = users.length <= 50 ? users : users.slice(0, 50);
   const ticketResults = await Promise.all(
     ticketUsers.map(function (u) {
       return fsListAll(`tickets/${u.uid}/list`, token, 50)
@@ -357,24 +413,25 @@ async function aggregateStats(token) {
       };
     });
 
-  // ── 14. Conversion trial → payant (approx) ──
-  // Hypothèse : on compte combien sont passés de trial à pro/max/master au total
-  const totalPaying = (byPlan.pro || 0) + (byPlan.max || 0) + (byPlan.master || 0);
+  // ── 14. Conversion trial → payant (approx, sur la base des vrais payants) ──
   const totalTrialNow = byPlan.trial || 0;
   const totalTrialExpired = byPlan.trial_expired || 0;
-  const trialConversionRate = (totalPaying + totalTrialExpired) > 0
-    ? Math.round((totalPaying / (totalPaying + totalTrialExpired)) * 100)
+  const trialConversionRate = (realPaying + totalTrialExpired) > 0
+    ? Math.round((realPaying / (realPaying + totalTrialExpired)) * 100)
     : 0;
 
   // ── 15. KPI résumé ──
   const summary = {
     totalUsers: users.length,
-    paying: totalPaying,
+    paying: realPaying,             // ⚠️ vrais payants Stripe uniquement (pas les promos)
+    payingByPlan: realPayingByPlan, // ex: { pro: 1, max: 0, master: 0 }
+    masterNonPaying,                // master en promo / test / sans Stripe
     trial: totalTrialNow,
     promoActive: promosActive.length,
     free: byPlan.free || 0,
     mrrEstimated: Math.round(mrrMonthly + mrrYearly),
     openTickets,
+    totalTickets,
     dau, wau, mau,
     trialConversionRate,
     countMonthly, countYearly
@@ -388,7 +445,8 @@ async function aggregateStats(token) {
     dailyActiveByDay,
     trialsExpiring,
     promosActive,
-    modulesActivity,
+    modulesActivity,    // depuis tracking nav.js (30 derniers jours)
+    modulesPresence,    // présence de données dans Firestore (immédiat)
     mrr: {
       monthly: Math.round(mrrMonthly),
       yearly:  Math.round(mrrYearly),
@@ -396,7 +454,12 @@ async function aggregateStats(token) {
       countMonthly,
       countYearly
     },
-    tickets: { open: openTickets, total: totalTickets, sampledUsers: ticketUsers.length },
+    tickets: {
+      open: openTickets,
+      total: totalTickets,
+      sampledUsers: ticketUsers.length,
+      isFullScan: users.length <= 50
+    },
     referrals: {
       totalCodes: totalReferralCodes,
       totalUses: totalReferralUses,
