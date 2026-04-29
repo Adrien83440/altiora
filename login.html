@@ -501,7 +501,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, updateProfile, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-  import { initializeFirestore, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { initializeFirestore, doc, setDoc, serverTimestamp, increment } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
   const app = initializeApp({
     apiKey: "AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
@@ -528,6 +528,21 @@
 
   onAuthStateChanged(auth, user => {
     if (window._registering) return; // Inscription en cours → bienvenue.html gère
+    if (user) {
+      // ── TRACKING : lastLogin + loginCount (1 fois par session, throttle sessionStorage) ──
+      try {
+        var sessKey = 'altTrackLogin_' + user.uid;
+        if (!sessionStorage.getItem(sessKey)) {
+          setDoc(doc(db, 'users_activity', user.uid), {
+            lastLogin: new Date().toISOString(),
+            lastLoginEmail: user.email || '',
+            loginCount: increment(1),
+            updatedAt: serverTimestamp()
+          }, { merge: true }).catch(function(){ /* silencieux : tracking ne doit pas casser le login */ });
+          sessionStorage.setItem(sessKey, '1');
+        }
+      } catch(_) { /* sessionStorage indisponible : ignorer */ }
+    }
     user ? showDashboard(user) : showAuth();
   });
 </script>

@@ -920,6 +920,11 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       if (!checkPageAccess(plan)) { applyNavPlan(plan); return; }
       applyNavPlan(plan);
       handleProfilParams();
+
+      // ── TRACKING ACTIVITÉ (fire-and-forget, ne bloque jamais) ──
+      // Throttle 5min par user via sessionStorage. Indépendant de window._setDoc
+      // (utilise dynamic import pour fonctionner même sur les pages qui n'exposent pas Firestore).
+      trackUserActivity(plan).catch(function(){});
     } catch (e) {
       if (mainEl) mainEl.style.visibility = 'visible';
       applyNavPlan('free');
@@ -941,6 +946,87 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       var upgrade = params.get('upgrade');
       if (upgrade === 'trial_expired' || upgrade === 'deleted' || upgrade === 'promo_expired') showUpgradeModal(upgrade);
     }, 400);
+  }
+
+  // ════════════════════════════════════════════════
+  // TRACKING ACTIVITÉ — users_activity/{uid}
+  //
+  // Écrit (en merge:true) :
+  //   • lastActivity   : ISO du dernier pageload
+  //   • lastPage       : nom de la page (ex: "pilotage.html")
+  //   • lastModule     : module détecté (ex: "pilotage")
+  //   • modulesUsed.X  : ISO du dernier accès au module X
+  //   • daysActive.YYYY-MM-DD : true (pour calculer DAU/WAU/MAU)
+  //   • lastEmail, plan : utiles pour l'admin reporting
+  //
+  // Throttle 5 min/user via sessionStorage (1 write max toutes les 5 minutes).
+  // ════════════════════════════════════════════════
+  var _trackFs = null;
+  async function _ensureFirestore() {
+    if (_trackFs) return _trackFs;
+    if (!window._db) return null;
+    if (window._setDoc && window._doc) {
+      _trackFs = { db: window._db, setDoc: window._setDoc, doc: window._doc };
+      return _trackFs;
+    }
+    try {
+      var m = await import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js');
+      _trackFs = { db: window._db, setDoc: m.setDoc, doc: m.doc };
+      return _trackFs;
+    } catch (_) { return null; }
+  }
+
+  function _detectModule(page) {
+    if (!page) return null;
+    var p = page.replace('.html', '');
+    if (['pilotage','dashboard','rapport-annuel','marges','cout-revient','panier','dettes','previsions','cashflow'].indexOf(p) >= 0) {
+      if (['marges','cout-revient','panier'].indexOf(p) >= 0) return 'marges';
+      if (['previsions','cashflow','dettes'].indexOf(p) >= 0) return 'cashflow';
+      return 'pilotage';
+    }
+    if (['fidelisation','client-fidelite','tablet'].indexOf(p) >= 0) return 'fidelisation';
+    if (p.indexOf('rh-') === 0 || p === 'espace-salarie') return 'rh';
+    if (['banque','bank-validation','import-releve','import-facture-achat'].indexOf(p) >= 0) return 'banque';
+    if (p === 'gestion-stock' || p === 'import') return 'stock';
+    if (p === 'bilan') return 'bilan';
+    if (['agent','lea','agent-historique','agent-upgrade'].indexOf(p) >= 0) return 'agent';
+    return null; // pages neutres (index, login, profil, aide, pricing, ...)
+  }
+
+  async function trackUserActivity(plan) {
+    try {
+      if (!window._uid) return;
+      // Throttle 5 min via sessionStorage
+      var sessKey = 'altTrackActivity_' + window._uid;
+      var nowMs = Date.now();
+      var last = parseInt(sessionStorage.getItem(sessKey) || '0', 10);
+      if (nowMs - last < 5 * 60 * 1000) return;
+
+      var fs = await _ensureFirestore();
+      if (!fs) return;
+
+      var now = new Date();
+      var todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+      var module = _detectModule(PAGE);
+      var email = (window._auth && window._auth.currentUser && window._auth.currentUser.email) || '';
+
+      var payload = {
+        lastActivity: now.toISOString(),
+        lastPage: PAGE || '',
+        lastEmail: email,
+        plan: plan || ''
+      };
+      if (module) {
+        payload.lastModule = module;
+        payload['modulesUsed.' + module] = now.toISOString();
+      }
+      payload['daysActive.' + todayStr] = true;
+
+      await fs.setDoc(fs.doc(fs.db, 'users_activity', window._uid), payload, { merge: true });
+      sessionStorage.setItem(sessKey, String(nowMs));
+    } catch (_) {
+      // Tracking ne doit JAMAIS casser la page → silencieux
+    }
   }
 
   // ════════════════════════════════════════════════

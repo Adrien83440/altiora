@@ -15,27 +15,34 @@ service cloud.firestore {
       return isAuth() && request.auth.uid == uid;
     }
 
+    // ─── Admin (serveur + équipe Alteore) ──────────────────────────
+    function isAdmin() {
+      return isAuth() && (
+        request.auth.token.email == 'api@altiora.app'
+        || request.auth.token.email == 'contact@adrienemily.com'
+        || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid))
+          && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin'
+        )
+      );
+    }
+
     function getUserPlan(uid) {
       return get(/databases/$(database)/documents/users/$(uid)).data.plan;
     }
 
-    // pro | max | master | trial → accès core (pilotage, marges, dettes, etc.)
     function hasPaidPlan(uid) {
       return getUserPlan(uid) in ['pro', 'max', 'master', 'trial'];
     }
 
-    // max | master | trial → accès fidélisation
     function hasFidelitePlan(uid) {
       return getUserPlan(uid) in ['max', 'master', 'trial'];
     }
 
-    // master UNIQUEMENT (+ trial) → accès RH
-    // ⚠️ CORRIGÉ : suppression de 'max' qui n'a PAS accès au module RH
     function hasRhPlan(uid) {
       return getUserPlan(uid) in ['master', 'trial'];
     }
 
-    // master UNIQUEMENT → accès bilan IA (trial exclu)
     function hasBilanPlan(uid) {
       return getUserPlan(uid) in ['master'];
     }
@@ -43,255 +50,383 @@ service cloud.firestore {
 
     // ═══════════════════════════════════════════════════════════════
     // USERS
-    // users/{uid}
-    // Champs proteges : plan | stripeCustomerId | stripeSubscriptionId | trialEnd
     // ═══════════════════════════════════════════════════════════════
     match /users/{uid} {
-      allow read:   if isOwner(uid);
-      allow create: if isOwner(uid);
-      allow update: if isOwner(uid)
-        && !('plan'                 in request.resource.data.diff(resource.data).affectedKeys())
-        && !('stripeCustomerId'     in request.resource.data.diff(resource.data).affectedKeys())
-        && !('stripeSubscriptionId' in request.resource.data.diff(resource.data).affectedKeys())
-        && !('trialEnd'             in request.resource.data.diff(resource.data).affectedKeys());
-      allow delete: if false;
+      allow read:   if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid) || isAdmin();
+      allow update: if isAdmin()
+        || (isOwner(uid)
+            && !('plan'                 in request.resource.data.diff(resource.data).affectedKeys())
+            && !('stripeCustomerId'     in request.resource.data.diff(resource.data).affectedKeys())
+            && !('stripeSubscriptionId' in request.resource.data.diff(resource.data).affectedKeys())
+            && !('trialEnd'             in request.resource.data.diff(resource.data).affectedKeys()));
+      allow delete: if isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // USERS_ACTIVITY — Tracking connexions / activité / modules
+    // users_activity/{uid}
+    //
+    // Champs (tous optionnels, écrits par login.html + nav.js) :
+    //   • lastLogin     ISO string  → dernière connexion
+    //   • loginCount    number       → nombre total de connexions (increment atomique)
+    //   • lastActivity  ISO string   → dernier pageload (throttlé 5min côté client)
+    //   • lastPage      string       → dernière page consultée (ex: "pilotage.html")
+    //   • lastModule    string       → dernier module utilisé (ex: "pilotage")
+    //   • modulesUsed   map          → { pilotage: ISO, fidelisation: ISO, ... }
+    //   • daysActive    map          → { 'YYYY-MM-DD': true } cap 90 jours côté client
+    //
+    // Lecture : owner (les pages peuvent vouloir relire pour gérer le cap)
+    //          + admin (page admin-reporting.html lit pour agréger)
+    // Écriture : owner (le frontend écrit son propre tracking)
+    //          + admin (cron éventuel de nettoyage)
+    //
+    // ⚠️ Sans cette règle, l'agent.html / nav.js / login.html ne pourront
+    //    PAS écrire le tracking et l'admin-reporting affichera des données vides.
+    // ═══════════════════════════════════════════════════════════════
+    match /users_activity/{uid} {
+      allow read, write: if isOwner(uid) || isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // PROFIL ENTREPRISE
+    // ═══════════════════════════════════════════════════════════════
+    match /profil/{uid}/{allPaths=**} {
+      allow read, write: if isOwner(uid) || isAdmin();
     }
 
 
     // ═══════════════════════════════════════════════════════════════
     // PILOTAGE
-    // pilotage/{uid}
-    // pilotage/{uid}/months/{YYYY-MM}
     // ═══════════════════════════════════════════════════════════════
     match /pilotage/{uid} {
-      allow read, write: if isOwner(uid) && hasPaidPlan(uid);
+      allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       match /months/{month} {
-        allow read, write: if isOwner(uid) && hasPaidPlan(uid);
+        allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
     }
 
 
     // ═══════════════════════════════════════════════════════════════
     // MARGES
-    // marges/{uid}/produits/{itemId}
-    // marges/{uid}/params/{itemId}
     // ═══════════════════════════════════════════════════════════════
     match /marges/{uid} {
-      allow read, write: if isOwner(uid) && hasPaidPlan(uid);
+      allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       match /produits/{itemId} {
-        allow read, write: if isOwner(uid) && hasPaidPlan(uid);
+        allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
       match /params/{itemId} {
-        allow read, write: if isOwner(uid) && hasPaidPlan(uid);
+        allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
     }
 
 
     // ═══════════════════════════════════════════════════════════════
     // PRODUITS / COUT DE REVIENT
-    // produits/{uid}/items/{itemId}
     // ═══════════════════════════════════════════════════════════════
     match /produits/{uid} {
-      allow read, write: if isOwner(uid) && hasPaidPlan(uid);
+      allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       match /items/{itemId} {
-        allow read, write: if isOwner(uid) && hasPaidPlan(uid);
+        allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
     }
 
 
     // ═══════════════════════════════════════════════════════════════
     // PANIER MOYEN
-    // panier/{uid}/data/{docId}
     // ═══════════════════════════════════════════════════════════════
     match /panier/{uid} {
-      allow read, write: if isOwner(uid) && hasPaidPlan(uid);
+      allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       match /data/{docId} {
-        allow read, write: if isOwner(uid) && hasPaidPlan(uid);
+        allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
     }
 
 
     // ═══════════════════════════════════════════════════════════════
     // DETTES
-    // dettes/{uid}/data/{docId}
     // ═══════════════════════════════════════════════════════════════
     match /dettes/{uid} {
-      allow read, write: if isOwner(uid) && hasPaidPlan(uid);
+      allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       match /data/{docId} {
-        allow read, write: if isOwner(uid) && hasPaidPlan(uid);
+        allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // CASHFLOW
+    // ═══════════════════════════════════════════════════════════════
+    match /cashflow/{uid}/{allPaths=**} {
+      allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // COPILOTE IA — LEGACY
+    // ═══════════════════════════════════════════════════════════════
+    match /copilote/{uid}/{allPaths=**} {
+      allow read, write: if (isOwner(uid) && hasFidelitePlan(uid)) || isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // AGENT IA — Léa
+    // ═══════════════════════════════════════════════════════════════
+    match /agent/{uid}/{allPaths=**} {
+      allow read:  if isOwner(uid) || isAdmin();
+      allow write: if isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // BILANS IA
+    // ═══════════════════════════════════════════════════════════════
+    match /bilans/{uid}/{allPaths=**} {
+      allow read, write: if (isOwner(uid) && hasBilanPlan(uid)) || isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // CONNEXIONS BANCAIRES (Bridge API)
+    // ═══════════════════════════════════════════════════════════════
+    match /bank_connections/{uid} {
+      allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
+      match /banks/{bankId} {
+        allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
+      }
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // TRANSACTIONS BANCAIRES EN ATTENTE
+    // ═══════════════════════════════════════════════════════════════
+    match /bank_pending/{uid} {
+      allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // STOCK
+    // ═══════════════════════════════════════════════════════════════
+    match /stock/{uid}/{allPaths=**} {
+      allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
     }
 
 
     // ═══════════════════════════════════════════════════════════════
     // FIDELISATION
-    // fidelite/{uid}/...
-    // fidelite_public/{clientId}    lecture publique QR
-    // fidelite_public_cfg/{uid}     lecture publique
     // ═══════════════════════════════════════════════════════════════
     match /fidelite/{uid} {
-      allow read, write: if isOwner(uid) && hasFidelitePlan(uid);
+      allow read, write: if (isOwner(uid) && hasFidelitePlan(uid)) || isAdmin();
       match /{subcollection}/{docId} {
-        allow read, write: if isOwner(uid) && hasFidelitePlan(uid);
+        allow read, write: if (isOwner(uid) && hasFidelitePlan(uid)) || isAdmin();
       }
     }
 
     match /fidelite_public/{clientId} {
       allow read: if true;
-      allow create: if isAuth() && hasFidelitePlan(request.auth.uid);
-      allow update: if isAuth()
-        && hasFidelitePlan(request.auth.uid)
-        && resource.data.merchantUid == request.auth.uid;
-      allow delete: if isAuth()
-        && hasFidelitePlan(request.auth.uid)
-        && resource.data.merchantUid == request.auth.uid;
+      allow create: if (isAuth() && hasFidelitePlan(request.auth.uid)) || isAdmin();
+      allow update: if isAdmin()
+        || (isAuth()
+            && hasFidelitePlan(request.auth.uid)
+            && resource.data.merchantUid == request.auth.uid);
+      allow delete: if isAdmin()
+        || (isAuth()
+            && hasFidelitePlan(request.auth.uid)
+            && resource.data.merchantUid == request.auth.uid);
     }
 
     match /fidelite_public_cfg/{uid} {
       allow read: if true;
-      allow write: if isOwner(uid) && hasFidelitePlan(uid);
+      allow write: if (isOwner(uid) && hasFidelitePlan(uid)) || isAdmin();
     }
 
 
     // ═══════════════════════════════════════════════════════════════
-    // SMS CREDITS — lecture seule client, ecriture via webhook Stripe
-    // sms_credits/{uid}/...
+    // SMS CREDITS
     // ═══════════════════════════════════════════════════════════════
     match /sms_credits/{uid} {
-      allow read:  if isOwner(uid);
-      allow write: if false;
+      allow read:  if isOwner(uid) || isAdmin();
+      allow write: if isAdmin();
       match /{subcollection}/{docId} {
-        allow read:  if isOwner(uid);
-        allow write: if false;
+        allow read:  if isOwner(uid) || isAdmin();
+        allow write: if isAdmin();
       }
     }
 
 
     // ═══════════════════════════════════════════════════════════════
-    // RH — toutes les collections et sous-collections
-    //
-    // ⚠️ CORRIGÉ : hasRhPlan = ['master', 'trial'] uniquement
-    // (max n'a PAS accès au module RH)
-    //
-    // Chemins couverts :
-    //   rh/{uid}/employes/{id}
-    //   rh/{uid}/paie/{id}
-    //   rh/{uid}/temps/{id}
-    //   rh/{uid}/conges/{id}
-    //   rh/{uid}/plan_{semaine}/{id}
-    //   rh/{uid}/entretiens_annuels/{empId}                    ← niveau 2
-    //   rh/{uid}/entretiens_annuels/{empId}/sessions/{sessId}  ← niveau 3 (=**)
+    // RH
     // ═══════════════════════════════════════════════════════════════
     match /rh/{uid}/{allPaths=**} {
-      allow read, write: if isOwner(uid) && hasRhPlan(uid);
+      allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
     }
 
 
     // ═══════════════════════════════════════════════════════════════
-    // RH — ESPACE SALARIE PUBLIC (acces via lien unique sans auth)
-    // rh_employes_public/{publicId}
-    // rh_employes_public_profil/{publicId}
+    // RH — ESPACE SALARIE PUBLIC
     // ═══════════════════════════════════════════════════════════════
     match /rh_employes_public/{publicId} {
       allow read:   if true;
-      allow create: if isAuth() && hasRhPlan(request.auth.uid);
-      allow update: if isAuth() && hasRhPlan(request.auth.uid);
-      allow delete: if isAuth() && hasRhPlan(request.auth.uid);
+      allow create: if (isAuth() && hasRhPlan(request.auth.uid)) || isAdmin();
+      allow update: if (isAuth() && hasRhPlan(request.auth.uid)) || isAdmin();
+      allow delete: if (isAuth() && hasRhPlan(request.auth.uid)) || isAdmin();
     }
 
     match /rh_employes_public_profil/{publicId} {
       allow read:   if true;
-      allow create: if isAuth() && hasRhPlan(request.auth.uid);
-      allow update: if isAuth() && hasRhPlan(request.auth.uid);
-      allow delete: if isAuth() && hasRhPlan(request.auth.uid);
+      allow create: if (isAuth() && hasRhPlan(request.auth.uid)) || isAdmin();
+      allow update: if (isAuth() && hasRhPlan(request.auth.uid)) || isAdmin();
+      allow delete: if (isAuth() && hasRhPlan(request.auth.uid)) || isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // RH — PLANNING PUBLIC
+    // ═══════════════════════════════════════════════════════════════
+    match /rh_planning_public/{uid}/{allPaths=**} {
+      allow read:  if true;
+      allow write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
     }
 
 
     // ═══════════════════════════════════════════════════════════════
     // RH — PARAMETRES GENERAUX
-    // rh_params/{uid}
     // ═══════════════════════════════════════════════════════════════
     match /rh_params/{uid} {
-      allow read, write: if isOwner(uid) && hasRhPlan(uid);
+      allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
     }
 
 
     // ═══════════════════════════════════════════════════════════════
     // RH — CONGES
-    // rh_conges/{uid}/demandes/{demandeId}
     // ═══════════════════════════════════════════════════════════════
     match /rh_conges/{uid} {
-      allow read, write: if isOwner(uid) && hasRhPlan(uid);
+      allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       match /demandes/{demandeId} {
-        allow read, write: if isOwner(uid) && hasRhPlan(uid);
+        allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       }
     }
 
 
     // ═══════════════════════════════════════════════════════════════
     // RH — ONBOARDING
-    // rh_onboarding/{uid}/dossiers/{dossierId}
     // ═══════════════════════════════════════════════════════════════
     match /rh_onboarding/{uid} {
-      allow read, write: if isOwner(uid) && hasRhPlan(uid);
+      allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       match /dossiers/{dossierId} {
-        allow read, write: if isOwner(uid) && hasRhPlan(uid);
+        allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       }
     }
 
 
     // ═══════════════════════════════════════════════════════════════
     // RH — RECRUTEMENT
-    // rh_recrutement/{uid}/offres/{id}
-    // rh_recrutement/{uid}/candidats/{id}
-    // rh_recrutement/{uid}/entretiens/{id}
     // ═══════════════════════════════════════════════════════════════
     match /rh_recrutement/{uid} {
-      allow read, write: if isOwner(uid) && hasRhPlan(uid);
+      allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       match /offres/{offreId} {
-        allow read, write: if isOwner(uid) && hasRhPlan(uid);
+        allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       }
       match /candidats/{candidatId} {
-        allow read, write: if isOwner(uid) && hasRhPlan(uid);
+        allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       }
       match /entretiens/{entretienId} {
-        allow read, write: if isOwner(uid) && hasRhPlan(uid);
+        allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       }
     }
 
 
     // ═══════════════════════════════════════════════════════════════
-    // RH — DOCUMENTS GENERES (module IA Claude)
-    // rh_docs_gen/{uid}/items/{itemId}
+    // RH — DOCUMENTS GENERES
     // ═══════════════════════════════════════════════════════════════
     match /rh_docs_gen/{uid} {
-      allow read, write: if isOwner(uid) && hasRhPlan(uid);
+      allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       match /items/{itemId} {
-        allow read, write: if isOwner(uid) && hasRhPlan(uid);
+        allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       }
     }
 
 
     // ═══════════════════════════════════════════════════════════════
-    // TICKETS SUPPORT — Chatbot ALTEORE
-    // tickets/{uid}/list/{ticketId}
-    // Tout utilisateur authentifié peut créer des tickets (même plan free)
-    // Lecture limitée au propriétaire
+    // PARRAINAGE
+    // ═══════════════════════════════════════════════════════════════
+    match /referrals/{code} {
+      allow read: if isAuth();
+      allow create: if isAdmin()
+        || (isAuth()
+            && request.resource.data.ownerUid == request.auth.uid);
+      allow update: if isAdmin()
+        || (isAuth()
+            && resource.data.ownerUid == request.auth.uid
+            && !('ownerUid' in request.resource.data.diff(resource.data).affectedKeys()));
+      allow delete: if isAdmin();
+
+      match /uses/{filleulUid} {
+        allow read: if isAdmin()
+          || (isAuth() && get(/databases/$(database)/documents/referrals/$(code)).data.ownerUid == request.auth.uid);
+        allow write: if isAdmin();
+      }
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // LOGS DE RETENTION / RESILIATION
+    // ═══════════════════════════════════════════════════════════════
+    match /retention_logs/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // RAPPORTS DE DIAGNOSTIC
+    // ═══════════════════════════════════════════════════════════════
+    match /debug_reports/{reportId} {
+      allow read:   if isAdmin();
+      allow create: if isAuth()
+                    && request.resource.data.uid == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // PROGRESSION TUTORIEL
+    // ═══════════════════════════════════════════════════════════════
+    match /tuto_progress/{uid} {
+      allow read, write: if isOwner(uid) || isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // TICKETS SUPPORT
     // ═══════════════════════════════════════════════════════════════
     match /tickets/{uid} {
-      allow read: if isOwner(uid);
-      allow write: if false;
+      allow read: if isOwner(uid) || isAdmin();
+      allow write: if isAdmin();
       match /list/{ticketId} {
-        allow read:   if isOwner(uid);
-        allow create: if isOwner(uid);
-        allow update: if false;
-        allow delete: if false;
+        allow read:   if isOwner(uid) || isAdmin();
+        allow create: if isOwner(uid) || isAdmin();
+        allow update: if isAdmin();
+        allow delete: if isAdmin();
       }
     }
 
 
     // ═══════════════════════════════════════════════════════════════
-    // REFUS PAR DEFAUT — ne jamais retirer
+    // UPDATES — Nouveautés / changelog in-app
+    // ═══════════════════════════════════════════════════════════════
+    match /updates/{updateId} {
+      allow read:  if isAdmin() || (isAuth() && resource.data.published == true);
+      allow write: if isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // REFUS PAR DEFAUT
     // ═══════════════════════════════════════════════════════════════
     match /{document=**} {
       allow read, write: if false;

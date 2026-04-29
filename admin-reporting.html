@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>ALTEORE — Reporting business</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Plus Jakarta Sans',sans-serif;background:#f3f4f6;color:#0f172a;font-size:13px;min-height:100vh}
+
+    /* Topbar */
+    .topbar{background:linear-gradient(135deg,#0f1f5c,#2563eb);color:white;padding:18px 28px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+    .topbar h1{font-size:18px;font-weight:800;display:flex;align-items:center;gap:10px}
+    .topbar .small{font-size:11px;opacity:.8;margin-top:2px}
+    .topbar-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .topbar-actions button{background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:white;font-weight:600;padding:7px 14px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:12px;transition:background .15s}
+    .topbar-actions button:hover{background:rgba(255,255,255,.25)}
+    .refresh-info{font-size:11px;opacity:.85}
+    .pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:#10b981;margin-right:5px;animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+    /* Login */
+    .login-form{max-width:400px;margin:80px auto;background:white;border-radius:14px;padding:32px;box-shadow:0 8px 24px rgba(0,0,0,.06)}
+    .login-form h2{font-size:18px;font-weight:800;margin-bottom:6px}
+    .login-form p{font-size:13px;color:#64748b;margin-bottom:20px}
+    .login-form input{width:100%;padding:11px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-family:inherit;font-size:13px;outline:none;margin-bottom:10px}
+    .login-form input:focus{border-color:#2563eb}
+    .login-form button{width:100%;background:linear-gradient(135deg,#2563eb,#60a5fa);color:white;font-weight:700;padding:12px;border:none;border-radius:10px;cursor:pointer;font-family:inherit;font-size:14px}
+
+    /* Grid container */
+    .container{max-width:1400px;margin:24px auto;padding:0 24px}
+
+    /* KPI cards (1) */
+    .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:24px}
+    .kpi{background:white;border:1px solid #e5e7eb;border-radius:14px;padding:16px 18px;position:relative;overflow:hidden}
+    .kpi::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--c,#2563eb)}
+    .kpi .label{font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+    .kpi .value{font-size:26px;font-weight:800;color:#0f172a;margin-top:4px;line-height:1.1}
+    .kpi .delta{font-size:11px;margin-top:4px;color:#64748b}
+    .kpi.users{--c:#2563eb}
+    .kpi.paying{--c:#10b981}
+    .kpi.trial{--c:#f59e0b}
+    .kpi.promo{--c:#a855f7}
+    .kpi.mrr{--c:#0ea5e9}
+    .kpi.tickets{--c:#dc2626}
+
+    /* Sections */
+    .section{background:white;border:1px solid #e5e7eb;border-radius:14px;padding:18px 20px;margin-bottom:18px}
+    .section h2{font-size:14px;font-weight:800;margin-bottom:14px;display:flex;align-items:center;gap:8px;color:#0f172a}
+    .section h2 .count{font-size:11px;color:#64748b;font-weight:600;background:#f3f4f6;padding:2px 8px;border-radius:20px}
+
+    /* Two-col layout */
+    .two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
+    @media(max-width:900px){.two-col{grid-template-columns:1fr}}
+
+    /* Active users (2) */
+    .active-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+    .active-cell{text-align:center;padding:12px;background:#f9fafb;border-radius:10px}
+    .active-cell .v{font-size:22px;font-weight:800;color:#0f172a}
+    .active-cell .l{font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-top:2px}
+
+    /* Charts wrappers */
+    .chart-wrap{height:230px;position:relative}
+    .chart-wrap-sm{height:180px;position:relative}
+
+    /* Tables */
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    table th{text-align:left;padding:10px 12px;background:#f9fafb;font-weight:700;color:#475569;font-size:11px;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid #e5e7eb}
+    table td{padding:10px 12px;border-bottom:1px solid #f1f5f9;color:#0f172a}
+    table tr:last-child td{border-bottom:none}
+    table tr:hover td{background:#f9fafb}
+    .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px}
+    .badge.urgent{background:#fee2e2;color:#b91c1c}
+    .badge.warn{background:#fef3c7;color:#92400e}
+    .badge.ok{background:#d1fae5;color:#065f46}
+    .badge.plan-trial{background:#fef3c7;color:#92400e}
+    .badge.plan-pro{background:#dbeafe;color:#1e40af}
+    .badge.plan-max{background:#e0e7ff;color:#3730a3}
+    .badge.plan-master{background:#f3e8ff;color:#6b21a8}
+    .badge.plan-free{background:#f1f5f9;color:#475569}
+    .badge.plan-deleted, .badge.plan-trial_expired, .badge.plan-promo_expired, .badge.plan-past_due{background:#fee2e2;color:#b91c1c}
+
+    .empty{text-align:center;padding:30px 20px;color:#94a3b8;font-size:12px}
+    .error-msg{background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:14px 18px;border-radius:10px;font-size:13px;margin:24px}
+    .loader{display:flex;justify-content:center;align-items:center;padding:80px 20px;color:#94a3b8;font-size:14px}
+    .loader .spin{width:18px;height:18px;border:2px solid #e5e7eb;border-top-color:#2563eb;border-radius:50%;animation:spin 0.8s linear infinite;margin-right:10px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    .module-bar{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+    .module-bar .name{flex:0 0 110px;font-size:12px;font-weight:600;color:#0f172a}
+    .module-bar .bar-bg{flex:1;height:18px;background:#f1f5f9;border-radius:10px;overflow:hidden;position:relative}
+    .module-bar .bar-fill{height:100%;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:10px;transition:width .4s}
+    .module-bar .num{flex:0 0 40px;text-align:right;font-size:12px;font-weight:700;color:#0f172a}
+  </style>
+  <link rel="stylesheet" href="responsive-global.css">
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen" style="display:none">
+  <div class="login-form">
+    <h2>🔒 Reporting Alteore</h2>
+    <p>Réservé à <strong>contact@adrienemily.com</strong></p>
+    <input type="email" id="adm-email" placeholder="Email" autocomplete="email" />
+    <input type="password" id="adm-password" placeholder="Mot de passe" autocomplete="current-password" />
+    <button onclick="adminLogin()">Se connecter</button>
+    <div id="login-err" style="color:#dc2626;font-size:12px;margin-top:10px;display:none"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" style="display:none">
+  <div class="topbar">
+    <div>
+      <h1>📊 Reporting business <span id="env-tag" style="font-size:10px;background:#10b981;color:white;padding:3px 8px;border-radius:20px;font-weight:700">PROD</span></h1>
+      <div class="small" id="adm-info">—</div>
+    </div>
+    <div class="topbar-actions">
+      <span class="refresh-info"><span class="pulse"></span><span id="last-refresh">—</span></span>
+      <button onclick="loadStats()">🔄 Refresh</button>
+      <button onclick="adminLogout()">Déconnexion</button>
+    </div>
+  </div>
+
+  <div class="container" id="content">
+    <div class="loader"><div class="spin"></div>Agrégation des données…</div>
+  </div>
+</div>
+
+<!-- ══════════════ FIREBASE INIT (module) ══════════════ -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  const app = initializeApp({
+    apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain:"altiora-70599.firebaseapp.com",
+    projectId:"altiora-70599",
+    storageBucket:"altiora-70599.firebasestorage.app",
+    messagingSenderId:"120905555746",
+    appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+  });
+  const auth = getAuth(app);
+  window._auth = auth;
+  window._signIn = signInWithEmailAndPassword;
+  window._signOut = signOut;
+
+  const ADMIN_EMAIL = 'contact@adrienemily.com';
+
+  onAuthStateChanged(auth, function(user) {
+    if (!user) {
+      document.getElementById('login-screen').style.display = 'block';
+      document.getElementById('app').style.display = 'none';
+      return;
+    }
+    if (user.email !== ADMIN_EMAIL) {
+      document.getElementById('login-screen').style.display = 'block';
+      document.getElementById('app').style.display = 'none';
+      const err = document.getElementById('login-err');
+      err.textContent = '⛔ Cet email n\'est pas autorisé (' + user.email + ')';
+      err.style.display = 'block';
+      signOut(auth);
+      return;
+    }
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    document.getElementById('adm-info').textContent = user.email;
+    window._adminUser = user;
+    loadStats();
+    // Auto-refresh toutes les 5 minutes
+    if (window._refreshInterval) clearInterval(window._refreshInterval);
+    window._refreshInterval = setInterval(loadStats, 5 * 60 * 1000);
+    // Tick visuel pour "MAJ il y a Xs"
+    if (window._tickInterval) clearInterval(window._tickInterval);
+    window._tickInterval = setInterval(updateRefreshLabel, 10 * 1000);
+  });
+</script>
+
+<!-- ══════════════ APP LOGIC (classique) ══════════════ -->
+<script>
+window._lastRefresh = null;
+window._charts = {}; // pour pouvoir détruire/recréer
+
+async function adminLogin() {
+  const email = document.getElementById('adm-email').value.trim();
+  const pwd   = document.getElementById('adm-password').value;
+  const errEl = document.getElementById('login-err');
+  errEl.style.display = 'none';
+  if (!email || !pwd) return;
+  try {
+    await window._signIn(window._auth, email, pwd);
+  } catch (e) {
+    errEl.textContent = '❌ ' + (e.message || 'Erreur de connexion');
+    errEl.style.display = 'block';
+  }
+}
+
+async function adminLogout() {
+  if (window._refreshInterval) clearInterval(window._refreshInterval);
+  if (window._tickInterval) clearInterval(window._tickInterval);
+  await window._signOut(window._auth);
+  window.location.reload();
+}
+
+function updateRefreshLabel() {
+  if (!window._lastRefresh) {
+    document.getElementById('last-refresh').textContent = '—';
+    return;
+  }
+  const sec = Math.floor((Date.now() - window._lastRefresh) / 1000);
+  let txt;
+  if (sec < 5) txt = 'à l\'instant';
+  else if (sec < 60) txt = 'il y a ' + sec + 's';
+  else if (sec < 3600) txt = 'il y a ' + Math.floor(sec / 60) + 'min';
+  else txt = 'il y a ' + Math.floor(sec / 3600) + 'h';
+  document.getElementById('last-refresh').textContent = 'MAJ ' + txt;
+}
+
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c];
+  });
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit', year:'2-digit' }) +
+         ' ' + d.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' });
+}
+
+function fmtDateShort(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' });
+}
+
+function planBadge(plan) {
+  const p = plan || 'free';
+  return '<span class="badge plan-' + escapeHtml(p) + '">' + escapeHtml(p) + '</span>';
+}
+
+async function loadStats() {
+  if (!window._adminUser) return;
+  const content = document.getElementById('content');
+  // Si déjà chargé, on ne montre pas le full loader (juste un overlay discret)
+  if (!window._lastRefresh) {
+    content.innerHTML = '<div class="loader"><div class="spin"></div>Agrégation des données…</div>';
+  }
+  try {
+    const idToken = await window._adminUser.getIdToken();
+    const res = await fetch('/api/admin-stats', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + idToken, 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      content.innerHTML = '<div class="error-msg">❌ Erreur API : ' + escapeHtml(err) + '</div>';
+      return;
+    }
+    const data = await res.json();
+    if (!data.ok || !data.stats) {
+      content.innerHTML = '<div class="error-msg">❌ Réponse API invalide</div>';
+      return;
+    }
+    window._lastRefresh = Date.now();
+    updateRefreshLabel();
+    renderStats(data.stats);
+  } catch (e) {
+    content.innerHTML = '<div class="error-msg">❌ Erreur : ' + escapeHtml(e.message || 'Inconnue') + '</div>';
+  }
+}
+
+function renderStats(s) {
+  const sum = s.summary || {};
+  const html = `
+    <!-- KPI cards (1) -->
+    <div class="kpi-grid">
+      <div class="kpi users">
+        <div class="label">Total users</div>
+        <div class="value">${sum.totalUsers || 0}</div>
+        <div class="delta">${sum.free || 0} en plan free</div>
+      </div>
+      <div class="kpi paying">
+        <div class="label">Payants</div>
+        <div class="value">${sum.paying || 0}</div>
+        <div class="delta">${sum.countMonthly || 0} mensuel · ${sum.countYearly || 0} annuel</div>
+      </div>
+      <div class="kpi trial">
+        <div class="label">Trials actifs</div>
+        <div class="value">${sum.trial || 0}</div>
+        <div class="delta">Conversion historique : ${sum.trialConversionRate || 0}%</div>
+      </div>
+      <div class="kpi promo">
+        <div class="label">Promos actives</div>
+        <div class="value">${sum.promoActive || 0}</div>
+        <div class="delta">OFFRE2MOIS en cours</div>
+      </div>
+      <div class="kpi mrr">
+        <div class="label">MRR estimé</div>
+        <div class="value">${sum.mrrEstimated || 0}€</div>
+        <div class="delta">Revenu mensuel récurrent</div>
+      </div>
+      <div class="kpi tickets">
+        <div class="label">Tickets ouverts</div>
+        <div class="value">${sum.openTickets || 0}</div>
+        <div class="delta">Sur échantillon ${s.tickets?.sampledUsers || 0} users</div>
+      </div>
+    </div>
+
+    <!-- Active users + Inscriptions (2 + 3) -->
+    <div class="two-col">
+      <div class="section">
+        <h2>👥 Users actifs</h2>
+        <div class="active-row">
+          <div class="active-cell"><div class="v">${sum.dau || 0}</div><div class="l">DAU (auj.)</div></div>
+          <div class="active-cell"><div class="v">${sum.wau || 0}</div><div class="l">WAU (7j)</div></div>
+          <div class="active-cell"><div class="v">${sum.mau || 0}</div><div class="l">MAU (30j)</div></div>
+        </div>
+        <div class="chart-wrap-sm"><canvas id="chart-dau"></canvas></div>
+      </div>
+      <div class="section">
+        <h2>📈 Inscriptions sur 30 jours <span class="count">${sumValues(s.signupsByDay)} total</span></h2>
+        <div class="chart-wrap"><canvas id="chart-signups"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Plans + Modules (4 + 5) -->
+    <div class="two-col">
+      <div class="section">
+        <h2>🎯 Répartition par plan</h2>
+        <div class="chart-wrap"><canvas id="chart-plans"></canvas></div>
+      </div>
+      <div class="section">
+        <h2>🧩 Activité par module (30j) <span class="count">users actifs sur le module</span></h2>
+        <div id="modules-bars"></div>
+      </div>
+    </div>
+
+    <!-- Trials qui expirent (6) -->
+    <div class="section">
+      <h2>⏳ Trials qui expirent <span class="count">${(s.trialsExpiring || []).length}</span></h2>
+      ${renderTrialsTable(s.trialsExpiring || [])}
+    </div>
+
+    <!-- Promos OFFRE2MOIS (7) -->
+    <div class="section">
+      <h2>🎁 Promos OFFRE2MOIS actives <span class="count">${(s.promosActive || []).length}</span></h2>
+      ${renderPromosTable(s.promosActive || [])}
+    </div>
+
+    <!-- Activité récente (8) -->
+    <div class="two-col">
+      <div class="section">
+        <h2>🆕 Derniers inscrits</h2>
+        ${renderLastSignupsTable(s.lastSignups || [])}
+      </div>
+      <div class="section">
+        <h2>🔌 Dernières connexions</h2>
+        ${renderLastLoginsTable(s.lastLogins || [])}
+      </div>
+    </div>
+
+    <!-- Résiliations -->
+    <div class="section">
+      <h2>👋 Résiliations 30j <span class="count">${s.retention?.last30Days || 0}</span></h2>
+      ${renderRetentionTable((s.retention || {}).logs || [])}
+    </div>
+
+    <!-- Parrainage (9) -->
+    <div class="section">
+      <h2>🤝 Parrainage <span class="count">${s.referrals?.totalRewarded || 0} récompensés / ${s.referrals?.totalUses || 0} utilisations / ${s.referrals?.totalCodes || 0} codes</span></h2>
+      ${renderReferralsTable((s.referrals || {}).top || [])}
+    </div>
+
+    <div style="text-align:center;color:#94a3b8;font-size:11px;padding:20px 0">
+      Données générées le ${fmtDate(s.generatedAt)}
+    </div>
+  `;
+  document.getElementById('content').innerHTML = html;
+
+  // Render des charts (après que le DOM soit injecté)
+  renderChartSignups(s.signupsByDay || {});
+  renderChartDau(s.dailyActiveByDay || {});
+  renderChartPlans(s.byPlan || {});
+  renderModulesBars(s.modulesActivity || {});
+}
+
+function sumValues(obj) {
+  return Object.values(obj || {}).reduce(function(a, b) { return a + (b || 0); }, 0);
+}
+
+// ══════════════ CHARTS ══════════════
+
+function destroyChart(id) {
+  if (window._charts[id]) {
+    try { window._charts[id].destroy(); } catch(_) {}
+    delete window._charts[id];
+  }
+}
+
+function sortDayKeys(obj) {
+  return Object.keys(obj).sort();
+}
+
+function renderChartSignups(byDay) {
+  const ctx = document.getElementById('chart-signups');
+  if (!ctx) return;
+  destroyChart('signups');
+  const keys = sortDayKeys(byDay);
+  window._charts.signups = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: keys.map(function(k) { return fmtDateShort(k); }),
+      datasets: [{
+        label: 'Inscriptions',
+        data: keys.map(function(k) { return byDay[k] || 0; }),
+        borderColor: '#2563eb',
+        backgroundColor: 'rgba(37,99,235,.1)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3,
+        pointBackgroundColor: '#2563eb'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } },
+        x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } }
+      }
+    }
+  });
+}
+
+function renderChartDau(byDay) {
+  const ctx = document.getElementById('chart-dau');
+  if (!ctx) return;
+  destroyChart('dau');
+  const keys = sortDayKeys(byDay);
+  window._charts.dau = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: keys.map(function(k) { return fmtDateShort(k); }),
+      datasets: [{
+        label: 'Users actifs',
+        data: keys.map(function(k) { return byDay[k] || 0; }),
+        backgroundColor: '#10b981',
+        borderRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, ticks: { stepSize: 1, precision: 0 } },
+        x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } }
+      }
+    }
+  });
+}
+
+function renderChartPlans(byPlan) {
+  const ctx = document.getElementById('chart-plans');
+  if (!ctx) return;
+  destroyChart('plans');
+  const PLAN_ORDER = ['free','trial','pro','max','master','past_due','trial_expired','promo_expired','deleted'];
+  const PLAN_COLORS = {
+    free: '#94a3b8', trial: '#f59e0b', pro: '#2563eb', max: '#6366f1', master: '#a855f7',
+    past_due: '#ef4444', trial_expired: '#dc2626', promo_expired: '#b91c1c', deleted: '#7f1d1d'
+  };
+  const labels = [];
+  const data = [];
+  const colors = [];
+  for (const p of PLAN_ORDER) {
+    if ((byPlan[p] || 0) > 0) {
+      labels.push(p + ' (' + byPlan[p] + ')');
+      data.push(byPlan[p]);
+      colors.push(PLAN_COLORS[p] || '#94a3b8');
+    }
+  }
+  // Plans non listés mais présents
+  for (const k of Object.keys(byPlan)) {
+    if (!PLAN_ORDER.includes(k) && byPlan[k] > 0) {
+      labels.push(k + ' (' + byPlan[k] + ')');
+      data.push(byPlan[k]);
+      colors.push('#475569');
+    }
+  }
+  window._charts.plans = new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels: labels, datasets: [{ data: data, backgroundColor: colors, borderWidth: 2, borderColor: '#fff' }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } }
+      },
+      cutout: '60%'
+    }
+  });
+}
+
+function renderModulesBars(modules) {
+  const wrap = document.getElementById('modules-bars');
+  if (!wrap) return;
+  const MODULE_LABELS = {
+    pilotage: '📊 Pilotage', marges: '🧮 Marges', fidelisation: '⭐ Fidélisation',
+    rh: '👥 RH', banque: '🏦 Banque', stock: '📦 Stock',
+    bilan: '📑 Bilan IA', agent: '🤖 Léa', cashflow: '💰 Cashflow'
+  };
+  const max = Math.max(1, ...Object.values(modules || {}));
+  const html = Object.keys(MODULE_LABELS).map(function(k) {
+    const v = modules[k] || 0;
+    const pct = Math.round((v / max) * 100);
+    return `
+      <div class="module-bar">
+        <div class="name">${MODULE_LABELS[k]}</div>
+        <div class="bar-bg"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <div class="num">${v}</div>
+      </div>`;
+  }).join('');
+  wrap.innerHTML = html;
+}
+
+// ══════════════ TABLES ══════════════
+
+function renderTrialsTable(rows) {
+  if (!rows.length) return '<div class="empty">Aucun trial qui expire dans les 7 prochains jours</div>';
+  return `
+    <table>
+      <thead><tr><th>Email</th><th>Nom</th><th>Plan visé</th><th>Fin trial</th><th>J−</th></tr></thead>
+      <tbody>
+        ${rows.map(function(r) {
+          let badge = 'ok';
+          if (r.daysLeft <= 1) badge = 'urgent';
+          else if (r.daysLeft <= 3) badge = 'warn';
+          return `<tr>
+            <td>${escapeHtml(r.email)}</td>
+            <td>${escapeHtml(r.name || '—')}</td>
+            <td>${r.pendingPlan ? planBadge(r.pendingPlan) : '<span class="badge plan-free">aucun</span>'}</td>
+            <td>${fmtDateShort(r.trialEnd)}</td>
+            <td><span class="badge ${badge}">${r.daysLeft <= 0 ? "aujourd'hui" : 'J−' + r.daysLeft}</span></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderPromosTable(rows) {
+  if (!rows.length) return '<div class="empty">Aucune promo OFFRE2MOIS active</div>';
+  return `
+    <table>
+      <thead><tr><th>Email</th><th>Code</th><th>Plan</th><th>Fin promo</th><th>J−</th></tr></thead>
+      <tbody>
+        ${rows.map(function(r) {
+          let badge = 'ok';
+          if (r.daysLeft <= 1) badge = 'urgent';
+          else if (r.daysLeft <= 7) badge = 'warn';
+          return `<tr>
+            <td>${escapeHtml(r.email)}</td>
+            <td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:11px">${escapeHtml(r.promoCode)}</code></td>
+            <td>${planBadge(r.plan)}</td>
+            <td>${fmtDateShort(r.promoEnd)}</td>
+            <td><span class="badge ${badge}">J−${r.daysLeft}</span></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderLastSignupsTable(rows) {
+  if (!rows.length) return '<div class="empty">Aucune inscription</div>';
+  return `
+    <table>
+      <thead><tr><th>Email</th><th>Plan</th><th>Inscrit</th></tr></thead>
+      <tbody>
+        ${rows.map(function(r) {
+          return `<tr>
+            <td>${escapeHtml(r.email)}<br><span style="font-size:10px;color:#94a3b8">${escapeHtml(r.name || '')}</span></td>
+            <td>${planBadge(r.plan)}</td>
+            <td style="font-size:11px;color:#64748b">${fmtDate(r.createdAt)}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderLastLoginsTable(rows) {
+  if (!rows.length) return '<div class="empty">Aucune connexion trackée encore</div>';
+  return `
+    <table>
+      <thead><tr><th>Email</th><th>Plan</th><th>Dernière connexion</th><th>Module</th><th>Total</th></tr></thead>
+      <tbody>
+        ${rows.map(function(r) {
+          return `<tr>
+            <td>${escapeHtml(r.email)}</td>
+            <td>${planBadge(r.plan)}</td>
+            <td style="font-size:11px;color:#64748b">${fmtDate(r.lastLogin)}</td>
+            <td><span style="font-size:11px;color:#475569">${escapeHtml(r.lastModule || '—')}</span></td>
+            <td style="font-weight:700">${r.loginCount}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderRetentionTable(rows) {
+  if (!rows.length) return '<div class="empty">Aucune résiliation sur 30 jours 🎉</div>';
+  return `
+    <table>
+      <thead><tr><th>Email</th><th>Action</th><th>Raison</th><th>Date</th></tr></thead>
+      <tbody>
+        ${rows.map(function(r) {
+          const action = r.action || 'canceled';
+          const badge = action.indexOf('kept') >= 0 ? 'ok' : 'urgent';
+          return `<tr>
+            <td>${escapeHtml(r.email || '—')}</td>
+            <td><span class="badge ${badge}">${escapeHtml(action)}</span></td>
+            <td style="font-size:11px;color:#475569">${escapeHtml(r.reason || '—')}</td>
+            <td style="font-size:11px;color:#64748b">${fmtDate(r.createdAt)}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+function renderReferralsTable(rows) {
+  if (!rows.length) return '<div class="empty">Aucun parrainage utilisé</div>';
+  return `
+    <table>
+      <thead><tr><th>Code</th><th>Owner UID</th><th>Utilisations</th><th>Récompensés</th></tr></thead>
+      <tbody>
+        ${rows.map(function(r) {
+          return `<tr>
+            <td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:11px">${escapeHtml(r.code)}</code></td>
+            <td style="font-size:11px;color:#64748b;font-family:monospace">${escapeHtml(r.ownerUid).slice(0, 12)}…</td>
+            <td>${r.uses}</td>
+            <td><strong style="color:#10b981">${r.rewarded}</strong></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+window.adminLogin = adminLogin;
+window.adminLogout = adminLogout;
+window.loadStats = loadStats;
+</script>
+
+</body>
+</html>

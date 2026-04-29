@@ -23,6 +23,13 @@
   // ══════════════════════════════════════════════════════════════
   var ADMIN_LINKS = [
     {
+      category: '📊 Reporting business',
+      color: '#0ea5e9',
+      items: [
+        { icon: '📈', title: 'Reporting temps réel', desc: 'KPI users, MRR, trials, promos, modules, parrainage — auto-refresh 5min', href: '/admin-reporting.html' },
+      ],
+    },
+    {
       category: '🎫 Support & tickets',
       color: '#2563eb',
       items: [
