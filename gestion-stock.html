@@ -934,11 +934,47 @@ window._auth=auth;window._db=db;window._doc=doc;window._setDoc=setDoc;window._ge
 window._getDocs=getDocs;window._deleteDoc=deleteDoc;window._collection=collection;
 window._query=query;window._orderBy=orderBy;window._limit=limit;window._where=where;
 window._writeBatch=writeBatch;window._signOut=signOut;
+// ─── Auth résiliente ───────────────────────────────────────────────
+// • Au boot : redirection immédiate si pas de session (légitime)
+// • En cours de session : tolérance 10s (token refresh, blip réseau, Safari ITP,
+//   onglet en arrière-plan revenu au premier plan…). Si Firebase se reconnecte
+//   pendant ces 10s, on annule la redirection. Sinon, on redirige.
+// • initStock() n'est appelé qu'une seule fois (au premier user reçu).
+let _authBootDone = false;
+let _authReconnectTimer = null;
 onAuthStateChanged(auth,user=>{
-  if(!user){location.href='index.html';return;}
+  if(!user){
+    if(!_authBootDone){
+      // Boot sans session → vraie redirection
+      location.href='index.html';
+      return;
+    }
+    // Session perdue après login → on attend que Firebase tente un refresh
+    console.warn('[auth] Session perdue, attente de reconnexion (10s)...');
+    if(_authReconnectTimer) clearTimeout(_authReconnectTimer);
+    _authReconnectTimer = setTimeout(function(){
+      _authReconnectTimer = null;
+      if(!auth.currentUser){
+        console.warn('[auth] Reconnexion échouée, redirection');
+        location.href='index.html';
+      } else {
+        console.log('[auth] Reconnecté avec succès');
+      }
+    }, 10000);
+    return;
+  }
+  // User présent
+  if(_authReconnectTimer){
+    clearTimeout(_authReconnectTimer);
+    _authReconnectTimer = null;
+    console.log('[auth] Reconnexion détectée, timer annulé');
+  }
   window._uid=user.uid;
   window._firebaseReady=true;
-  window.initStock();
+  if(!_authBootDone){
+    _authBootDone = true;
+    window.initStock();
+  }
 });
 </script>
 
