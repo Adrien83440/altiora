@@ -326,6 +326,35 @@ async function aggregateStats(token) {
     if (!hasActiveSub) masterNonPaying++;
   }
 
+  // ── 9bis. Liste détaillée des clients payants (pour la section dédiée) ──
+  // On collecte les vrais abonnés Stripe avec leur info de contribution MRR
+  const payingCustomers = [];
+  for (const u of users) {
+    const p = u.plan;
+    if (!PLAN_PRICING[p]) continue;
+    const status = u.subscriptionStatus || '';
+    const hasActiveSub = !!u.stripeSubscriptionId && (status === 'active' || status === 'trialing');
+    if (!hasActiveSub) continue;
+    const billing = (u.billing || u.pendingBilling || '').toLowerCase();
+    const isYearly = billing === 'yearly' || billing === 'annual' || billing === 'annuel';
+    const monthlyContribution = isYearly ? PLAN_PRICING[p].yearly : PLAN_PRICING[p].monthly;
+    payingCustomers.push({
+      uid: u.uid,
+      email: u.email || '?',
+      name: u.name || '',
+      plan: p,
+      billing: isYearly ? 'yearly' : 'monthly',
+      monthlyContribution: Math.round(monthlyContribution),
+      subscriptionStatus: status,
+      stripeCustomerId: u.stripeCustomerId || '',
+      stripeSubscriptionId: u.stripeSubscriptionId || '',
+      createdAt: u.createdAt || '',
+      agentEnabled: u.agentEnabled === true
+    });
+  }
+  // Tri : montant décroissant (gros payants en premier)
+  payingCustomers.sort(function (a, b) { return b.monthlyContribution - a.monthlyContribution; });
+
   // ── 10. Tickets support ──
   // Note : pas de collection-group query disponible via REST API + admin token,
   // donc on parcourt par user. Si <= 50 users, on prend tous (pas de sample).
@@ -420,6 +449,13 @@ async function aggregateStats(token) {
     ? Math.round((realPaying / (realPaying + totalTrialExpired)) * 100)
     : 0;
 
+  // ── 14bis. Tracking adoption — combien de users ont au moins 1 connexion enregistrée ──
+  // (utile au début quand DAU/WAU/MAU sont à 0 : ça monte dès la 1ère reconnexion)
+  let trackedLogins = 0;
+  for (const a of Object.values(activityByUid)) {
+    if (a.lastLogin || (a.loginCount || 0) > 0) trackedLogins++;
+  }
+
   // ── 15. KPI résumé ──
   const summary = {
     totalUsers: users.length,
@@ -433,6 +469,7 @@ async function aggregateStats(token) {
     openTickets,
     totalTickets,
     dau, wau, mau,
+    trackedLogins,                  // users avec au moins 1 connexion trackée
     trialConversionRate,
     countMonthly, countYearly
   };
@@ -443,6 +480,7 @@ async function aggregateStats(token) {
     byPlan,
     signupsByDay,
     dailyActiveByDay,
+    payingCustomers,                // ⭐ liste détaillée des vrais clients payants
     trialsExpiring,
     promosActive,
     modulesActivity,    // depuis tracking nav.js (30 derniers jours)
