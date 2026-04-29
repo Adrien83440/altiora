@@ -287,9 +287,9 @@ function renderStats(s) {
         <div class="delta">${sum.free || 0} en plan free</div>
       </div>
       <div class="kpi paying">
-        <div class="label">Payants</div>
+        <div class="label">Payants (Stripe)</div>
         <div class="value">${sum.paying || 0}</div>
-        <div class="delta">${sum.countMonthly || 0} mensuel · ${sum.countYearly || 0} annuel</div>
+        <div class="delta">${formatPayingByPlan(sum.payingByPlan)}${(sum.masterNonPaying || 0) > 0 ? ' · ' + sum.masterNonPaying + ' master en promo/test' : ''}</div>
       </div>
       <div class="kpi trial">
         <div class="label">Trials actifs</div>
@@ -304,12 +304,12 @@ function renderStats(s) {
       <div class="kpi mrr">
         <div class="label">MRR estimé</div>
         <div class="value">${sum.mrrEstimated || 0}€</div>
-        <div class="delta">Revenu mensuel récurrent</div>
+        <div class="delta">Sur ${sum.paying || 0} abonnement${(sum.paying || 0) > 1 ? 's' : ''} Stripe actif${(sum.paying || 0) > 1 ? 's' : ''}</div>
       </div>
       <div class="kpi tickets">
         <div class="label">Tickets ouverts</div>
         <div class="value">${sum.openTickets || 0}</div>
-        <div class="delta">Sur échantillon ${s.tickets?.sampledUsers || 0} users</div>
+        <div class="delta">${(s.tickets?.isFullScan ? 'Tous les users' : 'Échantillon ' + (s.tickets?.sampledUsers || 0))} · ${s.tickets?.total || 0} total</div>
       </div>
     </div>
 
@@ -337,8 +337,13 @@ function renderStats(s) {
         <div class="chart-wrap"><canvas id="chart-plans"></canvas></div>
       </div>
       <div class="section">
-        <h2>🧩 Activité par module (30j) <span class="count">users actifs sur le module</span></h2>
+        <h2>🧩 Modules — adoption par les users</h2>
+        <div style="display:flex;gap:8px;font-size:11px;color:#64748b;margin-bottom:14px;flex-wrap:wrap">
+          <span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:10px;height:10px;background:#2563eb;border-radius:2px"></span> Avec données (immédiat)</span>
+          <span style="display:inline-flex;align-items:center;gap:4px"><span style="display:inline-block;width:10px;height:10px;background:#10b981;border-radius:2px"></span> Actif 30j (depuis tracking)</span>
+        </div>
         <div id="modules-bars"></div>
+        ${(sumValues(s.modulesActivity) === 0) ? '<div style="font-size:11px;color:#94a3b8;margin-top:10px;line-height:1.5;border-top:1px dashed #e5e7eb;padding-top:10px">💡 Le tracking d\'activité 30j (vert) se remplit au fur et à mesure que tes users rechargent une page après le déploiement. La métrique « Avec données » (bleu) est calculée maintenant à partir de Firestore.</div>' : ''}
       </div>
     </div>
 
@@ -388,7 +393,7 @@ function renderStats(s) {
   renderChartSignups(s.signupsByDay || {});
   renderChartDau(s.dailyActiveByDay || {});
   renderChartPlans(s.byPlan || {});
-  renderModulesBars(s.modulesActivity || {});
+  renderModulesBars(s.modulesActivity || {}, s.modulesPresence || {});
 }
 
 function sumValues(obj) {
@@ -509,26 +514,49 @@ function renderChartPlans(byPlan) {
   });
 }
 
-function renderModulesBars(modules) {
+function renderModulesBars(modules, presence) {
   const wrap = document.getElementById('modules-bars');
   if (!wrap) return;
+  presence = presence || {};
+  modules = modules || {};
   const MODULE_LABELS = {
     pilotage: '📊 Pilotage', marges: '🧮 Marges', fidelisation: '⭐ Fidélisation',
     rh: '👥 RH', banque: '🏦 Banque', stock: '📦 Stock',
     bilan: '📑 Bilan IA', agent: '🤖 Léa', cashflow: '💰 Cashflow'
   };
-  const max = Math.max(1, ...Object.values(modules || {}));
+  // L'échelle est commune aux deux métriques pour comparer visuellement
+  const allValues = [].concat(Object.values(presence), Object.values(modules));
+  const max = Math.max(1, ...allValues);
   const html = Object.keys(MODULE_LABELS).map(function(k) {
-    const v = modules[k] || 0;
-    const pct = Math.round((v / max) * 100);
+    const vP = presence[k] || 0;
+    const vA = modules[k] || 0;
+    const pctP = Math.round((vP / max) * 100);
+    const pctA = Math.round((vA / max) * 100);
     return `
-      <div class="module-bar">
-        <div class="name">${MODULE_LABELS[k]}</div>
-        <div class="bar-bg"><div class="bar-fill" style="width:${pct}%"></div></div>
-        <div class="num">${v}</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <div style="flex:0 0 110px;font-size:12px;font-weight:600;color:#0f172a">${MODULE_LABELS[k]}</div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:3px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="flex:1;height:14px;background:#f1f5f9;border-radius:8px;overflow:hidden"><div style="height:100%;background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:8px;width:${pctP}%;transition:width .4s"></div></div>
+            <div style="flex:0 0 35px;text-align:right;font-size:12px;font-weight:700;color:#2563eb">${vP}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <div style="flex:1;height:8px;background:#f1f5f9;border-radius:6px;overflow:hidden"><div style="height:100%;background:linear-gradient(90deg,#10b981,#34d399);border-radius:6px;width:${pctA}%;transition:width .4s"></div></div>
+            <div style="flex:0 0 35px;text-align:right;font-size:11px;font-weight:600;color:#10b981">${vA}</div>
+          </div>
+        </div>
       </div>`;
   }).join('');
   wrap.innerHTML = html;
+}
+
+function formatPayingByPlan(byPlan) {
+  if (!byPlan) return '—';
+  const parts = [];
+  if (byPlan.pro)    parts.push(byPlan.pro    + ' pro');
+  if (byPlan.max)    parts.push(byPlan.max    + ' max');
+  if (byPlan.master) parts.push(byPlan.master + ' master');
+  return parts.length ? parts.join(' · ') : 'aucun';
 }
 
 // ══════════════ TABLES ══════════════
