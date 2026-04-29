@@ -405,6 +405,7 @@ tr.row-alerte{background:#fffbeb}
       <button class="btn btn-success btn-sm" onclick="openScanModal()">📸 Scan</button>
       <button class="btn btn-ai btn-sm" onclick="openImportModal()">🤖 Import IA</button>
       <button class="btn btn-success btn-sm" onclick="openMovModal()">📥 Mouvement</button>
+      <button class="btn btn-sm" onclick="openSalesImportModal()" style="background:linear-gradient(135deg,#7c3aed,#a78bfa);color:white;border:none">🛒 Ventes hebdo</button>
       <button class="btn btn-primary btn-sm" onclick="openProdModal()">+ Produit</button>
     </div>
   </div>
@@ -700,6 +701,83 @@ tr.row-alerte{background:#fffbeb}
     <div class="modal-foot">
       <button class="btn btn-outline" onclick="closeMovImportModal()">Annuler</button>
       <button class="btn btn-primary" id="mov-import-go-btn" style="display:none" onclick="executeMovImport()">📥 Importer <span id="mov-import-count">0</span> mouvement(s)</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL IMPORT VENTES HEBDO (export caisse boutique) -->
+<div class="overlay" id="salesImportOverlay">
+  <div class="modal modal-lg">
+    <div class="modal-head" style="background:linear-gradient(135deg,#7c3aed,#a78bfa);color:white">
+      <h3 style="color:white">🛒 Import ventes hebdo</h3>
+      <button class="modal-close" onclick="closeSalesImportModal()" style="color:white">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Step 1: Upload -->
+      <div id="sales-import-step-1">
+        <div style="text-align:center;padding:20px 0 10px">
+          <div style="font-size:44px;margin-bottom:10px">📁</div>
+          <h3 style="font-size:15px;margin-bottom:6px">Importez votre export d'articles vendus</h3>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:14px;max-width:520px;margin-left:auto;margin-right:auto;line-height:1.6">
+            Format attendu : un fichier Excel ou CSV exporté de votre logiciel de caisse, avec au minimum les colonnes <b>Article</b> et <b>Q_Sortie (FAC+BL)</b>.<br>
+            Les produits absents du catalogue seront <b>créés automatiquement</b>, et un mouvement de sortie sera enregistré pour chaque ligne.
+          </p>
+        </div>
+        <div style="background:#faf5ff;border:1.5px solid #e9d5ff;border-radius:10px;padding:10px 12px;font-size:11px;color:#6b21a8;line-height:1.7;margin-bottom:14px">
+          💡 <b>Détection automatique :</b> la date de la période est extraite du nom du fichier (ex : <code>article_vendus_du_7_au_11_avril.xls</code> → 11 avril). Vous pourrez la modifier à l'étape suivante.
+        </div>
+        <div style="text-align:center">
+          <label style="display:inline-block;padding:14px 28px;background:linear-gradient(135deg,#7c3aed,#a78bfa);color:white;border-radius:12px;font-weight:700;cursor:pointer;font-size:14px">
+            📁 Choisir le fichier de ventes
+            <input type="file" id="sales-import-file" accept=".csv,.xlsx,.xls,.ods,.tsv,.txt" style="display:none" onchange="handleSalesImportFile(this.files[0])"/>
+          </label>
+        </div>
+      </div>
+
+      <!-- Step 2: Récap & validation -->
+      <div id="sales-import-step-2" style="display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px;flex-wrap:wrap">
+          <div style="min-width:0;flex:1">
+            <div style="font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="sales-import-fname"></div>
+            <div style="font-size:11px;color:var(--muted)" id="sales-import-finfo"></div>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="salesImportBack()">← Changer de fichier</button>
+        </div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:10px;align-items:center;background:#f8fafc;border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:14px">
+          <label style="font-size:12px;font-weight:700;color:#0f172a">📅 Date des mouvements :</label>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <input type="date" id="sales-import-date" style="border:1.5px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px" onchange="_salesAnalyzeFromUI()"/>
+            <span id="sales-import-date-detected" style="font-size:11px;color:var(--muted)"></span>
+          </div>
+        </div>
+        <div id="sales-import-dup-warning" style="display:none;background:#fef3c7;border:1.5px solid #fde68a;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:12px;color:#78350f"></div>
+        <div id="sales-import-plan"></div>
+      </div>
+
+      <!-- Step 3: Progress -->
+      <div id="sales-import-step-3" style="display:none">
+        <div style="text-align:center;padding:30px 0">
+          <div class="spinner" style="margin:0 auto 16px"></div>
+          <div style="font-size:14px;font-weight:700;margin-bottom:6px" id="sales-import-progress-label">Préparation...</div>
+          <div style="font-size:11px;color:var(--muted)" id="sales-import-progress-sub"></div>
+        </div>
+      </div>
+
+      <!-- Step 4: Done -->
+      <div id="sales-import-step-4" style="display:none">
+        <div style="text-align:center;padding:20px 0 10px">
+          <div style="font-size:48px;margin-bottom:10px">✅</div>
+          <h3 style="font-size:15px;margin-bottom:14px">Import terminé !</h3>
+        </div>
+        <div id="sales-import-success-summary" style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:10px;padding:14px 18px;margin-bottom:14px;color:#14532d"></div>
+        <div style="background:#fafbff;border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;font-size:12px;color:#0f172a;line-height:1.7">
+          ℹ️ Vous pouvez à tout moment <b>annuler cet import</b> depuis l'onglet <b>Mouvements</b> (carte « Derniers imports »). Le rollback supprime les mouvements créés. Les nouveaux produits restent dans le catalogue (pour ne pas perdre leur fiche).
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeSalesImportModal()" id="sales-import-close-btn">Fermer</button>
+      <button class="btn btn-primary" id="sales-import-go-btn" style="display:none;background:linear-gradient(135deg,#7c3aed,#a78bfa);border:none" onclick="executeSalesImport()">🚀 Importer</button>
     </div>
   </div>
 </div>
@@ -1487,6 +1565,7 @@ function renderMovements(tc){
           <option value="">Tous types</option><option value="IN" ${fType==='IN'?'selected':''}>📥 Entrée</option><option value="OUT" ${fType==='OUT'?'selected':''}>📤 Sortie</option><option value="ADJUST" ${fType==='ADJUST'?'selected':''}>🔧 Ajustement</option><option value="LOSS" ${fType==='LOSS'?'selected':''}>💔 Perte</option>
         </select>
         <button class="btn btn-primary btn-sm" onclick="openMovImportModal()" style="margin-left:auto">📥 Import mouvements</button>
+        <button class="btn btn-sm" onclick="openSalesImportModal()" style="background:linear-gradient(135deg,#7c3aed,#a78bfa);color:white;border:none;margin-left:6px">🛒 Ventes hebdo</button>
         <span style="font-size:11px;color:var(--muted);margin-left:12px">${filtered.length} mouvement(s)</span>
       </div></div>
       <div class="tbl-wrap"><table>
@@ -2809,6 +2888,527 @@ async function rollbackMovBatch(batchId){
   }
 }
 window.rollbackMovBatch = rollbackMovBatch;
+
+// ══════════════════════════════════════════════════════════
+// IMPORT VENTES HEBDO — wizard dédié pour exports caisse boutique
+// (format : Article / Modèle / Taille / Couleur / PMPA / PV / TVA /
+//          Q_Sortie (FAC+BL) / Stock / Fournisseur / Fabricant /
+//          Rayon / Famille / SousFamille / etc.)
+//
+// Logique :
+// • Pour chaque ligne avec Q_Sortie > 0 :
+//     - si la ref existe déjà → mouvement OUT seulement
+//     - sinon → création produit (stockBase = Stock + Q_Sortie) + mouvement OUT
+// • Date : détectée depuis le nom du fichier ("du J au K mois"), modifiable.
+// • Hash anti-doublon : réutilise _simpleHash (avertit si fichier identique
+//   déjà importé non rollback).
+// • Batch import : kind = 'weekly_sales', rollback compatible avec l'existant.
+// ══════════════════════════════════════════════════════════
+
+var _salesImport = {
+  fileName: '',
+  fileHash: '',
+  rows: [],
+  headers: [],
+  detectedDate: '',
+  toCreate: [],
+  toMatch: [],
+  invalid: [],
+  totalCAHT: 0,
+  totalQty: 0,
+  colIdx: {}
+};
+
+function openSalesImportModal(){
+  _salesImport = {
+    fileName:'', fileHash:'', rows:[], headers:[], detectedDate:'',
+    toCreate:[], toMatch:[], invalid:[], totalCAHT:0, totalQty:0, colIdx:{}
+  };
+  document.getElementById('sales-import-step-1').style.display='block';
+  document.getElementById('sales-import-step-2').style.display='none';
+  document.getElementById('sales-import-step-3').style.display='none';
+  document.getElementById('sales-import-step-4').style.display='none';
+  document.getElementById('sales-import-go-btn').style.display='none';
+  document.getElementById('sales-import-dup-warning').style.display='none';
+  document.getElementById('sales-import-file').value='';
+  document.getElementById('salesImportOverlay').classList.add('show');
+}
+window.openSalesImportModal = openSalesImportModal;
+
+function closeSalesImportModal(){
+  document.getElementById('salesImportOverlay').classList.remove('show');
+}
+window.closeSalesImportModal = closeSalesImportModal;
+
+function salesImportBack(){
+  document.getElementById('sales-import-step-2').style.display='none';
+  document.getElementById('sales-import-step-1').style.display='block';
+  document.getElementById('sales-import-go-btn').style.display='none';
+  document.getElementById('sales-import-file').value='';
+}
+window.salesImportBack = salesImportBack;
+
+// ─── Détection date depuis nom de fichier ──────────────────
+function _salesDetectDate(name){
+  if(!name) return '';
+  var n = String(name).toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[._\-]/g,' ').replace(/\s+/g,' ');
+  var moisMap = {
+    'janvier':1,'janv':1,'jan':1,
+    'fevrier':2,'fevr':2,'fev':2,
+    'mars':3,'mar':3,
+    'avril':4,'avr':4,
+    'mai':5,
+    'juin':6,
+    'juillet':7,'juil':7,'jul':7,
+    'aout':8,'aou':8,
+    'septembre':9,'sept':9,'sep':9,
+    'octobre':10,'oct':10,
+    'novembre':11,'nov':11,
+    'decembre':12,'dec':12
+  };
+  var moisKeys = Object.keys(moisMap).join('|');
+  var rx1 = new RegExp('du\\s+(\\d{1,2})\\s+au\\s+(\\d{1,2})\\s+('+moisKeys+')(?:\\s+(\\d{4}))?');
+  var m = n.match(rx1);
+  if(m){
+    var d = parseInt(m[2],10);
+    var mo = moisMap[m[3]];
+    var y = m[4] ? parseInt(m[4],10) : new Date().getFullYear();
+    return _salesYmd(y, mo, d);
+  }
+  var rx2 = new RegExp('du\\s+\\d{1,2}\\s+(?:'+moisKeys+')\\s+au\\s+(\\d{1,2})\\s+('+moisKeys+')(?:\\s+(\\d{4}))?');
+  m = n.match(rx2);
+  if(m){
+    var d2 = parseInt(m[1],10);
+    var mo2 = moisMap[m[2]];
+    var y2 = m[3] ? parseInt(m[3],10) : new Date().getFullYear();
+    return _salesYmd(y2, mo2, d2);
+  }
+  m = n.match(/(\d{4})\s+(\d{1,2})\s+(\d{1,2})/);
+  if(m) return _salesYmd(parseInt(m[1],10), parseInt(m[2],10), parseInt(m[3],10));
+  m = n.match(/(\d{1,2})\s+(\d{1,2})\s+(\d{4})/);
+  if(m) return _salesYmd(parseInt(m[3],10), parseInt(m[2],10), parseInt(m[1],10));
+  return '';
+}
+
+function _salesYmd(y, m, d){
+  if(!y || !m || !d) return '';
+  if(y<2000 || y>2099 || m<1 || m>12 || d<1 || d>31) return '';
+  return y + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+}
+
+function _salesTodayYMD(){
+  var d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+// Recherche d'une colonne par candidates (insensible accents/casse)
+function _salesFindCol(headers, candidates){
+  function norm(s){
+    return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+  }
+  for(var i=0;i<headers.length;i++){
+    var h = norm(headers[i]);
+    for(var j=0;j<candidates.length;j++){
+      if(h === norm(candidates[j])) return i;
+    }
+  }
+  for(var i2=0;i2<headers.length;i2++){
+    var h2 = norm(headers[i2]);
+    for(var j2=0;j2<candidates.length;j2++){
+      var c2 = norm(candidates[j2]);
+      if(c2 && h2.indexOf(c2)===0) return i2;
+    }
+  }
+  return -1;
+}
+
+async function handleSalesImportFile(file){
+  if(!file) return;
+  _salesImport.fileName = file.name;
+  try{
+    var buf = await file.arrayBuffer();
+    var bytes = new Uint8Array(buf);
+    var hashStr = '';
+    for(var k=0;k<Math.min(bytes.length, 4000);k++) hashStr += bytes[k];
+    _salesImport.fileHash = _simpleHash(hashStr);
+    var wb = XLSX.read(buf, {type:'array'});
+    var ws = wb.Sheets[wb.SheetNames[0]];
+    var data = XLSX.utils.sheet_to_json(ws, {header:1, defval:''});
+    if(!data.length) throw new Error('Fichier vide');
+    var headers = data[0].map(function(h){return String(h||'').trim()});
+    var rows = data.slice(1).filter(function(r){return r.some(function(c){return c!==''})});
+    _salesImport.headers = headers;
+    _salesImport.rows = rows;
+
+    var ci = {
+      ref:       _salesFindCol(headers, ['Article','Référence','Reference','SKU','Code article']),
+      modele:    _salesFindCol(headers, ['Modèle','Modele','Model','Désignation','Designation']),
+      taille:    _salesFindCol(headers, ['Taille','Size']),
+      couleur:   _salesFindCol(headers, ['Couleur','Color','Coloris']),
+      pmpa:      _salesFindCol(headers, ['PMPA','PMP','CUMP','CMUP','Coût d\'achat','Prix achat','Cout achat']),
+      pv:        _salesFindCol(headers, ['PV','Prix de vente','Prix vente','PV TTC','PVTTC']),
+      tva:       _salesFindCol(headers, ['TVA','Taux TVA','VAT']),
+      qSortie:   _salesFindCol(headers, ['Q_Sortie (FAC+BL)','Q_Sortie','Q Sortie','Quantité sortie','Qte sortie','Qty out','Quantite sortie']),
+      stock:     _salesFindCol(headers, ['Stock','Stock actuel','Stock restant','Qty stock']),
+      caHT:      _salesFindCol(headers, ['CA HT','CAHT','CA H.T.']),
+      caTTC:     _salesFindCol(headers, ['CA TTC','CATTC']),
+      fournisseur: _salesFindCol(headers, ['Fournisseur','Supplier']),
+      fabricant: _salesFindCol(headers, ['Fabricant','Marque','Brand']),
+      rayon:     _salesFindCol(headers, ['Rayon','Department']),
+      famille:   _salesFindCol(headers, ['Famille','Family','Categorie','Catégorie']),
+      sousFam:   _salesFindCol(headers, ['SousFamille','Sous-famille','Sous famille','Subfamily','SousCategorie'])
+    };
+    _salesImport.colIdx = ci;
+
+    if(ci.ref < 0 || ci.qSortie < 0){
+      throw new Error('Colonnes manquantes. Requis : "Article" et "Q_Sortie (FAC+BL)".');
+    }
+
+    _salesImport.detectedDate = _salesDetectDate(file.name) || _salesTodayYMD();
+
+    var dup = _importBatches.find(function(b){
+      return b.fileHash === _salesImport.fileHash && !b.rolledBack;
+    });
+    var warn = document.getElementById('sales-import-dup-warning');
+    if(dup){
+      var dt = dup.createdAt ? new Date(dup.createdAt).toLocaleString('fr-FR') : '?';
+      warn.innerHTML = '⚠️ <strong>Attention :</strong> ce fichier a déjà été importé le <strong>'+dt+'</strong> ('+(dup.movementsCount||0)+' mouvements). Si vous continuez, les mouvements seront créés en double.';
+      warn.style.display = 'block';
+    } else {
+      warn.style.display = 'none';
+    }
+
+    _analyzeSalesImport();
+
+    document.getElementById('sales-import-step-1').style.display='none';
+    document.getElementById('sales-import-step-2').style.display='block';
+    document.getElementById('sales-import-fname').textContent = file.name;
+    document.getElementById('sales-import-finfo').textContent = rows.length + ' ligne(s) · ' + headers.length + ' colonne(s)';
+    document.getElementById('sales-import-date').value = _salesImport.detectedDate;
+    document.getElementById('sales-import-date-detected').textContent =
+      _salesDetectDate(file.name) ? '🔍 Date détectée depuis le nom du fichier' : '⚠️ Aucune date détectée — date du jour utilisée';
+
+  }catch(e){
+    console.error('[sales-import] error:', e);
+    showToast('❌ '+e.message, true, 4000);
+  }
+}
+window.handleSalesImportFile = handleSalesImportFile;
+
+function _salesAnalyzeFromUI(){
+  var v = (document.getElementById('sales-import-date')||{}).value || '';
+  if(/^\d{4}-\d{2}-\d{2}$/.test(v)) _salesImport.detectedDate = v;
+  _analyzeSalesImport();
+}
+window._salesAnalyzeFromUI = _salesAnalyzeFromUI;
+
+function _analyzeSalesImport(){
+  var ci = _salesImport.colIdx;
+  var rows = _salesImport.rows;
+  var byRef = {};
+  _products.forEach(function(p){
+    if(p.ref) byRef[String(p.ref).trim().toLowerCase()] = p;
+  });
+
+  var toCreate = [];
+  var toMatch = [];
+  var invalid = [];
+  var totalCAHT = 0;
+  var totalQty = 0;
+  var date = _salesImport.detectedDate || _salesTodayYMD();
+
+  rows.forEach(function(r, idx){
+    var ref = String(r[ci.ref]||'').trim();
+    var qStr = String(r[ci.qSortie]||'').replace(',','.').trim();
+    var qty = parseFloat(qStr);
+    if(!ref || !qty || qty <= 0){
+      invalid.push({rowIdx: idx, ref: ref, qty: qty});
+      return;
+    }
+    var pmpa = ci.pmpa>=0 ? parseFloat(String(r[ci.pmpa]||'').replace(',','.'))||0 : 0;
+    var pvTtc = ci.pv>=0 ? parseFloat(String(r[ci.pv]||'').replace(',','.'))||0 : 0;
+    var tvaRaw = ci.tva>=0 ? String(r[ci.tva]||'').replace(',','.').trim() : '20';
+    var tvaNum = parseFloat(tvaRaw); if(!isFinite(tvaNum)||tvaNum<0) tvaNum = 20;
+    var tvaSnap = '20';
+    if(tvaNum < 1)            tvaSnap = '0';
+    else if(tvaNum < 7)       tvaSnap = '5.5';
+    else if(tvaNum < 15)      tvaSnap = '10';
+    else                       tvaSnap = '20';
+    var pvHt = pvTtc / (1 + tvaNum/100);                       // prix catalogue HT (fiche produit)
+    if(!isFinite(pvHt) || pvHt < 0) pvHt = 0;
+    var caHt = ci.caHT>=0 ? parseFloat(String(r[ci.caHT]||'').replace(',','.'))||0 : (pvHt * qty);
+    // Prix unitaire réellement encaissé HT (utilisé dans le mouvement OUT pour marge réelle).
+    // Si CA HT absent ou 0, on retombe sur le prix catalogue.
+    var pvUnitReal = (caHt > 0 && qty > 0) ? (caHt / qty) : pvHt;
+    var stockApres = ci.stock>=0 ? parseFloat(String(r[ci.stock]||'').replace(',','.'))||0 : 0;
+
+    var modele     = ci.modele>=0     ? String(r[ci.modele]||'').trim()     : '';
+    var taille     = ci.taille>=0     ? String(r[ci.taille]||'').trim()     : '';
+    var couleur    = ci.couleur>=0    ? String(r[ci.couleur]||'').trim()    : '';
+    var fourn      = ci.fournisseur>=0? String(r[ci.fournisseur]||'').trim(): '';
+    var fabricant  = ci.fabricant>=0  ? String(r[ci.fabricant]||'').trim()  : '';
+    var rayon      = ci.rayon>=0      ? String(r[ci.rayon]||'').trim()      : '';
+    var famille    = ci.famille>=0    ? String(r[ci.famille]||'').trim()    : '';
+    var sousFam    = ci.sousFam>=0    ? String(r[ci.sousFam]||'').trim()    : '';
+
+    var displayName = modele || ref;
+    if(taille || couleur){
+      var bits = [taille, couleur].filter(Boolean).join(' / ');
+      if(bits && displayName.toLowerCase().indexOf(bits.toLowerCase())<0) displayName += ' — ' + bits;
+    }
+
+    var catParts = [rayon, famille, sousFam].filter(Boolean);
+    var cat = catParts.join(' / ');
+
+    totalQty  += qty;
+    totalCAHT += caHt;
+
+    var existing = byRef[ref.toLowerCase()];
+    var common = {
+      rowIdx: idx,
+      ref: ref,
+      name: displayName,
+      taille: taille, couleur: couleur,
+      fournisseur: fourn || fabricant,
+      cat: cat,
+      pa: pmpa,
+      pvHt: pvHt,             // catalogue HT → fiche produit
+      pvUnitReal: pvUnitReal, // réel encaissé HT → mouvement OUT
+      pvTtc: pvTtc, tva: tvaSnap,
+      qty: qty,
+      stockApres: stockApres,
+      caHt: caHt,
+      date: date
+    };
+
+    if(existing){
+      toMatch.push(Object.assign({existing: existing}, common));
+    } else {
+      common.stockBase = stockApres + qty;
+      toCreate.push(common);
+    }
+  });
+
+  _salesImport.toCreate = toCreate;
+  _salesImport.toMatch = toMatch;
+  _salesImport.invalid = invalid;
+  _salesImport.totalCAHT = totalCAHT;
+  _salesImport.totalQty = totalQty;
+
+  _renderSalesImportPlan();
+}
+
+function _renderSalesImportPlan(){
+  var s = _salesImport;
+  var html = '';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">';
+  html += _salesPlanCard('🆕 À créer',           s.toCreate.length, '#7c3aed', 'Nouveaux produits ajoutés au catalogue (stock initial = stock fichier + ventes)');
+  html += _salesPlanCard('🔗 À mettre à jour',  s.toMatch.length,  '#0891b2', 'Produits déjà dans le catalogue : seul un mouvement de sortie sera créé');
+  html += _salesPlanCard('📤 Mouvements OUT',   s.toCreate.length + s.toMatch.length, '#10b981', 'Total des mouvements de sortie qui seront créés');
+  html += _salesPlanCard('💰 CA HT',            (s.totalCAHT.toFixed(2)+' €').replace('.',','), '#f59e0b', 'Chiffre d\'affaires HT total de la période');
+  if(s.invalid.length){
+    html += _salesPlanCard('⚠ Ignorées',        s.invalid.length, '#ef4444', 'Lignes sans Article ou avec quantité ≤ 0 (ex : ligne de total)');
+  }
+  html += '</div>';
+
+  if(s.toCreate.length || s.toMatch.length){
+    html += '<div style="margin-top:18px;font-size:12px;font-weight:700">Aperçu (10 premiers) :</div>';
+    html += '<div style="max-height:240px;overflow-y:auto;border:1.5px solid var(--border);border-radius:10px;margin-top:6px">';
+    html += '<table style="width:100%;font-size:11px"><thead style="position:sticky;top:0;background:#f8fafc;z-index:1"><tr>';
+    html += '<th style="text-align:left;padding:6px 8px">État</th>';
+    html += '<th style="text-align:left;padding:6px 8px">Article</th>';
+    html += '<th style="padding:6px 8px">Qté</th>';
+    html += '<th style="padding:6px 8px">PA HT</th>';
+    html += '<th style="padding:6px 8px">PV HT</th>';
+    html += '<th style="padding:6px 8px">Stock init.</th>';
+    html += '</tr></thead><tbody>';
+    var preview = s.toCreate.slice(0,5).concat(s.toMatch.slice(0,5));
+    preview.forEach(function(r){
+      var isNew = !r.existing;
+      var stockInit = isNew ? r.stockBase : (r.existing.stockBase || '—');
+      var pvCell;
+      if(r.pvHt && r.pvUnitReal && Math.abs(r.pvUnitReal - r.pvHt) / r.pvHt > 0.02){
+        pvCell = '<span style="text-decoration:line-through;color:#94a3b8;font-size:10px">'+r.pvHt.toFixed(2)+'</span> '+
+                 '<b style="color:#dc2626">'+r.pvUnitReal.toFixed(2)+' €</b>';
+      } else {
+        pvCell = (r.pvUnitReal||r.pvHt||0).toFixed(2)+' €';
+      }
+      html += '<tr style="border-top:1px solid #f1f5f9">';
+      html += '<td style="padding:5px 8px">'+(isNew?'<span style="background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:6px;font-weight:700">🆕 Nouveau</span>':'<span style="background:#cffafe;color:#0e7490;padding:1px 6px;border-radius:6px;font-weight:700">🔗 Existant</span>')+'</td>';
+      html += '<td style="padding:5px 8px"><b>'+esc(r.ref)+'</b><br><span style="color:#64748b;font-size:10px">'+esc(r.name)+'</span></td>';
+      html += '<td style="padding:5px 8px;text-align:center;font-weight:700">-'+r.qty+'</td>';
+      html += '<td style="padding:5px 8px;text-align:right">'+(r.pa?r.pa.toFixed(2)+' €':'—')+'</td>';
+      html += '<td style="padding:5px 8px;text-align:right">'+pvCell+'</td>';
+      html += '<td style="padding:5px 8px;text-align:center">'+stockInit+'</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+
+  document.getElementById('sales-import-plan').innerHTML = html;
+
+  var go = document.getElementById('sales-import-go-btn');
+  var total = s.toCreate.length + s.toMatch.length;
+  if(total > 0){
+    go.style.display = 'inline-flex';
+    go.innerHTML = '🚀 Importer ('+s.toCreate.length+' produit'+(s.toCreate.length>1?'s':'')+' à créer · '+total+' mouvement'+(total>1?'s':'')+')';
+  } else {
+    go.style.display = 'none';
+  }
+}
+
+function _salesPlanCard(label, value, color, tooltip){
+  return '<div title="'+esc(tooltip)+'" style="background:white;border:1.5px solid '+color+'33;border-radius:10px;padding:10px 12px">'+
+    '<div style="font-size:10px;color:'+color+';font-weight:700;text-transform:uppercase;letter-spacing:0.4px">'+esc(label)+'</div>'+
+    '<div style="font-size:20px;font-weight:800;color:#0f172a;margin-top:2px">'+esc(value)+'</div>'+
+    '</div>';
+}
+
+async function executeSalesImport(){
+  var s = _salesImport;
+  var total = s.toCreate.length + s.toMatch.length;
+  if(!total){ showToast('Rien à importer', true); return; }
+
+  document.getElementById('sales-import-step-2').style.display='none';
+  document.getElementById('sales-import-step-3').style.display='block';
+  document.getElementById('sales-import-go-btn').style.display='none';
+
+  try{
+    var batchId = 'imp_' + Date.now() + '_' + Math.random().toString(36).substring(2,8);
+    var now = new Date().toISOString();
+    var date = s.detectedDate || _salesTodayYMD();
+    var BATCH_SIZE = 200; // 200 produits + 200 mouvements = 400 ops < 500 limite Firestore
+    var prodCreated = 0, movCreated = 0;
+    var pl = document.getElementById('sales-import-progress-label');
+    var ps = document.getElementById('sales-import-progress-sub');
+
+    // Phase 1 : nouveaux produits + leurs mouvements OUT (batches mixtes)
+    for(var i=0;i<s.toCreate.length;i+=BATCH_SIZE){
+      var chunk = s.toCreate.slice(i, i+BATCH_SIZE);
+      var fbBatch = window._writeBatch(window._db);
+      chunk.forEach(function(r){
+        var pid = uid();
+        var product = {
+          id: pid,
+          ref: r.ref,
+          ean: '',
+          name: r.name,
+          stockType: 'marchandise',
+          fournisseur: r.fournisseur || '',
+          pa: r.pa || 0,
+          pv: r.pvHt || 0,            // catalogue HT
+          tva: r.tva,
+          stockBase: r.stockBase,
+          min: '',
+          unite: 'unité',
+          emplacement: '',
+          condQte: '',
+          dlc: '',
+          lot: '',
+          notes: 'Importé depuis ventes hebdo (' + date + ')',
+          taille: r.taille || '',
+          couleur: r.couleur || '',
+          refFournisseur: '',
+          cat: r.cat || '',
+          familyId: null,
+          createdAt: now,
+          updatedAt: now,
+          importBatchId: batchId
+        };
+        fbBatch.set(window._doc(window._db,'stock',window._uid,'products',pid), product);
+        _products.push(product);
+        prodCreated++;
+
+        var movId = uid();
+        var mov = {
+          id: movId,
+          ref: r.ref,
+          type: 'OUT',
+          qty: r.qty,
+          pa: r.pa || 0,
+          pv: r.pvUnitReal || r.pvHt || 0,  // prix HT réellement encaissé
+          date: date,
+          note: 'Vente hebdo (import auto)',
+          importBatchId: batchId,
+          createdAt: now
+        };
+        fbBatch.set(window._doc(window._db,'stock',window._uid,'movements',movId), mov);
+        _movements.unshift(mov);
+        movCreated++;
+      });
+      await fbBatch.commit();
+      pl.textContent = 'Création produits + mouvements... ' + prodCreated + '/' + s.toCreate.length;
+      ps.textContent = movCreated + ' mouvement(s) créé(s)';
+    }
+
+    // Phase 2 : mouvements OUT pour produits existants
+    for(var j=0;j<s.toMatch.length;j+=BATCH_SIZE*2){
+      var chunk2 = s.toMatch.slice(j, j+BATCH_SIZE*2);
+      var fbBatch2 = window._writeBatch(window._db);
+      chunk2.forEach(function(r){
+        var movId2 = uid();
+        var mov2 = {
+          id: movId2,
+          ref: r.ref,
+          type: 'OUT',
+          qty: r.qty,
+          pa: r.pa || pf(r.existing.pa) || 0,
+          pv: r.pvUnitReal || r.pvHt || 0,  // prix HT réellement encaissé
+          date: date,
+          note: 'Vente hebdo (import auto)',
+          importBatchId: batchId,
+          createdAt: now
+        };
+        fbBatch2.set(window._doc(window._db,'stock',window._uid,'movements',movId2), mov2);
+        _movements.unshift(mov2);
+        movCreated++;
+      });
+      await fbBatch2.commit();
+      pl.textContent = 'Création mouvements (produits existants)... ' + movCreated + '/' + total;
+    }
+
+    // Phase 3 : meta du batch (rollback)
+    var batchMeta = {
+      id: batchId,
+      kind: 'weekly_sales',
+      fileName: s.fileName,
+      fileHash: s.fileHash,
+      defaultType: 'OUT',
+      movementsCount: movCreated,
+      productsCreated: prodCreated,
+      typeCounts: {OUT: movCreated},
+      totalCAHT: s.totalCAHT,
+      totalQty: s.totalQty,
+      periodDate: date,
+      createdAt: now,
+      rolledBack: false,
+      unknownCount: s.invalid.length
+    };
+    await window._setDoc(window._doc(window._db,'stock',window._uid,'import_batches',batchId), batchMeta);
+    _importBatches.push(batchMeta);
+
+    document.getElementById('sales-import-step-3').style.display='none';
+    document.getElementById('sales-import-step-4').style.display='block';
+    document.getElementById('sales-import-success-summary').innerHTML =
+      '<div style="font-size:14px;line-height:1.7">'+
+      '✅ <b>'+prodCreated+'</b> produit'+(prodCreated>1?'s':'')+' créé'+(prodCreated>1?'s':'')+'<br>'+
+      '📤 <b>'+movCreated+'</b> mouvement'+(movCreated>1?'s':'')+' de sortie<br>'+
+      '💰 <b>'+s.totalCAHT.toFixed(2).replace('.',',')+' €</b> de CA HT enregistré<br>'+
+      '📅 Date : <b>'+date+'</b>'+
+      '</div>';
+
+    showToast('✅ Import ventes hebdo terminé', false, 4000);
+    renderAll();
+  }catch(e){
+    console.error('[sales-import] execute error:', e);
+    document.getElementById('sales-import-progress-label').textContent = '❌ Erreur';
+    document.getElementById('sales-import-progress-sub').textContent = e.message || 'Erreur inconnue';
+    showToast('❌ Erreur import : '+e.message, true, 5000);
+  }
+}
+window.executeSalesImport = executeSalesImport;
 
 // ══════════════════════════════════════════════════════════
 // IMPORT IA
