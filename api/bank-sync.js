@@ -197,11 +197,19 @@ export default async function handler(req, res) {
     console.log('Req status:', rData.status, '| nb accounts:', rData.accounts?.length);
 
     if (!rData.accounts || rData.accounts.length === 0) {
-      return res.status(400).json({
-        error: rData.status === 'EXPIRED'
-          ? 'Connexion expirée. Déconnectez et reconnectez votre banque.'
-          : `Aucun compte trouvé (statut: ${rData.status || 'inconnu'})`
-      });
+      let errMsg;
+      if (rData.status === 'EXPIRED') {
+        errMsg = 'Connexion expirée. Déconnectez et reconnectez votre banque.';
+      } else if (rData.status === 'UA') {
+        // UA = User Action / Undergoing Authentication : le user a commencé le flow
+        // mais ne l'a pas terminé sur le site de sa banque (SMS non saisi, app non validée,
+        // onglet fermé avant la fin, etc.). La requisition existe mais la liste de comptes
+        // n'a jamais été reçue. Solution : recommencer la connexion jusqu'au bout.
+        errMsg = 'Votre connexion bancaire n\'a pas été finalisée. Recommencez la connexion en allant jusqu\'au bout de la validation sur le site de votre banque (saisie du code SMS, validation dans votre application bancaire, etc.).';
+      } else {
+        errMsg = `Aucun compte trouvé (statut: ${rData.status || 'inconnu'})`;
+      }
+      return res.status(400).json({ error: errMsg });
     }
 
     // ── Filtrer par comptes sélectionnés si spécifié ──

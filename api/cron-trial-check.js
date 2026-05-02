@@ -153,60 +153,91 @@ async function deleteUserData(uid, token) {
     'fidelite_public_cfg', 'rh_params', 'tuto_progress', 'previsions'
   ];
 
+  const SUB_NAMES = ['months', 'produits', 'params', 'items', 'data', 'years', 'briefings',
+    'config', 'clients', 'demandes', 'fiches', 'daily', 'planning_acks', 'audit',
+    'signatures', 'offres', 'candidats', 'entretiens', 'dossiers', 'events', 'list'];
+
+  const DELETE_BATCH = 20; // suppressions parallèles par batch (anti-throttling Firestore)
   let deleted = 0;
 
-  // 1. Collections with subcollections — list children and delete them, then parent
-  for (const col of COLLECTIONS_WITH_SUBCOLS) {
-    try {
-      // Try to list common subcollection names
-      const subNames = ['months', 'produits', 'params', 'items', 'data', 'years', 'briefings',
-        'config', 'clients', 'demandes', 'fiches', 'daily', 'planning_acks', 'audit',
-        'signatures', 'offres', 'candidats', 'entretiens', 'dossiers', 'events', 'list'];
-      for (const sub of subNames) {
-        const docs = await fsList(`${col}/${uid}/${sub}`, token);
-        for (const docPath of docs) {
-          await fsDelete(docPath, token);
-          deleted++;
-        }
-      }
-      // Delete parent
-      await fsDelete(`${col}/${uid}`, token);
-      deleted++;
-    } catch (e) {
-      // Silently skip non-existent collections
+  // Helper : delete une liste de paths par batches parallèles
+  async function deleteBatched(paths) {
+    let count = 0;
+    for (let i = 0; i < paths.length; i += DELETE_BATCH) {
+      const slice = paths.slice(i, i + DELETE_BATCH);
+      const results = await Promise.all(slice.map(p => fsDelete(p, token).catch(() => false)));
+      count += results.filter(Boolean).length;
     }
+    return count;
   }
 
-  // 2. Simple docs
-  for (const col of SIMPLE_DOCS) {
-    try {
-      await fsDelete(`${col}/${uid}`, token);
-      deleted++;
-    } catch (e) {}
+  // ──────────────────────────────────────────────────────────────
+  // 1. Collections with subcollections
+  //    a) Lister TOUS les chemins de subcollections candidats EN PARALLELE
+  //       (25 collections × 21 noms = 525 fsList → ~1-2s au lieu de ~80s)
+  //    b) Aplatir et delete par batches parallèles
+  //    c) Delete les parents en parallèle
+  // ──────────────────────────────────────────────────────────────
+  try {
+    const subPaths = [];
+    for (const col of COLLECTIONS_WITH_SUBCOLS) {
+      for (const sub of SUB_NAMES) {
+        subPaths.push(`${col}/${uid}/${sub}`);
+      }
+    }
+    // a) fsList parallèles, on ignore les erreurs (collections inexistantes = []
+    const listResults = await Promise.all(
+      subPaths.map(p => fsList(p, token).catch(() => []))
+    );
+    // b) aplatir tous les docs trouvés et les supprimer par batch
+    const docsToDelete = [];
+    for (const docs of listResults) for (const d of docs) docsToDelete.push(d);
+    deleted += await deleteBatched(docsToDelete);
+
+    // c) parents en parallèle
+    const parentPaths = COLLECTIONS_WITH_SUBCOLS.map(col => `${col}/${uid}`);
+    deleted += await deleteBatched(parentPaths);
+  } catch (e) {
+    console.warn(`[cron-trial] deleteUserData(subcols) ${uid}:`, e.message);
   }
 
+  // ──────────────────────────────────────────────────────────────
+  // 2. Simple docs (1 seul niveau) — en parallèle
+  // ──────────────────────────────────────────────────────────────
+  try {
+    const simplePaths = SIMPLE_DOCS.map(col => `${col}/${uid}`);
+    deleted += await deleteBatched(simplePaths);
+  } catch (e) {
+    console.warn(`[cron-trial] deleteUserData(simple) ${uid}:`, e.message);
+  }
+
+  // ──────────────────────────────────────────────────────────────
   // 3. fidelite_public where merchantUid == uid
+  // ──────────────────────────────────────────────────────────────
   try {
     const fidDocs = await fsQueryByField('fidelite_public', 'merchantUid', uid, token);
-    for (const doc of fidDocs) {
-      await fsDelete(`fidelite_public/${doc.uid}`, token);
-      deleted++;
-    }
-  } catch (e) {}
+    const fidPaths = fidDocs.map(doc => `fidelite_public/${doc.uid}`);
+    deleted += await deleteBatched(fidPaths);
+  } catch (e) {
+    console.warn(`[cron-trial] deleteUserData(fidelite_public) ${uid}:`, e.message);
+  }
 
-  // 4. rh_employes_public where ownerUid == uid
+  // ──────────────────────────────────────────────────────────────
+  // 4. rh_employes_public + rh_employes_public_profil where ownerUid == uid
+  // ──────────────────────────────────────────────────────────────
   try {
-    const rhDocs = await fsQueryByField('rh_employes_public', 'ownerUid', uid, token);
-    for (const doc of rhDocs) {
-      await fsDelete(`rh_employes_public/${doc.uid}`, token);
-      deleted++;
-    }
-    const rhProfDocs = await fsQueryByField('rh_employes_public_profil', 'ownerUid', uid, token);
-    for (const doc of rhProfDocs) {
-      await fsDelete(`rh_employes_public_profil/${doc.uid}`, token);
-      deleted++;
-    }
-  } catch (e) {}
+    const [rhDocs, rhProfDocs] = await Promise.all([
+      fsQueryByField('rh_employes_public', 'ownerUid', uid, token).catch(() => []),
+      fsQueryByField('rh_employes_public_profil', 'ownerUid', uid, token).catch(() => []),
+    ]);
+    const rhPaths = [
+      ...rhDocs.map(d => `rh_employes_public/${d.uid}`),
+      ...rhProfDocs.map(d => `rh_employes_public_profil/${d.uid}`),
+    ];
+    deleted += await deleteBatched(rhPaths);
+  } catch (e) {
+    console.warn(`[cron-trial] deleteUserData(rh_employes) ${uid}:`, e.message);
+  }
 
   return deleted;
 }
@@ -369,6 +400,13 @@ module.exports = async (req, res) => {
 
     console.log(`[cron-trial] 🔍 ${allTrials.length} utilisateur(s) en trial/trial_expired`);
 
+    // ──────────────────────────────────────────────────────────────
+    // PASSE 1 — Actions rapides (emails J-3, J-1, J+0, J+8, expirations)
+    // Les suppressions J+15 sont JUSTE COLLECTÉES ici, pas exécutées,
+    // pour qu'un timeout de suppression ne bloque pas les rappels.
+    // ──────────────────────────────────────────────────────────────
+    const toDelete = []; // collectés en passe 1, exécutés en passe 2
+
     for (const user of allTrials) {
       stats.checked++;
       const { uid, data } = user;
@@ -411,23 +449,51 @@ module.exports = async (req, res) => {
           stats.expired++;
           console.log(`[cron-trial] 🔒 ${uid} → trial_expired`);
         }
-        // J+15 : delete data
+        // J+15 : delete data → COLLECTÉ ICI, exécuté en passe 2
         else if (plan === 'trial_expired') {
           const expiredAt = data.trialExpiredAt || data.trialEnd;
           const daysSinceExpiry = expiredAt ? -daysDiff(expiredAt) : 999;
 
           if (daysSinceExpiry >= 15 && !data.trialDataDeleted) {
-            console.log(`[cron-trial] 🗑 ${uid} — suppression des données (J+${daysSinceExpiry})`);
-            const deletedCount = await deleteUserData(uid, token);
-            if (email) await sendEmail(email, '🗑 Vos données Alteore ont été supprimées', emailDeleted(name));
-            await fsUpdate(`users/${uid}`, { plan: 'deleted', trialDataDeleted: true, trialDataDeletedAt: new Date().toISOString(), dataDeletedCount: deletedCount }, token);
-            stats.deleted++;
-            console.log(`[cron-trial] ✅ ${uid} — ${deletedCount} docs supprimés`);
+            toDelete.push({ uid, email, name, daysSinceExpiry });
           }
         }
       } catch (userErr) {
         stats.errors++;
         console.error(`[cron-trial] ❌ ${uid}:`, userErr.message);
+      }
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // PASSE 2 — Suppressions de données (lentes), capées à MAX_DELETES_PER_RUN
+    // Si plus de N en attente, les suivantes passeront aux runs suivants.
+    // ──────────────────────────────────────────────────────────────
+    const MAX_DELETES_PER_RUN = 3;
+    stats.deletePending = toDelete.length;
+
+    if (toDelete.length > 0) {
+      // Priorité aux plus anciens (plus longtemps expirés en premier)
+      toDelete.sort((a, b) => b.daysSinceExpiry - a.daysSinceExpiry);
+      const batch = toDelete.slice(0, MAX_DELETES_PER_RUN);
+
+      if (toDelete.length > MAX_DELETES_PER_RUN) {
+        console.warn(`[cron-trial] ⚠️ ${toDelete.length} suppressions en attente, traitement de ${MAX_DELETES_PER_RUN} ce run (les autres aux runs suivants)`);
+      }
+
+      for (const { uid, email, name, daysSinceExpiry } of batch) {
+        try {
+          console.log(`[cron-trial] 🗑 ${uid} — suppression des données (J+${daysSinceExpiry})`);
+          const t0 = Date.now();
+          const deletedCount = await deleteUserData(uid, token);
+          const elapsed = Date.now() - t0;
+          if (email) await sendEmail(email, '🗑 Vos données Alteore ont été supprimées', emailDeleted(name));
+          await fsUpdate(`users/${uid}`, { plan: 'deleted', trialDataDeleted: true, trialDataDeletedAt: new Date().toISOString(), dataDeletedCount: deletedCount }, token);
+          stats.deleted++;
+          console.log(`[cron-trial] ✅ ${uid} — ${deletedCount} docs supprimés en ${elapsed}ms`);
+        } catch (delErr) {
+          stats.errors++;
+          console.error(`[cron-trial] ❌ delete ${uid}:`, delErr.message);
+        }
       }
     }
 
