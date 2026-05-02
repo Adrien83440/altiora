@@ -285,6 +285,33 @@ service cloud.firestore {
 
 
     // ═══════════════════════════════════════════════════════════════
+    // RH — AUTHENTIFICATION SALARIES (PIN, lockouts, reset codes)
+    // rh_auth_salaries/{publicId}
+    //
+    // Champs sensibles (TOUS gérés server-side uniquement) :
+    //   • pinHash             string  → bcrypt du PIN salarié
+    //   • pinAttempts         number  → compteur tentatives échouées
+    //   • pinLockedUntil      ISO     → timestamp fin de blocage
+    //   • tempResetCode       string  → code temporaire reset PIN
+    //   • tempResetExpiresAt  ISO     → expiration du code reset
+    //
+    // Cette collection est touchée EXCLUSIVEMENT par les API serveur :
+    //   • salarie-check-status.js  (read)
+    //   • salarie-verify-pin.js    (read + write)
+    //   • salarie-set-pin.js       (read + write)
+    //   • salarie-reset-request.js (read + write)
+    //   • salarie-reset-approve.js (write)
+    // Toutes s'authentifient via api@altiora.app (admin token REST).
+    //
+    // ⚠️ Aucun accès client direct — espace-salarie.html passe TOUJOURS
+    //    par les endpoints /api/salarie-*. Lecture/écriture admin only.
+    // ═══════════════════════════════════════════════════════════════
+    match /rh_auth_salaries/{publicId} {
+      allow read, write: if isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
     // RH — PLANNING PUBLIC
     // ═══════════════════════════════════════════════════════════════
     match /rh_planning_public/{uid}/{allPaths=**} {
@@ -422,6 +449,32 @@ service cloud.firestore {
     match /updates/{updateId} {
       allow read:  if isAdmin() || (isAuth() && resource.data.published == true);
       allow write: if isAdmin();
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════
+    // BLOG — Drafts, Published, Topics
+    //
+    // Toutes les API blog (list-blog-posts, delete-blog-draft,
+    // generate-blog-post, cron-generate-blog, sync-blog-published,
+    // import-blog-topics, github-publish, github-unpublish) s'auth
+    // via api@altiora.app (admin token REST) et passent par isAdmin().
+    //
+    // Le blog public (blog.html + /blog/*.html) n'utilise PAS Firestore
+    // — les articles publiés sont des fichiers HTML statiques poussés
+    // sur GitHub par github-publish.js. Aucune lecture publique
+    // nécessaire ici.
+    // ═══════════════════════════════════════════════════════════════
+    match /blog_drafts/{slug} {
+      allow read, write: if isAdmin();
+    }
+
+    match /blog_published/{slug} {
+      allow read, write: if isAdmin();
+    }
+
+    match /blog_topics/{topicId} {
+      allow read, write: if isAdmin();
     }
 
 
