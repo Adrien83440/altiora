@@ -183,7 +183,7 @@ module.exports = async (req, res) => {
     const RESEND_API_KEY = process.env.RESEND_API_KEY;
     const RESEND_FROM    = process.env.RESEND_FROM || 'ALTEORE <noreply@alteore.com>';
     if (RESEND_API_KEY) {
-      const inviteUrl = `https://conseil.alteore.com/accept-invite.html?token=${token}`;
+      const inviteUrl = `https://alteore.com/conseil/accept-invite.html?token=${token}`;
       const durationLabel = duration === 'permanent' ? 'Accès permanent'
         : duration === '7d'  ? '7 jours'
         : duration === '30d' ? '30 jours'
