@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Mes clients — Alteore Conseil</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="conseil-topbar">
+  <div class="conseil-topbar-inner">
+    <a href="dashboard.html" class="conseil-brand">
+      <div class="conseil-brand-mark">A</div>
+      <div class="conseil-brand-text">
+        <strong>Alteore Conseil</strong>
+        <span>Espace conseiller</span>
+      </div>
+    </a>
+    <div class="conseil-topbar-user">
+      <span id="userLabel"></span>
+      <button id="logoutBtn">Déconnexion</button>
+    </div>
+  </div>
+</div>
+
+<div class="conseil-container">
+
+  <div class="conseil-card">
+    <div class="conseil-card-header">
+      <div>
+        <h2 class="conseil-card-title">Mes clients</h2>
+        <p class="conseil-card-subtitle" id="clientCount">Chargement...</p>
+      </div>
+    </div>
+
+    <div id="clientsContainer">
+      <div class="conseil-loader">
+        <span class="conseil-spinner"></span>
+        Chargement de vos clients...
+      </div>
+    </div>
+  </div>
+
+  <div class="conseil-card" style="margin-top:24px;">
+    <h3 class="conseil-card-title" style="font-size:15px;margin-bottom:12px;">💡 Comment ça marche ?</h3>
+    <p style="margin:0;font-size:14px;color:#4b5563;line-height:1.7;">
+      Cliquez sur <strong>Consulter</strong> pour accéder en lecture seule au pilotage financier d'un client. 
+      Vous pourrez voir son dashboard, son pilotage, ses marges, son cashflow, ses dettes et ses bilans, 
+      exporter les données en PDF/Excel, et lui envoyer un message directement depuis l'interface.
+    </p>
+  </div>
+
+</div>
+
+<footer class="conseil-footer">
+  Alteore Conseil — <a href="https://alteore.com">Retour à Alteore</a>
+</footer>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { initializeFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey: "AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+  authDomain: "altiora-70599.firebaseapp.com",
+  projectId: "altiora-70599",
+  storageBucket: "altiora-70599.firebasestorage.app",
+  messagingSenderId: "120905555746",
+  appId: "1:120905555746:web:618460c65cdc9e57cc8f7b"
+});
+const auth = getAuth(app);
+const db   = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+
+const $userLabel  = document.getElementById('userLabel');
+const $logoutBtn  = document.getElementById('logoutBtn');
+const $container  = document.getElementById('clientsContainer');
+const $count      = document.getElementById('clientCount');
+
+$logoutBtn.addEventListener('click', async function() {
+  try { await signOut(auth); } catch(_) {}
+  // Sortir du mode viewAs si actif
+  try {
+    sessionStorage.removeItem('conseil_viewAs');
+    sessionStorage.removeItem('conseil_viewAsName');
+    sessionStorage.removeItem('conseil_viewAsEmail');
+  } catch(_) {}
+  location.href = 'index.html';
+});
+
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function planBadge(plan) {
+  const map = {
+    pro:    { cls: 'conseil-badge-pro',    label: 'Pro' },
+    max:    { cls: 'conseil-badge-max',    label: 'Max' },
+    master: { cls: 'conseil-badge-master', label: 'Master' },
+    trial:  { cls: 'conseil-badge-trial',  label: 'Essai' },
+    dev:    { cls: 'conseil-badge-master', label: 'Dev' }
+  };
+  const cfg = map[plan] || { cls: 'conseil-badge-pro', label: plan || '—' };
+  return '<span class="conseil-badge ' + cfg.cls + '">' + escHtml(cfg.label) + '</span>';
+}
+
+function durationBadge(duration, expiresAt) {
+  if (duration === 'permanent' || !expiresAt) {
+    return '<span class="conseil-badge conseil-badge-permanent">Permanent</span>';
+  }
+  const exp = new Date(expiresAt);
+  if (isNaN(exp.getTime())) return '';
+  const now = new Date();
+  const days = Math.ceil((exp - now) / 86400000);
+  if (days < 0) return '<span class="conseil-badge conseil-badge-soon">Expiré</span>';
+  if (days <= 3) return '<span class="conseil-badge conseil-badge-soon">Expire dans ' + days + 'j</span>';
+  if (days <= 14) return '<span class="conseil-badge conseil-badge-soon">' + days + 'j restants</span>';
+  return '<span class="conseil-badge conseil-badge-permanent">' + days + 'j restants</span>';
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+  } catch(_) { return '—'; }
+}
+
+function formatRelative(iso) {
+  if (!iso) return 'Jamais';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return 'Jamais';
+    const diffMs = Date.now() - d.getTime();
+    const days = Math.floor(diffMs / 86400000);
+    if (days === 0) return 'Aujourd\'hui';
+    if (days === 1) return 'Hier';
+    if (days < 7)   return 'Il y a ' + days + ' jours';
+    if (days < 30)  return 'Il y a ' + Math.floor(days / 7) + ' semaine(s)';
+    return formatDate(iso);
+  } catch(_) { return 'Jamais'; }
+}
+
+function renderClients(clients) {
+  if (!clients || clients.length === 0) {
+    $container.innerHTML = ''
+      + '<div class="conseil-empty">'
+      + '<h3>Aucun client pour le moment</h3>'
+      + '<p>Vos clients vous inviteront depuis leur espace Alteore.<br>Une fois l\'invitation acceptée, ils apparaîtront ici.</p>'
+      + '</div>';
+    $count.textContent = 'Aucun client actif';
+    return;
+  }
+
+  $count.textContent = clients.length + ' client' + (clients.length > 1 ? 's' : '') + ' actif' + (clients.length > 1 ? 's' : '');
+
+  let html = '<div class="conseil-clients-grid">';
+  clients.forEach(function(c) {
+    const safeName = escHtml(c.clientName || 'Client');
+    const safeEmail = escHtml(c.clientEmail || '');
+    html += ''
+      + '<div class="conseil-client-card">'
+      + '  <div class="conseil-client-info">'
+      + '    <h3>' + safeName + '</h3>'
+      + (safeEmail ? '<p>' + safeEmail + '</p>' : '')
+      + '    <div class="conseil-client-meta">'
+      + '      ' + planBadge(c.plan)
+      + '      ' + durationBadge(c.duration, c.expiresAt)
+      + '      <span class="conseil-client-meta-item">📅 Dernier accès : ' + escHtml(formatRelative(c.lastAccessAt)) + '</span>'
+      + '    </div>'
+      + '  </div>'
+      + '  <div>'
+      + '    <button class="conseil-btn conseil-btn-orange" data-uid="' + escHtml(c.clientUid) + '" data-name="' + safeName + '" data-email="' + safeEmail + '">'
+      + '      Consulter →'
+      + '    </button>'
+      + '  </div>'
+      + '</div>';
+  });
+  html += '</div>';
+  $container.innerHTML = html;
+
+  $container.querySelectorAll('[data-uid]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      const uid   = btn.getAttribute('data-uid');
+      const name  = btn.getAttribute('data-name');
+      const email = btn.getAttribute('data-email');
+      try {
+        sessionStorage.setItem('conseil_viewAs', uid);
+        sessionStorage.setItem('conseil_viewAsName', name);
+        sessionStorage.setItem('conseil_viewAsEmail', email);
+      } catch(_) {}
+      // Aller sur le domaine principal alteore.com pour bénéficier de l'app financière
+      const target = location.hostname.indexOf('conseil.') === 0
+        ? location.protocol + '//' + location.hostname.replace(/^conseil\./, '') + '/dashboard.html'
+        : '/dashboard.html';
+      location.href = target;
+    });
+  });
+}
+
+async function loadClients() {
+  try {
+    const user = auth.currentUser;
+    if (!user) return;
+    const idToken = await user.getIdToken();
+    const resp = await fetch('/api/conseil-list-clients', {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + idToken }
+    });
+    const data = await resp.json().catch(function() { return {}; });
+    if (!resp.ok) throw new Error(data.error || 'Erreur de chargement');
+
+    if (data.conseiller) {
+      const n = data.conseiller.displayName || (data.conseiller.email || '').split('@')[0];
+      $userLabel.textContent = n;
+    }
+    renderClients(data.clients || []);
+  } catch (err) {
+    $container.innerHTML = ''
+      + '<div class="conseil-feedback error" style="display:block;">'
+      + 'Erreur : ' + escHtml(err.message || 'chargement impossible')
+      + '</div>';
+  }
+}
+
+onAuthStateChanged(auth, async function(user) {
+  if (!user) { location.href = 'login.html'; return; }
+  // Vérifier que c'est bien un conseiller
+  try {
+    const snap = await getDoc(doc(db, 'conseillers', user.uid));
+    if (!snap.exists()) {
+      // Pas un conseiller → déconnexion + redirect
+      try { await signOut(auth); } catch(_) {}
+      location.href = 'login.html';
+      return;
+    }
+  } catch (e) {}
+
+  // Nettoyer un éventuel viewAs résiduel quand on revient au dashboard conseil
+  try {
+    sessionStorage.removeItem('conseil_viewAs');
+    sessionStorage.removeItem('conseil_viewAsName');
+    sessionStorage.removeItem('conseil_viewAsEmail');
+  } catch(_) {}
+
+  loadClients();
+});
+</script>
+
+</body>
+</html>

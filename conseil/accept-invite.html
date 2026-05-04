@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Accepter l'invitation — Alteore Conseil</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { background: #f0f1f3; }
+  .conseil-accept-wrap {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .conseil-accept-card {
+    width: 100%;
+    max-width: 480px;
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+  }
+  .conseil-accept-header {
+    background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+    color: #fff;
+    padding: 28px 32px;
+    text-align: center;
+  }
+  .conseil-accept-header h1 {
+    margin: 0 0 6px;
+    font-size: 20px;
+    font-weight: 600;
+  }
+  .conseil-accept-header p {
+    margin: 0;
+    color: #fdba74;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .conseil-accept-body {
+    padding: 28px 32px;
+  }
+  .conseil-invite-info {
+    background: #f9fafb;
+    border-left: 3px solid #fb923c;
+    padding: 14px 18px;
+    border-radius: 8px;
+    margin-bottom: 24px;
+    font-size: 14px;
+    color: #374151;
+    line-height: 1.6;
+  }
+  .conseil-invite-info strong {
+    color: #111827;
+  }
+  .conseil-form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 480px) {
+    .conseil-form-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="conseil-accept-wrap">
+  <div class="conseil-accept-card">
+
+    <div class="conseil-accept-header">
+      <h1>Acceptez l'invitation</h1>
+      <p>Alteore Conseil</p>
+    </div>
+
+    <div class="conseil-accept-body" id="acceptBody">
+      <div class="conseil-loader">
+        <span class="conseil-spinner"></span>
+        Vérification de l'invitation...
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<footer class="conseil-footer">
+  <a href="index.html">← Retour</a>
+</footer>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { initializeFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey: "AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+  authDomain: "altiora-70599.firebaseapp.com",
+  projectId: "altiora-70599",
+  storageBucket: "altiora-70599.firebasestorage.app",
+  messagingSenderId: "120905555746",
+  appId: "1:120905555746:web:618460c65cdc9e57cc8f7b"
+});
+const auth = getAuth(app);
+const db   = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+
+const $body = document.getElementById('acceptBody');
+const params = new URLSearchParams(location.search);
+const token = (params.get('token') || '').trim();
+
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function durationLabel(d) {
+  if (d === '7d')  return '7 jours';
+  if (d === '30d') return '30 jours';
+  if (d === '90d') return '90 jours';
+  if (d === 'permanent') return 'Permanent';
+  return d || 'Non défini';
+}
+
+function showError(msg) {
+  $body.innerHTML = ''
+    + '<div class="conseil-feedback error" style="display:block;">'
+    + escHtml(msg)
+    + '</div>'
+    + '<p style="text-align:center;margin-top:20px;">'
+    + '<a href="index.html" class="conseil-btn conseil-btn-secondary">Retour à l\'accueil</a>'
+    + '</p>';
+}
+
+async function loadInvitation() {
+  if (!token) { showError('Lien d\'invitation invalide ou incomplet.'); return; }
+
+  try {
+    const inv = await getDoc(doc(db, 'conseil_invitations', token));
+    if (!inv.exists()) { showError('Cette invitation n\'existe pas ou a été révoquée.'); return; }
+    const data = inv.data();
+
+    if (data.status === 'accepted') {
+      showError('Cette invitation a déjà été acceptée. Connectez-vous directement.');
+      return;
+    }
+    if (data.status === 'revoked') {
+      showError('Cette invitation a été révoquée.'); return;
+    }
+
+    const expIso = data.inviteExpiresAt && data.inviteExpiresAt.toDate
+      ? data.inviteExpiresAt.toDate().toISOString()
+      : (typeof data.inviteExpiresAt === 'string' ? data.inviteExpiresAt : null);
+    if (expIso && new Date(expIso) < new Date()) {
+      showError('Cette invitation a expiré. Demandez à votre client d\'en créer une nouvelle.'); return;
+    }
+
+    renderForm(data);
+
+  } catch (err) {
+    showError('Impossible de charger l\'invitation : ' + (err.message || err));
+  }
+}
+
+function renderForm(invData) {
+  const clientName    = escHtml(invData.clientName || 'Le client');
+  const clientEmail   = escHtml(invData.clientEmail || '');
+  const inviteEmail   = escHtml(invData.conseillerEmail || '');
+  const suggestedName = escHtml(invData.conseillerName || '');
+  const dur           = escHtml(durationLabel(invData.duration));
+
+  $body.innerHTML = ''
+    + '<div class="conseil-invite-info">'
+    + '<strong>' + clientName + '</strong>' + (clientEmail ? ' (' + clientEmail + ')' : '')
+    + ' vous invite à consulter sa gestion financière sur Alteore.'
+    + '<br><br>'
+    + '<strong>Durée :</strong> ' + dur
+    + '<br><strong>Mode :</strong> Lecture seule'
+    + '</div>'
+    + '<div id="step-mode" style="margin-bottom:24px;">'
+    + '  <label class="conseil-label">Avez-vous déjà un compte conseiller ?</label>'
+    + '  <div style="display:flex;gap:8px;">'
+    + '    <button type="button" class="conseil-btn conseil-btn-secondary conseil-btn-block" data-mode="signup">Créer mon compte</button>'
+    + '    <button type="button" class="conseil-btn conseil-btn-secondary conseil-btn-block" data-mode="signin">J\'ai déjà un compte</button>'
+    + '  </div>'
+    + '</div>'
+
+    // Formulaire signup (caché par défaut)
+    + '<form id="signupForm" style="display:none;" onsubmit="return false;">'
+    + '  <div class="conseil-form-group">'
+    + '    <label class="conseil-label">Email</label>'
+    + '    <input class="conseil-input" type="email" id="su-email" value="' + inviteEmail + '" readonly>'
+    + '    <p class="conseil-hint">Cette adresse correspond à l\'invitation. Elle ne peut pas être modifiée.</p>'
+    + '  </div>'
+    + '  <div class="conseil-form-group">'
+    + '    <label class="conseil-label">Mot de passe (8 caractères min.)</label>'
+    + '    <input class="conseil-input" type="password" id="su-pwd" minlength="8" autocomplete="new-password">'
+    + '  </div>'
+    + '  <div class="conseil-form-row">'
+    + '    <div class="conseil-form-group">'
+    + '      <label class="conseil-label">Votre nom</label>'
+    + '      <input class="conseil-input" type="text" id="su-name" value="' + suggestedName + '" maxlength="80">'
+    + '    </div>'
+    + '    <div class="conseil-form-group">'
+    + '      <label class="conseil-label">Vous êtes</label>'
+    + '      <select class="conseil-select" id="su-type">'
+    + '        <option value="comptable">Comptable</option>'
+    + '        <option value="coach">Coach business</option>'
+    + '        <option value="autre">Autre</option>'
+    + '      </select>'
+    + '    </div>'
+    + '  </div>'
+    + '  <div class="conseil-form-group">'
+    + '    <label class="conseil-label">Cabinet (optionnel)</label>'
+    + '    <input class="conseil-input" type="text" id="su-cabinet" maxlength="120" placeholder="Cabinet Dupont & Associés">'
+    + '  </div>'
+    + '  <button type="button" class="conseil-btn conseil-btn-primary conseil-btn-block" id="su-submit">Créer mon compte et accéder</button>'
+    + '</form>'
+
+    // Formulaire signin (caché par défaut)
+    + '<form id="signinForm" style="display:none;" onsubmit="return false;">'
+    + '  <div class="conseil-form-group">'
+    + '    <label class="conseil-label">Email</label>'
+    + '    <input class="conseil-input" type="email" id="si-email" value="' + inviteEmail + '" autocomplete="email">'
+    + '  </div>'
+    + '  <div class="conseil-form-group">'
+    + '    <label class="conseil-label">Mot de passe</label>'
+    + '    <input class="conseil-input" type="password" id="si-pwd" autocomplete="current-password">'
+    + '  </div>'
+    + '  <button type="button" class="conseil-btn conseil-btn-primary conseil-btn-block" id="si-submit">Me connecter et accepter l\'invitation</button>'
+    + '</form>'
+
+    + '<div id="acceptFb" class="conseil-feedback" style="display:none;"></div>';
+
+  document.querySelectorAll('[data-mode]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var mode = btn.getAttribute('data-mode');
+      document.getElementById('step-mode').style.display = 'none';
+      if (mode === 'signup') {
+        document.getElementById('signupForm').style.display = 'block';
+      } else {
+        document.getElementById('signinForm').style.display = 'block';
+      }
+    });
+  });
+
+  document.getElementById('su-submit').addEventListener('click', function() { handleSignup(invData); });
+  document.getElementById('si-submit').addEventListener('click', function() { handleSignin(invData); });
+}
+
+function showAcceptFb(msg, kind) {
+  var el = document.getElementById('acceptFb');
+  if (!el) return;
+  if (!msg) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  el.textContent = msg;
+  el.className = 'conseil-feedback ' + (kind || 'error');
+}
+
+async function handleSignup(invData) {
+  const email = (document.getElementById('su-email').value || '').trim();
+  const pwd   = document.getElementById('su-pwd').value || '';
+  const name  = (document.getElementById('su-name').value || '').trim();
+  const type  = document.getElementById('su-type').value || 'autre';
+  const cab   = (document.getElementById('su-cabinet').value || '').trim();
+  const btn   = document.getElementById('su-submit');
+
+  if (!email)        { showAcceptFb('Email manquant', 'error'); return; }
+  if (pwd.length < 8){ showAcceptFb('Mot de passe trop court (8 caractères min.)', 'error'); return; }
+  if (!name)         { showAcceptFb('Votre nom est requis', 'error'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Création du compte...';
+  showAcceptFb('', '');
+
+  try {
+    // 1. Créer le compte Firebase Auth
+    const cred = await createUserWithEmailAndPassword(auth, email, pwd);
+    const idToken = await cred.user.getIdToken();
+
+    // 2. Appeler l'API pour finaliser (profil + grant + index)
+    btn.textContent = 'Activation de l\'accès...';
+    const resp = await fetch('/api/conseil-accept-invite', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + idToken
+      },
+      body: JSON.stringify({
+        token: token,
+        displayName: name,
+        cabinet: cab,
+        type: type
+      })
+    });
+    const data = await resp.json().catch(function() { return {}; });
+    if (!resp.ok) throw new Error(data.error || 'Erreur lors de l\'acceptation');
+
+    showAcceptFb('✓ Compte créé. Redirection...', 'ok');
+    setTimeout(function() { location.href = 'dashboard.html'; }, 800);
+
+  } catch (err) {
+    var msg = err.message || 'Erreur';
+    if (err.code === 'auth/email-already-in-use') {
+      msg = 'Cet email a déjà un compte. Cliquez sur "J\'ai déjà un compte" pour vous connecter.';
+    }
+    showAcceptFb(msg, 'error');
+    btn.disabled = false;
+    btn.textContent = 'Créer mon compte et accéder';
+  }
+}
+
+async function handleSignin(invData) {
+  const email = (document.getElementById('si-email').value || '').trim();
+  const pwd   = document.getElementById('si-pwd').value || '';
+  const btn   = document.getElementById('si-submit');
+
+  if (!email || !pwd) { showAcceptFb('Email et mot de passe requis', 'error'); return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Connexion...';
+  showAcceptFb('', '');
+
+  try {
+    const cred = await signInWithEmailAndPassword(auth, email, pwd);
+    const idToken = await cred.user.getIdToken();
+
+    // Vérifier que l'email connecté correspond à celui de l'invitation
+    if ((invData.conseillerEmail || '').toLowerCase() !== (cred.user.email || '').toLowerCase()) {
+      showAcceptFb('Cette invitation est pour ' + (invData.conseillerEmail || '') + ' — veuillez vous connecter avec cette adresse.', 'error');
+      try { await auth.signOut(); } catch(_) {}
+      btn.disabled = false;
+      btn.textContent = 'Me connecter et accepter l\'invitation';
+      return;
+    }
+
+    btn.textContent = 'Activation de l\'accès...';
+    const resp = await fetch('/api/conseil-accept-invite', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + idToken
+      },
+      body: JSON.stringify({ token: token })
+    });
+    const data = await resp.json().catch(function() { return {}; });
+    if (!resp.ok) throw new Error(data.error || 'Erreur lors de l\'acceptation');
+
+    showAcceptFb('✓ Accès activé. Redirection...', 'ok');
+    setTimeout(function() { location.href = 'dashboard.html'; }, 800);
+
+  } catch (err) {
+    showAcceptFb(err.message || 'Email ou mot de passe incorrect', 'error');
+    btn.disabled = false;
+    btn.textContent = 'Me connecter et accepter l\'invitation';
+  }
+}
+
+loadInvitation();
+</script>
+
+</body>
+</html>
