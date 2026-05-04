@@ -166,11 +166,8 @@
         sessionStorage.removeItem('conseil_viewAsName');
         sessionStorage.removeItem('conseil_viewAsEmail');
       } catch(e) {}
-      // Domain-aware : on retourne sur le sous-domaine conseil
-      var conseilHost = location.hostname.indexOf('conseil.') === 0
-        ? location.origin
-        : (location.protocol + '//conseil.' + location.hostname.replace(/^www\./, ''));
-      location.href = conseilHost + '/dashboard.html';
+      // L'espace conseiller est sur le path /conseil/ du domaine principal
+      location.href = '/conseil/dashboard.html';
     },
 
     // Envoi d'un message au client (modale + appel API)
