@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Connexion — Alteore Conseil</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { background: #f0f1f3; }
+  .conseil-login-wrap {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .conseil-login-card {
+    width: 100%;
+    max-width: 400px;
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+    overflow: hidden;
+  }
+  .conseil-login-header {
+    padding: 32px 32px 24px;
+    text-align: center;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .conseil-login-mark {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #fb923c 0%, #f97316 100%);
+    margin: 0 auto 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-weight: 700;
+    font-size: 20px;
+  }
+  .conseil-login-header h1 {
+    margin: 0 0 4px;
+    font-size: 18px;
+    font-weight: 600;
+    color: #111827;
+  }
+  .conseil-login-header p {
+    margin: 0;
+    font-size: 13px;
+    color: #6b7280;
+  }
+  .conseil-login-body {
+    padding: 28px 32px 32px;
+  }
+</style>
+</head>
+<body>
+
+<div class="conseil-login-wrap">
+  <div class="conseil-login-card">
+
+    <div class="conseil-login-header">
+      <div class="conseil-login-mark">A</div>
+      <h1>Alteore Conseil</h1>
+      <p>Connexion à votre espace conseiller</p>
+    </div>
+
+    <div class="conseil-login-body">
+      <div class="conseil-form-group">
+        <label class="conseil-label" for="email">Email</label>
+        <input class="conseil-input" type="email" id="email" autocomplete="email" placeholder="vous@cabinet.fr">
+      </div>
+      <div class="conseil-form-group">
+        <label class="conseil-label" for="password">Mot de passe</label>
+        <input class="conseil-input" type="password" id="password" autocomplete="current-password" placeholder="••••••••">
+      </div>
+      <button id="loginBtn" class="conseil-btn conseil-btn-primary conseil-btn-block">Se connecter</button>
+      <div id="feedback" class="conseil-feedback" style="display:none;"></div>
+      <p class="conseil-hint" style="margin-top:18px;text-align:center;">
+        Pas encore de compte ? Vous devez avoir reçu un <strong>lien d'invitation</strong> par email de la part d'un client.
+      </p>
+    </div>
+
+  </div>
+</div>
+
+<footer class="conseil-footer">
+  <a href="index.html">← Retour</a>
+</footer>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { initializeFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey: "AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+  authDomain: "altiora-70599.firebaseapp.com",
+  projectId: "altiora-70599",
+  storageBucket: "altiora-70599.firebasestorage.app",
+  messagingSenderId: "120905555746",
+  appId: "1:120905555746:web:618460c65cdc9e57cc8f7b"
+});
+const auth = getAuth(app);
+const db   = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+
+const $email    = document.getElementById('email');
+const $pwd      = document.getElementById('password');
+const $btn      = document.getElementById('loginBtn');
+const $feedback = document.getElementById('feedback');
+
+function showFb(msg, kind) {
+  if (!msg) { $feedback.style.display = 'none'; return; }
+  $feedback.style.display = 'block';
+  $feedback.textContent = msg;
+  $feedback.className = 'conseil-feedback ' + (kind || 'error');
+}
+
+async function doLogin() {
+  const email = ($email.value || '').trim();
+  const pwd   = $pwd.value || '';
+  if (!email || !pwd) { showFb('Email et mot de passe requis.', 'error'); return; }
+  $btn.disabled = true;
+  $btn.textContent = 'Connexion...';
+  showFb('', '');
+  try {
+    const cred = await signInWithEmailAndPassword(auth, email, pwd);
+    // Vérifier que c'est bien un conseiller
+    const conseillerSnap = await getDoc(doc(db, 'conseillers', cred.user.uid));
+    if (!conseillerSnap.exists()) {
+      showFb('Ce compte n\'est pas un compte conseiller. Demandez à votre client de vous envoyer un lien d\'invitation.', 'error');
+      // Sign out pour ne pas laisser l'utilisateur dans un état hybride
+      try { await auth.signOut(); } catch(_) {}
+      $btn.disabled = false;
+      $btn.textContent = 'Se connecter';
+      return;
+    }
+    location.href = 'dashboard.html';
+  } catch (err) {
+    var msg = 'Email ou mot de passe incorrect.';
+    if (err && err.code === 'auth/too-many-requests') {
+      msg = 'Trop de tentatives. Réessayez dans quelques minutes.';
+    } else if (err && err.code === 'auth/network-request-failed') {
+      msg = 'Problème de connexion réseau.';
+    }
+    showFb(msg, 'error');
+    $btn.disabled = false;
+    $btn.textContent = 'Se connecter';
+  }
+}
+
+$btn.addEventListener('click', doLogin);
+$pwd.addEventListener('keydown', function(e) { if (e.key === 'Enter') doLogin(); });
+$email.addEventListener('keydown', function(e) { if (e.key === 'Enter') $pwd.focus(); });
+
+// Si déjà connecté ET conseiller → redirect
+onAuthStateChanged(auth, async function(user) {
+  if (!user) return;
+  try {
+    const snap = await getDoc(doc(db, 'conseillers', user.uid));
+    if (snap.exists()) {
+      location.replace('dashboard.html');
+    }
+  } catch (e) {}
+});
+</script>
+
+</body>
+</html>
