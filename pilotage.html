@@ -2746,8 +2746,10 @@ function renderMasseSalariale(data, t, forceRender) {
     '<option value="prelevement"' + (dir.type === 'prelevement' ? ' selected' : '') + '>Prélèvement privé (EARL, GAEC, BNC…)</option>' +
     '</select></div>' +
     '<table class="data-table"><thead><tr><th>Type</th><th>Montant mensuel (€)</th><th>Taux charges (%)</th><th>Coût total (€)</th></tr></thead><tbody>' +
-    '<tr><td style="font-weight:600">💰 Rémunération</td>' +
-    '<td><input class="cell-input" style="width:90px;text-align:right" type="text" inputmode="decimal" value="' + (dir.remuneration || '') + '" placeholder="0.00" oninput="_data.masseSalariale.dirigeant.remuneration=this.value;window._dirTauxUrssafOk=false;var _b=document.getElementById(\'ms-dir-urssaf-badge\');if(_b)_b.innerHTML=\'\';refreshTotals();scheduleDirURSSAF()"/></td>' +
+    '<tr><td style="font-weight:600">💰 Rémunération brute ' + (window.CalcHelpers ? window.CalcHelpers.tooltipIcon('remuneration_dirigeant_brut') : '') + '</td>' +
+    '<td><input class="cell-input" style="width:90px;text-align:right" type="text" inputmode="decimal" value="' + (dir.remuneration || '') + '" placeholder="0.00" oninput="_data.masseSalariale.dirigeant.remuneration=this.value;window._dirTauxUrssafOk=false;window._dirNetEstime=null;var _b=document.getElementById(\'ms-dir-urssaf-badge\');if(_b)_b.innerHTML=\'\';var _ne=document.getElementById(\'ms-dir-net-estime\');if(_ne)_ne.textContent=\'\';refreshTotals();scheduleDirURSSAF()"/>' +
+      '<div id="ms-dir-net-estime" style="font-size:10px;color:var(--muted);margin-top:3px;text-align:right;font-style:italic">' + (window._dirNetEstime > 0 && !isPrelevement ? '≈ ' + window._dirNetEstime.toLocaleString('fr-FR', {maximumFractionDigits:0}) + ' € net' : '') + '</div>' +
+    '</td>' +
     '<td style="text-align:center"><input class="cell-input" id="ms-dir-taux" style="width:55px;text-align:center" type="number" value="' + tauxDir + '" min="0" max="100" step="1" oninput="var v=parseFloat(this.value);_data.masseSalariale.dirigeant.tauxCharges=isNaN(v)?45:v;window._dirTauxUrssafOk=false;var _b=document.getElementById(\'ms-dir-urssaf-badge\');if(_b)_b.innerHTML=\'\';refreshTotals()"/>' +
       '<div id="ms-dir-urssaf-badge" style="margin-top:3px;min-height:14px">' + (window._dirTauxUrssafOk && !isPrelevement ? '<span style="font-size:9px;font-weight:700;background:#d1fae5;color:#065f46;padding:1px 5px;border-radius:6px;cursor:help" title="Taux calculé via mon-entreprise.urssaf.fr (simulateur officiel URSSAF). Inclut : sécu, retraite de base et complémentaire, CSG/CRDS. N\'inclut PAS : Madelin, mutuelle/prévoyance personnelle, forfait 1re/2e année.">🔗 URSSAF officiel</span>' : '') + '</div>' +
     '</td>' +
@@ -2950,8 +2952,11 @@ function onDirTypeChange(val) {
   if (el) el.value = d;
   // Le taux par défaut n'est plus garanti officiel — on retire le badge en attendant le refetch
   window._dirTauxUrssafOk = false;
+  window._dirNetEstime = null;
   var _badge = document.getElementById('ms-dir-urssaf-badge');
   if (_badge) _badge.innerHTML = '';
+  var _netEl = document.getElementById('ms-dir-net-estime');
+  if (_netEl) _netEl.textContent = '';
   refreshTotals();
   if (val !== 'prelevement') scheduleDirURSSAF();
 }
@@ -3022,6 +3027,9 @@ async function fetchAllURSSAF() {
   if (dirResult && dirResult.tauxEffectif !== null) {
     _data.masseSalariale.dirigeant.tauxCharges = dirResult.tauxEffectif;
     window._dirTauxUrssafOk = true;
+    // Net estimé renvoyé par l'API : netMensuel pour TNS, netAvantImpot pour assimilé
+    var _netEst = (dirResult.netMensuel != null ? dirResult.netMensuel : dirResult.netAvantImpot);
+    if (_netEst > 0) window._dirNetEstime = _netEst;
     updated++;
   } else if (remDir > 0 && dir.type !== 'prelevement' && !dirResult) {
     errors++;
@@ -3073,6 +3081,13 @@ function scheduleDirURSSAF() {
           window._dirTauxUrssafOk = true;
           var _b = document.getElementById('ms-dir-urssaf-badge');
           if (_b) _b.innerHTML = '<span style="font-size:9px;font-weight:700;background:#d1fae5;color:#065f46;padding:1px 5px;border-radius:6px;cursor:help" title="Taux calculé via mon-entreprise.urssaf.fr (simulateur officiel URSSAF). Inclut : sécu, retraite de base et complémentaire, CSG/CRDS. N\'inclut PAS : Madelin, mutuelle/prévoyance personnelle, forfait 1re/2e année.">🔗 URSSAF officiel</span>';
+          // Net estimé renvoyé par l'API : netMensuel pour TNS, netAvantImpot pour assimilé
+          var _netEst = (d.netMensuel != null ? d.netMensuel : d.netAvantImpot);
+          if (_netEst > 0) {
+            window._dirNetEstime = _netEst;
+            var _ne = document.getElementById('ms-dir-net-estime');
+            if (_ne) _ne.textContent = '≈ ' + Math.round(_netEst).toLocaleString('fr-FR') + ' € net';
+          }
           refreshTotals();
         }
       }

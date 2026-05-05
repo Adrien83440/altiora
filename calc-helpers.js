@@ -945,6 +945,12 @@
       title: 'TVA collectée — méthode CA3',
       short: 'Calcul officiel : base HT × taux. La valeur "CA3" en dessous est arrondie à l\'euro — c\'est ce que vous reportez sur votre déclaration aux impôts.',
       long: 'Votre caisse certifiée calcule la TVA ticket par ticket et arrondit au centime sur chaque ticket avant de sommer. Pilotage agrège votre CA et calcule la TVA sur le total — un seul arrondi final. Les deux méthodes sont valides comptablement, mais elles peuvent diverger de quelques centimes par jour (c\'est mathématiquement inévitable, l\'erreur d\'agrégation des arrondis). Pour votre déclaration de TVA (formulaire 3310-CA3 sur impots.gouv.fr), tous les montants se déclarent à l\'euro entier : l\'écart de centimes disparaît automatiquement. La caisse NF525 reste la référence légale pour la TVA réellement encaissée sur les tickets — Pilotage vous donne la vue consolidée mensuelle pour piloter votre marge et anticiper votre TVA à payer.'
+    },
+
+    remuneration_dirigeant_brut: {
+      title: 'Rémunération brute du dirigeant',
+      short: 'Saisissez le BRUT mensuel (avant cotisations URSSAF). Pilotage calcule automatiquement le coût total et le net estimé.',
+      long: 'Pour un TNS (gérant majoritaire SARL/EURL/EI), le brut = la rémunération que la société te verse — c\'est l\'assiette sur laquelle l\'URSSAF calcule tes cotisations. Tu paieras ensuite tes cotisations sur ce montant, et le net qui te reste réellement est affiché en dessous du champ. Pour un assimilé salarié (président SAS/SASU), le brut = le salaire avant cotisations salariales — la société paie en plus ~75% de cotisations patronales par-dessus. Si tu hésites : utilise le montant qui apparaît sur ta fiche de paie en case "Salaire brut" (assimilé) ou la rémunération que tu te verses depuis le compte de la société (TNS). Le système te montre le coût total pour la société (à droite) et le net estimé (sous le champ) pour que tu pilotes ton vrai revenu.'
     }
   };
 
