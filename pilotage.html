@@ -2752,6 +2752,7 @@ function renderMasseSalariale(data, t, forceRender) {
     '</td>' +
     '<td style="text-align:center"><input class="cell-input" id="ms-dir-taux" style="width:55px;text-align:center" type="number" value="' + tauxDir + '" min="0" max="100" step="1" oninput="var v=parseFloat(this.value);_data.masseSalariale.dirigeant.tauxCharges=isNaN(v)?45:v;window._dirTauxUrssafOk=false;var _b=document.getElementById(\'ms-dir-urssaf-badge\');if(_b)_b.innerHTML=\'\';refreshTotals()"/>' +
       '<div id="ms-dir-urssaf-badge" style="margin-top:3px;min-height:14px">' + (window._dirTauxUrssafOk && !isPrelevement ? '<span style="font-size:9px;font-weight:700;background:#d1fae5;color:#065f46;padding:1px 5px;border-radius:6px;cursor:help" title="Taux calculé via mon-entreprise.urssaf.fr (simulateur officiel URSSAF). Inclut : sécu, retraite de base et complémentaire, CSG/CRDS. N\'inclut PAS : Madelin, mutuelle/prévoyance personnelle, forfait 1re/2e année.">🔗 URSSAF officiel</span>' : '') + '</div>' +
+      '<div id="ms-dir-taux-sublabel" style="font-size:9px;color:var(--muted);margin-top:2px;font-style:italic">' + (isPrelevement ? '' : (dir.type === 'tns' ? 'URSSAF total' : 'patronales · +22% sal. dans brut')) + '</div>' +
     '</td>' +
     '<td style="text-align:right;font-weight:700;color:#f59e0b"><span id="ms-dir-cout">' + fmtN(coutDir) + '</span> €</td></tr>' +
     '<tr><td style="font-weight:600">💸 Dividendes /mois</td>' +
@@ -2760,7 +2761,24 @@ function renderMasseSalariale(data, t, forceRender) {
     '<td style="text-align:right;font-weight:700;color:#f59e0b"><span id="ms-dir-divCout">' + fmtN(coutDiv) + '</span> €</td></tr>' +
     '<tr style="border-top:2px solid var(--border);font-weight:800"><td>TOTAL DIRIGEANT</td><td></td><td></td><td style="text-align:right;color:#f59e0b"><span id="tot-msDir">' + fmtN(msCalc.dirigeant) + '</span> €</td></tr>' +
     '</tbody></table>' +
-    (isPrelevement ? '<div style="margin-top:8px;padding:8px 12px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:8px;font-size:11px;color:#6366f1;display:flex;align-items:center;gap:6px">ℹ️ <b>Prélèvement privé</b> — Ce montant est affiché à titre informatif et <b>exclu du calcul des charges et du résultat</b>. Votre résultat reflète le bénéfice fiscal avant prélèvement.</div>' : '<div style="margin-top:8px;padding:8px 12px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:8px;font-size:10.5px;color:#92400e;line-height:1.5">⚠️ <b>Limites du calcul URSSAF</b> — Le taux est valide en régime de croisière (à partir de la 3<sup>e</sup> année). En 1<sup>re</sup>/2<sup>e</sup> année, les TNS paient un forfait provisoire bien plus faible. Le calcul ne tient pas compte des contrats <b>Madelin</b> déductibles, du régime <b>micro-entrepreneur</b> (forfait sur CA), ni d\'<b>Alsace-Moselle</b>. Ajuste manuellement le taux si l\'un de ces cas te concerne. <b>Mutuelle, prévoyance et sur-complémentaire retraite</b> personnelles → à mettre en <b>Charges fixes</b>.</div>') +
+    (isPrelevement
+      ? '<div style="margin-top:8px;padding:8px 12px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:8px;font-size:11px;color:#6366f1;display:flex;align-items:center;gap:6px">ℹ️ <b>Prélèvement privé</b> — Ce montant est affiché à titre informatif et <b>exclu du calcul des charges et du résultat</b>. Votre résultat reflète le bénéfice fiscal avant prélèvement.</div>'
+      : (dir.type === 'Assimilé salarié'
+        ? '<div style="margin-top:8px;padding:10px 14px;background:linear-gradient(135deg,#eff6ff,#f0f9ff);border:1px solid #bfdbfe;border-radius:10px;font-size:11px;color:#1e3a8a;line-height:1.6">' +
+            '<div style="font-weight:700;margin-bottom:6px;color:#1e40af">💡 Comment ça marche en SAS/SASU</div>' +
+            'Sur ton brut de <span id="ms-sas-brut" style="font-weight:700">' + (remDir > 0 ? remDir.toLocaleString('fr-FR') : '—') + '</span> €, Pilotage calcule automatiquement <b>toutes les cotisations</b> :<br>' +
+            '<span style="display:inline-block;margin-top:4px">▸ <b>Cotisations patronales</b> (~42%) = <span id="ms-sas-pat" style="font-weight:700">' + (remDir > 0 ? Math.round(remDir * 0.42).toLocaleString('fr-FR') : '—') + '</span> € — payées par la société <i>en plus</i> du brut</span><br>' +
+            '<span style="display:inline-block">▸ <b>Cotisations salariales</b> (~22%) = <span id="ms-sas-sal" style="font-weight:700">' + (remDir > 0 ? Math.round(remDir * 0.22).toLocaleString('fr-FR') : '—') + '</span> € — <i>déjà déduites</i> du brut</span><br>' +
+            '<div style="margin-top:8px;padding-top:8px;border-top:1px solid #bfdbfe;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px">' +
+              '<span>📤 <b>Net pour toi</b> : <span id="ms-sas-net" style="font-weight:700;color:#059669">' + (remDir > 0 ? Math.round(remDir * 0.78).toLocaleString('fr-FR') : '—') + '</span> €</span>' +
+              '<span>🏢 <b>Coût société</b> : <span id="ms-sas-cout" style="font-weight:700;color:#dc2626">' + (remDir > 0 ? Math.round(remDir * 1.42).toLocaleString('fr-FR') : '—') + '</span> €</span>' +
+              '<span style="color:#6366f1">✅ Toutes les cotisations URSSAF, retraite, CSG/CRDS sont incluses</span>' +
+            '</div>' +
+            '<div style="margin-top:6px;font-size:10px;color:#475569;font-style:italic">Mutuelle, prévoyance personnelle et sur-complémentaire retraite restent à ajouter en Charges fixes (contrats annexes).</div>' +
+          '</div>'
+        : '<div style="margin-top:8px;padding:8px 12px;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.2);border-radius:8px;font-size:10.5px;color:#92400e;line-height:1.5">⚠️ <b>Limites du calcul URSSAF (TNS)</b> — Le taux est valide en régime de croisière (à partir de la 3<sup>e</sup> année). En 1<sup>re</sup>/2<sup>e</sup> année, les TNS paient un forfait provisoire bien plus faible. Le calcul ne tient pas compte des contrats <b>Madelin</b> déductibles, du régime <b>micro-entrepreneur</b> (forfait sur CA), ni d\'<b>Alsace-Moselle</b>. Ajuste manuellement le taux si l\'un de ces cas te concerne. <b>Mutuelle, prévoyance et sur-complémentaire retraite</b> personnelles → à mettre en <b>Charges fixes</b>.</div>'
+      )
+    ) +
     '</div>';
 
   // Section Primes & Objectifs
@@ -2948,15 +2966,21 @@ function onDirTypeChange(val) {
   var d = TAUX_DEFAUT[val];
   if (d === undefined) d = 45;
   _data.masseSalariale.dirigeant.tauxCharges = d;
-  var el = document.getElementById('ms-dir-taux');
-  if (el) el.value = d;
-  // Le taux par défaut n'est plus garanti officiel — on retire le badge en attendant le refetch
+  // Reset des flags runtime (badge URSSAF + net estimé) avant re-render
   window._dirTauxUrssafOk = false;
   window._dirNetEstime = null;
-  var _badge = document.getElementById('ms-dir-urssaf-badge');
-  if (_badge) _badge.innerHTML = '';
-  var _netEl = document.getElementById('ms-dir-net-estime');
-  if (_netEl) _netEl.textContent = '';
+  // Re-render complet de la section masse salariale : ça met à jour
+  // automatiquement la note pédagogique (SAS vs TNS vs Prélèvement), le
+  // sous-libellé du taux ('URSSAF total' vs 'patronales · +22%'), le badge
+  // URSSAF et le sub-text net qui dépendent tous de dir.type.
+  // Pattern emprunté au lazy renderer existant (ligne ~2140).
+  var body = document.getElementById('ms-body');
+  if (body) {
+    var t2 = calcTotals(_data);
+    var full = renderMasseSalariale(_data, t2, true);
+    var card = document.getElementById('sec-ms');
+    if (card) card.outerHTML = full;
+  }
   refreshTotals();
   if (val !== 'prelevement') scheduleDirURSSAF();
 }
@@ -4820,6 +4844,20 @@ function refreshTotals() {
   var dirR=pf((_data.masseSalariale||{}).dirigeant&&_data.masseSalariale.dirigeant.remuneration);
   var dirT=parseFloat(((_data.masseSalariale||{}).dirigeant||{}).tauxCharges);if(isNaN(dirT))dirT=45;
   s('ms-dir-cout',dirR*(1+dirT/100));
+  // Spans dynamiques de la note explicative SAS (n'existent que si dir.type === 'Assimilé salarié')
+  // Tous les calculs utilisent le tauxCharges courant (dirT) pour la part patronale,
+  // et 22% pour la part salariale (constante hors cas particuliers).
+  var _sasFr = function(v) { return Math.round(v).toLocaleString('fr-FR'); };
+  var _sasBrutEl = document.getElementById('ms-sas-brut');
+  if (_sasBrutEl) _sasBrutEl.textContent = dirR > 0 ? _sasFr(dirR) : '—';
+  var _sasPatEl = document.getElementById('ms-sas-pat');
+  if (_sasPatEl) _sasPatEl.textContent = dirR > 0 ? _sasFr(dirR * dirT / 100) : '—';
+  var _sasSalEl = document.getElementById('ms-sas-sal');
+  if (_sasSalEl) _sasSalEl.textContent = dirR > 0 ? _sasFr(dirR * 0.22) : '—';
+  var _sasNetEl = document.getElementById('ms-sas-net');
+  if (_sasNetEl) _sasNetEl.textContent = dirR > 0 ? _sasFr(dirR * 0.78) : '—';
+  var _sasCoutEl = document.getElementById('ms-sas-cout');
+  if (_sasCoutEl) _sasCoutEl.textContent = dirR > 0 ? _sasFr(dirR * (1 + dirT / 100)) : '—';
   var divR=pf(((_data.masseSalariale||{}).dirigeant||{}).dividendes);
   var divT=parseFloat(((_data.masseSalariale||{}).dirigeant||{}).tauxDividendes);if(isNaN(divT))divT=30;
   s('ms-dir-divCout',divR*(1+divT/100));
