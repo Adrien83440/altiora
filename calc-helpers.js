@@ -939,6 +939,12 @@
       title: 'Seuil de rentabilité',
       short: 'Le CA minimum à réaliser pour ne pas perdre d\'argent.',
       long: 'Au-dessus de ce seuil, chaque euro de CA supplémentaire contribue directement au bénéfice. En-dessous, votre activité est déficitaire. Il est calculé à partir de vos charges fixes et de votre taux de marge sur coûts variables.'
+    },
+
+    tva_collectee_ca3: {
+      title: 'TVA collectée — méthode CA3',
+      short: 'Calcul officiel : base HT × taux. La valeur "CA3" en dessous est arrondie à l\'euro — c\'est ce que vous reportez sur votre déclaration aux impôts.',
+      long: 'Votre caisse certifiée calcule la TVA ticket par ticket et arrondit au centime sur chaque ticket avant de sommer. Pilotage agrège votre CA et calcule la TVA sur le total — un seul arrondi final. Les deux méthodes sont valides comptablement, mais elles peuvent diverger de quelques centimes par jour (c\'est mathématiquement inévitable, l\'erreur d\'agrégation des arrondis). Pour votre déclaration de TVA (formulaire 3310-CA3 sur impots.gouv.fr), tous les montants se déclarent à l\'euro entier : l\'écart de centimes disparaît automatiquement. La caisse NF525 reste la référence légale pour la TVA réellement encaissée sur les tickets — Pilotage vous donne la vue consolidée mensuelle pour piloter votre marge et anticiper votre TVA à payer.'
     }
   };
 
