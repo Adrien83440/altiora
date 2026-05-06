@@ -737,6 +737,106 @@ html, body { overflow-x: hidden; max-width: 100vw; }
   </div>
 </div>
 
+<!-- MODAL RENÉGOCIATION -->
+<div class="overlay" id="renegOverlay">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="renegTitle">📝 Renégocier le crédit</h3>
+      <button class="modal-close" onclick="closeRenegocierModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Date d'effet de la renégociation</div>
+      <div class="mgrid2" style="margin-bottom:6px">
+        <div class="mfield">
+          <label>Mois</label>
+          <div class="mfield-wrap">
+            <select class="mfield-in" id="reneg-mois" onchange="onRenegDateChange()">
+              <option value="">—</option>
+              <option value="01">Janvier</option><option value="02">Février</option><option value="03">Mars</option><option value="04">Avril</option><option value="05">Mai</option><option value="06">Juin</option>
+              <option value="07">Juillet</option><option value="08">Août</option><option value="09">Septembre</option><option value="10">Octobre</option><option value="11">Novembre</option><option value="12">Décembre</option>
+            </select>
+          </div>
+        </div>
+        <div class="mfield">
+          <label>Année</label>
+          <div class="mfield-wrap">
+            <select class="mfield-in" id="reneg-annee" onchange="onRenegDateChange()"><option value="">—</option></select>
+          </div>
+        </div>
+      </div>
+      <div id="reneg-date-warn" style="display:none;font-size:11px;color:#a16207;background:#fef3c7;border:1px solid #fde68a;padding:8px 10px;border-radius:8px;margin-bottom:12px"></div>
+
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">Capital restant à rembourser</div>
+      <div id="reneg-capital-info" style="font-size:11px;color:#475569;background:#f1f5f9;padding:8px 10px;border-radius:8px;margin-bottom:6px;display:none">
+        💡 Capital théorique calculé à cette date : <strong id="reneg-capital-theo">—</strong>
+      </div>
+      <div class="mfield">
+        <div class="mfield-wrap"><input class="mfield-in" id="reneg-capital" type="number" step="0.01" placeholder="0.00" oninput="recalcRenegPreview()"/><span class="mfield-unit">€</span></div>
+      </div>
+      <div id="reneg-capital-warn" style="display:none;font-size:11px;color:#a16207;background:#fef3c7;border:1px solid #fde68a;padding:8px 10px;border-radius:8px;margin-bottom:12px"></div>
+
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin:16px 0 8px">Nouvelles conditions</div>
+
+      <div class="mgrid2">
+        <div class="mfield">
+          <label>Taux annuel</label>
+          <div class="mfield-wrap"><input class="mfield-in" id="reneg-taux" type="number" step="0.01" placeholder="2.8" oninput="recalcRenegPreview()"/><span class="mfield-unit">%</span></div>
+        </div>
+        <div class="mfield">
+          <label>Type d'amortissement</label>
+          <div class="mfield-wrap"><select class="mfield-in" id="reneg-amort" onchange="recalcRenegPreview()"></select></div>
+        </div>
+      </div>
+
+      <!-- Toggle durée / mensualité -->
+      <div style="margin-top:12px">
+        <div style="display:flex;gap:6px;background:#f1f5f9;padding:4px;border-radius:10px;margin-bottom:8px">
+          <button type="button" id="reneg-mode-duree" class="btn btn-xs" style="flex:1;background:#fff;color:#0f172a;font-weight:700" onclick="setRenegMode('duree')">📏 Saisir la durée</button>
+          <button type="button" id="reneg-mode-mens" class="btn btn-xs" style="flex:1;background:transparent;color:var(--muted);font-weight:600" onclick="setRenegMode('mens')">💰 Saisir la mensualité</button>
+        </div>
+        <div id="reneg-mode-duree-block">
+          <div class="mfield">
+            <label>Nouvelle durée (à partir de la date d'effet)</label>
+            <div class="mfield-wrap"><input class="mfield-in" id="reneg-duree" type="number" placeholder="60" oninput="recalcRenegPreview()"/><span class="mfield-unit">mois</span></div>
+          </div>
+        </div>
+        <div id="reneg-mode-mens-block" style="display:none">
+          <div class="mfield">
+            <label>Nouvelle mensualité</label>
+            <div class="mfield-wrap"><input class="mfield-in" id="reneg-mensualite" type="number" step="0.01" placeholder="580.00" oninput="recalcRenegPreview()"/><span class="mfield-unit">€</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mfield">
+        <label>Motif (optionnel)</label>
+        <div class="mfield-wrap"><input class="mfield-in" id="reneg-motif" placeholder="Rachat de crédit, baisse de taux, modulation…"/></div>
+      </div>
+
+      <div id="reneg-preview" style="margin-top:14px;padding:12px 14px;background:linear-gradient(135deg,#ecfdf5,#f0fdf4);border:1.5px solid #a7f3d0;border-radius:12px;display:none">
+        <div style="font-size:11px;font-weight:700;color:#047857;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px">📊 Aperçu de la renégociation</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:11px;color:#065f46">
+          <div>
+            <div style="font-weight:600;color:#475569;margin-bottom:3px">Avant</div>
+            <div>Mensualité : <strong id="reneg-prev-mens-old">—</strong></div>
+            <div>Reste à payer : <strong id="reneg-prev-reste-old">—</strong></div>
+          </div>
+          <div>
+            <div style="font-weight:600;color:#047857;margin-bottom:3px">Après</div>
+            <div>Mensualité : <strong id="reneg-prev-mens-new">—</strong></div>
+            <div>Reste à payer : <strong id="reneg-prev-reste-new">—</strong></div>
+          </div>
+        </div>
+        <div id="reneg-prev-eco" style="margin-top:8px;padding-top:8px;border-top:1px dashed #a7f3d0;font-size:11px;color:#047857;font-weight:700"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-o" onclick="closeRenegocierModal()">Annuler</button>
+      <button class="btn btn-p" id="reneg-save-btn" onclick="saveRenegociation()">💾 Appliquer</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -1060,6 +1160,8 @@ function renderDettes(){
     const paid=new Set(d.paiements||[]);
     // Bientôt = échéance dans les 7 prochains jours (non passée)
     const hasBientot=ech.some(r=>{const dt=new Date(r.date);const soon=new Date(now);soon.setDate(soon.getDate()+7);return!paid.has(r.idx)&&dt>=now&&dt<=soon;});
+    // Renégociations actives
+    const nbModifs = (d.modifications && d.modifications.length) || 0;
 
     return`<div class="dette-card ${hasBientot?'bientot':''}" id="dc-${d.id}">
       <div class="dette-head" onclick="toggleDette('${d.id}')">
@@ -1070,6 +1172,7 @@ function renderDettes(){
             <span class="badge badge-${d.type==='emprunt'?'blue':d.type==='fournisseur'?'orange':d.type==='leasing'?'purple':'red'}">${tc.label}</span>
             ${d._virtual?'<span class="badge badge-blue" style="background:#eff6ff;color:#60a5fa">📥 Pilotage</span>':''}
             ${hasBientot?'<span class="badge badge-orange">📅 Bientôt</span>':''}
+            ${nbModifs>0?`<span class="badge" style="background:#fef3c7;color:#a16207" title="${nbModifs} renégociation${nbModifs>1?'s':''} active${nbModifs>1?'s':''}">📝 Renégocié${nbModifs>1?' ('+nbModifs+')':''}</span>`:''}
             ${solde<=0?'<span class="badge badge-green">✅ Soldée</span>':''}
           </div>
           <div class="dette-meta">
@@ -1098,14 +1201,367 @@ function renderDettes(){
           <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap" id="det-btns-${d.id}">
             ${d._virtual
               ?'<button class="btn btn-o btn-xs" onclick="location.href=\'pilotage.html\'">📥 Gérer dans Pilotage →</button><span style="font-size:11px;color:var(--muted);align-self:center">Données synchronisées depuis le module Pilotage</span>'
-              :`<button class="btn btn-o btn-xs" onclick="editDette('${d.id}')">✏️ Modifier</button><button class="btn btn-d btn-xs" onclick="deleteDette('${d.id}')">🗑 Supprimer</button>${renderBulkBtn(d)}`}
+              :`<button class="btn btn-o btn-xs" onclick="editDette('${d.id}')">✏️ Modifier</button>${d.type==='emprunt'?`<button class="btn btn-xs" style="background:#fef3c7;color:#a16207;border:1px solid #fde68a" onclick="openRenegocierModal('${d.id}')">📝 Renégocier</button>`:''}<button class="btn btn-d btn-xs" onclick="deleteDette('${d.id}')">🗑 Supprimer</button>${renderBulkBtn(d)}`}
           </div>
+          ${renderRenegociations(d)}
           ${renderDetailStats(d)}
           ${renderEcheancier(d)}
         </div>
       </div>
     </div>`;
   }).join('');
+}
+
+// ── Affiche le timeline des renégociations dans le détail d'une dette ──
+function renderRenegociations(d){
+  if (d._virtual) return ''; // les dettes virtuelles (Pilotage) ne supportent pas les modifs
+  const mods = (d.modifications && d.modifications.length) ? d.modifications.slice() : [];
+  if (!mods.length) return '';
+
+  // Trier par date d'effet croissante pour l'affichage
+  mods.sort((a,b)=>{
+    const ka=(a.dateEffet||'').slice(0,10), kb=(b.dateEffet||'').slice(0,10);
+    return ka<kb?-1:(ka>kb?1:0);
+  });
+
+  const labels = (window.CalcHelpers && window.CalcHelpers.AMORT_LABELS) || {};
+  const lblAmort = (k) => (labels[k] && labels[k].short) || k || '—';
+
+  const items = mods.map((m, idx) => {
+    const dateLabel = fdate(m.dateEffet || m.dateEffet || '');
+    const cap = parseFloat(m.capitalRestant)||0;
+    const taux = (m.taux !== undefined && m.taux !== '') ? parseFloat(m.taux) : '';
+    const duree = parseInt(m.duree, 10) || 0;
+    const mens = parseFloat(m.mensualite) || 0;
+    const motif = m.motif ? m.motif : '';
+    return `
+      <div style="display:flex;gap:12px;padding:10px 12px;border:1px solid #fde68a;background:#fffbeb;border-radius:10px;margin-bottom:8px">
+        <div style="font-size:18px;flex-shrink:0;width:30px;text-align:center">📝</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;font-weight:700;color:#a16207">À partir du ${dateLabel} ${motif?'— '+motif:''}</div>
+          <div style="font-size:11px;color:#78716c;margin-top:3px;line-height:1.5">
+            Capital restant : <strong>${fe(cap)}</strong>
+            ${taux!==''?` · Taux : <strong>${taux}%</strong>`:''}
+            ${duree?` · Durée : <strong>${duree} mois</strong>`:''}
+            ${mens?` · Mensualité : <strong>${fe(mens)}</strong>`:''}
+            · Type : <strong>${lblAmort(m.amort||d.amort)}</strong>
+          </div>
+        </div>
+        <div style="display:flex;gap:4px;align-self:flex-start">
+          <button class="btn btn-o btn-xs" onclick="openRenegocierModal('${d.id}', ${idx})" title="Modifier cette renégociation">✏️</button>
+          <button class="btn btn-d btn-xs" onclick="deleteRenegociation('${d.id}', ${idx})" title="Supprimer cette renégociation">🗑</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  return `
+    <div style="margin:12px 0">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;display:flex;align-items:center;gap:6px">
+        📝 Historique des renégociations <span style="background:#fef3c7;color:#a16207;padding:2px 8px;border-radius:10px;font-size:10px">${mods.length}</span>
+      </div>
+      ${items}
+    </div>`;
+}
+
+// ── État de la modale de renégociation ──
+let _renegEditing = { dettéId: null, modIdx: null };
+let _renegMode = 'duree'; // 'duree' ou 'mens'
+
+function setRenegMode(mode){
+  _renegMode = mode;
+  const btnD = document.getElementById('reneg-mode-duree');
+  const btnM = document.getElementById('reneg-mode-mens');
+  const blockD = document.getElementById('reneg-mode-duree-block');
+  const blockM = document.getElementById('reneg-mode-mens-block');
+  if (mode === 'duree') {
+    btnD.style.background='#fff'; btnD.style.color='#0f172a'; btnD.style.fontWeight='700';
+    btnM.style.background='transparent'; btnM.style.color='var(--muted)'; btnM.style.fontWeight='600';
+    blockD.style.display=''; blockM.style.display='none';
+  } else {
+    btnM.style.background='#fff'; btnM.style.color='#0f172a'; btnM.style.fontWeight='700';
+    btnD.style.background='transparent'; btnD.style.color='var(--muted)'; btnD.style.fontWeight='600';
+    blockM.style.display=''; blockD.style.display='none';
+  }
+  recalcRenegPreview();
+}
+
+// ── Remplit le select Amortissement avec les libellés grand public ──
+function _fillRenegAmort(selected){
+  const sel = document.getElementById('reneg-amort');
+  if (!sel) return;
+  const labels = (window.CalcHelpers && window.CalcHelpers.AMORT_LABELS) || {};
+  const keys = ['constant','lineaire','fixe','infine'];
+  sel.innerHTML = keys.map(k=>{
+    const L = labels[k] || { short:k, help:'' };
+    const isSel = (selected||'constant')===k ? ' selected' : '';
+    const tip = (L.title ? (L.short+' — '+L.title) : L.short).replace(/"/g,'&quot;');
+    return '<option value="'+k+'"'+isSel+' title="'+tip+'">'+L.short+'</option>';
+  }).join('');
+}
+
+function _renegDateMonthKey(){
+  const m = document.getElementById('reneg-mois').value;
+  const y = document.getElementById('reneg-annee').value;
+  return (m && y) ? (y+'-'+m) : '';
+}
+
+// ── Quand la date d'effet change : on calcule le capital théorique restant ──
+function onRenegDateChange(){
+  const monthKey = _renegDateMonthKey();
+  const warn = document.getElementById('reneg-date-warn');
+  const info = document.getElementById('reneg-capital-info');
+  const theoLbl = document.getElementById('reneg-capital-theo');
+  const capInput = document.getElementById('reneg-capital');
+
+  if (!monthKey) { warn.style.display='none'; info.style.display='none'; return; }
+
+  // Avertissement si date passée
+  const todayKey = (new Date()).toISOString().slice(0,7);
+  if (monthKey < todayKey) {
+    warn.style.display='block';
+    warn.innerHTML = '⚠️ Date d\'effet dans le passé — les paiements déjà pointés sur les mois antérieurs resteront tels quels, mais cela peut désaligner les anciens idx.';
+  } else {
+    warn.style.display='none';
+  }
+
+  // Capital théorique à cette date (si CalcHelpers dispo)
+  if (window.CalcHelpers && window.CalcHelpers.getCapitalRestantAt && _renegEditing.dettéId) {
+    const d = _dettes.find(x=>x.id===_renegEditing.dettéId);
+    if (d) {
+      // On calcule sur la dette SANS la modif en cours d'édition (pour ne pas
+      // boucler) — on neutralise temporairement la modif courante
+      let dCopy = JSON.parse(JSON.stringify(d));
+      if (_renegEditing.modIdx !== null && dCopy.modifications) {
+        dCopy.modifications.splice(_renegEditing.modIdx, 1);
+      }
+      const cap = window.CalcHelpers.getCapitalRestantAt(dCopy, monthKey);
+      info.style.display='block';
+      theoLbl.textContent = fe(cap);
+      // Pré-remplir si vide
+      if (!capInput.value || parseFloat(capInput.value)===0) {
+        capInput.value = cap.toFixed(2);
+      }
+    }
+  }
+  recalcRenegPreview();
+}
+
+// ── Recalcul live de la mensualité OU durée selon le mode + aperçu before/after ──
+function recalcRenegPreview(){
+  const monthKey = _renegDateMonthKey();
+  const cap = parseFloat(document.getElementById('reneg-capital').value) || 0;
+  const taux = parseFloat(document.getElementById('reneg-taux').value) || 0;
+  const amort = document.getElementById('reneg-amort').value || 'constant';
+  const preview = document.getElementById('reneg-preview');
+  const capWarn = document.getElementById('reneg-capital-warn');
+
+  // Avertissement écart capital théorique > 1%
+  if (window.CalcHelpers && _renegEditing.dettéId && monthKey && cap > 0) {
+    const d = _dettes.find(x=>x.id===_renegEditing.dettéId);
+    if (d) {
+      let dCopy = JSON.parse(JSON.stringify(d));
+      if (_renegEditing.modIdx !== null && dCopy.modifications) {
+        dCopy.modifications.splice(_renegEditing.modIdx, 1);
+      }
+      const theo = window.CalcHelpers.getCapitalRestantAt(dCopy, monthKey);
+      if (theo > 0 && Math.abs(cap-theo)/theo > 0.01) {
+        capWarn.style.display='block';
+        const ecart = cap - theo;
+        capWarn.innerHTML = 'ℹ️ Écart de '+fe(Math.abs(ecart))+' '+(ecart>0?'au-dessus':'en-dessous')+' du capital théorique — frais de remboursement anticipé, IRA, ou soulte ?';
+      } else {
+        capWarn.style.display='none';
+      }
+    }
+  }
+
+  if (!cap || !monthKey) { preview.style.display='none'; return; }
+
+  // Mode durée → on calcule la mensualité
+  // Mode mens   → on calcule la durée
+  let duree = parseInt(document.getElementById('reneg-duree').value, 10) || 0;
+  let mens  = parseFloat(document.getElementById('reneg-mensualite').value) || 0;
+
+  if (_renegMode === 'duree' && duree > 0 && window.CalcHelpers) {
+    mens = window.CalcHelpers.calcMensualiteFromCapital(cap, taux, duree, amort);
+    document.getElementById('reneg-mensualite').value = mens > 0 ? mens.toFixed(2) : '';
+  } else if (_renegMode === 'mens' && mens > 0 && window.CalcHelpers) {
+    duree = window.CalcHelpers.calcDureeFromMensualite(cap, taux, mens, amort);
+    document.getElementById('reneg-duree').value = duree > 0 ? duree : '';
+    if (duree === 0 && amort !== 'infine') {
+      // Mensualité trop faible
+      preview.style.display='block';
+      document.getElementById('reneg-prev-mens-new').textContent = '—';
+      document.getElementById('reneg-prev-reste-new').textContent = '—';
+      document.getElementById('reneg-prev-eco').innerHTML = '<span style="color:#dc2626">⚠️ Mensualité trop faible : elle ne couvre pas les intérêts mensuels (capital × taux/12).</span>';
+      return;
+    }
+  }
+
+  if (mens <= 0 && amort !== 'infine') { preview.style.display='none'; return; }
+  if (duree <= 0 && amort !== 'infine') { preview.style.display='none'; return; }
+
+  preview.style.display='block';
+
+  // Calcul du "avant" : mensualité moyenne actuelle + reste à payer total
+  let mensOld = 0, resteOld = 0;
+  if (window.CalcHelpers && _renegEditing.dettéId) {
+    const d = _dettes.find(x=>x.id===_renegEditing.dettéId);
+    if (d) {
+      let dCopy = JSON.parse(JSON.stringify(d));
+      if (_renegEditing.modIdx !== null && dCopy.modifications) {
+        dCopy.modifications.splice(_renegEditing.modIdx, 1);
+      }
+      const sched = window.CalcHelpers.calcAmortSchedule(dCopy);
+      const remaining = sched.filter(r=>r.monthKey >= monthKey);
+      if (remaining.length) {
+        mensOld = remaining[0].mensualite;
+        resteOld = remaining.reduce((s,r)=>s+(r.mensualite||0), 0);
+      }
+    }
+  }
+
+  // Total à payer après renégo = mens × duree (approximation pour lineaire/infine)
+  let resteNew = 0;
+  if (amort === 'infine') {
+    resteNew = mens * duree + cap; // intérêts × n + capital final
+  } else if (duree > 0) {
+    resteNew = mens * duree;
+  }
+
+  document.getElementById('reneg-prev-mens-old').textContent = mensOld > 0 ? fe(mensOld) : '—';
+  document.getElementById('reneg-prev-reste-old').textContent = resteOld > 0 ? fe(resteOld) : '—';
+  document.getElementById('reneg-prev-mens-new').textContent = mens > 0 ? fe(mens) : '—';
+  document.getElementById('reneg-prev-reste-new').textContent = resteNew > 0 ? fe(resteNew) : '—';
+
+  const eco = document.getElementById('reneg-prev-eco');
+  if (resteOld > 0 && resteNew > 0) {
+    const diff = resteOld - resteNew;
+    if (Math.abs(diff) < 1) {
+      eco.innerHTML = '≈ Coût total identique';
+    } else if (diff > 0) {
+      eco.innerHTML = '✅ Économie totale : <strong>'+fe(diff)+'</strong> sur la durée restante';
+    } else {
+      eco.innerHTML = '⚠️ Surcoût total : <strong>'+fe(-diff)+'</strong> sur la durée restante';
+    }
+  } else {
+    eco.textContent = '';
+  }
+}
+
+// ── Ouvre la modale Renégocier (création OU modification d'une renégo existante) ──
+function openRenegocierModal(detteId, modIdx){
+  const d = _dettes.find(x=>x.id===detteId);
+  if (!d) { showToast('Dette introuvable','err'); return; }
+  if (d._virtual) { showToast('Renégociation impossible sur une dette synchronisée depuis Pilotage — modifie directement le crédit','err'); return; }
+  if (d.type !== 'emprunt') { showToast('La renégociation n\'est disponible que pour les emprunts','err'); return; }
+
+  _renegEditing = { dettéId: detteId, modIdx: (modIdx===undefined ? null : modIdx) };
+
+  document.getElementById('renegTitle').textContent = (modIdx===undefined ? '📝 Renégocier' : '✏️ Modifier la renégociation') + ' — ' + (d.nom||'');
+
+  // Peupler les années (de l'année du crédit jusqu'à 30 ans en avant)
+  const debut = d.debut ? new Date(d.debut) : new Date();
+  const yStart = Math.min(debut.getFullYear(), new Date().getFullYear());
+  const yEnd   = Math.max(new Date().getFullYear(), yStart) + 30;
+  const selY = document.getElementById('reneg-annee');
+  selY.innerHTML = '<option value="">—</option>';
+  for (let y = yStart; y <= yEnd; y++) selY.innerHTML += '<option value="'+y+'">'+y+'</option>';
+
+  // Pré-remplir si on modifie
+  let mod = null;
+  if (modIdx !== undefined && d.modifications && d.modifications[modIdx]) {
+    mod = d.modifications[modIdx];
+  }
+
+  // Reset / fill
+  if (mod) {
+    document.getElementById('reneg-mois').value  = (mod.dateEffet||'').slice(5,7);
+    document.getElementById('reneg-annee').value = (mod.dateEffet||'').slice(0,4);
+    document.getElementById('reneg-capital').value = mod.capitalRestant || '';
+    document.getElementById('reneg-taux').value    = (mod.taux !== undefined && mod.taux !== '') ? mod.taux : (d.taux || '');
+    _fillRenegAmort(mod.amort || d.amort || 'constant');
+    document.getElementById('reneg-duree').value = mod.duree || '';
+    document.getElementById('reneg-mensualite').value = mod.mensualite || '';
+    document.getElementById('reneg-motif').value = mod.motif || '';
+  } else {
+    document.getElementById('reneg-mois').value  = '';
+    document.getElementById('reneg-annee').value = '';
+    document.getElementById('reneg-capital').value = '';
+    document.getElementById('reneg-taux').value = d.taux || '';
+    _fillRenegAmort(d.amort || 'constant');
+    document.getElementById('reneg-duree').value = '';
+    document.getElementById('reneg-mensualite').value = '';
+    document.getElementById('reneg-motif').value = '';
+  }
+
+  setRenegMode('duree');
+  document.getElementById('reneg-preview').style.display = 'none';
+  document.getElementById('reneg-capital-info').style.display = 'none';
+  document.getElementById('reneg-capital-warn').style.display = 'none';
+  document.getElementById('reneg-date-warn').style.display = 'none';
+  document.getElementById('renegOverlay').classList.add('show');
+  setTimeout(()=>{ if (mod) onRenegDateChange(); }, 50);
+}
+
+function closeRenegocierModal(){
+  document.getElementById('renegOverlay').classList.remove('show');
+  _renegEditing = { dettéId: null, modIdx: null };
+}
+
+async function saveRenegociation(){
+  if (!_renegEditing.dettéId) return;
+  const d = _dettes.find(x=>x.id===_renegEditing.dettéId);
+  if (!d) { showToast('Dette introuvable','err'); return; }
+
+  const monthKey = _renegDateMonthKey();
+  const cap   = parseFloat(document.getElementById('reneg-capital').value) || 0;
+  const taux  = parseFloat(document.getElementById('reneg-taux').value);
+  const amort = document.getElementById('reneg-amort').value || 'constant';
+  const duree = parseInt(document.getElementById('reneg-duree').value, 10) || 0;
+  const mens  = parseFloat(document.getElementById('reneg-mensualite').value) || 0;
+  const motif = (document.getElementById('reneg-motif').value || '').trim();
+
+  if (!monthKey) { showToast('Renseigne la date d\'effet','warn'); return; }
+  if (cap <= 0)  { showToast('Renseigne un capital restant > 0','warn'); return; }
+  if (amort !== 'infine' && duree <= 0) { showToast('Renseigne une durée valide','warn'); return; }
+
+  const newMod = {
+    dateEffet: monthKey + '-01',
+    capitalRestant: cap,
+    taux: isNaN(taux) ? '' : taux,
+    duree: duree,
+    amort: amort,
+    mensualite: mens > 0 ? mens : null,
+    motif: motif,
+    _createdAt: new Date().toISOString()
+  };
+
+  if (!d.modifications) d.modifications = [];
+  if (_renegEditing.modIdx !== null && d.modifications[_renegEditing.modIdx]) {
+    // Préserver _createdAt si existant
+    if (d.modifications[_renegEditing.modIdx]._createdAt) {
+      newMod._createdAt = d.modifications[_renegEditing.modIdx]._createdAt;
+    }
+    d.modifications[_renegEditing.modIdx] = newMod;
+  } else {
+    d.modifications.push(newMod);
+  }
+
+  await save();
+  closeRenegocierModal();
+  renderAll();
+  showToast('✅ Renégociation enregistrée','ok');
+}
+
+async function deleteRenegociation(detteId, modIdx){
+  if (!confirm('Supprimer cette renégociation ? Les échéances repartiront sur les conditions précédentes.')) return;
+  const d = _dettes.find(x=>x.id===detteId);
+  if (!d || !d.modifications || !d.modifications[modIdx]) return;
+  d.modifications.splice(modIdx, 1);
+  if (!d.modifications.length) delete d.modifications;
+  await save();
+  renderAll();
+  showToast('Renégociation supprimée','ok');
 }
 
 function renderDetailStats(d){
