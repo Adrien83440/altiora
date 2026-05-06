@@ -651,7 +651,7 @@
 
     <!-- Nouveau prix (uniquement pour action modif) -->
     <div id="scope-price-wrap" style="display:none;margin-bottom:14px">
-      <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Nouveau montant HT</div>
+      <div id="scope-price-label" style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Nouveau montant HT</div>
       <input id="scope-price-input" type="text" inputmode="decimal" class="cell-input" style="width:160px;font-size:14px;padding:8px 12px"
         placeholder="0.00" />
     </div>
@@ -766,23 +766,33 @@
           <div class="mfield-wrap" style="padding:9px 13px;border:2px solid var(--border);border-radius:10px;background:#f8faff"><input class="mfield-in" id="aclm-subtype" placeholder="ex: Utilitaire" style="font-size:14px;font-weight:700;border:none;background:transparent;width:100%;outline:none"/></div>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div style="display:grid;grid-template-columns:1fr 1fr 110px;gap:12px;margin-bottom:12px">
         <div>
-          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px" id="aclm-montant-lbl">Mensualité (principal) €</label>
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px" id="aclm-montant-lbl">Mensualité totale €</label>
           <div class="mfield-wrap" style="padding:9px 13px;border:2px solid var(--border);border-radius:10px;background:#f8faff"><input class="mfield-in" id="aclm-montant" type="text" inputmode="decimal" placeholder="0.00" style="font-size:14px;font-weight:700;border:none;background:transparent;width:100%;outline:none"/><span style="font-size:12px;font-weight:700;color:var(--muted)">€</span></div>
         </div>
         <div id="aclm-taux-wrap">
           <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px">Taux intérêt annuel</label>
           <div class="mfield-wrap" style="padding:9px 13px;border:2px solid var(--border);border-radius:10px;background:#f8faff"><input class="mfield-in" id="aclm-taux" type="text" inputmode="decimal" placeholder="3.5" style="font-size:14px;font-weight:700;border:none;background:transparent;width:100%;outline:none"/><span style="font-size:12px;font-weight:700;color:var(--muted)">%</span></div>
         </div>
+        <div id="aclm-duree-wrap">
+          <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px">Durée *</label>
+          <div class="mfield-wrap" style="padding:9px 10px;border:2px solid var(--border);border-radius:10px;background:#f8faff"><input class="mfield-in" id="aclm-duree" type="text" inputmode="numeric" placeholder="60" style="font-size:14px;font-weight:700;border:none;background:transparent;width:100%;outline:none" oninput="aclmRecalcPreview()"/><span style="font-size:11px;font-weight:600;color:var(--muted)">mois</span></div>
+        </div>
       </div>
       <div id="aclm-amort-wrap" style="margin-bottom:12px">
-        <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px">Amortissement</label>
+        <label style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;display:block;margin-bottom:5px">Type d'amortissement <span style="color:#94a3b8;font-weight:600;text-transform:none;font-size:10px">(survole pour comprendre)</span></label>
         <div class="mfield-wrap" style="padding:9px 13px;border:2px solid var(--border);border-radius:10px;background:#f8faff">
-          <select id="aclm-amort" style="font-size:14px;font-weight:700;border:none;background:transparent;width:100%;outline:none;cursor:pointer">
-            <option value="constant">Mensualités constantes</option><option value="lineaire">Capital constant</option><option value="fixe">Intérêts fixes</option><option value="infine">In fine</option>
+          <select id="aclm-amort" style="font-size:14px;font-weight:700;border:none;background:transparent;width:100%;outline:none;cursor:pointer" onchange="aclmRecalcPreview()">
+            <!-- Rempli dynamiquement par aclmFillAmortOptions() avec libellés grand public + tooltips -->
           </select>
         </div>
+        <div id="aclm-amort-help" style="margin-top:6px;font-size:11px;color:#475569;line-height:1.4;padding:8px 10px;background:#f1f5f9;border-radius:8px;border-left:3px solid #6366f1"></div>
+      </div>
+      <!-- Preview Capital initial estimé (calcul inverse à partir de la mensualité) -->
+      <div id="aclm-preview" style="margin-bottom:12px;padding:10px 14px;background:#ecfdf5;border:1.5px solid #a7f3d0;border-radius:10px;font-size:12px;color:#065f46;font-weight:600;display:none">
+        <span style="font-size:13px">💰</span> Capital initial estimé : <span id="aclm-preview-capital" style="font-size:14px;font-weight:800;color:#047857">—</span>
+        <div id="aclm-preview-note" style="font-size:10px;font-weight:500;color:#475569;margin-top:3px"></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
         <div>
@@ -1485,9 +1495,19 @@ async function loadMonth() {
 // ── SYNC DETTES → PILOTAGE (version synchrone avec snapshot pré-chargé) ──
 function _syncDettesFromSnap(data, monthKey, detteSnap) {
   try {
-    if (!detteSnap || !detteSnap.exists || !detteSnap.exists()) return;
+    if (!detteSnap || !detteSnap.exists || !detteSnap.exists()) {
+      // Pas de doc dettes → cache vide (utile pour les nouveaux comptes)
+      window._cachedDettes = [];
+      return;
+    }
     var dettes = detteSnap.data().list;
-    if (!dettes) return;
+    if (!dettes) { window._cachedDettes = []; return; }
+
+    // ── Cache global pour le tableau d'amortissement (lecture par renderCredits) ──
+    // Stocké dès que possible : permet à renderCredits de calculer la mensualité
+    // exacte du mois courant via CalcHelpers.getMonthEcheance(dette, monthKey).
+    window._cachedDettes = dettes;
+
     var changed = false;
 
     dettes.forEach(function(d) {
@@ -1531,11 +1551,23 @@ function _syncDettesFromSnap(data, monthKey, detteSnap) {
             && parseFloat(c.montant) > 0;
         });
         if (!exists2) {
-          var mensualite = duree > 0 ? montant / duree : montant;
+          var partCapMensuelle = duree > 0 ? montant / duree : montant;
+          var mensualiteImport = parseFloat(d.mensualite) || partCapMensuelle;
           var taux = parseFloat(d.taux) || 0;
           var debutM2 = debutDate.getFullYear() + '-' + String(debutDate.getMonth() + 1).padStart(2, '0');
           var finM2 = finDate ? (finDate.getFullYear() + '-' + String(finDate.getMonth() + 1).padStart(2, '0')) : '';
-          var creditLine = { fournisseur: nom, nom: nom, ligneType: 'principal', montant: String(mensualite.toFixed(2)), tvaRate: 20, tvaAuto: false, tauxInteret: taux ? String(taux) : '', pointe: 'Non', dateDebut: debutM2, dateFin: finM2, amort: d.amort || 'constant' };
+          var creditLine = {
+            fournisseur: nom, nom: nom, ligneType: 'principal',
+            montant: String(partCapMensuelle.toFixed(2)),
+            // Nouveau format : on stocke aussi le capital initial et la mensualité réelle
+            capitalInitial: String(montant),
+            mensualite: String(mensualiteImport),
+            duree: duree > 0 ? String(duree) : '',
+            tvaRate: 20, tvaAuto: false,
+            tauxInteret: taux ? String(taux) : '',
+            pointe: 'Non', dateDebut: debutM2, dateFin: finM2,
+            amort: d.amort || 'constant'
+          };
           if (data.credits.length === 1 && !data.credits[0].fournisseur && !parseFloat(data.credits[0].montant)) {
             data.credits[0] = creditLine;
           } else {
@@ -1824,18 +1856,23 @@ async function syncCreditsTosDettes() {
       var nom     = (c.nom && c.nom.trim()) ? c.nom.trim() : c.fournisseur.trim();
       var debut   = parseYYYYMM(c.dateDebut);
       var taux    = parseFloat(c.tauxInteret) || 0;
-      var duree   = 0;
-      if (debut && c.dateFin) {
+      var duree   = parseInt(c.duree, 10) || 0;
+      // Si la durée n'est pas stockée, on la déduit des dates
+      if (!duree && debut && c.dateFin) {
         var _nf1 = parseYYYYMM(c.dateFin);
         if (_nf1) { var d1 = new Date(debut + '-01'), d2 = new Date(_nf1 + '-01'); duree = Math.round((d2 - d1) / (1000 * 60 * 60 * 24 * 30.44)); if (duree < 1) duree = 0; }
       }
       var existingIdx = dettes.findIndex(function(d) {
         return d._pilotageRef === c.fournisseur.trim();
       });
-      // montant dans pilotage = mensualité, capital = mensualité × durée
-      var capital = duree > 0 ? montant * duree : montant;
+      // ── Capital initial : nouveau format si présent, sinon legacy montant×durée ──
+      // Nouveau format (modale d'ajout post-refonte) : c.capitalInitial est stocké explicitement
+      // Legacy : c.montant représente la part capital mensuelle, et capital = montant × durée
+      var capital = parseFloat(c.capitalInitial) || (duree > 0 ? montant * duree : montant);
+      // Mensualité réelle : nouveau format si présent, sinon montant pour rétrocompat
+      var mensualiteReelle = parseFloat(c.mensualite) || montant;
       var detteData = {
-        type: 'emprunt', nom: nom, montant: capital, mensualite: montant, debut: debut,
+        type: 'emprunt', nom: nom, montant: capital, mensualite: mensualiteReelle, debut: debut,
         taux: taux, duree: duree, amort: c.amort || 'constant',
         active: true, _pilotageRef: c.fournisseur.trim(), paiements: []
       };
@@ -2083,8 +2120,8 @@ function renderPage(data, month) {
           '<div class="section-actions" onclick="event.stopPropagation()"><button class="btn btn-outline btn-sm" onclick="ensureSectionOpen(\'cred\');addCredit()">+ Crédit</button><button class="btn btn-outline btn-sm" style="color:#6366f1;border-color:#6366f1" onclick="forceSyncDettes()">🔗 Sync → Dettes</button></div>' +
         '</div>' +
         '<div class="section-body">' +
-        '<div class="info-box">💡 Renseigne Principal + Taux → mensualité calculée automatiquement · Pas de TVA sur les intérêts d\'emprunt · Renseigne Début/Fin pour la propagation</div>' +
-        '<table class="data-table"><thead><tr><th>Pointé</th><th>Nom crédit</th><th>Principal €</th><th>Taux int. %</th><th>Amortissement</th><th>Mensualité HT</th><th>dont Intérêts</th><th>Début / Fin</th><th></th></tr></thead>' +
+        '<div class="info-box">💡 Mensualité &amp; intérêts <strong>lus depuis 💰 Dettes &amp; Emprunts</strong> pour le mois en cours · Renseigne Début/Fin pour la propagation · <em>(les emprunts ne sont pas soumis à TVA)</em></div>' +
+        '<table class="data-table"><thead><tr><th>Pointé</th><th>Nom crédit</th><th title="Part de capital remboursée pour ce mois (varie selon le type d\'amortissement)">Capital du mois €</th><th>Taux int. %</th><th>Type d\'amortissement</th><th title="Mensualité totale pour ce mois (capital + intérêts) — lue depuis Dettes &amp; Emprunts">Mensualité</th><th title="Part d\'intérêts incluse dans la mensualité de ce mois">dont Intérêts</th><th>Début / Fin</th><th></th></tr></thead>' +
         '<tbody id="cred-tbody">' + secTbody('cred', renderCredits(data.credits)) + '</tbody>' +
         '<tfoot><tr><td colspan="2">TOTAL CRÉDITS</td><td><span id="tot-credP">' + fmtN(t.creditsPrincipal) + '</span> €</td><td>—</td><td>—</td><td><span id="tot-credMens">' + fmtN(t.creditsPrincipal+t.creditsInteret) + '</span> €</td><td><span id="tot-credInt">' + fmtN(t.creditsInteret) + '</span> €</td><td colspan="2"></td></tr>' +
         '<tr><td colspan="9" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCredit()">+ Crédit</button></td></tr></tfoot>' +
@@ -3874,27 +3911,72 @@ function migrateCreditsToSingleLine(rows) {
 function renderCredits(rows) {
   rows = migrateCreditsToSingleLine(rows);
   var curKey = getMonthKey ? getMonthKey() : '';
+  var H = window.CalcHelpers || {};
+  var cachedDettes = window._cachedDettes || [];
+  var amortSelectOpts = function(selected) {
+    // Libellés grand public depuis CalcHelpers.AMORT_LABELS (avec fallback)
+    var labels = (H.AMORT_LABELS) || {
+      constant: { short: 'Mensualités constantes', help: '' },
+      lineaire: { short: 'Capital constant',       help: '' },
+      fixe:     { short: 'Intérêts fixes',         help: '' },
+      infine:   { short: 'In fine',                help: '' }
+    };
+    var keys = ['constant','lineaire','fixe','infine'];
+    return keys.map(function(k) {
+      var L = labels[k] || { short: k, help: '' };
+      var sel = (selected || 'constant') === k ? ' selected' : '';
+      var ttl = L.title ? (L.short + ' — ' + L.title) : L.short;
+      return '<option value="' + k + '"' + sel + ' title="' + (L.help || '').replace(/"/g, '&quot;') + '">' + L.short + '</option>';
+    }).join('');
+  };
+
   return rows.map(function(r, i) {
     // Masquer si hors plage de dates
     if (curKey && r.dateDebut && r.dateFin) {
       var deb = parseYYYYMM(r.dateDebut), fin = parseYYYYMM(r.dateFin);
       if (deb && fin && (curKey < deb || curKey > fin)) return '';
     }
-    var principal  = parseFloat((r.montant||'').toString().replace(',','.')) || 0;
-    var interet    = calcCreditInteret(r);
-    var mensualite = principal + interet;
+
+    // ── Source de vérité : tableau d'amortissement de Dettes & Emprunts ──
+    // Si une dette correspondante existe (matching par _pilotageRef ou nom),
+    // on lit la mensualité, le capital du mois et les intérêts depuis son
+    // tableau d'amortissement → garantit zéro divergence avec dettes.html.
+    var dette = (H.findDetteForCredit && cachedDettes.length)
+      ? H.findDetteForCredit(r, cachedDettes) : null;
+    var ech = (dette && curKey && H.getMonthEcheance)
+      ? H.getMonthEcheance(dette, curKey) : null;
+
+    var principal, interet, mensualite, capInitial, tauxAffiche, amortAffiche, syncBadge;
+    if (ech && dette) {
+      // Mode miroir : valeurs cohérentes avec la page Dettes & Emprunts
+      principal   = ech.capital;
+      interet     = ech.interet;
+      mensualite  = ech.mensualite;
+      capInitial  = parseFloat(dette.montant) || 0;
+      tauxAffiche = parseFloat(dette.taux);
+      if (isNaN(tauxAffiche)) tauxAffiche = parseFloat(r.tauxInteret) || 0;
+      amortAffiche = dette.amort || r.amort || 'constant';
+      syncBadge = ' <span class="cred-sync-badge" title="Synchronisé avec Dettes &amp; Emprunts" style="font-size:10px;color:#10b981;font-weight:700;cursor:help">↔</span>';
+    } else {
+      // Fallback : ancien calcul (cas d'un crédit non encore synchronisé dans Dettes)
+      principal   = parseFloat((r.montant||'').toString().replace(',','.')) || 0;
+      interet     = calcCreditInteret(r);
+      mensualite  = principal + interet;
+      capInitial  = 0;
+      tauxAffiche = parseFloat(r.tauxInteret) || 0;
+      amortAffiche = r.amort || 'constant';
+      syncBadge = ' <span class="cred-sync-badge" title="Pas encore synchronisé avec Dettes &amp; Emprunts — sauvegarde le crédit pour synchroniser" style="font-size:10px;color:#f59e0b;font-weight:700;cursor:help">⚠</span>';
+    }
+
     var isBankLinkedC = !!(r.bankLink && r.bankLink.bankTxId);
     var trAttr = ' class="row-principal" id="cred-row-' + i + '"' + (isBankLinkedC ? ' style="background:rgba(99,102,241,0.05)"' : '');
     return '<tr' + trAttr + '>' +
       '<td>' + pointeSelectHtml('credits', i, r.pointe) + '</td>' +
-      '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + catalogInputHtml('clients', 'credN-'+i, r.fournisseur||'', 'width:120px', 'Nom crédit', 'updateCreditField('+i+',\'fournisseur\',this.value)') + bankLinkBadge(r) + invoiceDateBadge('credits', i, r) + '</div></td>' +
-      '<td><input class="cell-input" style="width:85px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="updateCreditMontant(' + i + ',this.value)"/></td>' +
+      '<td><div style="display:flex;align-items:center;gap:3px;flex-wrap:nowrap">' + catalogInputHtml('clients', 'credN-'+i, r.fournisseur||'', 'width:120px', 'Nom crédit', 'updateCreditField('+i+',\'fournisseur\',this.value)') + bankLinkBadge(r) + invoiceDateBadge('credits', i, r) + syncBadge + '</div></td>' +
+      '<td><input class="cell-input" style="width:85px" type="text" inputmode="decimal" placeholder="0.00" value="' + (r.montant||'') + '" oninput="updateCreditMontant(' + i + ',this.value)" title="Mensualité de capital saisie. Pour modifier le crédit, utilisez 💰 Dettes &amp; Emprunts."/></td>' +
       '<td><input class="cell-input" style="width:65px" type="text" inputmode="decimal" placeholder="%" value="' + (r.tauxInteret||'') + '" oninput="updateCreditTaux(' + i + ',this.value)"/></td>' +
-      '<td><select class="cell-input" style="width:110px" onchange="_data.credits[' + i + '].amort=this.value;scheduleSave()">' +
-        '<option value="constant"' + ((r.amort||'constant')==='constant'?' selected':'') + '>Mensualités constantes</option>' +
-        '<option value="lineaire"' + (r.amort==='lineaire'?' selected':'') + '>Capital constant</option>' +
-        '<option value="fixe"' + (r.amort==='fixe'?' selected':'') + '>Intérêts fixes</option>' +
-        '<option value="infine"' + (r.amort==='infine'?' selected':'') + '>In fine</option>' +
+      '<td><select class="cell-input" style="width:130px" onchange="_data.credits[' + i + '].amort=this.value;scheduleSave();renderHiddenCredits&&renderHiddenCredits()">' +
+        amortSelectOpts(amortAffiche) +
       '</select></td>' +
       '<td><span class="cell-readonly orange" id="cred-mens-' + i + '">' + (mensualite > 0 ? fmtN(mensualite) + ' €' : '—') + '</span></td>' +
       '<td><span class="cell-readonly green" id="cred-int-' + i + '">' + (interet > 0 ? fmtN(interet) + ' €' : '—') + '</span></td>' +
@@ -4050,6 +4132,123 @@ function addCredit() { openAddCLModal('credit'); }
 // ── MODAL AJOUT CRÉDIT / LEASING ──
 var _aclType = 'credit';
 
+// ── Remplit le select Amortissement avec les libellés grand public et tooltips ──
+// Source : CalcHelpers.AMORT_LABELS (single source of truth pour les libellés)
+function aclmFillAmortOptions() {
+  var sel = document.getElementById('aclm-amort');
+  if (!sel) return;
+  var L = (window.CalcHelpers && window.CalcHelpers.AMORT_LABELS) || {
+    constant: { short: 'Mensualités constantes', help: '' },
+    lineaire: { short: 'Capital constant',       help: '' },
+    fixe:     { short: 'Intérêts fixes',         help: '' },
+    infine:   { short: 'In fine',                help: '' }
+  };
+  var keys = ['constant','lineaire','fixe','infine'];
+  var current = sel.value || 'constant';
+  sel.innerHTML = keys.map(function(k) {
+    var v = L[k] || { short: k, help: '' };
+    var sel2 = (current === k) ? ' selected' : '';
+    var tip = (v.title ? (v.short + ' — ' + v.title) : v.short);
+    return '<option value="' + k + '"' + sel2 + ' title="' + tip.replace(/"/g, '&quot;') + '">' + v.short + '</option>';
+  }).join('');
+  aclmUpdateAmortHelp();
+}
+
+// ── Met à jour la zone d'aide pédagogique sous le select Amortissement ──
+function aclmUpdateAmortHelp() {
+  var sel = document.getElementById('aclm-amort');
+  var help = document.getElementById('aclm-amort-help');
+  if (!sel || !help) return;
+  var L = (window.CalcHelpers && window.CalcHelpers.AMORT_LABELS) || {};
+  var v = L[sel.value] || null;
+  help.innerHTML = v && v.help
+    ? '<strong style="color:#334155">' + (v.title || v.short || '') + '</strong> — ' + v.help
+    : '';
+}
+
+// ── Calcule en temps réel le capital initial à partir de mensualité + taux + durée + amort ──
+// Le calcul inverse dépend du type d'amortissement :
+//   • constant : C = m × (1 - (1+i)^-n) / i
+//   • lineaire : mensualité varie ; on prend la moyenne → C ≈ m × n / (1 + i × (n+1)/2)
+//   • fixe     : m = C/n + C×i  →  C = m × n / (1 + n × i)
+//   • infine   : m = C × i      →  C = m / i  (intérêts seuls jusqu'au dernier mois)
+function aclmRecalcPreview() {
+  var preview = document.getElementById('aclm-preview');
+  var capLbl  = document.getElementById('aclm-preview-capital');
+  var noteLbl = document.getElementById('aclm-preview-note');
+  if (!preview || !capLbl) return;
+  aclmUpdateAmortHelp();
+
+  var m = parseFloat((document.getElementById('aclm-montant').value || '').replace(',', '.')) || 0;
+  var t = parseFloat((document.getElementById('aclm-taux').value    || '').replace(',', '.')) || 0;
+  var n = parseInt(document.getElementById('aclm-duree').value, 10) || 0;
+  var amort = (document.getElementById('aclm-amort').value || 'constant');
+  if (m <= 0 || n <= 0) { preview.style.display = 'none'; return; }
+
+  var i = (t / 100) / 12; // taux mensuel décimal
+  var capital = 0;
+  var note = '';
+  if (i <= 0) {
+    capital = m * n;
+    note = 'Pas d\'intérêts saisis : capital = mensualité × durée.';
+  } else if (amort === 'constant') {
+    capital = m * (1 - Math.pow(1 + i, -n)) / i;
+    note = 'Mensualités constantes — calcul exact.';
+  } else if (amort === 'lineaire') {
+    capital = m * n / (1 + i * (n + 1) / 2);
+    note = '⚠️ Capital constant : la mensualité varie chaque mois. Le capital est estimé à partir d\'une mensualité moyenne — vérifie dans Dettes & Emprunts.';
+  } else if (amort === 'fixe') {
+    capital = m * n / (1 + n * i);
+    note = 'Intérêts fixes — calcul exact.';
+  } else if (amort === 'infine') {
+    capital = m / i;
+    note = '⚠️ In fine : la dernière mensualité = mensualité saisie + capital initial. Vérifie ton plan de remboursement.';
+  }
+  if (capital <= 0 || !isFinite(capital)) { preview.style.display = 'none'; return; }
+  preview.style.display = 'block';
+  capLbl.textContent = (typeof fmtN === 'function' ? fmtN(capital) : capital.toFixed(2)) + ' €';
+  if (noteLbl) noteLbl.textContent = note;
+}
+
+// ── Calcule la durée en mois entre deux dates YYYY-MM (inclusive) ──
+function _aclmDureeFromDates(deb, fin) {
+  if (!deb || !fin) return 0;
+  var dY = parseInt(deb.slice(0,4), 10), dM = parseInt(deb.slice(5,7), 10);
+  var fY = parseInt(fin.slice(0,4), 10), fM = parseInt(fin.slice(5,7), 10);
+  if (!dY || !dM || !fY || !fM) return 0;
+  return (fY - dY) * 12 + (fM - dM) + 1;
+}
+
+// ── Synchronise la durée depuis les dates début/fin (sans écraser une saisie manuelle valide) ──
+function aclmSyncDureeFromDates() {
+  var debY = document.getElementById('aclm-debut-y').value;
+  var debM = document.getElementById('aclm-debut-m').value;
+  var finY = document.getElementById('aclm-fin-y').value;
+  var finM = document.getElementById('aclm-fin-m').value;
+  if (!debY || !debM || !finY || !finM) return;
+  var deb = debY + '-' + debM, fin = finY + '-' + finM;
+  var n = _aclmDureeFromDates(deb, fin);
+  if (n > 0) {
+    document.getElementById('aclm-duree').value = n;
+    aclmRecalcPreview();
+  }
+}
+
+// ── Met à jour la date fin à partir de date début + durée (sens inverse) ──
+function aclmSyncFinFromDuree() {
+  var debY = document.getElementById('aclm-debut-y').value;
+  var debM = document.getElementById('aclm-debut-m').value;
+  var n = parseInt(document.getElementById('aclm-duree').value, 10) || 0;
+  if (!debY || !debM || n <= 0) return;
+  var dY = parseInt(debY, 10), dM = parseInt(debM, 10);
+  // mois fin = dM + n - 1 (inclusive)
+  var totalM = dM + n - 1;
+  var fY = dY + Math.floor((totalM - 1) / 12);
+  var fM = ((totalM - 1) % 12) + 1;
+  document.getElementById('aclm-fin-y').value = String(fY);
+  document.getElementById('aclm-fin-m').value = (fM < 10 ? '0' : '') + fM;
+}
+
 function openAddCLModal(type) {
   _aclType = type || 'credit';
   setACLType(_aclType);
@@ -4057,6 +4256,8 @@ function openAddCLModal(type) {
   document.getElementById('aclm-subtype').value = '';
   document.getElementById('aclm-montant').value = '';
   document.getElementById('aclm-taux').value = '';
+  var dureeEl = document.getElementById('aclm-duree');
+  if (dureeEl) dureeEl.value = '';
   document.getElementById('aclm-amort').value = 'constant';
   // Peupler les selects année (2000 → 10 ans en avant, couvre tous les crédits y compris immobiliers)
   var cy = window._year || new Date().getFullYear();
@@ -4072,6 +4273,23 @@ function openAddCLModal(type) {
   document.getElementById('aclm-debut-y').value = '';
   document.getElementById('aclm-fin-m').value = '';
   document.getElementById('aclm-fin-y').value = '';
+  // Brancher les fonctions de calcul live
+  aclmFillAmortOptions();
+  var preview = document.getElementById('aclm-preview');
+  if (preview) preview.style.display = 'none';
+  ['aclm-montant','aclm-taux'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el && !el._aclmBound) { el.addEventListener('input', aclmRecalcPreview); el._aclmBound = true; }
+  });
+  ['aclm-debut-m','aclm-debut-y','aclm-fin-m','aclm-fin-y'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el && !el._aclmBoundDate) { el.addEventListener('change', aclmSyncDureeFromDates); el._aclmBoundDate = true; }
+  });
+  var dureeEl2 = document.getElementById('aclm-duree');
+  if (dureeEl2 && !dureeEl2._aclmBoundDuree) {
+    dureeEl2.addEventListener('change', aclmSyncFinFromDuree);
+    dureeEl2._aclmBoundDuree = true;
+  }
   document.getElementById('addCreditLeasModal').classList.add('show');
   setTimeout(function(){ document.getElementById('aclm-nom').focus(); }, 100);
 }
@@ -4090,8 +4308,12 @@ function setACLType(type) {
   document.getElementById('aclm-type-leasing').style.background = !isCredit ? '#eff6ff' : '#fff';
   document.getElementById('aclm-taux-wrap').style.display = isCredit ? '' : 'none';
   document.getElementById('aclm-amort-wrap').style.display = isCredit ? '' : 'none';
+  var dureeWrap = document.getElementById('aclm-duree-wrap');
+  if (dureeWrap) dureeWrap.style.display = isCredit ? '' : 'none';
+  var preview = document.getElementById('aclm-preview');
+  if (preview) preview.style.display = 'none';
   document.getElementById('aclm-type-wrap').style.display = isCredit ? 'none' : '';
-  document.getElementById('aclm-montant-lbl').textContent = isCredit ? 'Mensualité (principal) €' : 'Montant HT mensuel €';
+  document.getElementById('aclm-montant-lbl').textContent = isCredit ? 'Mensualité totale €' : 'Montant HT mensuel €';
 }
 
 async function submitAddCL(propagate) {
@@ -4107,8 +4329,53 @@ async function submitAddCL(propagate) {
 
   if (_aclType === 'credit') {
     var taux = (document.getElementById('aclm-taux').value || '').replace(',','.');
+    var dureeStr = document.getElementById('aclm-duree') ? document.getElementById('aclm-duree').value : '';
+    var dureeNum = parseInt(dureeStr, 10) || _aclmDureeFromDates(debut, fin);
     var amort = document.getElementById('aclm-amort').value || 'constant';
-    var line = { fournisseur: nom, nom: nom, ligneType: 'principal', montant: String(montant), tvaRate: 20, tvaAuto: false, tauxInteret: taux, pointe: 'Non', dateDebut: debut, dateFin: fin, amort: amort };
+
+    // ── Calcul inverse : capital initial à partir de mensualité saisie ──
+    // On reproduit la même logique qu'aclmRecalcPreview pour rester cohérent
+    var capitalInitial = 0;
+    var i = ((parseFloat(taux) || 0) / 100) / 12;
+    if (dureeNum > 0) {
+      if (i <= 0) {
+        capitalInitial = montant * dureeNum;
+      } else if (amort === 'constant') {
+        capitalInitial = montant * (1 - Math.pow(1 + i, -dureeNum)) / i;
+      } else if (amort === 'lineaire') {
+        capitalInitial = montant * dureeNum / (1 + i * (dureeNum + 1) / 2);
+      } else if (amort === 'fixe') {
+        capitalInitial = montant * dureeNum / (1 + dureeNum * i);
+      } else if (amort === 'infine') {
+        capitalInitial = montant / i;
+      } else {
+        capitalInitial = montant * dureeNum;
+      }
+      capitalInitial = Math.round(capitalInitial * 100) / 100;
+    }
+
+    // La ligne stocke à la fois les nouveaux champs (capitalInitial, mensualite, duree)
+    // et l'ancien champ `montant` (pour rétrocompat avec parseCredits historique).
+    // En convention historique : `montant` = part capital mensuelle = capital / durée.
+    var partCapMensuelle = (dureeNum > 0 && capitalInitial > 0)
+      ? Math.round((capitalInitial / dureeNum) * 100) / 100
+      : montant;
+    var line = {
+      fournisseur: nom,
+      nom: nom,
+      ligneType: 'principal',
+      montant: String(partCapMensuelle),
+      capitalInitial: capitalInitial > 0 ? String(capitalInitial) : '',
+      mensualite: String(montant),
+      duree: dureeNum > 0 ? String(dureeNum) : '',
+      tvaRate: 20,
+      tvaAuto: false,
+      tauxInteret: taux,
+      pointe: 'Non',
+      dateDebut: debut,
+      dateFin: fin,
+      amort: amort
+    };
     // Remplacer la ligne vide si c'est la seule
     var creditIdx;
     if (_data.credits.length === 1 && !_data.credits[0].fournisseur && !parseFloat(_data.credits[0].montant)) {
@@ -4577,8 +4844,39 @@ function calcTotals(data) {
   var creditsPrincipal=0,creditsInteret=0,creditsTVA=0;
   // Migrer si ancienne structure paires principal+interet
   var creditsToCalc = migrateCreditsToSingleLine ? migrateCreditsToSingleLine(data.credits.slice()) : data.credits;
-  // Wave 1 : délégation vers CalcHelpers.parseCredits (même calcul sur toutes les pages)
-  if (window.CalcHelpers) {
+  // ── Source de vérité : tableau d'amortissement de Dettes & Emprunts ──
+  // Pour chaque crédit, si une dette correspondante existe → on lit le capital
+  // et l'intérêt du mois depuis le tableau d'amortissement (cohérent avec dettes.html).
+  // Sinon on retombe sur CalcHelpers.parseCredits (ancien calcul, fallback).
+  var H = window.CalcHelpers;
+  var cachedDettes = window._cachedDettes || [];
+  var hasMirror = !!(H && H.findDetteForCredit && H.getMonthEcheance && cachedDettes.length);
+  if (hasMirror) {
+    var unmirrored = [];
+    creditsToCalc.forEach(function(r) {
+      if (r && r.ligneType === 'interet') return; // ignoré, format legacy
+      // Filtre plage de dates
+      if (r && r.dateDebut && r.dateFin && curMonthKey) {
+        var _deb = parseYYYYMM(r.dateDebut), _fin = parseYYYYMM(r.dateFin);
+        if (_deb && _fin && (curMonthKey < _deb || curMonthKey > _fin)) return;
+      }
+      var dette = H.findDetteForCredit(r, cachedDettes);
+      var ech = (dette && curMonthKey) ? H.getMonthEcheance(dette, curMonthKey) : null;
+      if (ech) {
+        creditsPrincipal += ech.capital || 0;
+        creditsInteret   += ech.interet || 0;
+      } else {
+        unmirrored.push(r);
+      }
+    });
+    // Fallback parseCredits pour les crédits sans dette correspondante
+    if (unmirrored.length && H.parseCredits) {
+      var ci2 = H.parseCredits(unmirrored, curMonthKey);
+      creditsPrincipal += ci2.principal;
+      creditsInteret   += ci2.interet;
+    }
+  } else if (window.CalcHelpers) {
+    // Wave 1 : délégation vers CalcHelpers.parseCredits (même calcul sur toutes les pages)
     var ci = window.CalcHelpers.parseCredits(creditsToCalc, curMonthKey);
     creditsPrincipal = ci.principal;
     creditsInteret = ci.interet;
@@ -4930,6 +5228,16 @@ function openScopeModal(action) {
     title.textContent = '✏️ Modifier le montant';
     desc.textContent  = 'Appliquer le nouveau prix sur "' + lineLabel + '" sur :';
     priceWrap.style.display = 'block';
+    // ── Label contextuel : "HT" pour les charges, "Mensualité" pour les crédits ──
+    // Un emprunt n'est jamais soumis à TVA, donc parler de HT serait faux.
+    var priceLabel = document.getElementById('scope-price-label');
+    if (priceLabel) {
+      if (action.dataKey === 'credits') {
+        priceLabel.textContent = 'Nouvelle mensualité de capital';
+      } else {
+        priceLabel.textContent = 'Nouveau montant HT';
+      }
+    }
     document.getElementById('scope-price-input').value = action.currentVal || '';
     confirmBtn.textContent = '✏️ Appliquer';
     confirmBtn.className = 'btn btn-orange';

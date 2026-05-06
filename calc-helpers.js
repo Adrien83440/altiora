@@ -827,6 +827,292 @@
   };
 
   /* ───────────────────────────────────────────────────────────────────────
+   * EMPRUNTS — Tableau d'amortissement partagé
+   * ───────────────────────────────────────────────────────────────────────
+   *
+   * Source de vérité unique pour le calcul des échéances d'emprunt.
+   * Logique extraite de dettes.html pour qu'elle soit réutilisée par
+   * pilotage.html → garantit que la mensualité affichée dans Pilotage
+   * correspond EXACTEMENT à celle affichée dans Dettes & Emprunts.
+   *
+   * Avant cette extraction, Pilotage utilisait une formule simpliste
+   *   intérêt = montant × taux / 100 / 12
+   * qui était fausse pour 3 des 4 types d'amortissement et produisait
+   * un écart visible avec Dettes (ex : 100,25 € vs 101,25 € sur MATINAE).
+   *
+   * Format dette attendu (compatible avec dettes.html `_dettes[]`) :
+   *   {
+   *     type: 'emprunt',
+   *     montant: 900,           // capital initial emprunté
+   *     taux: 3,                // taux annuel %
+   *     duree: 9,               // durée en mois
+   *     amort: 'constant'|'lineaire'|'fixe'|'infine',
+   *     debut: '2026-01-01'     // ISO date
+   *   }
+   *
+   * Retour calcAmortSchedule : tableau d'échéances
+   *   [{ date: 'YYYY-MM-DD', capital, interet, mensualite, solde, idx }, …]
+   * ─────────────────────────────────────────────────────────────────────── */
+
+  // Ajoute n mois à une date (1er du mois résultat, en local)
+  H._addMonths = function (date, n) {
+    var d = new Date(date);
+    return new Date(d.getFullYear(), d.getMonth() + n, 1);
+  };
+
+  // Calcule le monthKey "YYYY-MM" qui correspond logiquement à la k-ième
+  // échéance d'un emprunt démarré à `debut`, en local.
+  // Convention : la 1ère échéance (k=0) tombe dans le mois de début du prêt.
+  // Ainsi un prêt démarré le 01/01/2026 a sa 1ère échéance dans "2026-01",
+  // sa 5ème dans "2026-05", etc. — cohérent avec ce que voit l'utilisateur.
+  H._echeanceMonthKey = function (debut, k) {
+    var d = new Date(debut);
+    var y = d.getFullYear();
+    var m = d.getMonth() + k; // 0-indexé
+    // normaliser
+    var dt = new Date(y, m, 1);
+    var yy = dt.getFullYear();
+    var mm = dt.getMonth() + 1;
+    return yy + '-' + (mm < 10 ? '0' + mm : '' + mm);
+  };
+
+  // Reproduit le format historique "YYYY-MM-DD" que produisait dettes.html
+  // pour l'affichage. On garde ce format pour ne pas changer ce qui est
+  // affiché côté Dettes & Emprunts (compat visuelle).
+  H._displayDate = function (dt) {
+    try { return dt.toISOString().slice(0, 10); } catch (e) {
+      return (dt.getFullYear()) + '-' +
+        (dt.getMonth() + 1 < 10 ? '0' : '') + (dt.getMonth() + 1) + '-' +
+        (dt.getDate() < 10 ? '0' : '') + dt.getDate();
+    }
+  };
+
+  H.calcAmortSchedule = function (d) {
+    if (!d) return [];
+    var m = H.pf(d.montant);
+    var taux = H.pf(d.taux);
+    var duree = parseInt(d.duree, 10) || 0;
+    if (m <= 0 || duree <= 0 || !d.debut) return [];
+
+    var debut = new Date(d.debut);
+    if (isNaN(debut.getTime())) return [];
+    var rows = [];
+
+    // Types non-emprunt : pas d'amortissement classique
+    if (d.type === 'fournisseur') {
+      rows.push({
+        date: d.echeance || d.debut,
+        monthKey: H._echeanceMonthKey(d.echeance || d.debut, 0),
+        capital: m, interet: 0, mensualite: m, solde: 0, idx: 0
+      });
+      return rows;
+    }
+    if (d.type === 'decouvert') {
+      var tauxMd = taux / 12 / 100;
+      rows.push({
+        date: d.debut,
+        monthKey: H._echeanceMonthKey(d.debut, 0),
+        capital: 0, interet: m * tauxMd, mensualite: m * tauxMd,
+        solde: m, idx: 0, note: 'Intérêts mensuels'
+      });
+      return rows;
+    }
+    if (d.type === 'leasing') {
+      var loyer = H.pf(d.loyer);
+      for (var iL = 0; iL < duree; iL++) {
+        var dtL = H._addMonths(debut, iL + 1);
+        rows.push({
+          date: H._displayDate(dtL),
+          monthKey: H._echeanceMonthKey(debut, iL),
+          capital: 0, interet: 0, mensualite: loyer,
+          solde: m - (loyer * (iL + 1)), idx: iL
+        });
+      }
+      return rows;
+    }
+
+    // Emprunt bancaire — différents amortissements
+    var tauxM = taux / 12 / 100;
+    var amort = d.amort || 'constant';
+
+    // ─── In fine : intérêts seuls + capital au dernier mois ───
+    if (amort === 'infine') {
+      var intMI = m * tauxM;
+      for (var iI = 0; iI < duree; iI++) {
+        var dtI = H._addMonths(debut, iI + 1);
+        var isLast = iI === duree - 1;
+        rows.push({
+          date: H._displayDate(dtI),
+          monthKey: H._echeanceMonthKey(debut, iI),
+          capital: isLast ? m : 0,
+          interet: intMI,
+          mensualite: isLast ? m + intMI : intMI,
+          solde: isLast ? 0 : m,
+          idx: iI
+        });
+      }
+      return rows;
+    }
+
+    // ─── Capital constant (linéaire) ───
+    if (amort === 'lineaire') {
+      var capML = m / duree;
+      var soldeL = m;
+      for (var iLin = 0; iLin < duree; iLin++) {
+        var interetL = soldeL * tauxM;
+        var dtLin = H._addMonths(debut, iLin + 1);
+        rows.push({
+          date: H._displayDate(dtLin),
+          monthKey: H._echeanceMonthKey(debut, iLin),
+          capital: capML, interet: interetL,
+          mensualite: capML + interetL,
+          solde: Math.max(0, soldeL - capML), idx: iLin
+        });
+        soldeL -= capML;
+      }
+      return rows;
+    }
+
+    // ─── Intérêts fixes (prêt américain simplifié) ───
+    if (amort === 'fixe') {
+      var capMF = m / duree;
+      var intMF = m * tauxM;
+      var mensualiteF = capMF + intMF;
+      var soldeF = m;
+      for (var iF = 0; iF < duree; iF++) {
+        var dtF = H._addMonths(debut, iF + 1);
+        rows.push({
+          date: H._displayDate(dtF),
+          monthKey: H._echeanceMonthKey(debut, iF),
+          capital: capMF, interet: intMF, mensualite: mensualiteF,
+          solde: Math.max(0, soldeF - capMF), idx: iF
+        });
+        soldeF -= capMF;
+      }
+      return rows;
+    }
+
+    // ─── Mensualités constantes (par défaut, le plus courant) ───
+    if (tauxM === 0) {
+      var capMZ = m / duree;
+      var soldeZ = m;
+      for (var iZ = 0; iZ < duree; iZ++) {
+        var dtZ = H._addMonths(debut, iZ + 1);
+        rows.push({
+          date: H._displayDate(dtZ),
+          monthKey: H._echeanceMonthKey(debut, iZ),
+          capital: capMZ, interet: 0, mensualite: capMZ,
+          solde: Math.max(0, soldeZ - capMZ), idx: iZ
+        });
+        soldeZ -= capMZ;
+      }
+      return rows;
+    }
+    var mensualiteC = m * (tauxM * Math.pow(1 + tauxM, duree)) / (Math.pow(1 + tauxM, duree) - 1);
+    var soldeC = m;
+    for (var iC = 0; iC < duree; iC++) {
+      var interetC = soldeC * tauxM;
+      var capitalC = mensualiteC - interetC;
+      var dtC = H._addMonths(debut, iC + 1);
+      rows.push({
+        date: H._displayDate(dtC),
+        monthKey: H._echeanceMonthKey(debut, iC),
+        capital: capitalC, interet: interetC, mensualite: mensualiteC,
+        solde: Math.max(0, soldeC - capitalC), idx: iC
+      });
+      soldeC -= capitalC;
+    }
+    return rows;
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * H.getMonthEcheance(dette, monthKey)
+   * ───────────────────────────────────────────────────────────────────────
+   * Retourne l'échéance correspondant au mois `monthKey` (format YYYY-MM)
+   * pour la dette donnée, ou null si aucun match.
+   *
+   * Utilise calcAmortSchedule + matching mois/année sur la date de l'échéance.
+   * ─────────────────────────────────────────────────────────────────────── */
+  H.getMonthEcheance = function (dette, monthKey) {
+    if (!dette || !monthKey) return null;
+    var sched = H.calcAmortSchedule(dette);
+    if (!sched || !sched.length) return null;
+    for (var i = 0; i < sched.length; i++) {
+      if (sched[i].monthKey === monthKey) return sched[i];
+    }
+    return null;
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * H.findDetteForCredit(credit, dettesList)
+   * ───────────────────────────────────────────────────────────────────────
+   * Trouve la dette correspondant à un crédit pilotage. Match en cascade :
+   *   1) _pilotageRef === credit.fournisseur (lien fort, posé par sync)
+   *   2) nom (insensible à la casse) === credit.fournisseur
+   *   3) nom (insensible à la casse) === credit.nom
+   *
+   * Filtre type='emprunt' et active !== false.
+   * Retourne null si rien trouvé.
+   * ─────────────────────────────────────────────────────────────────────── */
+  H.findDetteForCredit = function (credit, dettesList) {
+    if (!credit || !dettesList || !dettesList.length) return null;
+    var fournisseur = (credit.fournisseur || '').trim();
+    var nom = (credit.nom || '').trim();
+    var fournisseurLc = fournisseur.toLowerCase();
+    var nomLc = nom.toLowerCase();
+
+    // Pass 1 : lien fort _pilotageRef
+    if (fournisseur) {
+      for (var i = 0; i < dettesList.length; i++) {
+        var d = dettesList[i];
+        if (!d || d.type !== 'emprunt' || d.active === false) continue;
+        if ((d._pilotageRef || '').trim() === fournisseur) return d;
+      }
+    }
+    // Pass 2 : match par nom
+    for (var j = 0; j < dettesList.length; j++) {
+      var d2 = dettesList[j];
+      if (!d2 || d2.type !== 'emprunt' || d2.active === false) continue;
+      var dnom = (d2.nom || '').trim().toLowerCase();
+      if (dnom && (dnom === fournisseurLc || dnom === nomLc)) return d2;
+    }
+    return null;
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * H.AMORT_LABELS — Libellés grand public + tooltip pédagogique
+   * ───────────────────────────────────────────────────────────────────────
+   * Pour les selects "type d'amortissement" exposés à l'utilisateur final.
+   * Chaque entrée contient :
+   *   • short : libellé court (option du select)
+   *   • title : sous-titre 1 ligne (affiché en <small> ou tooltip)
+   *   • help  : explication 2-3 phrases pour pédagogie
+   * ─────────────────────────────────────────────────────────────────────── */
+  H.AMORT_LABELS = {
+    constant: {
+      short: '🏦 Mensualités constantes',
+      title: 'Le plus courant — emprunt classique en banque',
+      help: 'Vous payez la même somme chaque mois (capital + intérêts confondus). La part d\'intérêts est plus élevée au début et diminue avec le temps. C\'est le mode par défaut de la quasi-totalité des prêts immobiliers et professionnels.'
+    },
+    lineaire: {
+      short: '📉 Capital constant',
+      title: 'Mensualités dégressives — coût total moins élevé',
+      help: 'Vous remboursez la même part de capital chaque mois, mais les intérêts diminuent au fil du temps. Donc la mensualité globale baisse mois après mois. Plus rare, parfois proposé pour les prêts professionnels ou les rachats anticipés.'
+    },
+    fixe: {
+      short: '📊 Intérêts fixes',
+      title: 'Crédit conso ou financement matériel — coût total élevé',
+      help: 'Les intérêts sont calculés une fois pour toutes sur le capital initial et répartis sur la durée. Mensualités constantes mais coût total des intérêts plus élevé qu\'un prêt classique. Souvent utilisé en crédit à la consommation ou financement de matériel.'
+    },
+    infine: {
+      short: '🎯 In fine',
+      title: 'Intérêts seuls puis capital à la fin',
+      help: 'Vous ne payez que les intérêts chaque mois, et vous remboursez la totalité du capital au dernier mois. Utilisé pour les prêts patrimoniaux, prêts relais, ou montages avec assurance-vie en garantie.'
+    }
+  };
+
+
+  /* ───────────────────────────────────────────────────────────────────────
    * EXPLANATIONS — libellés clients
    * ───────────────────────────────────────────────────────────────────────
    * Utilisées pour afficher des tooltips pédagogiques sur les KPI.
