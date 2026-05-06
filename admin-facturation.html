@@ -1,0 +1,3155 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Ambitio — Facturation</title>
+<link rel="stylesheet" href="sales.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script>if(!firebase.apps.length){firebase.initializeApp({apiKey:"AIzaSyDo30FASeWnhvx4mYWYungKOu4AMhyJz6o",authDomain:"ambitio-team.firebaseapp.com",projectId:"ambitio-team",storageBucket:"ambitio-team.firebasestorage.app",messagingSenderId:"1079366902268",appId:"1:1079366902268:web:b4ec1691dba54230339279"});}</script>
+<style>
+:root{
+  --bill-green:#10b981;
+  --bill-green-bg:rgba(16,185,129,.08);
+  --bill-green-bd:rgba(16,185,129,.18);
+  --bill-amber:#f59e0b;
+  --bill-red:#ef4444;
+  --bill-blue:#60a5fa;
+  --bill-purple:#a78bfa;
+}
+
+/* ═══ LAYOUT ═══ */
+.bill-app{display:grid;grid-template-columns:240px 1fr;min-height:calc(100vh - 56px);background:var(--bg)}
+.bill-sidebar{background:var(--bg2);border-right:1px solid var(--border);padding:20px 12px;display:flex;flex-direction:column;gap:4px;position:sticky;top:56px;height:calc(100vh - 56px);overflow-y:auto}
+.bill-side-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--muted);padding:0 12px;margin:8px 0 6px}
+.bill-side-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;transition:all .12s;text-decoration:none;border:1px solid transparent}
+.bill-side-item:hover{background:var(--bg3);color:var(--text)}
+.bill-side-item.active{background:var(--bill-green-bg);border-color:var(--bill-green-bd);color:var(--bill-green)}
+.bill-side-item .bsi-icon{width:18px;text-align:center;font-size:14px}
+.bill-side-item .bsi-soon{margin-left:auto;font-size:9px;font-weight:800;padding:2px 6px;border-radius:8px;background:var(--bg3);color:var(--muted);letter-spacing:.5px}
+.bill-main{padding:24px 32px 80px;max-width:1400px;width:100%;box-sizing:border-box}
+
+/* ═══ HEADER ═══ */
+.bill-header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:24px;flex-wrap:wrap}
+.bill-header-l h1{font-family:var(--font-d);font-size:22px;font-weight:800;letter-spacing:-.4px;margin:0}
+.bill-header-l p{font-size:12px;color:var(--muted);margin:4px 0 0}
+.bill-header-r{display:flex;gap:8px;flex-wrap:wrap}
+
+/* ═══ STATS HERO ═══ */
+.bill-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:28px}
+.bill-stat{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:16px 18px;position:relative;overflow:hidden}
+.bill-stat::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--bill-green)}
+.bill-stat.amber::before{background:var(--bill-amber)}
+.bill-stat.blue::before{background:var(--bill-blue)}
+.bill-stat.purple::before{background:var(--bill-purple)}
+.bill-stat-l{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
+.bill-stat-v{font-size:24px;font-weight:800;font-family:var(--font-m);margin-top:4px;color:var(--text)}
+.bill-stat-s{font-size:11px;color:var(--muted);margin-top:2px}
+
+/* ═══ CONTENT TABS ═══ */
+.bill-tab{display:none}
+.bill-tab.active{display:block}
+.bill-soon{background:var(--bg2);border:1px dashed var(--border2);border-radius:14px;padding:60px 24px;text-align:center;color:var(--muted)}
+.bill-soon-icon{font-size:36px;margin-bottom:12px}
+.bill-soon h3{font-size:16px;font-weight:700;color:var(--text);margin:0 0 6px}
+.bill-soon p{font-size:13px;margin:0;line-height:1.6}
+
+/* ═══ SETTINGS — sub-nav horizontal ═══ */
+.bill-subnav{display:flex;gap:4px;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:4px;margin-bottom:24px;flex-wrap:wrap}
+.bill-subnav-item{padding:8px 14px;border-radius:8px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;transition:all .12s;border:1px solid transparent;white-space:nowrap}
+.bill-subnav-item:hover{background:var(--bg3);color:var(--text)}
+.bill-subnav-item.active{background:var(--bill-green-bg);border-color:var(--bill-green-bd);color:var(--bill-green)}
+
+/* ═══ CARDS ═══ */
+.bill-card{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:24px;margin-bottom:16px}
+.bill-card-h{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--border)}
+.bill-card-h h3{font-family:var(--font-d);font-size:14px;font-weight:800;letter-spacing:.2px;margin:0}
+.bill-card-h p{font-size:11px;color:var(--muted);margin:2px 0 0}
+.bill-card-h-r{display:flex;gap:6px;align-items:center}
+
+/* ═══ FORMS ═══ */
+.bill-form-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+.bill-form-grid.full{grid-template-columns:1fr}
+.bill-form-grid.three{grid-template-columns:repeat(3,1fr)}
+.bill-form-row.span2{grid-column:span 2}
+.bill-form-row.span3{grid-column:span 3}
+.bill-label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;display:flex;align-items:center;gap:6px}
+.bill-label .bill-req{color:var(--bill-red)}
+.bill-input,.bill-select,.bill-textarea{width:100%;padding:10px 12px;background:var(--bg3);border:1.5px solid var(--border);border-radius:10px;color:var(--text);font-family:var(--font-b);font-size:13px;outline:none;transition:border-color .12s;box-sizing:border-box}
+.bill-input:focus,.bill-select:focus,.bill-textarea:focus{border-color:var(--bill-green)}
+.bill-input.invalid{border-color:var(--bill-red)}
+.bill-textarea{resize:vertical;min-height:90px;font-family:var(--font-b)}
+.bill-textarea.cgv{font-family:var(--font-m);font-size:12px;line-height:1.6;min-height:280px}
+.bill-help{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5}
+.bill-help.warn{color:var(--bill-amber)}
+
+/* ═══ LOGO ═══ */
+.bill-logo-section{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+@media(max-width:780px){.bill-logo-section{grid-template-columns:1fr}}
+.bill-logo-mode-toggle{display:flex;border:1.5px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.bill-logo-mode-btn{flex:1;padding:10px;background:transparent;border:none;color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;transition:all .12s;font-family:var(--font-b)}
+.bill-logo-mode-btn.on{background:var(--bill-green-bg);color:var(--bill-green)}
+.bill-logo-preview{background:#fafafa;color:#0a0a0a;border-radius:12px;padding:36px 24px;display:flex;align-items:center;justify-content:center;min-height:140px;border:1px solid var(--border)}
+.bill-logo-preview.dark{background:var(--bg3);color:var(--text)}
+.bill-wordmark{font-family:'Montserrat',sans-serif;font-size:22px;font-weight:500;letter-spacing:8px;text-transform:uppercase;text-align:center;line-height:1.4}
+.bill-wordmark .amp{font-weight:300;margin:0 4px}
+.bill-logo-img{max-width:100%;max-height:120px;object-fit:contain}
+.bill-logo-drop{border:2px dashed var(--border2);border-radius:12px;padding:30px 20px;text-align:center;cursor:pointer;transition:all .12s;background:var(--bg3)}
+.bill-logo-drop:hover,.bill-logo-drop.dragover{border-color:var(--bill-green);background:var(--bill-green-bg)}
+.bill-logo-drop-icon{font-size:30px;margin-bottom:8px}
+.bill-logo-drop-t{font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px}
+.bill-logo-drop-s{font-size:11px;color:var(--muted)}
+.bill-logo-drop input{display:none}
+
+/* ═══ BUTTONS ═══ */
+.bill-btn{padding:9px 16px;border:none;border-radius:10px;font-family:var(--font-b);font-size:12px;font-weight:700;cursor:pointer;transition:all .12s;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;line-height:1}
+.bill-btn-primary{background:var(--bill-green);color:#000}
+.bill-btn-primary:hover{filter:brightness(1.08)}
+.bill-btn-primary:disabled{opacity:.45;cursor:not-allowed}
+.bill-btn-ghost{background:var(--bg3);border:1px solid var(--border);color:var(--muted)}
+.bill-btn-ghost:hover{border-color:var(--border2);color:var(--text)}
+.bill-btn-red{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);color:var(--bill-red)}
+.bill-btn-amber{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.2);color:var(--bill-amber)}
+.bill-btn-sm{padding:6px 10px;font-size:11px}
+.bill-btn-lg{padding:11px 20px;font-size:13px}
+
+/* ═══ TABLE ═══ */
+.bill-toolbar{display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap}
+.bill-toolbar .bill-search{flex:1;min-width:200px;max-width:400px;position:relative}
+.bill-search input{width:100%;padding:9px 12px 9px 34px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-size:13px;outline:none;box-sizing:border-box}
+.bill-search input:focus{border-color:var(--bill-green)}
+.bill-search-icon{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:13px;pointer-events:none}
+.bill-table-wrap{background:var(--bg2);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.bill-table{width:100%;border-collapse:collapse}
+.bill-table thead th{padding:11px 16px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);background:var(--bg3);border-bottom:1px solid var(--border);white-space:nowrap}
+.bill-table tbody tr{border-bottom:1px solid rgba(255,255,255,.03);transition:background .1s;cursor:pointer}
+.bill-table tbody tr:last-child{border-bottom:none}
+.bill-table tbody tr:hover{background:rgba(255,255,255,.02)}
+.bill-table tbody td{padding:12px 16px;font-size:13px;vertical-align:middle}
+.bill-table .col-actions{text-align:right;white-space:nowrap}
+.bill-table .col-actions .bill-btn{padding:5px 8px;font-size:10px}
+.bill-empty{text-align:center;padding:60px 20px;color:var(--muted)}
+.bill-empty-icon{font-size:42px;margin-bottom:10px;opacity:.6}
+.bill-empty h4{font-size:14px;font-weight:700;color:var(--text);margin:0 0 4px}
+.bill-empty p{font-size:12px;margin:0 0 16px;line-height:1.6}
+
+/* ═══ BADGES ═══ */
+.bill-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap}
+.bill-badge.company{background:rgba(96,165,250,.1);color:var(--bill-blue);border:1px solid rgba(96,165,250,.2)}
+.bill-badge.individual{background:rgba(167,139,250,.1);color:var(--bill-purple);border:1px solid rgba(167,139,250,.2)}
+.bill-badge.exempt{background:rgba(245,158,11,.1);color:var(--bill-amber);border:1px solid rgba(245,158,11,.2)}
+
+/* ═══ DRAWER ═══ */
+.bill-drawer-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9000;display:none;backdrop-filter:blur(2px)}
+.bill-drawer-bg.show{display:block}
+.bill-drawer{position:fixed;top:0;right:-540px;width:520px;max-width:100vw;height:100vh;background:var(--bg2);border-left:1px solid var(--border2);z-index:9001;display:flex;flex-direction:column;transition:right .22s ease;overflow:hidden}
+.bill-drawer.show{right:0}
+.bill-drawer-h{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--border)}
+.bill-drawer-h h2{font-family:var(--font-d);font-size:16px;font-weight:800;margin:0}
+.bill-drawer-close{background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;line-height:1;padding:0;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:8px}
+.bill-drawer-close:hover{background:var(--bg3);color:var(--text)}
+.bill-drawer-body{flex:1;overflow-y:auto;padding:24px}
+.bill-drawer-foot{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;background:var(--bg2)}
+
+/* ═══ CLIENT TYPE TOGGLE ═══ */
+.bill-type-toggle{display:flex;border:1.5px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:14px}
+.bill-type-btn{flex:1;padding:10px;background:transparent;border:none;color:var(--muted);font-size:12px;font-weight:700;cursor:pointer;transition:all .12s;font-family:var(--font-b)}
+.bill-type-btn.on{background:var(--bill-green-bg);color:var(--bill-green)}
+
+/* ═══ TOAST ═══ */
+.bill-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--bg2);border:1px solid var(--border2);border-radius:12px;padding:12px 18px;font-size:13px;font-weight:600;color:var(--text);box-shadow:0 12px 30px rgba(0,0,0,.4);z-index:11000;opacity:0;transition:all .25s;display:flex;align-items:center;gap:10px;max-width:90vw}
+.bill-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.bill-toast.error{border-color:var(--bill-red)}
+
+/* ═══ LOADER ═══ */
+.bill-loader{display:flex;align-items:center;justify-content:center;padding:60px 20px;color:var(--muted);font-size:13px}
+.bill-spinner{width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--bill-green);border-radius:50%;animation:bsp 0.7s linear infinite;margin-right:10px}
+@keyframes bsp{to{transform:rotate(360deg)}}
+
+/* ═══ CGV VERSIONS ═══ */
+.bill-cgv-versions{display:flex;flex-direction:column;gap:8px;margin-bottom:18px}
+.bill-cgv-version{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:10px}
+.bill-cgv-version.active{border-color:var(--bill-green-bd);background:var(--bill-green-bg)}
+.bill-cgv-version-l{flex:1}
+.bill-cgv-version-v{font-size:13px;font-weight:700;color:var(--text)}
+.bill-cgv-version-d{font-size:10px;color:var(--muted);margin-top:2px}
+.bill-cgv-version-actions{display:flex;gap:6px}
+
+/* ═══ RESPONSIVE ═══ */
+@media(max-width:900px){
+  .bill-app{grid-template-columns:1fr}
+  .bill-sidebar{position:relative;top:0;height:auto;flex-direction:row;overflow-x:auto;padding:12px;gap:8px}
+  .bill-sidebar .bill-side-title{display:none}
+  .bill-side-item{flex-shrink:0}
+  .bill-form-grid,.bill-form-grid.three{grid-template-columns:1fr}
+  .bill-form-row.span2,.bill-form-row.span3{grid-column:span 1}
+  .bill-main{padding:18px}
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<script src="nav.js"></script>
+
+<!-- LOADING -->
+<div id="bootLoader" class="bill-loader">
+  <span class="bill-spinner"></span> Chargement…
+</div>
+
+<!-- APP -->
+<div class="bill-app" id="billApp" style="display:none">
+
+  <!-- SIDEBAR INTERNE -->
+  <aside class="bill-sidebar">
+    <div class="bill-side-title">Facturation</div>
+    <a class="bill-side-item" data-tab="invoices" onclick="switchTab('invoices')">
+      <span class="bsi-icon">📄</span>
+      <span>Factures</span>
+    </a>
+    <a class="bill-side-item" data-tab="clients" onclick="switchTab('clients')">
+      <span class="bsi-icon">👥</span>
+      <span>Clients</span>
+    </a>
+    <a class="bill-side-item" data-tab="products" onclick="switchTab('products')">
+      <span class="bsi-icon">📦</span>
+      <span>Produits</span>
+    </a>
+    <a class="bill-side-item" data-tab="subscriptions" onclick="switchTab('subscriptions')">
+      <span class="bsi-icon">🔁</span>
+      <span>Abonnements</span>
+    </a>
+    <a class="bill-side-item" data-tab="alerts" onclick="switchTab('alerts')">
+      <span class="bsi-icon">🚨</span>
+      <span>Alertes</span>
+      <span id="sideBadgeAlerts" style="display:none;margin-left:auto;background:#ef4444;color:#fff;border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700">0</span>
+    </a>
+    <div class="bill-side-title" style="margin-top:14px">Configuration</div>
+    <a class="bill-side-item active" data-tab="settings" onclick="switchTab('settings')">
+      <span class="bsi-icon">⚙️</span>
+      <span>Paramètres</span>
+    </a>
+    <a class="bill-side-item" data-tab="export" onclick="switchTab('export')">
+      <span class="bsi-icon">📤</span>
+      <span>Export</span>
+      <span class="bsi-soon">S5</span>
+    </a>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="bill-main">
+
+    <!-- HEADER -->
+    <div class="bill-header">
+      <div class="bill-header-l">
+        <h1 id="billHeaderTitle">Paramètres</h1>
+        <p id="billHeaderSubtitle">Configurez votre identité d'émetteur, votre logo, vos coordonnées bancaires et vos CGV.</p>
+      </div>
+      <div class="bill-header-r" id="billHeaderActions"></div>
+    </div>
+
+    <!-- ============ TAB : SETTINGS ============ -->
+    <div class="bill-tab active" data-tab="settings">
+
+      <!-- Sub-nav settings -->
+      <div class="bill-subnav">
+        <div class="bill-subnav-item active" data-sub="company" onclick="switchSettingsSub('company')">🏢 Entreprise</div>
+        <div class="bill-subnav-item" data-sub="logo" onclick="switchSettingsSub('logo')">🎨 Identité visuelle</div>
+        <div class="bill-subnav-item" data-sub="bank" onclick="switchSettingsSub('bank')">🏦 Banque & paiement</div>
+        <div class="bill-subnav-item" data-sub="numbering" onclick="switchSettingsSub('numbering')">🔢 Numérotation & TVA</div>
+        <div class="bill-subnav-item" data-sub="email" onclick="switchSettingsSub('email')">📨 Email</div>
+        <div class="bill-subnav-item" data-sub="automation" onclick="switchSettingsSub('automation')">🤖 Automation</div>
+        <div class="bill-subnav-item" data-sub="cgv" onclick="switchSettingsSub('cgv')">📜 CGV</div>
+      </div>
+
+      <!-- Sub-tab : Entreprise -->
+      <div class="bill-settings-sub" data-sub="company">
+        <div class="bill-card">
+          <div class="bill-card-h">
+            <div>
+              <h3>Informations légales de l'émetteur</h3>
+              <p>Ces informations apparaîtront sur toutes les factures émises. Modification immuable une fois la première facture validée.</p>
+            </div>
+          </div>
+          <div class="bill-form-grid">
+            <div class="bill-form-row span2">
+              <div class="bill-label">Raison sociale <span class="bill-req">*</span></div>
+              <input class="bill-input" id="cfCompanyName" placeholder="Ambitio Corp"/>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Forme juridique <span class="bill-req">*</span></div>
+              <select class="bill-select" id="cfLegalForm">
+                <option value="SARL">SARL</option>
+                <option value="SAS">SAS</option>
+                <option value="SASU">SASU</option>
+                <option value="EURL">EURL</option>
+                <option value="EI">Entreprise individuelle</option>
+              </select>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Capital social <span class="bill-req">*</span></div>
+              <input class="bill-input" id="cfShareCapital" placeholder="1000 €"/>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">SIRET <span class="bill-req">*</span></div>
+              <input class="bill-input" id="cfSiret" placeholder="14 chiffres" maxlength="14"/>
+              <div class="bill-help">Le SIREN sera extrait automatiquement (9 premiers chiffres).</div>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">N° TVA intracommunautaire <span class="bill-req">*</span></div>
+              <input class="bill-input" id="cfVatNumber" placeholder="FR00 000000000"/>
+              <div class="bill-help">Format : FR + 2 chiffres clé + 9 chiffres SIREN</div>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">RCS <span class="bill-req">*</span></div>
+              <input class="bill-input" id="cfRcs" placeholder="RCS Draguignan 943 098 707"/>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Tribunal compétent</div>
+              <input class="bill-input" id="cfTribunal" placeholder="Tribunal de commerce de Draguignan"/>
+            </div>
+            <div class="bill-form-row span2">
+              <div class="bill-label">Adresse — ligne 1 <span class="bill-req">*</span></div>
+              <input class="bill-input" id="cfAddrLine1" placeholder="231B chemin de mourre de masque"/>
+            </div>
+            <div class="bill-form-row span2">
+              <div class="bill-label">Adresse — ligne 2 (optionnel)</div>
+              <input class="bill-input" id="cfAddrLine2" placeholder=""/>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Code postal <span class="bill-req">*</span></div>
+              <input class="bill-input" id="cfAddrPostal" placeholder="83440" maxlength="5"/>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Ville <span class="bill-req">*</span></div>
+              <input class="bill-input" id="cfAddrCity" placeholder="Fayence"/>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Pays</div>
+              <input class="bill-input" id="cfAddrCountry" placeholder="France" value="France"/>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Téléphone</div>
+              <input class="bill-input" id="cfPhone" placeholder="+33…"/>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Email principal <span class="bill-req">*</span></div>
+              <input class="bill-input" id="cfEmail" type="email" placeholder="contact@ambitiocorp.com"/>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Email rétractation</div>
+              <input class="bill-input" id="cfEmailRetract" type="email" placeholder="relationclient@ambitiocorp.com"/>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
+            <button class="bill-btn bill-btn-ghost" onclick="loadBillingConfig()">Annuler</button>
+            <button class="bill-btn bill-btn-primary bill-btn-lg" id="cfSaveBtn" onclick="saveCompanyInfo()">💾 Enregistrer</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-tab : Logo -->
+      <div class="bill-settings-sub" data-sub="logo" style="display:none">
+        <div class="bill-card">
+          <div class="bill-card-h">
+            <div>
+              <h3>Identité visuelle</h3>
+              <p>Le logo apparaîtra en en-tête de chaque facture émise et dans le portail client.</p>
+            </div>
+          </div>
+
+          <div class="bill-logo-mode-toggle">
+            <button class="bill-logo-mode-btn on" id="logoModeWordmark" onclick="setLogoMode('wordmark')">✍️ Wordmark typographique</button>
+            <button class="bill-logo-mode-btn" id="logoModeImage" onclick="setLogoMode('image')">🖼️ Image personnalisée</button>
+          </div>
+
+          <div class="bill-logo-section">
+            <div>
+              <div class="bill-label">Aperçu sur fond clair (PDF facture)</div>
+              <div class="bill-logo-preview" id="logoPreviewLight"></div>
+              <div class="bill-label" style="margin-top:14px">Aperçu sur fond sombre (interface)</div>
+              <div class="bill-logo-preview dark" id="logoPreviewDark"></div>
+            </div>
+            <div>
+              <div id="logoWordmarkConfig">
+                <div class="bill-label">Texte du wordmark</div>
+                <input class="bill-input" id="cfWordmarkText" value="ADRIEN & EMILY" oninput="updateWordmarkPreview()"/>
+                <div class="bill-form-grid" style="margin-top:14px">
+                  <div class="bill-form-row">
+                    <div class="bill-label">Espacement (letter-spacing)</div>
+                    <input class="bill-input" id="cfWordmarkSpacing" type="number" min="0" max="20" step="0.5" value="8" oninput="updateWordmarkPreview()"/>
+                  </div>
+                  <div class="bill-form-row">
+                    <div class="bill-label">Graisse</div>
+                    <select class="bill-select" id="cfWordmarkWeight" onchange="updateWordmarkPreview()">
+                      <option value="300">Light (300)</option>
+                      <option value="400">Regular (400)</option>
+                      <option value="500" selected>Medium (500)</option>
+                      <option value="600">Semi-bold (600)</option>
+                      <option value="700">Bold (700)</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="bill-help">Police : Montserrat. Affichage en majuscules avec espacement entre les lettres.</div>
+              </div>
+
+              <div id="logoImageConfig" style="display:none">
+                <div class="bill-logo-drop" id="logoDropZone">
+                  <div class="bill-logo-drop-icon">📁</div>
+                  <div class="bill-logo-drop-t">Glissez une image ici ou cliquez</div>
+                  <div class="bill-logo-drop-s">PNG, JPG ou SVG · Max 500 KB</div>
+                  <input type="file" id="logoFileInput" accept="image/png,image/jpeg,image/svg+xml"/>
+                </div>
+                <div class="bill-help">Idéalement transparent (PNG ou SVG) avec un format paysage (max 600×200 px).</div>
+                <button class="bill-btn bill-btn-red bill-btn-sm" id="logoDeleteBtn" style="margin-top:10px;display:none" onclick="deleteUploadedLogo()">🗑️ Supprimer le logo</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:24px">
+            <button class="bill-btn bill-btn-ghost" onclick="loadBillingConfig()">Annuler</button>
+            <button class="bill-btn bill-btn-primary bill-btn-lg" id="logoSaveBtn" onclick="saveLogo()">💾 Enregistrer</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-tab : Bank -->
+      <div class="bill-settings-sub" data-sub="bank" style="display:none">
+        <div class="bill-card">
+          <div class="bill-card-h">
+            <div>
+              <h3>Coordonnées bancaires</h3>
+              <p>Affichées sur les factures pour les paiements par virement. GoCardless gère séparément le prélèvement automatique.</p>
+            </div>
+          </div>
+          <div class="bill-form-grid">
+            <div class="bill-form-row">
+              <div class="bill-label">Banque</div>
+              <input class="bill-input" id="cfBankName" placeholder="Crédit Mutuel, Boursorama…"/>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">BIC / SWIFT</div>
+              <input class="bill-input" id="cfBic" placeholder="CMCIFRPP" maxlength="11"/>
+            </div>
+            <div class="bill-form-row span2">
+              <div class="bill-label">IBAN</div>
+              <input class="bill-input" id="cfIban" placeholder="FR76 ..."/>
+              <div class="bill-help">L'IBAN sera affiché sur les factures. Formaté automatiquement par groupes de 4.</div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
+            <button class="bill-btn bill-btn-ghost" onclick="loadBillingConfig()">Annuler</button>
+            <button class="bill-btn bill-btn-primary bill-btn-lg" id="bankSaveBtn" onclick="saveBankInfo()">💾 Enregistrer</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-tab : Numbering -->
+      <div class="bill-settings-sub" data-sub="numbering" style="display:none">
+        <div class="bill-card">
+          <div class="bill-card-h">
+            <div>
+              <h3>Numérotation des factures</h3>
+              <p>Format de numérotation séquentielle, immuable une fois la première facture émise (loi anti-fraude 2018).</p>
+            </div>
+          </div>
+          <div class="bill-form-grid">
+            <div class="bill-form-row">
+              <div class="bill-label">Préfixe factures</div>
+              <input class="bill-input" id="cfInvoicePrefix" value="F" maxlength="3"/>
+              <div class="bill-help">Exemple final : <code id="cfInvoicePreview">F2026-00001</code></div>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Préfixe avoirs</div>
+              <input class="bill-input" id="cfCreditNotePrefix" value="A" maxlength="3"/>
+              <div class="bill-help">Exemple final : <code id="cfCreditPreview">A2026-00001</code></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="bill-card">
+          <div class="bill-card-h">
+            <div>
+              <h3>TVA & conditions de paiement</h3>
+              <p>Paramètres par défaut appliqués aux nouvelles factures. Modifiable au niveau de chaque facture.</p>
+            </div>
+          </div>
+          <div class="bill-form-grid three">
+            <div class="bill-form-row">
+              <div class="bill-label">Taux TVA par défaut</div>
+              <select class="bill-select" id="cfVatRate">
+                <option value="20">20 % (taux normal)</option>
+                <option value="10">10 %</option>
+                <option value="5.5">5,5 %</option>
+                <option value="2.1">2,1 %</option>
+                <option value="0">0 % (exonéré)</option>
+              </select>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Conditions de paiement (jours)</div>
+              <input class="bill-input" id="cfPaymentTerms" type="number" min="0" max="120" value="30"/>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Pénalités retard (× taux légal)</div>
+              <input class="bill-input" id="cfLateFeeRate" type="number" min="1" max="10" step="0.5" value="3"/>
+              <div class="bill-help">Mention obligatoire art. L441-10 Code de commerce.</div>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Indemnité forfaitaire (€)</div>
+              <input class="bill-input" id="cfLateFeePenalty" type="number" min="0" value="40"/>
+              <div class="bill-help">Indemnité forfaitaire pour frais de recouvrement (art. D441-5).</div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
+            <button class="bill-btn bill-btn-ghost" onclick="loadBillingConfig()">Annuler</button>
+            <button class="bill-btn bill-btn-primary bill-btn-lg" id="numbSaveBtn" onclick="saveNumberingVat()">💾 Enregistrer</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-tab : Email (Step 2B-2) -->
+      <div class="bill-settings-sub" data-sub="email" style="display:none">
+        <div class="bill-card">
+          <div class="bill-card-h">
+            <div>
+              <h3>Compte expéditeur</h3>
+              <p>Compte Gmail OAuth utilisé pour l'envoi des factures par email. Le token doit être présent dans <code>email_tokens/{slug}</code>.</p>
+            </div>
+          </div>
+          <div class="bill-form-grid">
+            <div class="bill-form-row">
+              <div class="bill-label">Slug du compte expéditeur</div>
+              <input class="bill-input" id="cfSenderAccount" value="contact" maxlength="40" placeholder="contact"/>
+              <div class="bill-help">Ce nom correspond à l'identifiant du document Firestore <code>email_tokens/&lt;slug&gt;</code>. Par défaut : <code>contact</code> (= <code>contact@adrienemily.com</code>).</div>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">BCC automatique</div>
+              <label class="bill-checkbox-label" style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+                <input type="checkbox" id="cfEnableBcc" checked style="accent-color:#10b981;width:16px;height:16px"/>
+                <span>Recevoir une copie en BCC à chaque envoi (sur le compte expéditeur)</span>
+              </label>
+              <div class="bill-help">Pratique pour avoir la trace dans la boîte de réception du compte expéditeur. Override possible au cas par cas dans le modal.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="bill-card">
+          <div class="bill-card-h">
+            <div>
+              <h3>Template email facture</h3>
+              <p>Sujet et corps utilisés par défaut au moment de l'envoi. Tu pourras toujours les modifier au cas par cas dans le modal d'envoi.</p>
+            </div>
+            <div>
+              <button class="bill-btn bill-btn-ghost" onclick="resetEmailTemplate()" title="Réinitialiser le template aux valeurs par défaut">↺ Réinitialiser</button>
+            </div>
+          </div>
+          <div class="bill-form-grid">
+            <div class="bill-form-row">
+              <div class="bill-label">Sujet</div>
+              <input class="bill-input" id="cfEmailSubject" placeholder="Votre facture {invoiceNumber} — {issuerName}"/>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Corps</div>
+              <textarea class="bill-input" id="cfEmailBody" rows="14" style="font-family:inherit;line-height:1.55"></textarea>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Variables disponibles</div>
+              <div style="font-size:11px;color:var(--muted);background:var(--bg1);padding:10px 12px;border-radius:6px;font-family:ui-monospace,Menlo,monospace;line-height:1.7">
+                <span style="color:var(--text)">{invoiceNumber}</span> · <span style="color:var(--text)">{clientFirstName}</span> · <span style="color:var(--text)">{clientName}</span> · <span style="color:var(--text)">{issueDate}</span> · <span style="color:var(--text)">{dueDate}</span> · <span style="color:var(--text)">{totalTtc}</span> · <span style="color:var(--text)">{totalHt}</span> · <span style="color:var(--text)">{paymentMethod}</span> · <span style="color:var(--text)">{paymentInstructions}</span> · <span style="color:var(--text)">{issuerName}</span> · <span style="color:var(--text)">{issuerEmail}</span>
+              </div>
+              <div class="bill-help"><code>{paymentInstructions}</code> est généré automatiquement selon le mode de paiement de la facture (IBAN si virement, mention SEPA si GoCardless, etc.).</div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
+            <button class="bill-btn bill-btn-ghost" onclick="loadBillingConfig()">Annuler</button>
+            <button class="bill-btn bill-btn-primary bill-btn-lg" id="emailSaveBtn" onclick="saveEmailSettings()">💾 Enregistrer</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-tab : Automation (Step 3) -->
+      <div class="bill-settings-sub" data-sub="automation" style="display:none">
+        <div class="bill-card">
+          <div class="bill-card-h">
+            <div>
+              <h3>Lien automatique GoCardless → factures (Step 3)</h3>
+              <p>Lorsqu'un prélèvement GoCardless est confirmé, marque automatiquement la facture correspondante comme "Payée" si elle existe (matching par client + montant exact, ordre FIFO).</p>
+            </div>
+          </div>
+          <div class="bill-form-grid full">
+            <div class="bill-form-row">
+              <div class="bill-label">Activer le lien automatique</div>
+              <label class="bill-checkbox-label" style="display:flex;align-items:center;gap:10px;font-size:13px;cursor:pointer;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px">
+                <input type="checkbox" id="cfAutoPaymentLinking" style="accent-color:#10b981;width:18px;height:18px"/>
+                <div>
+                  <div style="font-weight:700;color:var(--text)">Auto-marquer les factures payées via GC</div>
+                  <div style="font-size:11px;color:var(--muted);margin-top:2px">Désactivé tant que tu n'émets pas de factures pour les mensualités GC. Les paiements arrivés tant que c'est OFF sont marqués comme traités sans matching (ils ne déclencheront pas d'alerte rétroactive à l'activation).</div>
+                </div>
+              </label>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Cas non résolus</div>
+              <div style="font-size:12px;color:var(--muted);line-height:1.6">
+                Quand le matching échoue (0 ou plusieurs factures candidates pour un paiement), une alerte est créée dans <code>_alerts/billing/items/</code>.
+                <br>Les alertes apparaissent dans l'onglet <strong>🚨 Alertes</strong> du sidebar.
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
+            <button class="bill-btn bill-btn-ghost" onclick="loadBillingConfig()">Annuler</button>
+            <button class="bill-btn bill-btn-primary bill-btn-lg" id="autoSaveBtn" onclick="saveAutomationSettings()">💾 Enregistrer</button>
+          </div>
+        </div>
+
+        <div class="bill-card">
+          <div class="bill-card-h">
+            <div>
+              <h3>Statistiques auto-link</h3>
+              <p>Bilan des derniers paiements traités automatiquement.</p>
+            </div>
+          </div>
+          <div class="bill-stats" style="margin:0">
+            <div class="bill-stat">
+              <div class="bill-stat-l">Factures auto-payées</div>
+              <div class="bill-stat-v" id="statAutoPaid">—</div>
+            </div>
+            <div class="bill-stat amber">
+              <div class="bill-stat-l">Alertes ouvertes</div>
+              <div class="bill-stat-v" id="statAlertsOpen">—</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sub-tab : CGV -->
+      <div class="bill-settings-sub" data-sub="cgv" style="display:none">
+        <div class="bill-card">
+          <div class="bill-card-h">
+            <div>
+              <h3>Conditions Générales de Facturation (CGF)</h3>
+              <p>Versions horodatées. Chaque facture émise stocke une copie immuable de la version active au moment de l'émission.</p>
+            </div>
+          </div>
+          <div class="bill-cgv-versions" id="cgvVersionsList"></div>
+
+          <div class="bill-label" style="margin-top:18px">Édition / nouvelle version</div>
+          <textarea class="bill-textarea cgv" id="cfCgvText" placeholder="Texte intégral des CGF…"></textarea>
+          <div class="bill-form-grid" style="margin-top:12px">
+            <div class="bill-form-row">
+              <div class="bill-label">Numéro de version</div>
+              <input class="bill-input" id="cfCgvVersion" placeholder="1.0"/>
+              <div class="bill-help">Si la version saisie existe déjà, elle sera mise à jour. Sinon une nouvelle version sera créée.</div>
+            </div>
+            <div class="bill-form-row">
+              <div class="bill-label">Action</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="bill-btn bill-btn-primary" id="cgvSaveBtn" onclick="saveCgv(false)">💾 Enregistrer (sans activer)</button>
+                <button class="bill-btn bill-btn-primary" id="cgvSaveActivateBtn" onclick="saveCgv(true)">✅ Enregistrer & activer</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ============ TAB : CLIENTS ============ -->
+    <div class="bill-tab" data-tab="clients">
+      <div class="bill-stats">
+        <div class="bill-stat">
+          <div class="bill-stat-l">Clients enregistrés</div>
+          <div class="bill-stat-v" id="statClientsTotal">—</div>
+        </div>
+        <div class="bill-stat blue">
+          <div class="bill-stat-l">Sociétés</div>
+          <div class="bill-stat-v" id="statClientsCompany">—</div>
+        </div>
+        <div class="bill-stat purple">
+          <div class="bill-stat-l">Particuliers</div>
+          <div class="bill-stat-v" id="statClientsIndiv">—</div>
+        </div>
+        <div class="bill-stat amber">
+          <div class="bill-stat-l">Liés GoCardless</div>
+          <div class="bill-stat-v" id="statClientsLinked">—</div>
+        </div>
+      </div>
+
+      <div class="bill-toolbar">
+        <div class="bill-search">
+          <span class="bill-search-icon">🔍</span>
+          <input id="clientsSearch" placeholder="Rechercher par nom, société, email, SIRET…" oninput="renderClientsList()"/>
+        </div>
+        <select class="bill-select" id="clientsTypeFilter" onchange="renderClientsList()" style="min-width:140px">
+          <option value="all">Tous types</option>
+          <option value="company">🏢 Sociétés</option>
+          <option value="individual">👤 Particuliers</option>
+        </select>
+        <select class="bill-select" id="clientsOwnerFilter" onchange="renderClientsList()" style="min-width:160px">
+          <option value="all">Tous les sales</option>
+        </select>
+        <select class="bill-select" id="clientsGcFilter" onchange="renderClientsList()" style="min-width:130px">
+          <option value="all">GC : tous</option>
+          <option value="yes">Avec GC</option>
+          <option value="no">Sans GC</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;white-space:nowrap">
+          <input type="checkbox" id="clientsShowArchived" onchange="renderClientsList()" style="accent-color:var(--inv-green,#10b981)"/>
+          <span>Archivés</span>
+        </label>
+        <button class="bill-btn bill-btn-primary bill-btn-lg" onclick="openClientDrawer(null)">➕ Nouveau client</button>
+      </div>
+
+      <div class="bill-table-wrap" id="clientsTableWrap">
+        <div class="bill-loader"><span class="bill-spinner"></span> Chargement des clients…</div>
+      </div>
+    </div>
+
+    <!-- ============ TAB : INVOICES ============ -->
+    <div class="bill-tab" data-tab="invoices">
+      <div class="bill-stats">
+        <div class="bill-stat">
+          <div class="bill-stat-l">CA encaissé (mois)</div>
+          <div class="bill-stat-v" id="statInvCa">— €</div>
+          <div class="bill-stat-s" id="statInvCaCount">Disponible Step 2B</div>
+        </div>
+        <div class="bill-stat amber">
+          <div class="bill-stat-l">Brouillons</div>
+          <div class="bill-stat-v" id="statInvDrafts">—</div>
+          <div class="bill-stat-s">À finaliser</div>
+        </div>
+        <div class="bill-stat blue">
+          <div class="bill-stat-l">Validées non payées</div>
+          <div class="bill-stat-v" id="statInvPending">—</div>
+          <div class="bill-stat-s" id="statInvPendingAmt">Step 2B</div>
+        </div>
+        <div class="bill-stat purple">
+          <div class="bill-stat-l">Total émises</div>
+          <div class="bill-stat-v" id="statInvTotal">—</div>
+          <div class="bill-stat-s">Toutes années</div>
+        </div>
+      </div>
+
+      <div class="bill-toolbar">
+        <div class="bill-search">
+          <span class="bill-search-icon">🔍</span>
+          <input id="invoicesSearch" placeholder="Rechercher par numéro, client, montant…" oninput="renderInvoicesList()"/>
+        </div>
+        <select class="bill-select" id="invoicesStatusFilter" style="width:auto;min-width:160px" onchange="renderInvoicesList()">
+          <option value="all">Tous les statuts</option>
+          <option value="draft">Brouillons</option>
+          <option value="validated">Validées</option>
+          <option value="sent">Envoyées</option>
+          <option value="paid">Payées</option>
+          <option value="cancelled">Annulées</option>
+        </select>
+        <button class="bill-btn bill-btn-primary bill-btn-lg" onclick="newInvoice()">➕ Nouvelle facture</button>
+      </div>
+
+      <div class="bill-table-wrap" id="invoicesTableWrap">
+        <div class="bill-loader"><span class="bill-spinner"></span> Chargement des factures…</div>
+      </div>
+    </div>
+
+    <!-- ============ TAB : PRODUCTS ============ -->
+    <div class="bill-tab" data-tab="products">
+      <div class="bill-stats">
+        <div class="bill-stat">
+          <div class="bill-stat-l">Produits au catalogue</div>
+          <div class="bill-stat-v" id="statProdTotal">—</div>
+        </div>
+        <div class="bill-stat blue">
+          <div class="bill-stat-l">Actifs</div>
+          <div class="bill-stat-v" id="statProdActive">—</div>
+        </div>
+        <div class="bill-stat purple">
+          <div class="bill-stat-l">Archivés</div>
+          <div class="bill-stat-v" id="statProdArchived">—</div>
+        </div>
+        <div class="bill-stat amber">
+          <div class="bill-stat-l">Variantes totales</div>
+          <div class="bill-stat-v" id="statProdVariants">—</div>
+        </div>
+      </div>
+
+      <div class="bill-toolbar">
+        <div class="bill-search">
+          <span class="bill-search-icon">🔍</span>
+          <input id="productsSearch" placeholder="Rechercher par nom, catégorie…" oninput="renderProductsList()"/>
+        </div>
+        <select class="bill-select" id="productsStatusFilter" style="width:auto;min-width:140px" onchange="renderProductsList()">
+          <option value="active">Actifs</option>
+          <option value="archived">Archivés</option>
+          <option value="all">Tous</option>
+        </select>
+        <button class="bill-btn bill-btn-primary bill-btn-lg" onclick="openProductDrawer(null)">➕ Nouveau produit</button>
+      </div>
+
+      <div class="bill-table-wrap" id="productsTableWrap">
+        <div class="bill-loader"><span class="bill-spinner"></span> Chargement du catalogue…</div>
+      </div>
+    </div>
+
+    <!-- ============ TAB : SUBSCRIPTIONS (Step 4A) ============ -->
+    <div class="bill-tab" data-tab="subscriptions">
+      <div class="bill-stats">
+        <div class="bill-stat">
+          <div class="bill-stat-l">Total</div>
+          <div class="bill-stat-v" id="subStatTotal">—</div>
+        </div>
+        <div class="bill-stat">
+          <div class="bill-stat-l">Actifs</div>
+          <div class="bill-stat-v" id="subStatActive">—</div>
+        </div>
+        <div class="bill-stat amber">
+          <div class="bill-stat-l">En pause</div>
+          <div class="bill-stat-v" id="subStatPaused">—</div>
+        </div>
+        <div class="bill-stat">
+          <div class="bill-stat-l">Terminés / annulés</div>
+          <div class="bill-stat-v" id="subStatDone">—</div>
+        </div>
+      </div>
+
+      <div class="bill-toolbar">
+        <div class="bill-search">
+          <span class="bill-search-icon">🔍</span>
+          <input id="subSearch" placeholder="Rechercher par client, description, sales…" oninput="renderSubscriptionsList()"/>
+        </div>
+        <select class="bill-select" id="subStatusFilter" onchange="renderSubscriptionsList()" style="min-width:140px">
+          <option value="active">Actifs</option>
+          <option value="paused">En pause</option>
+          <option value="cancelled">Annulés</option>
+          <option value="completed">Terminés</option>
+          <option value="all">Tous</option>
+        </select>
+        <select class="bill-select" id="subOwnerFilter" onchange="renderSubscriptionsList()" style="min-width:160px">
+          <option value="">Tous les sales</option>
+        </select>
+      </div>
+
+      <div class="bill-table-wrap" id="subTableWrap">
+        <div class="bill-loader"><span class="bill-spinner"></span> Chargement des abonnements…</div>
+      </div>
+    </div>
+
+    <!-- ============ TAB : ALERTES (Step 3) ============ -->
+    <div class="bill-tab" data-tab="alerts">
+      <div class="bill-stats">
+        <div class="bill-stat">
+          <div class="bill-stat-l">Alertes ouvertes</div>
+          <div class="bill-stat-v" id="alertsStatOpen">—</div>
+        </div>
+        <div class="bill-stat blue">
+          <div class="bill-stat-l">Résolues (30j)</div>
+          <div class="bill-stat-v" id="alertsStatResolved">—</div>
+        </div>
+        <div class="bill-stat amber">
+          <div class="bill-stat-l">Total cumulé</div>
+          <div class="bill-stat-v" id="alertsStatTotal">—</div>
+        </div>
+      </div>
+
+      <div class="bill-toolbar">
+        <div class="bill-search">
+          <span class="bill-search-icon">🔍</span>
+          <input id="alertsSearch" placeholder="Rechercher par type, payment ID, montant…" oninput="renderAlertsList()"/>
+        </div>
+        <select class="bill-select" id="alertsStatusFilter" onchange="renderAlertsList()" style="min-width:140px">
+          <option value="open">Ouvertes</option>
+          <option value="resolved">Résolues</option>
+          <option value="all">Toutes</option>
+        </select>
+      </div>
+
+      <div class="bill-table-wrap" id="alertsTableWrap">
+        <div class="bill-loader"><span class="bill-spinner"></span> Chargement des alertes…</div>
+      </div>
+    </div>
+
+    <!-- ============ TAB : EXPORT (placeholder) ============ -->
+    <div class="bill-tab" data-tab="export">
+      <div class="bill-soon">
+        <div class="bill-soon-icon">📤</div>
+        <h3>Export — disponible en Step 5</h3>
+        <p>Dashboard CA mensuel, export PDF groupé, export FEC pour expert-comptable.</p>
+      </div>
+    </div>
+
+  </main>
+
+</div>
+
+<!-- DRAWER -->
+<div class="bill-drawer-bg" id="drawerBg" onclick="closeDrawer()"></div>
+<div class="bill-drawer" id="drawer">
+  <div class="bill-drawer-h">
+    <h2 id="drawerTitle">Nouveau client</h2>
+    <button class="bill-drawer-close" onclick="closeDrawer()">×</button>
+  </div>
+  <div class="bill-drawer-body" id="drawerBody"></div>
+  <div class="bill-drawer-foot" id="drawerFoot"></div>
+</div>
+
+<!-- TOAST -->
+<div class="bill-toast" id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════════
+   FACTURATION — STEP 1
+   Paramètres + Clients de facturation
+   ═══════════════════════════════════════════════ */
+
+const auth = firebase.auth();
+const db   = firebase.firestore();
+
+/* ─── State ─── */
+let currentUser    = null;
+let currentRole    = null;
+let billingConfig  = null;
+let cgvVersions    = [];
+let clientsCache   = [];
+let invoicesCache  = [];
+let productsCache  = [];
+let activeTab      = 'settings';
+let activeSub      = 'company';
+let editingClientId = null;
+let editingProductId = null;
+let pendingLogoData = null;     // {base64, mimeType} en attente de save
+let pendingLogoMode = null;     // 'wordmark' | 'image'
+
+const DEFAULT_EMAIL_SUBJECT = 'Votre facture {invoiceNumber} — {issuerName}';
+const DEFAULT_EMAIL_BODY =
+'Bonjour {clientFirstName},\n' +
+'\n' +
+'Vous trouverez en pièce jointe votre facture {invoiceNumber} d\'un montant de {totalTtc} TTC.\n' +
+'\n' +
+'Échéance de paiement : {dueDate}\n' +
+'\n' +
+'{paymentInstructions}\n' +
+'\n' +
+'Pour toute question, n\'hésitez pas à nous répondre directement à cet email.\n' +
+'\n' +
+'Bien cordialement,\n' +
+'{issuerName}';
+
+const DEFAULT_BILLING = {
+  companyName: 'Ambitio Corp',
+  companyLegalForm: 'SARL',
+  companyShareCapital: '1000 €',
+  companySiret: '94309870700012',
+  companySiren: '943098707',
+  companyVatNumber: '',
+  companyRcs: '',
+  companyTribunal: 'Tribunal de commerce de Draguignan',
+  companyAddress: {
+    line1: '231B chemin de mourre de masque',
+    line2: '',
+    postalCode: '83440',
+    city: 'Fayence',
+    country: 'France'
+  },
+  companyPhone: '',
+  companyEmail: 'contact@ambitiocorp.com',
+  companyEmailRetractation: 'relationclient@ambitiocorp.com',
+  logoMode: 'wordmark',
+  logoBase64: null,
+  logoMimeType: null,
+  wordmarkText: 'ADRIEN & EMILY',
+  wordmarkSpacing: 8,
+  wordmarkWeight: 500,
+  iban: '',
+  bic: '',
+  bankName: '',
+  invoiceNumberPrefix: 'F',
+  creditNoteNumberPrefix: 'A',
+  vatRate: 20,
+  defaultPaymentTerms: 30,
+  defaultLateFeeRate: 3,
+  defaultLateFeePenalty: 40,
+  /* Step 2B-2 : email */
+  senderAccount: 'contact',
+  enableBcc: true,
+  emailTemplates: {
+    invoice: {
+      subject: DEFAULT_EMAIL_SUBJECT,
+      body: DEFAULT_EMAIL_BODY
+    }
+  },
+  /* Step 3 : automation */
+  autoPaymentLinking: false
+};
+
+/* CGV V2 — pré-embarquée comme version 1.0 par défaut au seed initial */
+const CGV_V1_TEXT = [
+  "CONDITIONS GÉNÉRALES DE FACTURATION",
+  "",
+  "1. Objet",
+  "Les présentes Conditions Générales de Facturation régissent les modalités de paiement et obligations liées aux services proposés par Ambitio Corp (SARL au capital de 1000 €, SIREN 943 098 707, SIRET 943 098 707 00012, 231B chemin de mourre de masque, 83440 Fayence).",
+  "",
+  "2. Prix et paiement",
+  "Les prix sont exprimés en euros, TVA de 20 % incluse.",
+  "Le paiement s'effectue exclusivement par prélèvement automatique ou carte bancaire via les plateformes partenaires.",
+  "En cas de paiement en plusieurs fois, le Client s'engage à honorer l'ensemble des échéances prévues.",
+  "Tout rejet de paiement entraîne la suspension immédiate de l'accès aux services jusqu'à régularisation.",
+  "",
+  "3. Accès aux services et formations",
+  "L'accès aux services est accordé après validation du premier paiement.",
+  "En cas d'incident de paiement, l'accès est suspendu jusqu'à régularisation.",
+  "",
+  "4. Droit de rétractation et politique de remboursement",
+  "Le Client bénéficie d'un droit de rétractation légal de 14 jours, à compter de la date de conclusion du contrat, sans avoir à justifier de motif ni supporter de pénalité. Ce droit peut être exercé par simple email à relationclient@ambitiocorp.com ou via le bouton prévu à cet effet en fin de contrat.",
+  "Toute participation à une séance de coaching (hors session d'accueil) constitue une renonciation définitive à ce droit, conformément à l'article L221-28 1° du Code de la consommation.",
+  "En cas de rétractation exercée dans le délai légal, un remboursement intégral est effectué dans les 14 jours.",
+  "Passé ce délai ou en cas de consommation du programme, aucun remboursement ne sera accordé.",
+  "À noter : si le Client a suivi l'intégralité du programme et appliqué toutes les actions recommandées, il peut demander l'activation de l'engagement de résultat étendu : une prolongation gratuite de l'accompagnement, sous conditions.",
+  "",
+  "5. Retards et défauts de paiement",
+  "Tout rejet de prélèvement entraîne l'application d'intérêts de retard au taux de trois fois le taux légal en vigueur, ainsi qu'une indemnité forfaitaire de 40 € pour frais de recouvrement.",
+  "En cas d'incident non résolu sous 10 jours, Ambitio Corp se réserve le droit d'exiger le paiement immédiat du solde restant dû.",
+  "",
+  "6. Responsabilité",
+  "Ambitio Corp ne saurait être tenue responsable d'une mauvaise utilisation des formations ou services. Les résultats dépendent de l'implication du Client et de la mise en œuvre des enseignements dispensés.",
+  "",
+  "7. Propriété intellectuelle",
+  "Tous les contenus fournis (formations, vidéos, documents, outils) restent la propriété exclusive d'Ambitio Corp. Toute reproduction, diffusion ou réutilisation non autorisée est strictement interdite.",
+  "",
+  "8. Données personnelles",
+  "Les données collectées pour la gestion des services sont traitées conformément à la réglementation en vigueur.",
+  "Le Client peut exercer ses droits d'accès, de modification et de suppression de ses données en contactant : contact@ambitiocorp.com.",
+  "",
+  "9. Litiges et droit applicable",
+  "En cas de litige, une tentative de résolution amiable sera privilégiée.",
+  "À défaut, les différends relèveront de la compétence exclusive du tribunal de commerce de Draguignan.",
+  "Les présentes CGF sont régies par le droit français."
+].join('\n');
+
+/* ═══ AUTH GUARD ═══ */
+auth.onAuthStateChanged(async function(user) {
+  if (!user) { location.replace('login.html'); return; }
+  try {
+    const userDoc = await db.collection('users').doc(user.uid).get();
+    if (!userDoc.exists) { location.replace('/'); return; }
+    const role = userDoc.data().role;
+    if (role !== 'admin') {
+      toast('Accès réservé aux administrateurs', true);
+      setTimeout(function(){ location.replace('/'); }, 1200);
+      return;
+    }
+    currentUser = user;
+    currentRole = role;
+    await initBillingConfig();
+    initClientsListener();
+    initProductsListener();
+    initInvoicesListener();
+    initAlertsListener();
+    initSubscriptionsListener();
+    document.getElementById('bootLoader').style.display = 'none';
+    document.getElementById('billApp').style.display = 'grid';
+
+    /* Step 5 : ouverture directe d'un onglet via ?tab=invoices&clientId=... */
+    const urlParams = new URLSearchParams(window.location.search);
+    const requestedTab = urlParams.get('tab');
+    if (requestedTab && ['invoices', 'clients', 'products', 'subscriptions', 'alerts', 'settings', 'export'].indexOf(requestedTab) > -1) {
+      switchTab(requestedTab);
+    }
+  } catch (err) {
+    console.error('[billing] auth error', err);
+    toast('Erreur d\'authentification : ' + err.message, true);
+  }
+});
+
+/* ═══ INIT BILLING CONFIG ═══ */
+async function initBillingConfig() {
+  const ref = db.collection('_config').doc('billing');
+  const snap = await ref.get();
+
+  if (!snap.exists) {
+    /* Premier accès : seed config + CGV v1.0 */
+    console.log('[billing] First access — seeding default config');
+    const seedDoc = Object.assign({}, DEFAULT_BILLING, {
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      createdBy: currentUser.uid,
+      updatedBy: currentUser.uid
+    });
+    await ref.set(seedDoc);
+    await ref.collection('cgv').doc('v1_0').set({
+      version: '1.0',
+      text: CGV_V1_TEXT,
+      isActive: true,
+      activeFrom: firebase.firestore.FieldValue.serverTimestamp(),
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      createdBy: currentUser.uid
+    });
+    toast('🎉 Configuration initiale créée — vérifiez les paramètres');
+  }
+
+  /* Live listener config */
+  ref.onSnapshot(function(snap) {
+    if (!snap.exists) return;
+    billingConfig = snap.data();
+    if (activeTab === 'settings') renderSettingsActiveSub();
+  });
+
+  /* Live listener CGV versions */
+  ref.collection('cgv').orderBy('createdAt', 'desc').onSnapshot(function(qs) {
+    cgvVersions = [];
+    qs.forEach(function(d) { cgvVersions.push(Object.assign({ id: d.id }, d.data())); });
+    if (activeSub === 'cgv') renderCgvVersions();
+  });
+}
+
+/* ═══ INIT CLIENTS LISTENER ═══ */
+function initClientsListener() {
+  db.collection('invoice_clients').orderBy('createdAt', 'desc').onSnapshot(function(qs) {
+    clientsCache = [];
+    qs.forEach(function(d) { clientsCache.push(Object.assign({ id: d.id }, d.data())); });
+    updateClientsStats();
+    if (activeTab === 'clients') renderClientsList();
+  }, function(err) {
+    console.error('[billing] clients listener error', err);
+    toast('Erreur lecture clients : ' + err.message, true);
+  });
+}
+
+/* ═══ TABS ═══ */
+function switchTab(tab) {
+  /* Si on change d'onglet, retirer les query params spécifiques au tab Factures */
+  if (activeTab === 'invoices' && tab !== 'invoices') {
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('clientId')) {
+      url.searchParams.delete('clientId');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }
+  activeTab = tab;
+  const items = document.querySelectorAll('.bill-side-item');
+  for (let i = 0; i < items.length; i++) {
+    items[i].classList.toggle('active', items[i].getAttribute('data-tab') === tab);
+  }
+  const tabs = document.querySelectorAll('.bill-tab');
+  for (let i = 0; i < tabs.length; i++) {
+    tabs[i].classList.toggle('active', tabs[i].getAttribute('data-tab') === tab);
+  }
+  /* Header */
+  const titles = {
+    invoices: { t: 'Factures', s: 'Liste de toutes les factures émises et brouillons.' },
+    clients: { t: 'Clients de facturation', s: 'Fiches clients utilisées sur les factures (distinct des leads CRM).' },
+    products: { t: 'Catalogue produits', s: 'Produits réutilisables avec prix et taux TVA.' },
+    subscriptions: { t: 'Abonnements', s: 'Mandats GoCardless avec génération automatique de factures.' },
+    alerts: { t: 'Alertes', s: 'Cas non résolus du matching automatique paiements GoCardless → factures.' },
+    settings: { t: 'Paramètres', s: 'Configurez votre identité d\'émetteur, votre logo, vos coordonnées bancaires et vos CGV.' },
+    export: { t: 'Export', s: 'Exports comptables et factures groupées.' }
+  };
+  document.getElementById('billHeaderTitle').textContent = titles[tab].t;
+  document.getElementById('billHeaderSubtitle').textContent = titles[tab].s;
+
+  if (tab === 'clients') renderClientsList();
+  if (tab === 'invoices') renderInvoicesList();
+  if (tab === 'products') renderProductsList();
+  if (tab === 'settings') renderSettingsActiveSub();
+  if (tab === 'alerts') renderAlertsList();
+  if (tab === 'subscriptions') renderSubscriptionsList();
+}
+
+function switchSettingsSub(sub) {
+  activeSub = sub;
+  const items = document.querySelectorAll('.bill-subnav-item');
+  for (let i = 0; i < items.length; i++) {
+    items[i].classList.toggle('active', items[i].getAttribute('data-sub') === sub);
+  }
+  const subs = document.querySelectorAll('.bill-settings-sub');
+  for (let i = 0; i < subs.length; i++) {
+    subs[i].style.display = subs[i].getAttribute('data-sub') === sub ? 'block' : 'none';
+  }
+  renderSettingsActiveSub();
+}
+
+function renderSettingsActiveSub() {
+  if (!billingConfig) return;
+  if (activeSub === 'company') renderCompanyForm();
+  if (activeSub === 'logo') renderLogoForm();
+  if (activeSub === 'bank') renderBankForm();
+  if (activeSub === 'numbering') renderNumberingForm();
+  if (activeSub === 'email') renderEmailForm();
+  if (activeSub === 'automation') renderAutomationForm();
+  if (activeSub === 'cgv') renderCgvVersions();
+}
+
+function loadBillingConfig() { renderSettingsActiveSub(); }
+
+/* ═══ COMPANY FORM ═══ */
+function renderCompanyForm() {
+  const c = billingConfig;
+  const a = c.companyAddress || {};
+  setVal('cfCompanyName', c.companyName || '');
+  setVal('cfLegalForm', c.companyLegalForm || 'SARL');
+  setVal('cfShareCapital', c.companyShareCapital || '');
+  setVal('cfSiret', c.companySiret || '');
+  setVal('cfVatNumber', c.companyVatNumber || '');
+  setVal('cfRcs', c.companyRcs || '');
+  setVal('cfTribunal', c.companyTribunal || '');
+  setVal('cfAddrLine1', a.line1 || '');
+  setVal('cfAddrLine2', a.line2 || '');
+  setVal('cfAddrPostal', a.postalCode || '');
+  setVal('cfAddrCity', a.city || '');
+  setVal('cfAddrCountry', a.country || 'France');
+  setVal('cfPhone', c.companyPhone || '');
+  setVal('cfEmail', c.companyEmail || '');
+  setVal('cfEmailRetract', c.companyEmailRetractation || '');
+}
+
+async function saveCompanyInfo() {
+  const btn = document.getElementById('cfSaveBtn');
+  const v = function(id) { return (document.getElementById(id).value || '').trim(); };
+
+  /* Validation */
+  const name = v('cfCompanyName');
+  const siret = v('cfSiret').replace(/\s/g, '');
+  const email = v('cfEmail');
+  const addrLine1 = v('cfAddrLine1');
+  const postal = v('cfAddrPostal');
+  const city = v('cfAddrCity');
+  const vatNumber = v('cfVatNumber').replace(/\s/g, '').toUpperCase();
+  const rcs = v('cfRcs');
+  const shareCapital = v('cfShareCapital');
+
+  if (!name) return toast('La raison sociale est obligatoire', true);
+  if (!/^\d{14}$/.test(siret)) return toast('SIRET invalide (14 chiffres requis)', true);
+  if (!shareCapital) return toast('Le capital social est obligatoire', true);
+  if (!rcs) return toast('Le RCS est obligatoire', true);
+  if (!/^FR[0-9A-Z]{2}\d{9}$/.test(vatNumber)) return toast('N° TVA invalide (format FR + 2 chiffres + 9 chiffres SIREN)', true);
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast('Email principal invalide', true);
+  if (!addrLine1) return toast('Adresse ligne 1 obligatoire', true);
+  if (!/^\d{5}$/.test(postal)) return toast('Code postal invalide (5 chiffres)', true);
+  if (!city) return toast('Ville obligatoire', true);
+
+  const siren = siret.substring(0, 9);
+
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    await db.collection('_config').doc('billing').update({
+      companyName: name,
+      companyLegalForm: v('cfLegalForm'),
+      companyShareCapital: shareCapital,
+      companySiret: siret,
+      companySiren: siren,
+      companyVatNumber: vatNumber,
+      companyRcs: rcs,
+      companyTribunal: v('cfTribunal'),
+      companyAddress: {
+        line1: addrLine1,
+        line2: v('cfAddrLine2'),
+        postalCode: postal,
+        city: city,
+        country: v('cfAddrCountry') || 'France'
+      },
+      companyPhone: v('cfPhone'),
+      companyEmail: email,
+      companyEmailRetractation: v('cfEmailRetract'),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser.uid
+    });
+    toast('✅ Informations entreprise enregistrées');
+  } catch (err) {
+    console.error(err);
+    toast('Erreur : ' + err.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = '💾 Enregistrer';
+  }
+}
+
+/* ═══ LOGO FORM ═══ */
+function renderLogoForm() {
+  const c = billingConfig;
+  pendingLogoMode = c.logoMode || 'wordmark';
+  pendingLogoData = null;
+
+  document.getElementById('logoModeWordmark').classList.toggle('on', pendingLogoMode === 'wordmark');
+  document.getElementById('logoModeImage').classList.toggle('on', pendingLogoMode === 'image');
+  document.getElementById('logoWordmarkConfig').style.display = pendingLogoMode === 'wordmark' ? 'block' : 'none';
+  document.getElementById('logoImageConfig').style.display = pendingLogoMode === 'image' ? 'block' : 'none';
+
+  setVal('cfWordmarkText', c.wordmarkText || 'ADRIEN & EMILY');
+  setVal('cfWordmarkSpacing', c.wordmarkSpacing != null ? c.wordmarkSpacing : 8);
+  setVal('cfWordmarkWeight', c.wordmarkWeight || 500);
+  document.getElementById('logoDeleteBtn').style.display = c.logoBase64 ? 'inline-flex' : 'none';
+
+  updateLogoPreviews();
+  setupLogoDrop();
+}
+
+function setLogoMode(mode) {
+  pendingLogoMode = mode;
+  document.getElementById('logoModeWordmark').classList.toggle('on', mode === 'wordmark');
+  document.getElementById('logoModeImage').classList.toggle('on', mode === 'image');
+  document.getElementById('logoWordmarkConfig').style.display = mode === 'wordmark' ? 'block' : 'none';
+  document.getElementById('logoImageConfig').style.display = mode === 'image' ? 'block' : 'none';
+  updateLogoPreviews();
+}
+
+function updateWordmarkPreview() { updateLogoPreviews(); }
+
+function buildWordmarkHtml() {
+  const text = (document.getElementById('cfWordmarkText').value || '').trim() || 'ADRIEN & EMILY';
+  const spacing = parseFloat(document.getElementById('cfWordmarkSpacing').value || '8');
+  const weight = parseInt(document.getElementById('cfWordmarkWeight').value || '500', 10);
+  /* Texte avec ampersand stylé en lighter */
+  const escaped = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const styled = escaped.replace(/&/g, '<span class="amp">&amp;</span>');
+  return '<div class="bill-wordmark" style="font-weight:' + weight + ';letter-spacing:' + spacing + 'px">' + styled + '</div>';
+}
+
+function updateLogoPreviews() {
+  const lp = document.getElementById('logoPreviewLight');
+  const dp = document.getElementById('logoPreviewDark');
+  if (pendingLogoMode === 'image') {
+    const dataUri = pendingLogoData
+      ? pendingLogoData.base64
+      : (billingConfig.logoBase64 || null);
+    if (dataUri) {
+      const img = '<img class="bill-logo-img" src="' + dataUri + '" alt="logo"/>';
+      lp.innerHTML = img;
+      dp.innerHTML = img;
+    } else {
+      lp.innerHTML = '<div style="color:#999;font-size:12px">Aucune image</div>';
+      dp.innerHTML = '<div style="color:var(--muted);font-size:12px">Aucune image</div>';
+    }
+  } else {
+    const html = buildWordmarkHtml();
+    lp.innerHTML = html;
+    dp.innerHTML = html;
+  }
+}
+
+function setupLogoDrop() {
+  const dz = document.getElementById('logoDropZone');
+  const inp = document.getElementById('logoFileInput');
+  if (dz._wired) return;
+  dz._wired = true;
+  dz.addEventListener('click', function(){ inp.click(); });
+  inp.addEventListener('change', function(e){
+    if (e.target.files && e.target.files[0]) handleLogoFile(e.target.files[0]);
+  });
+  dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', function(){ dz.classList.remove('dragover'); });
+  dz.addEventListener('drop', function(e){
+    e.preventDefault();
+    dz.classList.remove('dragover');
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleLogoFile(e.dataTransfer.files[0]);
+  });
+}
+
+function handleLogoFile(file) {
+  const valid = ['image/png', 'image/jpeg', 'image/svg+xml'];
+  if (valid.indexOf(file.type) === -1) return toast('Format non supporté (PNG, JPG ou SVG)', true);
+  if (file.size > 500 * 1024) return toast('Image trop grande (max 500 KB)', true);
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    pendingLogoData = { base64: e.target.result, mimeType: file.type, size: file.size };
+    document.getElementById('logoDeleteBtn').style.display = 'inline-flex';
+    updateLogoPreviews();
+    toast('✅ Image chargée — pensez à enregistrer');
+  };
+  reader.readAsDataURL(file);
+}
+
+function deleteUploadedLogo() {
+  pendingLogoData = { base64: null, mimeType: null };
+  document.getElementById('logoDeleteBtn').style.display = 'none';
+  updateLogoPreviews();
+}
+
+async function saveLogo() {
+  const btn = document.getElementById('logoSaveBtn');
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    const updates = {
+      logoMode: pendingLogoMode,
+      wordmarkText: (document.getElementById('cfWordmarkText').value || '').trim() || 'ADRIEN & EMILY',
+      wordmarkSpacing: parseFloat(document.getElementById('cfWordmarkSpacing').value || '8'),
+      wordmarkWeight: parseInt(document.getElementById('cfWordmarkWeight').value || '500', 10),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser.uid
+    };
+    if (pendingLogoData) {
+      updates.logoBase64 = pendingLogoData.base64;
+      updates.logoMimeType = pendingLogoData.mimeType;
+    }
+    await db.collection('_config').doc('billing').update(updates);
+    pendingLogoData = null;
+    toast('✅ Identité visuelle enregistrée');
+  } catch (err) {
+    console.error(err);
+    toast('Erreur : ' + err.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = '💾 Enregistrer';
+  }
+}
+
+/* ═══ BANK FORM ═══ */
+function renderBankForm() {
+  const c = billingConfig;
+  setVal('cfBankName', c.bankName || '');
+  setVal('cfBic', c.bic || '');
+  setVal('cfIban', formatIban(c.iban || ''));
+}
+
+function formatIban(iban) {
+  const clean = (iban || '').replace(/\s/g, '').toUpperCase();
+  return clean.replace(/(.{4})/g, '$1 ').trim();
+}
+
+async function saveBankInfo() {
+  const btn = document.getElementById('bankSaveBtn');
+  const iban = (document.getElementById('cfIban').value || '').replace(/\s/g, '').toUpperCase();
+  const bic = (document.getElementById('cfBic').value || '').replace(/\s/g, '').toUpperCase();
+  if (iban && !/^FR\d{12}[A-Z0-9]{11}\d{2}$/.test(iban) && !/^[A-Z]{2}\d{2}[A-Z0-9]{4,28}$/.test(iban)) {
+    return toast('IBAN invalide (format FR ou IBAN international)', true);
+  }
+  if (bic && !/^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/.test(bic)) {
+    return toast('BIC invalide (8 ou 11 caractères)', true);
+  }
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    await db.collection('_config').doc('billing').update({
+      bankName: (document.getElementById('cfBankName').value || '').trim(),
+      bic: bic,
+      iban: iban,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser.uid
+    });
+    toast('✅ Coordonnées bancaires enregistrées');
+  } catch (err) {
+    console.error(err);
+    toast('Erreur : ' + err.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = '💾 Enregistrer';
+  }
+}
+
+/* ═══ NUMBERING + VAT FORM ═══ */
+function renderNumberingForm() {
+  const c = billingConfig;
+  setVal('cfInvoicePrefix', c.invoiceNumberPrefix || 'F');
+  setVal('cfCreditNotePrefix', c.creditNoteNumberPrefix || 'A');
+  setVal('cfVatRate', String(c.vatRate != null ? c.vatRate : 20));
+  setVal('cfPaymentTerms', c.defaultPaymentTerms || 30);
+  setVal('cfLateFeeRate', c.defaultLateFeeRate || 3);
+  setVal('cfLateFeePenalty', c.defaultLateFeePenalty || 40);
+  updateNumberingPreviews();
+  document.getElementById('cfInvoicePrefix').addEventListener('input', updateNumberingPreviews);
+  document.getElementById('cfCreditNotePrefix').addEventListener('input', updateNumberingPreviews);
+}
+
+function updateNumberingPreviews() {
+  const year = new Date().getFullYear();
+  const ip = (document.getElementById('cfInvoicePrefix').value || 'F').toUpperCase();
+  const cp = (document.getElementById('cfCreditNotePrefix').value || 'A').toUpperCase();
+  document.getElementById('cfInvoicePreview').textContent = ip + year + '-00001';
+  document.getElementById('cfCreditPreview').textContent = cp + year + '-00001';
+}
+
+async function saveNumberingVat() {
+  const btn = document.getElementById('numbSaveBtn');
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    await db.collection('_config').doc('billing').update({
+      invoiceNumberPrefix: (document.getElementById('cfInvoicePrefix').value || 'F').toUpperCase().trim(),
+      creditNoteNumberPrefix: (document.getElementById('cfCreditNotePrefix').value || 'A').toUpperCase().trim(),
+      vatRate: parseFloat(document.getElementById('cfVatRate').value || '20'),
+      defaultPaymentTerms: parseInt(document.getElementById('cfPaymentTerms').value || '30', 10),
+      defaultLateFeeRate: parseFloat(document.getElementById('cfLateFeeRate').value || '3'),
+      defaultLateFeePenalty: parseFloat(document.getElementById('cfLateFeePenalty').value || '40'),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser.uid
+    });
+    toast('✅ Numérotation & TVA enregistrées');
+  } catch (err) {
+    console.error(err);
+    toast('Erreur : ' + err.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = '💾 Enregistrer';
+  }
+}
+
+/* ═══ EMAIL TEMPLATES (Step 2B-2) ═══ */
+function renderEmailForm() {
+  const c = billingConfig;
+  setVal('cfSenderAccount', c.senderAccount || 'contact');
+  document.getElementById('cfEnableBcc').checked = (c.enableBcc != null ? c.enableBcc : true);
+  const tmpl = (c.emailTemplates && c.emailTemplates.invoice) || {};
+  setVal('cfEmailSubject', tmpl.subject || DEFAULT_EMAIL_SUBJECT);
+  setVal('cfEmailBody', tmpl.body || DEFAULT_EMAIL_BODY);
+}
+
+async function saveEmailSettings() {
+  const btn = document.getElementById('emailSaveBtn');
+  const senderAccount = (document.getElementById('cfSenderAccount').value || '').trim() || 'contact';
+  const enableBcc = document.getElementById('cfEnableBcc').checked;
+  const subject = (document.getElementById('cfEmailSubject').value || '').trim() || DEFAULT_EMAIL_SUBJECT;
+  const body = (document.getElementById('cfEmailBody').value || '').trim() || DEFAULT_EMAIL_BODY;
+
+  /* Slug validation : alphanumeric + underscore + dash */
+  if (!/^[a-zA-Z0-9_-]+$/.test(senderAccount)) {
+    return toast('Slug invalide (caractères autorisés : a-z, 0-9, _, -)', true);
+  }
+
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    /* Vérifier que le token Gmail existe pour ce slug */
+    const tokenSnap = await db.collection('email_tokens').doc(senderAccount).get();
+    if (!tokenSnap.exists) {
+      const ok = confirm('⚠️ Aucun document email_tokens/' + senderAccount + ' trouvé en Firestore.\n\nL\'envoi des factures échouera tant que le token OAuth Gmail n\'aura pas été créé pour ce compte.\n\nEnregistrer quand même ?');
+      if (!ok) {
+        btn.disabled = false; btn.textContent = '💾 Enregistrer';
+        return;
+      }
+    }
+
+    await db.collection('_config').doc('billing').update({
+      senderAccount: senderAccount,
+      enableBcc: enableBcc,
+      'emailTemplates.invoice.subject': subject,
+      'emailTemplates.invoice.body': body,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser.uid
+    });
+    toast('✅ Paramètres email enregistrés');
+  } catch (err) {
+    console.error(err);
+    toast('Erreur : ' + err.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = '💾 Enregistrer';
+  }
+}
+
+function resetEmailTemplate() {
+  if (!confirm('Réinitialiser le sujet et le corps aux valeurs par défaut ?\n\nLes valeurs courantes ne seront pas écrasées tant que tu n\'auras pas cliqué sur "Enregistrer".')) return;
+  setVal('cfEmailSubject', DEFAULT_EMAIL_SUBJECT);
+  setVal('cfEmailBody', DEFAULT_EMAIL_BODY);
+  toast('Template réinitialisé (clique Enregistrer pour confirmer)');
+}
+
+/* ═══ AUTOMATION (Step 3) ═══ */
+function renderAutomationForm() {
+  const c = billingConfig || {};
+  document.getElementById('cfAutoPaymentLinking').checked = !!c.autoPaymentLinking;
+  /* Stats : auto-payées + alertes ouvertes */
+  const autoPaid = invoicesCache.filter(function(i){ return i.paidBy === 'auto_step3'; }).length;
+  const alertsOpen = (window._alertsCache || []).filter(function(a){ return !a.resolved; }).length;
+  const elAuto = document.getElementById('statAutoPaid');
+  const elAlerts = document.getElementById('statAlertsOpen');
+  if (elAuto) elAuto.textContent = autoPaid;
+  if (elAlerts) elAlerts.textContent = alertsOpen;
+}
+
+async function saveAutomationSettings() {
+  const btn = document.getElementById('autoSaveBtn');
+  const wasOn = !!(billingConfig && billingConfig.autoPaymentLinking);
+  const willBeOn = document.getElementById('cfAutoPaymentLinking').checked;
+  if (!wasOn && willBeOn) {
+    /* Activation : warning explicite */
+    const ok = confirm(
+      '🤖 Activer le lien automatique GoCardless → factures ?\n\n' +
+      '— Chaque nouveau prélèvement GC marquera automatiquement la facture correspondante en "Payée".\n' +
+      '— Les paiements arrivés AVANT activation ne seront pas re-traités.\n' +
+      '— Si une facture n\'est pas trouvée pour un paiement, une alerte est créée dans l\'onglet 🚨 Alertes.\n\n' +
+      'Continuer ?'
+    );
+    if (!ok) return;
+  }
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    await db.collection('_config').doc('billing').update({
+      autoPaymentLinking: willBeOn,
+      autoPaymentLinkingChangedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      autoPaymentLinkingChangedBy: currentUser.uid,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser.uid
+    });
+    toast(willBeOn ? '🤖 Auto-link ACTIVÉ' : 'Auto-link désactivé');
+  } catch (err) {
+    console.error(err);
+    toast('Erreur : ' + err.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = '💾 Enregistrer';
+  }
+}
+
+/* ═══ ALERTES (Step 3) ═══ */
+window._alertsCache = [];
+let _alertsUnsub = null;
+
+function initAlertsListener() {
+  if (_alertsUnsub) return;
+  _alertsUnsub = db.collection('_alerts').doc('billing').collection('items')
+    .orderBy('createdAt', 'desc')
+    .limit(200)
+    .onSnapshot(function(snap) {
+      window._alertsCache = [];
+      snap.forEach(function(d){ window._alertsCache.push(Object.assign({ id: d.id }, d.data())); });
+      updateSidebarAlertsBadge();
+      if (activeTab === 'alerts') renderAlertsList();
+      /* Si on est sur Paramètres > Automation, refresh les stats */
+      if (activeTab === 'settings' && activeSub === 'automation') renderAutomationForm();
+    }, function(err) {
+      console.warn('[alerts] listener error', err);
+    });
+}
+
+function updateSidebarAlertsBadge() {
+  const badge = document.getElementById('sideBadgeAlerts');
+  if (!badge) return;
+  const open = (window._alertsCache || []).filter(function(a){ return !a.resolved; }).length;
+  if (open > 0) {
+    badge.textContent = open;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+const ALERT_TYPE_LABELS = {
+  no_invoice_client_for_gc: { icon: '👤', label: 'Aucun client trouvé', desc: 'Le gcCustomerId n\'est lié à aucun invoice_client' },
+  multiple_invoice_clients_for_gc: { icon: '👥', label: 'Plusieurs clients trouvés', desc: 'Plusieurs invoice_clients ont le même gocardlessCustomerId' },
+  no_invoice_match: { icon: '📄', label: 'Aucune facture trouvée', desc: 'Pas de facture validated/sent du client avec ce montant TTC' },
+  multiple_invoice_matches_resolved: { icon: '✅', label: 'Multi-match résolu (info)', desc: 'Plusieurs candidates, FIFO appliqué' },
+  missing_gc_customer_id: { icon: '⚠️', label: 'gcCustomerId manquant', desc: 'Le doc payment n\'a pas de gcCustomerId' },
+  invalid_payment_amount: { icon: '⚠️', label: 'Montant invalide', desc: 'Le paiement a un montant nul ou non numérique' },
+  processing_error: { icon: '💥', label: 'Erreur de traitement', desc: 'Exception lors du matching' },
+};
+
+function renderAlertsList() {
+  const wrap = document.getElementById('alertsTableWrap');
+  if (!wrap) return;
+  const q = ((document.getElementById('alertsSearch') && document.getElementById('alertsSearch').value) || '').toLowerCase().trim();
+  const statusFilter = (document.getElementById('alertsStatusFilter') && document.getElementById('alertsStatusFilter').value) || 'open';
+  const all = window._alertsCache || [];
+
+  /* Stats hero */
+  const open = all.filter(function(a){ return !a.resolved; });
+  const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const resolved30d = all.filter(function(a) {
+    if (!a.resolved || !a.resolvedAt) return false;
+    const ts = a.resolvedAt.toMillis ? a.resolvedAt.toMillis() : new Date(a.resolvedAt).getTime();
+    return ts >= cutoff;
+  });
+  const elOpen = document.getElementById('alertsStatOpen');
+  const elResolved = document.getElementById('alertsStatResolved');
+  const elTotal = document.getElementById('alertsStatTotal');
+  if (elOpen) elOpen.textContent = open.length;
+  if (elResolved) elResolved.textContent = resolved30d.length;
+  if (elTotal) elTotal.textContent = all.length;
+
+  /* Filtres */
+  let list = all;
+  if (statusFilter === 'open') list = list.filter(function(a){ return !a.resolved; });
+  if (statusFilter === 'resolved') list = list.filter(function(a){ return !!a.resolved; });
+  if (q) {
+    list = list.filter(function(a) {
+      return JSON.stringify(a).toLowerCase().indexOf(q) > -1;
+    });
+  }
+
+  if (!list.length) {
+    wrap.innerHTML = '<div class="bill-empty">' +
+      '<div class="bill-empty-icon">🎉</div>' +
+      '<h4>' + (statusFilter === 'open' ? 'Aucune alerte ouverte' : 'Aucun résultat') + '</h4>' +
+      '<p>' + (statusFilter === 'open' ? 'Tous les paiements sont correctement liés à leur facture.' : 'Essayez d\'autres filtres.') + '</p>' +
+      '</div>';
+    return;
+  }
+
+  let html = '<table class="bill-table">';
+  html += '<thead><tr>';
+  html += '<th style="width:40px"></th>';
+  html += '<th>Type</th>';
+  html += '<th>Détails</th>';
+  html += '<th style="width:100px;text-align:right">Montant</th>';
+  html += '<th style="width:140px">Date</th>';
+  html += '<th class="col-actions">Actions</th>';
+  html += '</tr></thead><tbody>';
+
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i];
+    const meta = ALERT_TYPE_LABELS[a.type] || { icon: '⚠️', label: a.type, desc: '' };
+    const dt = a.createdAt && a.createdAt.toDate ? a.createdAt.toDate() : null;
+    const dateStr = dt ? dt.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+    const amount = a.amount ? formatEur(a.amount) : '—';
+    const isInfo = a.severity === 'info';
+    const rowOpacity = a.resolved ? 'opacity:.5' : '';
+
+    html += '<tr style="' + rowOpacity + '">';
+    html += '<td style="font-size:18px">' + meta.icon + '</td>';
+    html += '<td>';
+    html += '<div style="font-weight:700;color:' + (isInfo ? 'var(--inv-blue,#60a5fa)' : 'var(--text)') + '">' + escapeHtml(meta.label);
+    if (a.resolved) html += ' <span class="bill-badge" style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:#10b981;margin-left:6px">✓ Résolue</span>';
+    html += '</div>';
+    if (meta.desc) html += '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + escapeHtml(meta.desc) + '</div>';
+    html += '</td>';
+    html += '<td style="font-family:var(--font-m);font-size:11px;color:var(--muted);max-width:380px;overflow:hidden;text-overflow:ellipsis">';
+    if (a.gcPaymentId) html += '<div>GC paiement : <span style="color:var(--text)">' + escapeHtml(a.gcPaymentId) + '</span></div>';
+    if (a.gcCustomerId) html += '<div>GC client : <span style="color:var(--text)">' + escapeHtml(a.gcCustomerId) + '</span></div>';
+    if (a.clientId) html += '<div>Client invoice : <span style="color:var(--text)">' + escapeHtml(a.clientId) + '</span></div>';
+    if (a.selectedInvoiceId) html += '<div>Facture sélectionnée : <span style="color:#10b981">' + escapeHtml(a.selectedInvoiceId) + '</span></div>';
+    if (a.candidateClientIds && a.candidateClientIds.length) html += '<div>' + a.candidateClientIds.length + ' candidats client</div>';
+    if (a.candidateIds && a.candidateIds.length) html += '<div>' + a.candidateIds.length + ' candidates facture</div>';
+    if (a.error) html += '<div style="color:#ef4444">Err : ' + escapeHtml(String(a.error).substring(0, 100)) + '</div>';
+    if (a.hint) html += '<div style="color:#f59e0b">' + escapeHtml(a.hint) + '</div>';
+    html += '</td>';
+    html += '<td style="text-align:right;font-family:var(--font-m);font-weight:700">' + amount + '</td>';
+    html += '<td style="font-size:11px;color:var(--muted)">' + dateStr + '</td>';
+    html += '<td class="col-actions">';
+    if (!a.resolved) {
+      html += '<button class="bill-btn bill-btn-ghost" onclick="resolveAlert(\'' + a.id + '\')" title="Marquer comme résolue">✓ Résoudre</button>';
+    } else {
+      html += '<button class="bill-btn bill-btn-ghost" onclick="reopenAlert(\'' + a.id + '\')" title="Réouvrir">↩️</button>';
+    }
+    html += '</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+async function resolveAlert(id) {
+  try {
+    await db.collection('_alerts').doc('billing').collection('items').doc(id).update({
+      resolved: true,
+      resolvedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      resolvedBy: currentUser.uid,
+      resolvedByEmail: currentUser.email || null
+    });
+    toast('✓ Alerte résolue');
+  } catch (err) {
+    toast('Erreur : ' + err.message, true);
+  }
+}
+
+async function reopenAlert(id) {
+  try {
+    await db.collection('_alerts').doc('billing').collection('items').doc(id).update({
+      resolved: false,
+      resolvedAt: null,
+      resolvedBy: null,
+      reopenedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      reopenedBy: currentUser.uid
+    });
+    toast('↩️ Alerte réouverte');
+  } catch (err) {
+    toast('Erreur : ' + err.message, true);
+  }
+}
+
+/* ═══ ABONNEMENTS (Step 4A) ═══ */
+let subscriptionsCache = [];
+let _subsUnsub = null;
+
+function initSubscriptionsListener() {
+  if (_subsUnsub) return;
+  _subsUnsub = db.collection('subscriptions')
+    .orderBy('createdAt', 'desc')
+    .onSnapshot(function(snap) {
+      subscriptionsCache = [];
+      snap.forEach(function(d){ subscriptionsCache.push(Object.assign({ id: d.id }, d.data())); });
+      if (activeTab === 'subscriptions') renderSubscriptionsList();
+    }, function(err) {
+      console.warn('[subscriptions] listener error', err);
+    });
+}
+
+function populateSubOwnerFilter() {
+  const sel = document.getElementById('subOwnerFilter');
+  if (!sel) return;
+  /* Ne re-populate qu'au premier appel ou si le select est resté à un seul item */
+  if (sel.options.length > 1) return;
+  const owners = {};
+  subscriptionsCache.forEach(function(s) {
+    if (s.closerSlug && s.closerName) owners[s.closerSlug] = s.closerName;
+  });
+  Object.keys(owners).sort().forEach(function(slug) {
+    const opt = document.createElement('option');
+    opt.value = slug;
+    opt.textContent = owners[slug];
+    sel.appendChild(opt);
+  });
+}
+
+const SUB_STATUS_LABELS = {
+  active:    { label: 'Actif',    color: '#10b981', bg: 'rgba(16,185,129,.1)', bd: 'rgba(16,185,129,.3)' },
+  paused:    { label: 'En pause', color: '#f59e0b', bg: 'rgba(245,158,11,.1)', bd: 'rgba(245,158,11,.3)' },
+  cancelled: { label: 'Annulé',   color: '#ef4444', bg: 'rgba(239,68,68,.1)',  bd: 'rgba(239,68,68,.3)' },
+  completed: { label: 'Terminé',  color: '#60a5fa', bg: 'rgba(96,165,250,.1)', bd: 'rgba(96,165,250,.3)' },
+};
+
+function renderSubscriptionsList() {
+  populateSubOwnerFilter();
+  const wrap = document.getElementById('subTableWrap');
+  if (!wrap) return;
+  const q = ((document.getElementById('subSearch') && document.getElementById('subSearch').value) || '').toLowerCase().trim();
+  const statusFilter = (document.getElementById('subStatusFilter') && document.getElementById('subStatusFilter').value) || 'active';
+  const ownerFilter = (document.getElementById('subOwnerFilter') && document.getElementById('subOwnerFilter').value) || '';
+  const all = subscriptionsCache || [];
+
+  /* Stats hero */
+  const elT = document.getElementById('subStatTotal');
+  const elA = document.getElementById('subStatActive');
+  const elP = document.getElementById('subStatPaused');
+  const elD = document.getElementById('subStatDone');
+  if (elT) elT.textContent = all.length;
+  if (elA) elA.textContent = all.filter(function(s){ return s.status === 'active'; }).length;
+  if (elP) elP.textContent = all.filter(function(s){ return s.status === 'paused'; }).length;
+  if (elD) elD.textContent = all.filter(function(s){ return s.status === 'cancelled' || s.status === 'completed'; }).length;
+
+  /* Filtres */
+  let list = all;
+  if (statusFilter !== 'all') {
+    if (statusFilter === 'completed') {
+      list = list.filter(function(s){ return s.status === 'completed' || s.status === 'cancelled'; });
+      /* Note : le bouton "Terminés/annulés" regroupe les deux pour l'aperçu rapide.
+         Le filtre "cancelled" pur reste dispo pour distinguer si besoin */
+    }
+    if (statusFilter === 'active')    list = list.filter(function(s){ return s.status === 'active'; });
+    if (statusFilter === 'paused')    list = list.filter(function(s){ return s.status === 'paused'; });
+    if (statusFilter === 'cancelled') list = list.filter(function(s){ return s.status === 'cancelled'; });
+  }
+  if (ownerFilter) list = list.filter(function(s){ return s.closerSlug === ownerFilter; });
+  if (q) {
+    list = list.filter(function(s) {
+      const blob = ((s.description || '') + ' ' + (s.closerName || '') + ' ' +
+        (clientById(s.clientId) || {}).displayName || '').toLowerCase();
+      return blob.indexOf(q) > -1;
+    });
+  }
+
+  if (!list.length) {
+    wrap.innerHTML = '<div class="bill-empty">' +
+      '<div class="bill-empty-icon">🔁</div>' +
+      '<h4>Aucun abonnement</h4>' +
+      '<p>Lance le script de migration pour importer tes 51 mandats GoCardless.</p>' +
+      '</div>';
+    return;
+  }
+
+  let html = '<table class="bill-table">';
+  html += '<thead><tr>';
+  html += '<th>Client</th>';
+  html += '<th>Description</th>';
+  html += '<th style="text-align:right;width:110px">Mensuel</th>';
+  html += '<th style="text-align:center;width:80px">Mensualités</th>';
+  html += '<th style="width:130px">Prochaine</th>';
+  html += '<th style="width:120px">Sales</th>';
+  html += '<th style="width:90px">Statut</th>';
+  html += '</tr></thead><tbody>';
+
+  list.forEach(function(s) {
+    const cli = clientById(s.clientId) || {};
+    const cliName = cli.displayName || cli.companyName || cli.firstName + ' ' + cli.lastName || '—';
+    const stMeta = SUB_STATUS_LABELS[s.status] || { label: s.status, color: '#999', bg: '#222', bd: '#444' };
+    const next = s.nextScheduledAt && s.nextScheduledAt.toDate
+      ? s.nextScheduledAt.toDate().toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
+      : '—';
+    const totalLabel = s.totalInstallments ? (s.installmentsPaidOnGC + '/' + s.totalInstallments) : (s.installmentsPaidOnGC + '/?');
+    const amount = formatEur(s.installmentAmount || 0);
+
+    html += '<tr style="cursor:pointer" onclick="openSubscriptionDrawer(\'' + s.id + '\')">';
+    html += '<td><div style="font-weight:700;color:var(--text)">' + escapeHtml(cliName) + '</div>';
+    html += '<div style="font-size:11px;color:var(--muted)">' + escapeHtml(cli.gocardlessCustomerId || s.gcCustomerId || '') + '</div></td>';
+    html += '<td style="font-family:var(--font-m);font-size:12px">' + escapeHtml(s.description || '—') + '</td>';
+    html += '<td style="text-align:right;font-family:var(--font-m);font-weight:700">' + amount + '</td>';
+    html += '<td style="text-align:center;font-family:var(--font-m);font-size:12px">' + totalLabel + '</td>';
+    html += '<td style="font-size:12px">' + next + '</td>';
+    html += '<td style="font-size:12px">' + escapeHtml(s.closerName || '—') + '</td>';
+    html += '<td><span class="bill-badge" style="background:' + stMeta.bg + ';border:1px solid ' + stMeta.bd + ';color:' + stMeta.color + '">' + stMeta.label + '</span></td>';
+    html += '</tr>';
+  });
+
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function clientById(id) {
+  if (!id) return null;
+  for (let i = 0; i < clientsCache.length; i++) {
+    if (clientsCache[i].id === id) return clientsCache[i];
+  }
+  return null;
+}
+
+function openSubscriptionDrawer(subId) {
+  const sub = subscriptionsCache.find(function(s){ return s.id === subId; });
+  if (!sub) return toast('Abonnement introuvable', true);
+
+  const cli = clientById(sub.clientId) || {};
+  const cliName = cli.displayName || cli.companyName || ((cli.firstName || '') + ' ' + (cli.lastName || '')).trim() || '—';
+  const stMeta = SUB_STATUS_LABELS[sub.status] || { label: sub.status, color: '#999', bg: '#222', bd: '#444' };
+  const startDate = sub.startDate && sub.startDate.toDate
+    ? sub.startDate.toDate().toLocaleDateString('fr-FR', { dateStyle: 'long' })
+    : '—';
+  const nextDate = sub.nextScheduledAt && sub.nextScheduledAt.toDate
+    ? sub.nextScheduledAt.toDate().toLocaleDateString('fr-FR', { dateStyle: 'long' })
+    : '—';
+  const totalLabel = sub.totalInstallments ? (sub.installmentsPaidOnGC + ' / ' + sub.totalInstallments) : (sub.installmentsPaidOnGC + ' / ?');
+
+  document.getElementById('drawerTitle').textContent = '🔁 ' + (sub.description || 'Abonnement');
+
+  let html = '';
+  html += '<div style="margin-bottom:18px"><span class="bill-badge" style="background:' + stMeta.bg + ';border:1px solid ' + stMeta.bd + ';color:' + stMeta.color + ';font-size:12px;padding:4px 10px">' + stMeta.label + '</span></div>';
+
+  html += '<div class="bill-card" style="margin-bottom:14px"><div class="bill-card-h"><h3>Client</h3></div>';
+  html += '<div style="font-size:14px;font-weight:700;color:var(--text)">' + escapeHtml(cliName) + '</div>';
+  if (cli.email) html += '<div style="font-size:12px;color:var(--muted);margin-top:4px">' + escapeHtml(cli.email) + '</div>';
+  html += '<div style="margin-top:10px"><a href="?tab=clients" onclick="closeDrawer();switchTab(\'clients\');return false" style="font-size:12px;color:var(--inv-green,#10b981);text-decoration:none">→ Voir la fiche client</a></div>';
+  html += '</div>';
+
+  html += '<div class="bill-card" style="margin-bottom:14px"><div class="bill-card-h"><h3>Paramètres</h3></div>';
+  html += '<div class="bill-info-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px">';
+  html += '<div><div style="color:var(--muted);font-size:11px;margin-bottom:2px">Montant mensuel</div><div style="font-weight:700;color:var(--text)">' + formatEur(sub.installmentAmount || 0) + ' (' + (sub.vatType || 'ht').toUpperCase() + ')</div></div>';
+  html += '<div><div style="color:var(--muted);font-size:11px;margin-bottom:2px">Fréquence</div><div style="font-weight:700;color:var(--text)">' + (sub.frequency || 'monthly') + '</div></div>';
+  html += '<div><div style="color:var(--muted);font-size:11px;margin-bottom:2px">Jour du mois</div><div style="font-weight:700;color:var(--text)">' + (sub.dayOfMonth || '—') + '</div></div>';
+  html += '<div><div style="color:var(--muted);font-size:11px;margin-bottom:2px">Mensualités totales</div><div style="font-weight:700;color:var(--text)">' + (sub.totalInstallments || 'illimité') + '</div></div>';
+  html += '<div><div style="color:var(--muted);font-size:11px;margin-bottom:2px">Date de début</div><div style="font-weight:700;color:var(--text)">' + startDate + '</div></div>';
+  html += '<div><div style="color:var(--muted);font-size:11px;margin-bottom:2px">Avancement GC</div><div style="font-weight:700;color:var(--text)">' + totalLabel + '</div></div>';
+  html += '</div></div>';
+
+  html += '<div class="bill-card" style="margin-bottom:14px"><div class="bill-card-h"><h3>Génération automatique (Step 4B)</h3></div>';
+  html += '<div class="bill-info-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:12px">';
+  html += '<div><div style="color:var(--muted);font-size:11px;margin-bottom:2px">Factures générées par notre système</div><div style="font-weight:700;color:var(--text)">' + (sub.installmentsGenerated || 0) + '</div></div>';
+  html += '<div><div style="color:var(--muted);font-size:11px;margin-bottom:2px">Prochaine facture (J-1 prélèvement)</div><div style="font-weight:700;color:var(--text)">' + nextDate + '</div></div>';
+  html += '</div>';
+  html += '<div style="margin-top:10px;padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;font-size:11px;color:var(--muted);line-height:1.5">';
+  html += '⚠️ La génération automatique sera disponible en <strong style="color:var(--text)">Phase 4B</strong>. Pour l\'instant cette page est en lecture seule.';
+  html += '</div>';
+  html += '</div>';
+
+  html += '<div class="bill-card" style="margin-bottom:14px"><div class="bill-card-h"><h3>Mandat GoCardless</h3></div>';
+  html += '<div style="font-family:var(--font-m);font-size:11px;color:var(--muted);line-height:1.6">';
+  html += 'Customer ID : <span style="color:var(--text)">' + escapeHtml(sub.gcCustomerId || '—') + '</span><br/>';
+  html += 'Mandate ID : <span style="color:var(--text)">' + escapeHtml(sub.gcMandateId || '—') + '</span><br/>';
+  html += 'Doc payment : <span style="color:var(--text)">' + escapeHtml(sub.paymentDocId || '—') + '</span>';
+  html += '</div></div>';
+
+  html += '<div class="bill-card" style="margin-bottom:14px"><div class="bill-card-h"><h3>Sales attribution</h3></div>';
+  html += '<div style="font-size:13px;color:var(--text);font-weight:700">' + escapeHtml(sub.closerName || '—') + '</div>';
+  html += '</div>';
+
+  document.getElementById('drawerBody').innerHTML = html;
+  document.getElementById('drawerFoot').innerHTML = '<button class="bill-btn bill-btn-ghost" onclick="closeDrawer()">Fermer</button>';
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('drawerBg').classList.add('open');
+}
+
+/* ═══ CGV ═══ */
+function renderCgvVersions() {
+  const list = document.getElementById('cgvVersionsList');
+  if (!cgvVersions.length) {
+    list.innerHTML = '<div class="bill-help">Aucune version enregistrée. Saisissez le texte ci-dessous puis cliquez sur "Enregistrer & activer".</div>';
+    setVal('cfCgvText', CGV_V1_TEXT);
+    setVal('cfCgvVersion', '1.0');
+    return;
+  }
+  let html = '';
+  for (let i = 0; i < cgvVersions.length; i++) {
+    const v = cgvVersions[i];
+    const dt = v.activeFrom && v.activeFrom.toDate ? v.activeFrom.toDate() : (v.createdAt && v.createdAt.toDate ? v.createdAt.toDate() : null);
+    const dateStr = dt ? dt.toLocaleDateString('fr-FR') : '—';
+    html += '<div class="bill-cgv-version' + (v.isActive ? ' active' : '') + '">';
+    html += '  <div class="bill-cgv-version-l">';
+    html += '    <div class="bill-cgv-version-v">Version ' + (v.version || v.id) + (v.isActive ? ' · Active' : '') + '</div>';
+    html += '    <div class="bill-cgv-version-d">' + (v.isActive ? 'En vigueur depuis ' : 'Archivée le ') + dateStr + '</div>';
+    html += '  </div>';
+    html += '  <div class="bill-cgv-version-actions">';
+    html += '    <button class="bill-btn bill-btn-ghost bill-btn-sm" onclick="loadCgvIntoEditor(\'' + v.id + '\')">📝 Charger</button>';
+    if (!v.isActive) html += '    <button class="bill-btn bill-btn-primary bill-btn-sm" onclick="activateCgv(\'' + v.id + '\')">Activer</button>';
+    html += '  </div>';
+    html += '</div>';
+  }
+  list.innerHTML = html;
+  /* Charger l'active par défaut si éditeur vide */
+  if (!document.getElementById('cfCgvText').value) {
+    const active = cgvVersions.filter(function(v){ return v.isActive; })[0];
+    if (active) {
+      setVal('cfCgvText', active.text || '');
+      setVal('cfCgvVersion', active.version || '1.0');
+    }
+  }
+}
+
+function loadCgvIntoEditor(id) {
+  const v = cgvVersions.filter(function(x){ return x.id === id; })[0];
+  if (!v) return;
+  setVal('cfCgvText', v.text || '');
+  setVal('cfCgvVersion', v.version || '');
+  toast('Version chargée dans l\'éditeur');
+}
+
+async function saveCgv(activate) {
+  const btn = document.getElementById(activate ? 'cgvSaveActivateBtn' : 'cgvSaveBtn');
+  const text = (document.getElementById('cfCgvText').value || '').trim();
+  const version = (document.getElementById('cfCgvVersion').value || '').trim();
+
+  if (!text) return toast('Le texte des CGV est vide', true);
+  if (!version) return toast('Numéro de version obligatoire', true);
+  if (!/^[\d.]+$/.test(version)) return toast('Format de version invalide (ex: 1.0, 1.1, 2.0)', true);
+
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    const docId = 'v' + version.replace(/\./g, '_');
+    const cgvRef = db.collection('_config').doc('billing').collection('cgv');
+    const exists = cgvVersions.filter(function(x){ return x.version === version; })[0];
+
+    const payload = {
+      version: version,
+      text: text,
+      isActive: !!activate,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser.uid
+    };
+    if (!exists) {
+      payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      payload.createdBy = currentUser.uid;
+    }
+    if (activate) {
+      payload.activeFrom = firebase.firestore.FieldValue.serverTimestamp();
+    }
+
+    if (activate) {
+      /* Désactiver toutes les autres */
+      const batch = db.batch();
+      for (let i = 0; i < cgvVersions.length; i++) {
+        if (cgvVersions[i].id !== docId && cgvVersions[i].isActive) {
+          batch.update(cgvRef.doc(cgvVersions[i].id), { isActive: false });
+        }
+      }
+      batch.set(cgvRef.doc(docId), payload, { merge: true });
+      await batch.commit();
+    } else {
+      await cgvRef.doc(docId).set(payload, { merge: true });
+    }
+
+    toast(activate ? '✅ Version ' + version + ' enregistrée et activée' : '✅ Version ' + version + ' enregistrée');
+  } catch (err) {
+    console.error(err);
+    toast('Erreur : ' + err.message, true);
+  } finally {
+    btn.disabled = false;
+    document.getElementById('cgvSaveBtn').textContent = '💾 Enregistrer (sans activer)';
+    document.getElementById('cgvSaveActivateBtn').textContent = '✅ Enregistrer & activer';
+  }
+}
+
+async function activateCgv(id) {
+  if (!confirm('Activer cette version ? Toutes les nouvelles factures émises utiliseront ces CGV.')) return;
+  try {
+    const cgvRef = db.collection('_config').doc('billing').collection('cgv');
+    const batch = db.batch();
+    for (let i = 0; i < cgvVersions.length; i++) {
+      batch.update(cgvRef.doc(cgvVersions[i].id), {
+        isActive: cgvVersions[i].id === id,
+        activeFrom: cgvVersions[i].id === id ? firebase.firestore.FieldValue.serverTimestamp() : (cgvVersions[i].activeFrom || null)
+      });
+    }
+    await batch.commit();
+    toast('✅ Version activée');
+  } catch (err) {
+    console.error(err);
+    toast('Erreur : ' + err.message, true);
+  }
+}
+
+/* ═══ CLIENTS LIST ═══ */
+function updateClientsStats() {
+  /* Stats sur les clients NON archivés (les archivés ne sont visibles qu'avec le toggle dédié) */
+  const active = clientsCache.filter(function(c){ return !c.archived; });
+  const total = active.length;
+  const company = active.filter(function(c){ return c.clientType === 'company'; }).length;
+  const indiv = active.filter(function(c){ return c.clientType === 'individual'; }).length;
+  const linkedGc = active.filter(function(c){ return !!c.gocardlessCustomerId; }).length;
+  document.getElementById('statClientsTotal').textContent = total;
+  document.getElementById('statClientsCompany').textContent = company;
+  document.getElementById('statClientsIndiv').textContent = indiv;
+  document.getElementById('statClientsLinked').textContent = linkedGc;
+
+  /* Peuple le filtre Sales owner avec les valeurs distinctes effectivement présentes */
+  const ownerSelect = document.getElementById('clientsOwnerFilter');
+  if (ownerSelect) {
+    const owners = {};
+    active.forEach(function(c){ if (c.salesOwner) owners[c.salesOwner] = true; });
+    const ownerSlugs = Object.keys(owners).sort();
+    const currentVal = ownerSelect.value;
+    let optsHtml = '<option value="all">Tous les sales</option>';
+    optsHtml += '<option value="__none__">— Aucun —</option>';
+    for (let i = 0; i < ownerSlugs.length; i++) {
+      const slug = ownerSlugs[i];
+      const display = (window.TEAM_MEMBERS && window.TEAM_MEMBERS[slug] && window.TEAM_MEMBERS[slug].displayName) || slug;
+      optsHtml += '<option value="' + escapeAttr(slug) + '">' + escapeHtml(display) + '</option>';
+    }
+    ownerSelect.innerHTML = optsHtml;
+    if (currentVal) ownerSelect.value = currentVal;
+  }
+}
+
+function renderClientsList() {
+  const wrap = document.getElementById('clientsTableWrap');
+  const q = (document.getElementById('clientsSearch').value || '').toLowerCase().trim();
+  const typeFilter = document.getElementById('clientsTypeFilter').value;
+  const ownerFilter = document.getElementById('clientsOwnerFilter').value;
+  const gcFilter = document.getElementById('clientsGcFilter').value;
+  const showArchived = document.getElementById('clientsShowArchived').checked;
+
+  let list = clientsCache.filter(function(c) {
+    if (!showArchived && c.archived) return false;
+    if (typeFilter !== 'all' && c.clientType !== typeFilter) return false;
+    if (ownerFilter === '__none__' && c.salesOwner) return false;
+    if (ownerFilter !== 'all' && ownerFilter !== '__none__' && c.salesOwner !== ownerFilter) return false;
+    if (gcFilter === 'yes' && !c.gocardlessCustomerId) return false;
+    if (gcFilter === 'no' && c.gocardlessCustomerId) return false;
+    if (q) {
+      const hay = (c.companyName || '') + ' ' +
+        ((c.contactFirstName || '') + ' ' + (c.contactLastName || '')) + ' ' +
+        (c.email || '') + ' ' + (c.siret || '') + ' ' + (c.phone || '');
+      if (hay.toLowerCase().indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+
+  /* Compute count factures par client */
+  const invoiceCountByClient = {};
+  invoicesCache.forEach(function(inv) {
+    if (inv.clientId) invoiceCountByClient[inv.clientId] = (invoiceCountByClient[inv.clientId] || 0) + 1;
+  });
+
+  if (!list.length) {
+    const hasFilters = q || typeFilter !== 'all' || ownerFilter !== 'all' || gcFilter !== 'all' || showArchived;
+    wrap.innerHTML = '<div class="bill-empty">' +
+      '<div class="bill-empty-icon">👥</div>' +
+      '<h4>' + (hasFilters ? 'Aucun résultat' : 'Aucun client de facturation') + '</h4>' +
+      '<p>' + (hasFilters ? 'Essayez d\'ajuster les filtres.' : 'Créez votre premier client de facturation pour commencer à émettre des factures.') + '</p>' +
+      (hasFilters ? '' : '<button class="bill-btn bill-btn-primary" onclick="openClientDrawer(null)">➕ Nouveau client</button>') +
+      '</div>';
+    return;
+  }
+
+  let html = '<table class="bill-table">';
+  html += '<thead><tr>';
+  html += '<th style="width:32px"></th>';
+  html += '<th>Nom / Société</th>';
+  html += '<th>Email · Tél</th>';
+  html += '<th style="width:90px">GC</th>';
+  html += '<th style="width:120px">Sales owner</th>';
+  html += '<th style="width:60px;text-align:right">Fact.</th>';
+  html += '<th class="col-actions">Actions</th>';
+  html += '</tr></thead><tbody>';
+
+  for (let i = 0; i < list.length; i++) {
+    const c = list[i];
+    const name = c.clientType === 'company'
+      ? (c.companyName || '—')
+      : ((c.contactFirstName || '') + ' ' + (c.contactLastName || '')).trim() || c.email || '—';
+    const contactName = c.clientType === 'company'
+      ? ((c.contactFirstName || '') + ' ' + (c.contactLastName || '')).trim()
+      : '';
+    const badge = c.clientType === 'company'
+      ? '<span class="bill-badge company">🏢</span>'
+      : '<span class="bill-badge individual">👤</span>';
+    const archivedBadge = c.archived ? ' <span class="bill-badge" style="background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:#ef4444">Archivé</span>' : '';
+    const exempt = c.vatExempt ? ' <span class="bill-badge exempt">Hors TVA</span>' : '';
+
+    /* GC badge */
+    const gcBadge = c.gocardlessCustomerId
+      ? '<span class="bill-badge" style="background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:#10b981" title="' + escapeAttr(c.gocardlessCustomerId) + '">✅ GC</span>'
+      : '<span style="color:var(--muted);font-size:11px">—</span>';
+
+    /* Sales owner display */
+    let ownerDisplay = '<span style="color:var(--muted);font-size:11px">—</span>';
+    if (c.salesOwner) {
+      const member = (window.TEAM_MEMBERS && window.TEAM_MEMBERS[c.salesOwner]);
+      const displayName = (member && member.displayName) || c.salesOwner;
+      ownerDisplay = '<span style="font-size:12px">' + escapeHtml(displayName) + '</span>';
+    }
+
+    const invCount = invoiceCountByClient[c.id] || 0;
+    const invCountDisplay = invCount > 0
+      ? '<span style="font-family:var(--font-m);font-weight:700;color:var(--text)">' + invCount + '</span>'
+      : '<span style="color:var(--muted);font-size:11px">—</span>';
+
+    html += '<tr ' + (c.archived ? 'style="opacity:.5"' : '') + ' onclick="openClientDrawer(\'' + c.id + '\')">';
+    html += '<td>' + badge + '</td>';
+    html += '<td><div style="font-weight:700">' + escapeHtml(name) + archivedBadge + exempt + '</div>'
+      + (contactName ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + escapeHtml(contactName) + '</div>' : '')
+      + (c.linkedLeadId ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">🔗 Lead lié</div>' : '')
+      + '</td>';
+    html += '<td><div style="font-family:var(--font-m);font-size:12px">' + escapeHtml(c.email || '—') + '</div>'
+      + (c.phone ? '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + escapeHtml(c.phone) + '</div>' : '')
+      + '</td>';
+    html += '<td>' + gcBadge + '</td>';
+    html += '<td>' + ownerDisplay + '</td>';
+    html += '<td style="text-align:right">' + invCountDisplay + '</td>';
+    html += '<td class="col-actions">';
+    if (invCount > 0) {
+      html += '<button class="bill-btn bill-btn-ghost" onclick="event.stopPropagation();showInvoicesForClient(\'' + c.id + '\')" title="Voir les factures de ce client">📄</button> ';
+    }
+    html += '<button class="bill-btn bill-btn-ghost" onclick="event.stopPropagation();openClientDrawer(\'' + c.id + '\')" title="Éditer">✏️</button>';
+    html += '</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+/* Action : voir les factures d'un client (redirection vers tab Factures avec filtre clientId) */
+function showInvoicesForClient(clientId) {
+  /* On change l'URL pour la rendre partageable + on bascule */
+  const url = new URL(window.location.href);
+  url.searchParams.set('tab', 'invoices');
+  url.searchParams.set('clientId', clientId);
+  window.history.replaceState({}, '', url.toString());
+  switchTab('invoices');
+  /* Le filtre s'applique automatiquement via applyClientIdFilter dans renderInvoicesList */
+}
+
+/* ═══ DRAWER : CLIENT ═══ */
+function openClientDrawer(clientId) {
+  editingClientId = clientId;
+  const isEdit = !!clientId;
+  const c = isEdit ? clientsCache.filter(function(x){ return x.id === clientId; })[0] : null;
+  if (isEdit && !c) return toast('Client introuvable', true);
+
+  document.getElementById('drawerTitle').textContent = isEdit ? 'Modifier le client' : 'Nouveau client de facturation';
+
+  const data = c || {
+    clientType: 'company',
+    companyName: '',
+    companyLegalForm: '',
+    companyRcs: '',
+    contactFirstName: '',
+    contactLastName: '',
+    email: '',
+    phone: '',
+    siret: '',
+    vatNumber: '',
+    vatExempt: false,
+    address: { line1: '', line2: '', postalCode: '', city: '', country: 'France' },
+    notes: '',
+    linkedLeadId: null,
+    gocardlessCustomerId: null,
+    salesOwner: null,
+    archived: false
+  };
+  /* Rétrocompat : ancien champ leadId remplacé par linkedLeadId */
+  const linkedLeadId = data.linkedLeadId || data.leadId || null;
+
+  let html = '';
+  html += '<div class="bill-type-toggle">';
+  html += '  <button class="bill-type-btn ' + (data.clientType === 'company' ? 'on' : '') + '" id="ctTypeCompany" onclick="setClientType(\'company\')">🏢 Société</button>';
+  html += '  <button class="bill-type-btn ' + (data.clientType === 'individual' ? 'on' : '') + '" id="ctTypeIndiv" onclick="setClientType(\'individual\')">👤 Particulier</button>';
+  html += '</div>';
+
+  /* Section société (cachée si individuel) */
+  html += '<div id="cfFieldsCompany" ' + (data.clientType === 'individual' ? 'style="display:none"' : '') + '>';
+  html += '  <div class="bill-form-grid full">';
+  html += '    <div class="bill-form-row"><div class="bill-label">Nom de la société <span class="bill-req">*</span></div><input class="bill-input" id="ctCompanyName" value="' + attr(data.companyName) + '"/></div>';
+  html += '  </div>';
+  html += '  <div class="bill-form-grid" style="margin-top:14px">';
+  html += '    <div class="bill-form-row"><div class="bill-label">Forme juridique</div><input class="bill-input" id="ctLegalForm" value="' + attr(data.companyLegalForm) + '" placeholder="SARL, SAS, EURL, EI…"/></div>';
+  html += '    <div class="bill-form-row"><div class="bill-label">N° RCS</div><input class="bill-input" id="ctRcs" value="' + attr(data.companyRcs) + '" placeholder="RCS Paris 123 456 789"/></div>';
+  html += '  </div>';
+  html += '  <div class="bill-form-grid" style="margin-top:14px">';
+  html += '    <div class="bill-form-row"><div class="bill-label">SIRET</div><input class="bill-input" id="ctSiret" value="' + attr(data.siret) + '" maxlength="14" oninput="validateSiretSoft(this)"/><div class="bill-help" id="ctSiretHelp" style="display:none;color:#f59e0b;font-size:11px;margin-top:4px"></div></div>';
+  html += '    <div class="bill-form-row"><div class="bill-label">N° TVA intracommunautaire</div><input class="bill-input" id="ctVatNumber" value="' + attr(data.vatNumber) + '" oninput="validateVatSoft(this)"/><div class="bill-help" id="ctVatHelp" style="display:none;color:#f59e0b;font-size:11px;margin-top:4px"></div></div>';
+  html += '  </div>';
+  html += '  <div class="bill-form-grid full" style="margin-top:14px">';
+  html += '    <div class="bill-form-row"><label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;color:var(--text)"><input type="checkbox" id="ctVatExempt" ' + (data.vatExempt ? 'checked' : '') + '/> Client exonéré de TVA (auto-liquidation, hors UE…)</label></div>';
+  html += '  </div>';
+  html += '</div>';
+
+  /* Contact (toujours visible) */
+  html += '<div class="bill-form-grid" style="margin-top:14px">';
+  html += '  <div class="bill-form-row"><div class="bill-label">Prénom contact ' + (data.clientType === 'individual' ? '<span class="bill-req">*</span>' : '') + '</div><input class="bill-input" id="ctFirstName" value="' + attr(data.contactFirstName) + '"/></div>';
+  html += '  <div class="bill-form-row"><div class="bill-label">Nom contact ' + (data.clientType === 'individual' ? '<span class="bill-req">*</span>' : '') + '</div><input class="bill-input" id="ctLastName" value="' + attr(data.contactLastName) + '"/></div>';
+  html += '  <div class="bill-form-row"><div class="bill-label">Email <span class="bill-req">*</span></div><input class="bill-input" id="ctEmail" type="email" value="' + attr(data.email) + '" oninput="validateEmailSoft(this)"/><div class="bill-help" id="ctEmailHelp" style="display:none;color:#f59e0b;font-size:11px;margin-top:4px"></div></div>';
+  html += '  <div class="bill-form-row"><div class="bill-label">Téléphone</div><input class="bill-input" id="ctPhone" value="' + attr(data.phone) + '" oninput="validatePhoneSoft(this)"/><div class="bill-help" id="ctPhoneHelp" style="display:none;color:#f59e0b;font-size:11px;margin-top:4px"></div></div>';
+  html += '</div>';
+
+  /* Adresse */
+  html += '<div class="bill-card-h" style="margin-top:18px"><div><h3 style="font-size:12px">Adresse de facturation</h3></div></div>';
+  const a = data.address || {};
+  html += '<div class="bill-form-grid full">';
+  html += '  <div class="bill-form-row"><div class="bill-label">Adresse — ligne 1 <span class="bill-req">*</span></div><input class="bill-input" id="ctAddrLine1" value="' + attr(a.line1) + '"/></div>';
+  html += '  <div class="bill-form-row"><div class="bill-label">Adresse — ligne 2</div><input class="bill-input" id="ctAddrLine2" value="' + attr(a.line2) + '"/></div>';
+  html += '</div>';
+  html += '<div class="bill-form-grid three" style="margin-top:14px">';
+  html += '  <div class="bill-form-row"><div class="bill-label">Code postal <span class="bill-req">*</span></div><input class="bill-input" id="ctAddrPostal" value="' + attr(a.postalCode) + '" maxlength="10"/></div>';
+  html += '  <div class="bill-form-row"><div class="bill-label">Ville <span class="bill-req">*</span></div><input class="bill-input" id="ctAddrCity" value="' + attr(a.city) + '"/></div>';
+  html += '  <div class="bill-form-row"><div class="bill-label">Pays</div><input class="bill-input" id="ctAddrCountry" value="' + attr(a.country || 'France') + '"/></div>';
+  html += '</div>';
+
+  /* Liens : Lead CRM + GoCardless + Sales owner */
+  html += '<div class="bill-card-h" style="margin-top:18px"><div><h3 style="font-size:12px">Liens & attribution</h3></div></div>';
+  html += '<div class="bill-form-grid full">';
+  html += '  <div class="bill-form-row"><div class="bill-label">Lead CRM lié (optionnel)</div>';
+  html += '    <input class="bill-input" id="ctLeadSearch" placeholder="Rechercher par nom, email ou téléphone…" oninput="searchLeadsForLink(this.value)"/>';
+  html += '    <div id="ctLeadResults" style="margin-top:6px;max-height:180px;overflow-y:auto"></div>';
+  html += '    <div id="ctLeadSelected" style="margin-top:8px">' + (linkedLeadId ? '<div class="bill-badge company">🔗 Lead ' + escapeHtml(linkedLeadId) + ' <span style="margin-left:6px;cursor:pointer" onclick="clearLeadLink()">×</span></div>' : '') + '</div>';
+  html += '  </div>';
+  html += '</div>';
+  html += '<div class="bill-form-grid" style="margin-top:14px">';
+  html += '  <div class="bill-form-row"><div class="bill-label">Sales owner</div>';
+  let ownerOpts = '<option value="">— Aucun —</option>';
+  if (window.TEAM_MEMBERS_LIST) {
+    for (let oi = 0; oi < window.TEAM_MEMBERS_LIST.length; oi++) {
+      const m = window.TEAM_MEMBERS_LIST[oi];
+      const sel = (data.salesOwner === m.slug) ? ' selected' : '';
+      ownerOpts += '<option value="' + escapeAttr(m.slug) + '"' + sel + '>' + escapeHtml(m.displayName || m.slug) + '</option>';
+    }
+  }
+  html += '    <select class="bill-select" id="ctSalesOwner">' + ownerOpts + '</select>';
+  html += '    <div class="bill-help" style="font-size:11px;color:var(--muted);margin-top:4px">Pour traçabilité (Step 3 ouvrira l\'accès aux sales sur leurs clients)</div>';
+  html += '  </div>';
+  html += '  <div class="bill-form-row"><div class="bill-label">ID client GoCardless</div>';
+  html += '    <input class="bill-input" id="ctGcCustomerId" value="' + attr(data.gocardlessCustomerId || '') + '" placeholder="CU000XXXXXX" style="font-family:var(--font-m);font-size:11px"/>';
+  if (data.gocardlessCustomerId) {
+    html += '    <div class="bill-help" style="font-size:11px;margin-top:4px"><a href="https://manage.gocardless.com/customers/' + escapeAttr(data.gocardlessCustomerId) + '" target="_blank" style="color:#10b981">↗ Voir dans GoCardless</a></div>';
+  }
+  html += '  </div>';
+  html += '</div>';
+
+  /* Notes */
+  html += '<div class="bill-form-grid full" style="margin-top:14px">';
+  html += '  <div class="bill-form-row"><div class="bill-label">Notes internes</div><textarea class="bill-textarea" id="ctNotes">' + escapeHtml(data.notes || '') + '</textarea></div>';
+  html += '</div>';
+
+  /* Statut archivé */
+  if (data.archived) {
+    html += '<div style="margin-top:18px;padding:12px 16px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:8px;color:#ef4444;font-size:12px">⚠️ Ce client est <strong>archivé</strong>. Il n\'apparaît plus dans le sélecteur de nouvelles factures, mais ses anciennes factures restent intactes.</div>';
+  }
+
+  document.getElementById('drawerBody').innerHTML = html;
+  document.getElementById('drawerBody')._currentLeadId = linkedLeadId;
+
+  let footHtml = '';
+  if (isEdit) {
+    if (data.archived) {
+      footHtml += '<button class="bill-btn bill-btn-ghost" onclick="toggleArchiveClient(\'' + clientId + '\', false)">↩️ Désarchiver</button>';
+    } else {
+      footHtml += '<button class="bill-btn bill-btn-ghost" onclick="toggleArchiveClient(\'' + clientId + '\', true)" style="color:#ef4444">🗄️ Archiver</button>';
+    }
+    footHtml += '<span style="flex:1"></span>';
+  }
+  footHtml += '<button class="bill-btn bill-btn-ghost" onclick="closeDrawer()">Annuler</button>';
+  footHtml += '<button class="bill-btn bill-btn-primary" id="ctSaveBtn" onclick="saveClient()">💾 ' + (isEdit ? 'Enregistrer' : 'Créer le client') + '</button>';
+  document.getElementById('drawerFoot').innerHTML = footHtml;
+
+  /* Re-trigger validations sur les champs déjà remplis (pour montrer les warnings éventuels) */
+  setTimeout(function(){
+    if (data.siret) validateSiretSoft(document.getElementById('ctSiret'));
+    if (data.vatNumber) validateVatSoft(document.getElementById('ctVatNumber'));
+    if (data.email) validateEmailSoft(document.getElementById('ctEmail'));
+    if (data.phone) validatePhoneSoft(document.getElementById('ctPhone'));
+  }, 50);
+
+  document.getElementById('drawerBg').classList.add('show');
+  document.getElementById('drawer').classList.add('show');
+}
+
+function closeDrawer() {
+  document.getElementById('drawerBg').classList.remove('show');
+  document.getElementById('drawer').classList.remove('show');
+  editingClientId = null;
+}
+
+function setClientType(t) {
+  document.getElementById('ctTypeCompany').classList.toggle('on', t === 'company');
+  document.getElementById('ctTypeIndiv').classList.toggle('on', t === 'individual');
+  document.getElementById('cfFieldsCompany').style.display = t === 'company' ? 'block' : 'none';
+  document.getElementById('drawerBody')._currentType = t;
+}
+
+let leadSearchTimer = null;
+function searchLeadsForLink(q) {
+  clearTimeout(leadSearchTimer);
+  const results = document.getElementById('ctLeadResults');
+  q = (q || '').trim();
+  if (q.length < 2) { results.innerHTML = ''; return; }
+  results.innerHTML = '<div class="bill-help">Recherche…</div>';
+  leadSearchTimer = setTimeout(async function() {
+    try {
+      const ql = q.toLowerCase();
+      const all = await db.collection('leads').limit(500).get();
+      const matches = [];
+      all.forEach(function(d) {
+        const l = d.data();
+        const merged = l._merged === true;
+        if (merged) return;
+        const name = ((l.firstName || '') + ' ' + (l.lastName || '')).toLowerCase();
+        const email = (l.email || '').toLowerCase();
+        const phone = l.telephone || '';
+        if (name.indexOf(ql) > -1 || email.indexOf(ql) > -1 || phone.indexOf(q) > -1) {
+          matches.push({ id: d.id, name: name.trim() || '(sans nom)', email: l.email || '', phone: phone, company: l.companyName || '' });
+        }
+        if (matches.length >= 8) return;
+      });
+      if (!matches.length) { results.innerHTML = '<div class="bill-help">Aucun lead trouvé</div>'; return; }
+      let h = '';
+      for (let i = 0; i < matches.length && i < 8; i++) {
+        const m = matches[i];
+        h += '<div style="padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px;margin-bottom:4px;cursor:pointer;font-size:12px" onclick="selectLeadForLink(\'' + m.id + '\',\'' + escapeAttr(m.name) + '\',\'' + escapeAttr(m.email) + '\',\'' + escapeAttr(m.phone) + '\',\'' + escapeAttr(m.company) + '\')">';
+        h += '<div style="font-weight:700;color:var(--text)">' + escapeHtml(m.name) + (m.company ? ' · ' + escapeHtml(m.company) : '') + '</div>';
+        h += '<div style="color:var(--muted);font-size:11px;margin-top:2px">' + escapeHtml(m.email) + (m.phone ? ' · ' + escapeHtml(m.phone) : '') + '</div>';
+        h += '</div>';
+      }
+      results.innerHTML = h;
+    } catch (err) {
+      results.innerHTML = '<div class="bill-help warn">Erreur recherche : ' + escapeHtml(err.message) + '</div>';
+    }
+  }, 250);
+}
+
+function selectLeadForLink(id, name, email, phone, company) {
+  document.getElementById('drawerBody')._currentLeadId = id;
+  document.getElementById('ctLeadSelected').innerHTML = '<div class="bill-badge company">🔗 ' + escapeHtml(name) + ' <span style="margin-left:6px;cursor:pointer" onclick="clearLeadLink()">×</span></div>';
+  document.getElementById('ctLeadResults').innerHTML = '';
+  document.getElementById('ctLeadSearch').value = '';
+  /* Pré-remplissage */
+  if (email && !document.getElementById('ctEmail').value) document.getElementById('ctEmail').value = email;
+  if (phone && !document.getElementById('ctPhone').value) document.getElementById('ctPhone').value = phone;
+  if (company && !document.getElementById('ctCompanyName').value) {
+    document.getElementById('ctCompanyName').value = company;
+    setClientType('company');
+  } else if (!company && name) {
+    /* Particulier : split prénom/nom */
+    const parts = name.split(' ');
+    if (parts.length >= 2 && !document.getElementById('ctFirstName').value && !document.getElementById('ctLastName').value) {
+      document.getElementById('ctFirstName').value = parts[0];
+      document.getElementById('ctLastName').value = parts.slice(1).join(' ');
+    }
+  }
+}
+
+function clearLeadLink() {
+  document.getElementById('drawerBody')._currentLeadId = null;
+  document.getElementById('ctLeadSelected').innerHTML = '';
+}
+
+async function saveClient() {
+  const btn = document.getElementById('ctSaveBtn');
+  const v = function(id) { const el = document.getElementById(id); return el ? (el.value || '').trim() : ''; };
+  const type = document.getElementById('drawerBody')._currentType
+    || (document.getElementById('ctTypeCompany').classList.contains('on') ? 'company' : 'individual');
+
+  const email = v('ctEmail');
+  const addrLine1 = v('ctAddrLine1');
+  const postal = v('ctAddrPostal');
+  const city = v('ctAddrCity');
+  const siret = v('ctSiret').replace(/\s/g, '');
+  const vatNumber = v('ctVatNumber').replace(/\s/g, '').toUpperCase();
+  const companyName = v('ctCompanyName');
+  const firstName = v('ctFirstName');
+  const lastName = v('ctLastName');
+
+  /* Validations BLOQUANTES (champs obligatoires uniquement) */
+  if (type === 'company' && !companyName) return toast('Nom de la société obligatoire', true);
+  if (type === 'individual' && (!firstName || !lastName)) return toast('Prénom et nom obligatoires pour un particulier', true);
+  if (!email) return toast('Email obligatoire', true);
+  if (!addrLine1) return toast('Adresse ligne 1 obligatoire', true);
+  if (!postal) return toast('Code postal obligatoire', true);
+  if (!city) return toast('Ville obligatoire', true);
+  /* Le SIRET et la TVA ne sont plus bloquants (validation SOUPLE via les warnings inline) */
+
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    const doc = {
+      clientType: type,
+      companyName: companyName,
+      companyLegalForm: v('ctLegalForm') || null,
+      companyRcs: v('ctRcs') || null,
+      contactFirstName: firstName,
+      contactLastName: lastName,
+      email: email.toLowerCase(),
+      phone: v('ctPhone'),
+      siret: siret,
+      vatNumber: vatNumber,
+      vatExempt: !!document.getElementById('ctVatExempt') && document.getElementById('ctVatExempt').checked,
+      address: {
+        line1: addrLine1,
+        line2: v('ctAddrLine2'),
+        postalCode: postal,
+        city: city,
+        country: v('ctAddrCountry') || 'France'
+      },
+      notes: v('ctNotes'),
+      linkedLeadId: document.getElementById('drawerBody')._currentLeadId || null,
+      gocardlessCustomerId: v('ctGcCustomerId') || null,
+      salesOwner: v('ctSalesOwner') || null,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser.uid
+    };
+    if (editingClientId) {
+      await db.collection('invoice_clients').doc(editingClientId).update(doc);
+      toast('✅ Client mis à jour');
+    } else {
+      doc.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      doc.createdBy = currentUser.uid;
+      doc.archived = false;
+      await db.collection('invoice_clients').add(doc);
+      toast('✅ Client créé');
+    }
+    closeDrawer();
+  } catch (err) {
+    console.error(err);
+    toast('Erreur : ' + err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 ' + (editingClientId ? 'Enregistrer' : 'Créer le client');
+  }
+}
+
+/* Archive / désarchive un client (soft delete) */
+async function toggleArchiveClient(id, archive) {
+  const action = archive ? 'archiver' : 'désarchiver';
+  if (archive) {
+    /* Compte les factures pour informer l'utilisateur */
+    const count = invoicesCache.filter(function(inv){ return inv.clientId === id; }).length;
+    let msg = 'Archiver ce client ?\n\nIl ne pourra plus être sélectionné pour de nouvelles factures.';
+    if (count > 0) msg += '\n\nLes ' + count + ' facture(s) déjà émise(s) pour ce client restent intactes (immutabilité fiscale).';
+    if (!confirm(msg)) return;
+  }
+  try {
+    await db.collection('invoice_clients').doc(id).update({
+      archived: !!archive,
+      archivedAt: archive ? firebase.firestore.FieldValue.serverTimestamp() : null,
+      archivedBy: archive ? currentUser.uid : null,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser.uid
+    });
+    toast(archive ? '🗄️ Client archivé' : '↩️ Client désarchivé');
+    closeDrawer();
+  } catch (err) {
+    toast('Erreur : ' + err.message, true);
+  }
+}
+
+/* ═══ Validation SOUPLE (warnings inline, n'empêche pas le save) ═══ */
+function validateSiretSoft(input) {
+  const help = document.getElementById('ctSiretHelp');
+  if (!help) return;
+  const v = (input.value || '').replace(/\s/g, '');
+  if (!v) { help.style.display = 'none'; return; }
+  if (!/^\d{14}$/.test(v)) {
+    help.textContent = '⚠️ Format inhabituel : un SIRET français fait 14 chiffres (saisie autorisée mais à vérifier)';
+    help.style.display = 'block';
+  } else {
+    help.style.display = 'none';
+  }
+}
+function validateVatSoft(input) {
+  const help = document.getElementById('ctVatHelp');
+  if (!help) return;
+  const v = (input.value || '').replace(/\s/g, '').toUpperCase();
+  if (!v) { help.style.display = 'none'; return; }
+  /* Format générique : 2 lettres pays + 2-13 chars alphanum */
+  if (!/^[A-Z]{2}[0-9A-Z]{2,13}$/.test(v)) {
+    help.textContent = '⚠️ Format inhabituel : commence généralement par 2 lettres (FR, DE, BE…) suivies de chiffres';
+    help.style.display = 'block';
+  } else if (v.startsWith('FR') && !/^FR[0-9A-Z]{2}\d{9}$/.test(v)) {
+    help.textContent = '⚠️ TVA française attendue : FR + 2 caractères + 9 chiffres (saisie autorisée mais à vérifier)';
+    help.style.display = 'block';
+  } else {
+    help.style.display = 'none';
+  }
+}
+function validateEmailSoft(input) {
+  const help = document.getElementById('ctEmailHelp');
+  if (!help) return;
+  const v = (input.value || '').trim();
+  if (!v) { help.style.display = 'none'; return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+    help.textContent = '⚠️ Format email suspect (vérifie la présence de @ et du domaine)';
+    help.style.display = 'block';
+  } else {
+    help.style.display = 'none';
+  }
+}
+function validatePhoneSoft(input) {
+  const help = document.getElementById('ctPhoneHelp');
+  if (!help) return;
+  const v = (input.value || '').replace(/[\s\-\.\(\)]/g, '');
+  if (!v) { help.style.display = 'none'; return; }
+  if (!/^\+?\d{8,15}$/.test(v)) {
+    help.textContent = '⚠️ Format inhabituel : préférer le format E.164 (+33XXXXXXXXX)';
+    help.style.display = 'block';
+  } else {
+    help.style.display = 'none';
+  }
+}
+
+/* ═══════════════════════════════════════════════
+   INVOICES — STEP 2A
+   Listing brouillons + redirection vers édition
+   La validation, le PDF et l'envoi arrivent en Step 2B
+   ═══════════════════════════════════════════════ */
+
+function initInvoicesListener() {
+  db.collection('invoices').orderBy('createdAt', 'desc').limit(500).onSnapshot(function(qs) {
+    invoicesCache = [];
+    qs.forEach(function(d) { invoicesCache.push(Object.assign({ id: d.id }, d.data())); });
+    updateInvoicesStats();
+    if (activeTab === 'invoices') renderInvoicesList();
+  }, function(err) {
+    console.error('[billing] invoices listener error', err);
+    if (activeTab === 'invoices') {
+      document.getElementById('invoicesTableWrap').innerHTML = '<div class="bill-empty"><div class="bill-empty-icon">⚠️</div><h4>Erreur de chargement</h4><p>' + escapeHtml(err.message) + '</p></div>';
+    }
+  });
+}
+
+function updateInvoicesStats() {
+  const drafts = invoicesCache.filter(function(i){ return i.status === 'draft'; }).length;
+  const validated = invoicesCache.filter(function(i){ return i.status === 'validated' || i.status === 'sent'; });
+  const total = invoicesCache.filter(function(i){ return i.status !== 'draft'; }).length;
+
+  /* CA encaissé du mois (factures payées sur le mois en cours) */
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  let caMonth = 0;
+  invoicesCache.forEach(function(i) {
+    if (i.status !== 'paid' || !i.paidAt) return;
+    const paidDate = i.paidAt.toDate ? i.paidAt.toDate() : new Date(i.paidAt);
+    if (paidDate >= monthStart && paidDate < monthEnd) {
+      /* paidAmount fixé au moment du marquage manuel ; fallback totalTtc si absent (factures historiques) */
+      caMonth += (i.paidAmount != null ? i.paidAmount : (i.totalTtc || 0));
+    }
+  });
+
+  let pendingAmount = 0;
+  validated.forEach(function(i){ pendingAmount += (i.totalTtc || 0); });
+
+  document.getElementById('statInvCa').textContent = formatEur(caMonth);
+  document.getElementById('statInvDrafts').textContent = drafts;
+  document.getElementById('statInvPending').textContent = validated.length;
+  document.getElementById('statInvPendingAmt').textContent = formatEur(pendingAmount);
+  document.getElementById('statInvTotal').textContent = total;
+}
+
+function renderInvoicesList() {
+  const wrap = document.getElementById('invoicesTableWrap');
+  const q = (document.getElementById('invoicesSearch').value || '').toLowerCase().trim();
+  const statusFilter = document.getElementById('invoicesStatusFilter').value;
+
+  /* Filtre clientId : lu depuis l'URL (?clientId=...) au moment du render */
+  const clientIdFilter = (new URLSearchParams(window.location.search)).get('clientId') || null;
+
+  let list = invoicesCache;
+  if (clientIdFilter) list = list.filter(function(i){ return i.clientId === clientIdFilter; });
+  if (statusFilter !== 'all') list = list.filter(function(i){ return i.status === statusFilter; });
+  if (q) {
+    list = list.filter(function(i) {
+      const number = (i.number || '').toLowerCase();
+      const client = ((i.clientSnapshot && i.clientSnapshot.companyName) || (i.clientSnapshot && (i.clientSnapshot.contactFirstName + ' ' + i.clientSnapshot.contactLastName)) || '').toLowerCase();
+      const amount = String(i.totalTtc || '');
+      return number.indexOf(q) > -1 || client.indexOf(q) > -1 || amount.indexOf(q) > -1;
+    });
+  }
+
+  /* Badge filtre client actif (avec bouton × pour retirer) */
+  let filterBadgeHtml = '';
+  if (clientIdFilter) {
+    const c = clientsCache.filter(function(x){ return x.id === clientIdFilter; })[0];
+    const clientLabel = c
+      ? (c.clientType === 'company' ? (c.companyName || '—') : ((c.contactFirstName || '') + ' ' + (c.contactLastName || '')).trim() || c.email || '—')
+      : 'client supprimé';
+    filterBadgeHtml = '<div style="margin-bottom:14px;padding:10px 14px;background:rgba(96,165,250,.08);border:1px solid rgba(96,165,250,.2);border-radius:8px;display:flex;align-items:center;gap:10px;font-size:12px">'
+      + '<span style="color:var(--muted)">Filtré par client :</span>'
+      + '<strong style="color:var(--text)">' + escapeHtml(clientLabel) + '</strong>'
+      + '<span style="flex:1"></span>'
+      + '<button class="bill-btn bill-btn-ghost" onclick="clearClientIdFilter()" style="font-size:11px;padding:4px 10px">× Retirer le filtre</button>'
+      + '</div>';
+  }
+
+  if (!list.length) {
+    wrap.innerHTML = filterBadgeHtml + '<div class="bill-empty">' +
+      '<div class="bill-empty-icon">📄</div>' +
+      '<h4>' + (q || statusFilter !== 'all' || clientIdFilter ? 'Aucun résultat' : 'Aucune facture') + '</h4>' +
+      '<p>' + (q || statusFilter !== 'all' || clientIdFilter ? 'Essayez avec d\'autres filtres.' : 'Créez votre première facture pour commencer.') + '</p>' +
+      (q || statusFilter !== 'all' || clientIdFilter ? '' : '<button class="bill-btn bill-btn-primary" onclick="newInvoice()">➕ Nouvelle facture</button>') +
+      '</div>';
+    return;
+  }
+
+  let html = filterBadgeHtml;
+  html += '<table class="bill-table">';
+  html += '<thead><tr>';
+  html += '<th style="width:120px">N°</th>';
+  html += '<th>Client</th>';
+  html += '<th>Date</th>';
+  html += '<th style="text-align:right">Montant TTC</th>';
+  html += '<th>Statut</th>';
+  html += '<th class="col-actions">Actions</th>';
+  html += '</tr></thead><tbody>';
+
+  for (let i = 0; i < list.length; i++) {
+    const inv = list[i];
+    const num = inv.number || '<span style="color:var(--muted)">— Brouillon —</span>';
+    const cs = inv.clientSnapshot || {};
+    const clientName = cs.companyName || ((cs.contactFirstName || '') + ' ' + (cs.contactLastName || '')).trim() || '—';
+    const dt = inv.issueDate && inv.issueDate.toDate ? inv.issueDate.toDate() : (inv.createdAt && inv.createdAt.toDate ? inv.createdAt.toDate() : null);
+    const dateStr = dt ? dt.toLocaleDateString('fr-FR') : '—';
+    const statusBadge = invoiceStatusBadge(inv.status);
+
+    html += '<tr onclick="editInvoice(\'' + inv.id + '\')">';
+    html += '<td><span style="font-family:var(--font-m);font-weight:700;font-size:13px">' + num + '</span></td>';
+    html += '<td>' + escapeHtml(clientName) + '</td>';
+    html += '<td><span style="font-size:12px;color:var(--muted)">' + dateStr + '</span></td>';
+    html += '<td style="text-align:right;font-weight:700;font-family:var(--font-m)">' + formatEur(inv.totalTtc || 0) + '</td>';
+    html += '<td>' + statusBadge + '</td>';
+    html += '<td class="col-actions">';
+    html += '<button class="bill-btn bill-btn-ghost" onclick="event.stopPropagation();editInvoice(\'' + inv.id + '\')">' + (inv.status === 'draft' ? '✏️ Éditer' : '👁️ Voir') + '</button>';
+    if (inv.status === 'draft') {
+      html += ' <button class="bill-btn bill-btn-red" onclick="event.stopPropagation();deleteDraft(\'' + inv.id + '\')" title="Supprimer le brouillon">🗑️</button>';
+    } else if (inv.pdfHash) {
+      html += ' <button class="bill-btn bill-btn-ghost" onclick="event.stopPropagation();downloadInvoicePdf(\'' + inv.id + '\', \'' + escapeAttr(inv.number || inv.id) + '\')" title="Télécharger PDF">📄</button>';
+      /* Renvoi : auto-ouvre le modal envoi */
+      html += ' <button class="bill-btn bill-btn-ghost" onclick="event.stopPropagation();openInvoiceAction(\'' + inv.id + '\', \'send\')" title="' + (inv.sentAt ? 'Renvoyer' : 'Envoyer') + ' par email">📨</button>';
+      /* Marquer payée : auto-ouvre le modal paiement */
+      if (inv.status !== 'paid') {
+        html += ' <button class="bill-btn bill-btn-ghost" onclick="event.stopPropagation();openInvoiceAction(\'' + inv.id + '\', \'paid\')" title="Marquer comme payée" style="color:#10b981">💰</button>';
+      }
+    } else if (inv.pdfPending || inv.pdfError) {
+      html += ' <span class="bill-badge individual" title="' + (inv.pdfError ? escapeAttr(inv.pdfError) : 'Génération en cours') + '">⚠️ PDF</span>';
+    }
+    html += '</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function invoiceStatusBadge(status) {
+  const map = {
+    draft: { c: 'individual', t: '📝 Brouillon' },
+    validated: { c: 'company', t: '✅ Validée' },
+    sent: { c: 'company', t: '📨 Envoyée' },
+    paid: { c: 'exempt', t: '💰 Payée' },
+    cancelled: { c: 'individual', t: '❌ Annulée' }
+  };
+  const m = map[status] || { c: 'individual', t: status || '—' };
+  return '<span class="bill-badge ' + m.c + '">' + m.t + '</span>';
+}
+
+function newInvoice() {
+  /* Vérifier que la config est complète avant d'autoriser une nouvelle facture */
+  if (!billingConfig) return toast('Configuration en cours de chargement…', true);
+  const c = billingConfig;
+  const missing = [];
+  if (!c.companyVatNumber) missing.push('N° TVA intracommunautaire');
+  if (!c.companyRcs) missing.push('RCS');
+  if (!c.companySiret || c.companySiret.length !== 14) missing.push('SIRET');
+  if (missing.length) {
+    toast('⚠️ Complétez d\'abord les paramètres : ' + missing.join(', '), true);
+    setTimeout(function(){ switchTab('settings'); switchSettingsSub('company'); }, 800);
+    return;
+  }
+  if (!productsCache.length) {
+    if (!confirm('Aucun produit dans le catalogue. Souhaitez-vous d\'abord créer un produit ?')) return;
+    switchTab('products');
+    return;
+  }
+  if (!clientsCache.length) {
+    if (!confirm('Aucun client de facturation. Souhaitez-vous d\'abord créer un client ?')) return;
+    switchTab('clients');
+    return;
+  }
+  location.href = 'admin-invoice-edit.html?new=1';
+}
+
+function editInvoice(id) {
+  location.href = 'admin-invoice-edit.html?id=' + encodeURIComponent(id);
+}
+
+/* Ouvre la page d'édition avec auto-déclenchement du modal envoi ou paiement (Step 2B-2) */
+function openInvoiceAction(id, action) {
+  location.href = 'admin-invoice-edit.html?id=' + encodeURIComponent(id) + '&action=' + encodeURIComponent(action);
+}
+
+/* Retire le filtre clientId du tab Factures (Step 5) */
+function clearClientIdFilter() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('clientId');
+  window.history.replaceState({}, '', url.toString());
+  renderInvoicesList();
+}
+
+async function deleteDraft(id) {
+  const inv = invoicesCache.filter(function(x){ return x.id === id; })[0];
+  if (!inv) return;
+  if (inv.status !== 'draft') return toast('Seuls les brouillons peuvent être supprimés', true);
+  if (!confirm('Supprimer ce brouillon ?\n\nCette action est irréversible.')) return;
+  try {
+    await db.collection('invoices').doc(id).delete();
+    toast('🗑️ Brouillon supprimé');
+  } catch (err) {
+    toast('Erreur : ' + err.message, true);
+  }
+}
+
+/* Téléchargement PDF d'une facture validée (Step 2B-1)
+   Fetch /api/invoice-pdf avec Bearer token Firebase, puis déclenche un download local */
+async function downloadInvoicePdf(id, number) {
+  if (!id) return;
+  const user = firebase.auth().currentUser;
+  if (!user) return toast('Session expirée — reconnectez-vous', true);
+  toast('⏳ Téléchargement…');
+  try {
+    const idToken = await user.getIdToken();
+    const response = await fetch('/api/invoice-pdf?id=' + encodeURIComponent(id), {
+      headers: { 'Authorization': 'Bearer ' + idToken }
+    });
+    if (!response.ok) {
+      let errMsg = 'Erreur HTTP ' + response.status;
+      try { const data = await response.json(); errMsg = data.error || errMsg; } catch(e) {}
+      throw new Error(errMsg);
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (number || id) + '.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast('📄 PDF téléchargé');
+  } catch (err) {
+    console.error('[downloadInvoicePdf]', err);
+    toast('Erreur téléchargement : ' + err.message, true);
+  }
+}
+
+
+/* ═══════════════════════════════════════════════
+   PRODUCTS — STEP 2A
+   Catalogue produits avec variantes intégrées
+   ═══════════════════════════════════════════════ */
+
+function initProductsListener() {
+  db.collection('invoice_products').orderBy('sortOrder', 'asc').onSnapshot(function(qs) {
+    productsCache = [];
+    qs.forEach(function(d) { productsCache.push(Object.assign({ id: d.id }, d.data())); });
+    updateProductsStats();
+    if (activeTab === 'products') renderProductsList();
+  }, function(err) {
+    console.error('[billing] products listener error', err);
+    if (activeTab === 'products') {
+      document.getElementById('productsTableWrap').innerHTML = '<div class="bill-empty"><div class="bill-empty-icon">⚠️</div><h4>Erreur de chargement</h4><p>' + escapeHtml(err.message) + '</p></div>';
+    }
+  });
+}
+
+function updateProductsStats() {
+  const total = productsCache.length;
+  const active = productsCache.filter(function(p){ return p.status === 'active'; }).length;
+  const archived = productsCache.filter(function(p){ return p.status === 'archived'; }).length;
+  let variantsTotal = 0;
+  productsCache.forEach(function(p){ variantsTotal += (p.variants && p.variants.length) || 0; });
+  document.getElementById('statProdTotal').textContent = total;
+  document.getElementById('statProdActive').textContent = active;
+  document.getElementById('statProdArchived').textContent = archived;
+  document.getElementById('statProdVariants').textContent = variantsTotal;
+}
+
+function renderProductsList() {
+  const wrap = document.getElementById('productsTableWrap');
+  const q = (document.getElementById('productsSearch').value || '').toLowerCase().trim();
+  const status = document.getElementById('productsStatusFilter').value;
+
+  let list = productsCache;
+  if (status !== 'all') list = list.filter(function(p){ return p.status === status; });
+  if (q) {
+    list = list.filter(function(p) {
+      return (p.name || '').toLowerCase().indexOf(q) > -1
+          || (p.category || '').toLowerCase().indexOf(q) > -1
+          || (p.description || '').toLowerCase().indexOf(q) > -1;
+    });
+  }
+
+  if (!list.length) {
+    wrap.innerHTML = '<div class="bill-empty">' +
+      '<div class="bill-empty-icon">📦</div>' +
+      '<h4>' + (q ? 'Aucun résultat' : 'Aucun produit') + '</h4>' +
+      '<p>' + (q ? 'Essayez avec un autre terme.' : 'Créez votre premier produit pour pouvoir l\'ajouter aux factures.') + '</p>' +
+      (q ? '' : '<button class="bill-btn bill-btn-primary" onclick="openProductDrawer(null)">➕ Nouveau produit</button>') +
+      '</div>';
+    return;
+  }
+
+  let html = '<table class="bill-table">';
+  html += '<thead><tr>';
+  html += '<th>Nom</th>';
+  html += '<th>Catégorie</th>';
+  html += '<th>Variantes</th>';
+  html += '<th style="text-align:right">Prix HT</th>';
+  html += '<th>TVA</th>';
+  html += '<th>Statut</th>';
+  html += '<th class="col-actions">Actions</th>';
+  html += '</tr></thead><tbody>';
+
+  for (let i = 0; i < list.length; i++) {
+    const p = list[i];
+    const variants = p.variants || [];
+    const prices = variants.map(function(v){ return v.priceHt || 0; });
+    const minPrice = prices.length ? Math.min.apply(null, prices) : 0;
+    const maxPrice = prices.length ? Math.max.apply(null, prices) : 0;
+    const priceStr = variants.length === 0 ? '—'
+      : variants.length === 1 ? formatEur(minPrice)
+      : formatEur(minPrice) + ' → ' + formatEur(maxPrice);
+    const vatRates = {};
+    variants.forEach(function(v){ vatRates[v.vatRate != null ? v.vatRate : 20] = true; });
+    const vatStr = Object.keys(vatRates).map(function(r){ return r + ' %'; }).join(' / ') || '—';
+    const statusBadge = p.status === 'active'
+      ? '<span class="bill-badge company">✅ Actif</span>'
+      : '<span class="bill-badge individual">📦 Archivé</span>';
+
+    html += '<tr onclick="openProductDrawer(\'' + p.id + '\')">';
+    html += '<td><div style="font-weight:700">' + escapeHtml(p.name || '—') + '</div>' + (p.description ? '<div style="font-size:11px;color:var(--muted);margin-top:2px;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(p.description) + '</div>' : '') + '</td>';
+    html += '<td><span style="font-size:11px;color:var(--muted)">' + escapeHtml(p.category || '—') + '</span></td>';
+    html += '<td><span style="font-weight:700">' + variants.length + '</span> <span style="font-size:11px;color:var(--muted)">' + (variants.length > 1 ? 'variantes' : 'variante') + '</span></td>';
+    html += '<td style="text-align:right;font-family:var(--font-m);font-weight:600">' + priceStr + '</td>';
+    html += '<td><span style="font-size:11px;color:var(--muted)">' + vatStr + '</span></td>';
+    html += '<td>' + statusBadge + '</td>';
+    html += '<td class="col-actions"><button class="bill-btn bill-btn-ghost" onclick="event.stopPropagation();openProductDrawer(\'' + p.id + '\')">✏️ Éditer</button></td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+}
+
+function openProductDrawer(productId) {
+  editingProductId = productId;
+  const isEdit = !!productId;
+  const p = isEdit ? productsCache.filter(function(x){ return x.id === productId; })[0] : null;
+  if (isEdit && !p) return toast('Produit introuvable', true);
+
+  document.getElementById('drawerTitle').textContent = isEdit ? 'Modifier le produit' : 'Nouveau produit';
+
+  const data = p || {
+    name: '',
+    description: '',
+    category: '',
+    baseUnit: 'forfait',
+    baseUnitCustom: '',
+    status: 'active',
+    sortOrder: productsCache.length,
+    variants: [{ id: 'v_' + Date.now(), label: 'Standard', priceHt: 0, vatRate: 20, sku: '' }]
+  };
+
+  let html = '<div class="bill-form-grid full">';
+  html += '  <div class="bill-form-row"><div class="bill-label">Nom du produit <span class="bill-req">*</span></div><input class="bill-input" id="pdName" value="' + attr(data.name) + '" placeholder="Programme Business Phénix"/></div>';
+  html += '  <div class="bill-form-row"><div class="bill-label">Description</div><textarea class="bill-textarea" id="pdDescription" placeholder="Description courte affichée sur la facture (optionnel — peut être surchargée par ligne)">' + escapeHtml(data.description || '') + '</textarea></div>';
+  html += '</div>';
+
+  html += '<div class="bill-form-grid" style="margin-top:14px">';
+  html += '  <div class="bill-form-row"><div class="bill-label">Catégorie</div><input class="bill-input" id="pdCategory" value="' + attr(data.category || '') + '" placeholder="Coaching, Formation, Masterclass…"/></div>';
+  html += '  <div class="bill-form-row"><div class="bill-label">Unité par défaut</div>';
+  html += '    <select class="bill-select" id="pdBaseUnit" onchange="onBaseUnitChange()">';
+  const units = ['forfait', 'session', 'mois', 'heure', 'jour', 'unité', 'personne'];
+  for (let u = 0; u < units.length; u++) {
+    html += '<option value="' + units[u] + '"' + (data.baseUnit === units[u] ? ' selected' : '') + '>' + units[u] + '</option>';
+  }
+  html += '<option value="custom"' + (units.indexOf(data.baseUnit) === -1 ? ' selected' : '') + '>Personnalisée…</option>';
+  html += '    </select>';
+  html += '    <input class="bill-input" id="pdBaseUnitCustom" style="margin-top:6px;display:' + (units.indexOf(data.baseUnit) === -1 ? 'block' : 'none') + '" value="' + attr(units.indexOf(data.baseUnit) === -1 ? data.baseUnit : '') + '" placeholder="Unité personnalisée"/>';
+  html += '  </div>';
+  html += '</div>';
+
+  html += '<div class="bill-card-h" style="margin-top:18px"><div><h3 style="font-size:12px">Variantes & prix</h3><p>Plusieurs variantes = sélection au moment de l\'ajout à la facture.</p></div></div>';
+  html += '<div id="pdVariantsList"></div>';
+  html += '<button class="bill-btn bill-btn-ghost bill-btn-sm" style="margin-top:8px" onclick="addVariantRow()">➕ Ajouter une variante</button>';
+
+  html += '<div class="bill-card-h" style="margin-top:18px"><div><h3 style="font-size:12px">Statut</h3></div></div>';
+  html += '<div class="bill-type-toggle">';
+  html += '  <button class="bill-type-btn ' + (data.status === 'active' ? 'on' : '') + '" id="pdStatusActive" onclick="setProductStatus(\'active\')">✅ Actif</button>';
+  html += '  <button class="bill-type-btn ' + (data.status === 'archived' ? 'on' : '') + '" id="pdStatusArchived" onclick="setProductStatus(\'archived\')">📦 Archivé</button>';
+  html += '</div>';
+  html += '<div class="bill-help">Les produits archivés n\'apparaissent plus dans la sélection lors de la création de factures (mais restent visibles sur les factures déjà émises).</div>';
+
+  document.getElementById('drawerBody').innerHTML = html;
+  document.getElementById('drawerBody')._currentStatus = data.status;
+  document.getElementById('drawerBody')._variants = JSON.parse(JSON.stringify(data.variants || []));
+  renderVariantsRows();
+
+  let footHtml = '';
+  if (isEdit) footHtml += '<button class="bill-btn bill-btn-red" onclick="confirmDeleteProduct(\'' + productId + '\')">🗑️ Supprimer</button><span style="flex:1"></span>';
+  footHtml += '<button class="bill-btn bill-btn-ghost" onclick="closeDrawer()">Annuler</button>';
+  footHtml += '<button class="bill-btn bill-btn-primary" id="pdSaveBtn" onclick="saveProduct()">💾 ' + (isEdit ? 'Enregistrer' : 'Créer le produit') + '</button>';
+  document.getElementById('drawerFoot').innerHTML = footHtml;
+
+  document.getElementById('drawerBg').classList.add('show');
+  document.getElementById('drawer').classList.add('show');
+}
+
+function setProductStatus(s) {
+  document.getElementById('drawerBody')._currentStatus = s;
+  document.getElementById('pdStatusActive').classList.toggle('on', s === 'active');
+  document.getElementById('pdStatusArchived').classList.toggle('on', s === 'archived');
+}
+
+function onBaseUnitChange() {
+  const sel = document.getElementById('pdBaseUnit');
+  document.getElementById('pdBaseUnitCustom').style.display = sel.value === 'custom' ? 'block' : 'none';
+}
+
+function renderVariantsRows() {
+  const list = document.getElementById('pdVariantsList');
+  const variants = document.getElementById('drawerBody')._variants || [];
+  if (!variants.length) {
+    list.innerHTML = '<div class="bill-help warn">⚠️ Au moins une variante est requise.</div>';
+    return;
+  }
+  let html = '';
+  for (let i = 0; i < variants.length; i++) {
+    const v = variants[i];
+    html += '<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px">';
+    html += '  <div class="bill-form-grid three">';
+    html += '    <div class="bill-form-row"><div class="bill-label">Libellé <span class="bill-req">*</span></div><input class="bill-input" data-vrow="' + i + '" data-vfield="label" value="' + attr(v.label || '') + '" placeholder="Solo, Duo, Premium…" oninput="updateVariantField(this)"/></div>';
+    html += '    <div class="bill-form-row"><div class="bill-label">Prix HT (€) <span class="bill-req">*</span></div><input class="bill-input" data-vrow="' + i + '" data-vfield="priceHt" type="number" min="0" step="0.01" value="' + attr(v.priceHt != null ? v.priceHt : '') + '" oninput="updateVariantField(this)"/></div>';
+    html += '    <div class="bill-form-row"><div class="bill-label">TVA (%)</div>';
+    html += '      <select class="bill-select" data-vrow="' + i + '" data-vfield="vatRate" onchange="updateVariantField(this)">';
+    const rates = [20, 10, 5.5, 2.1, 0];
+    for (let r = 0; r < rates.length; r++) {
+      html += '<option value="' + rates[r] + '"' + ((v.vatRate != null ? v.vatRate : 20) == rates[r] ? ' selected' : '') + '>' + rates[r] + ' %</option>';
+    }
+    html += '      </select>';
+    html += '    </div>';
+    html += '  </div>';
+    html += '  <div style="display:flex;gap:10px;margin-top:10px;align-items:center">';
+    html += '    <input class="bill-input" data-vrow="' + i + '" data-vfield="sku" value="' + attr(v.sku || '') + '" placeholder="SKU / Référence (optionnel)" style="flex:1" oninput="updateVariantField(this)"/>';
+    html += '    <button class="bill-btn bill-btn-red bill-btn-sm" onclick="removeVariantRow(' + i + ')" ' + (variants.length === 1 ? 'disabled title="Au moins une variante requise"' : '') + '>🗑️</button>';
+    html += '  </div>';
+    html += '</div>';
+  }
+  list.innerHTML = html;
+}
+
+function addVariantRow() {
+  const variants = document.getElementById('drawerBody')._variants || [];
+  variants.push({ id: 'v_' + Date.now() + '_' + variants.length, label: 'Variante ' + (variants.length + 1), priceHt: 0, vatRate: 20, sku: '' });
+  document.getElementById('drawerBody')._variants = variants;
+  renderVariantsRows();
+}
+
+function removeVariantRow(idx) {
+  const variants = document.getElementById('drawerBody')._variants || [];
+  if (variants.length <= 1) return;
+  variants.splice(idx, 1);
+  document.getElementById('drawerBody')._variants = variants;
+  renderVariantsRows();
+}
+
+function updateVariantField(input) {
+  const idx = parseInt(input.getAttribute('data-vrow'), 10);
+  const field = input.getAttribute('data-vfield');
+  const variants = document.getElementById('drawerBody')._variants || [];
+  if (!variants[idx]) return;
+  let val = input.value;
+  if (field === 'priceHt' || field === 'vatRate') val = parseFloat(val || '0');
+  variants[idx][field] = val;
+}
+
+async function saveProduct() {
+  const btn = document.getElementById('pdSaveBtn');
+  const name = (document.getElementById('pdName').value || '').trim();
+  const description = (document.getElementById('pdDescription').value || '').trim();
+  const category = (document.getElementById('pdCategory').value || '').trim();
+  const baseUnitSel = document.getElementById('pdBaseUnit').value;
+  const baseUnit = baseUnitSel === 'custom' ? ((document.getElementById('pdBaseUnitCustom').value || '').trim() || 'unité') : baseUnitSel;
+  const status = document.getElementById('drawerBody')._currentStatus || 'active';
+  const variants = document.getElementById('drawerBody')._variants || [];
+
+  if (!name) return toast('Nom du produit obligatoire', true);
+  if (!variants.length) return toast('Au moins une variante requise', true);
+
+  /* Valider chaque variante */
+  for (let i = 0; i < variants.length; i++) {
+    const v = variants[i];
+    if (!v.label || !v.label.trim()) return toast('Variante ' + (i + 1) + ' : libellé obligatoire', true);
+    const price = parseFloat(v.priceHt);
+    if (isNaN(price) || price < 0) return toast('Variante ' + (i + 1) + ' : prix HT invalide', true);
+    v.priceHt = price;
+    v.vatRate = parseFloat(v.vatRate != null ? v.vatRate : 20);
+  }
+
+  btn.disabled = true; btn.textContent = 'Enregistrement…';
+  try {
+    const doc = {
+      name: name,
+      description: description,
+      category: category,
+      baseUnit: baseUnit,
+      status: status,
+      variants: variants,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedBy: currentUser.uid
+    };
+    if (editingProductId) {
+      await db.collection('invoice_products').doc(editingProductId).update(doc);
+      toast('✅ Produit mis à jour');
+    } else {
+      doc.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      doc.createdBy = currentUser.uid;
+      doc.sortOrder = productsCache.length;
+      await db.collection('invoice_products').add(doc);
+      toast('✅ Produit créé');
+    }
+    closeDrawer();
+  } catch (err) {
+    console.error(err);
+    toast('Erreur : ' + err.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 ' + (editingProductId ? 'Enregistrer' : 'Créer le produit');
+  }
+}
+
+async function confirmDeleteProduct(id) {
+  /* Vérifier si le produit est utilisé dans des factures */
+  if (!confirm('Supprimer ce produit définitivement ?\n\n⚠️ Si des factures déjà émises utilisent ce produit, leurs lignes resteront intactes (snapshot immuable). En revanche, vous ne pourrez plus l\'ajouter à de nouvelles factures.\n\n💡 Pour conserver la traçabilité, l\'archivage est recommandé.')) return;
+  try {
+    await db.collection('invoice_products').doc(id).delete();
+    toast('🗑️ Produit supprimé');
+    closeDrawer();
+  } catch (err) {
+    toast('Erreur : ' + err.message, true);
+  }
+}
+
+
+/* ═══ HELPERS ═══ */
+function setVal(id, v) { const el = document.getElementById(id); if (el) el.value = v; }
+function escapeHtml(s) { return (s == null ? '' : String(s)).replace(/[&<>"']/g, function(c){ return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
+function attr(s) { return escapeHtml(s); }
+function escapeAttr(s) { return (s == null ? '' : String(s)).replace(/[\\'"]/g, '\\$&'); }
+function formatEur(n) {
+  if (n == null || isNaN(n)) return '— €';
+  return Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+}
+
+let toastTimer = null;
+function toast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.toggle('error', !!isError);
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 3000);
+}
+</script>
+
+</body>
+</html>
