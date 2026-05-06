@@ -892,13 +892,13 @@
     var m = H.pf(d.montant);
     var taux = H.pf(d.taux);
     var duree = parseInt(d.duree, 10) || 0;
-    if (m <= 0 || duree <= 0 || !d.debut) return [];
+    if (m <= 0 || !d.debut) return [];
 
     var debut = new Date(d.debut);
     if (isNaN(debut.getTime())) return [];
     var rows = [];
 
-    // Types non-emprunt : pas d'amortissement classique
+    // Types non-emprunt : pas d'amortissement classique (pas besoin de duree)
     if (d.type === 'fournisseur') {
       rows.push({
         date: d.echeance || d.debut,
@@ -917,6 +917,9 @@
       });
       return rows;
     }
+
+    // À partir d'ici (leasing, emprunt) on a besoin d'une durée
+    if (duree <= 0) return [];
     if (d.type === 'leasing') {
       var loyer = H.pf(d.loyer);
       for (var iL = 0; iL < duree; iL++) {

@@ -493,6 +493,9 @@ html, body { overflow-x: hidden; max-width: 100vw; }
 <!-- ── Alteore Conseil : mode lecture seule (no-op si pas activé) ── -->
 <link rel="stylesheet" href="conseil-mode.css">
 <script src="conseil-bootstrap.js"></script>
+<!-- ── CalcHelpers : source de vérité unique pour le calcul d'échéancier ── -->
+<!-- Partagé avec pilotage.html (cohérence stricte des mensualités affichées) -->
+<script src="calc-helpers.js"></script>
 </head>
 <body>
   <main x-data="dettesApp()" x-cloak>
@@ -775,7 +778,16 @@ function togglePil(el){document.getElementById('psub').classList.toggle('open');
 async function doLogout(){try{if(window._signOut&&window._auth)await window._signOut(window._auth);}catch(e){}location.href='index.html';}
 
 // ── CALCUL ÉCHÉANCIER ──
+// Source de vérité : window.CalcHelpers.calcAmortSchedule (calc-helpers.js)
+// Cette même fonction est utilisée par pilotage.html → garantit que la mensualité
+// affichée dans Pilotage est strictement identique à celle de Dettes & Emprunts.
+// Le code historique est conservé en fallback si CalcHelpers n'est pas chargé
+// (réseau, blocage de script, etc.) — pour ne pas casser la page dans ce cas.
 function calcEcheancier(d){
+  if (window.CalcHelpers && typeof window.CalcHelpers.calcAmortSchedule === 'function') {
+    return window.CalcHelpers.calcAmortSchedule(d);
+  }
+  // ─── Fallback historique (utilisé uniquement si calc-helpers.js n'a pas chargé) ───
   const m=parseFloat(d.montant)||0, taux=parseFloat(d.taux)||0, duree=parseInt(d.duree)||0;
   const debut=new Date(d.debut);
   let rows=[];
