@@ -887,7 +887,7 @@
     }
   };
 
-  H.calcAmortSchedule = function (d) {
+  H._calcAmortScheduleSimple = function (d) {
     if (!d) return [];
     var m = H.pf(d.montant);
     var taux = H.pf(d.taux);
@@ -1026,6 +1026,204 @@
       soldeC -= capitalC;
     }
     return rows;
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * H.calcAmortSchedule(d) — Échéancier prenant en compte les renégociations
+   * ───────────────────────────────────────────────────────────────────────
+   * Si `d.modifications` est un tableau non vide, on découpe l'échéancier
+   * en phases :
+   *   • Phase 0 : conditions originelles (d.montant, d.taux, d.duree, d.amort)
+   *               jusqu'à la date d'effet de la 1ère modification (exclusive)
+   *   • Phase k : conditions de la k-ième modification, à partir de sa
+   *               date d'effet jusqu'à la date d'effet de la (k+1)-ième
+   *
+   * Format d'une modification :
+   *   { dateEffet:'YYYY-MM-DD' (ou 'YYYY-MM'),
+   *     capitalRestant: 32480.50,   // calculé auto et éventuellement édité
+   *     taux: 2.8,                  // nouveau taux annuel %
+   *     duree: 60,                  // nouvelle durée en mois (à partir de dateEffet)
+   *     amort: 'constant',          // type d'amortissement (peut différer de l'origine)
+   *     mensualite: 580.12,         // optionnel — informatif (recalculé)
+   *     motif: 'Rachat de crédit',  // libre, pour audit
+   *     _createdAt: 'ISO8601'       // posé à la création
+   *   }
+   *
+   * Les `idx` des phases pré-existantes sont préservés (croissants 0,1,2,...)
+   * → les paid.has(idx) restent corrects tant que la dateEffet est future
+   *   ou contemporaine. Les utilisateurs ne peuvent pas créer de modif passée
+   *   (vérifié côté UI dans dettes.html).
+   * ─────────────────────────────────────────────────────────────────────── */
+  H.calcAmortSchedule = function (d) {
+    if (!d) return [];
+
+    var mods = (d.modifications && d.modifications.length) ? d.modifications.slice() : [];
+    // Pas de renégociation → comportement historique strict
+    if (!mods.length) return H._calcAmortScheduleSimple(d);
+
+    // Pour les types non-emprunt (fournisseur, decouvert, leasing) on ne supporte
+    // pas les modifications → on retourne le calcul simple
+    if (d.type && d.type !== 'emprunt') return H._calcAmortScheduleSimple(d);
+
+    // Trier les modifications par dateEffet croissante
+    mods.sort(function (a, b) {
+      var ka = (a.dateEffet || '').slice(0, 10);
+      var kb = (b.dateEffet || '').slice(0, 10);
+      return ka < kb ? -1 : (ka > kb ? 1 : 0);
+    });
+
+    var rows = [];
+    var globalIdx = 0;
+
+    // ── Phase 0 : conditions originelles, tronquée à la 1ère dateEffet ──
+    var firstMod = mods[0];
+    var firstMonthKey = (firstMod.dateEffet || '').slice(0, 7);
+    var phase0 = H._calcAmortScheduleSimple(d);
+    for (var i0 = 0; i0 < phase0.length; i0++) {
+      var r0 = phase0[i0];
+      if (r0.monthKey >= firstMonthKey) break; // on s'arrête à la 1ère modif (exclusive)
+      r0.idx = globalIdx++;
+      rows.push(r0);
+    }
+
+    // ── Phases k ≥ 1 : pour chaque modification, recalculer à partir de cette date ──
+    for (var k = 0; k < mods.length; k++) {
+      var mod  = mods[k];
+      var next = mods[k + 1] || null;
+      var nextMonthKey = next ? (next.dateEffet || '').slice(0, 7) : null;
+
+      // Construire une "dette virtuelle" pour cette phase
+      var dPhase = {
+        type:    'emprunt',
+        montant: H.pf(mod.capitalRestant),
+        taux:    (mod.taux !== undefined && mod.taux !== '') ? H.pf(mod.taux) : H.pf(d.taux),
+        duree:   parseInt(mod.duree, 10) || 0,
+        amort:   mod.amort || d.amort || 'constant',
+        debut:   mod.dateEffet
+      };
+      if (dPhase.montant <= 0 || dPhase.duree <= 0 || !dPhase.debut) continue;
+
+      var phaseSched = H._calcAmortScheduleSimple(dPhase);
+      for (var j = 0; j < phaseSched.length; j++) {
+        var rj = phaseSched[j];
+        if (nextMonthKey && rj.monthKey >= nextMonthKey) break; // troncature pour la phase suivante
+        rj.idx = globalIdx++;
+        rows.push(rj);
+      }
+    }
+
+    return rows;
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * H.getCapitalRestantAt(dette, monthKey)
+   * ───────────────────────────────────────────────────────────────────────
+   * Retourne le capital restant dû AU DÉBUT du mois `monthKey`, c'est-à-dire
+   * juste avant que l'échéance de ce mois soit prélevée.
+   *
+   * Exemple : pour MATINAE (capital 900 €, début 2026-01) :
+   *   getCapitalRestantAt(d, '2026-01') === 900     (avant 1ère échéance)
+   *   getCapitalRestantAt(d, '2026-05') === 502.50  (juste avant celle de mai)
+   *   getCapitalRestantAt(d, '2026-10') === 0       (après dernière)
+   *
+   * Mécanique : on cherche l'échéance précédant `monthKey` et on lit son `solde`.
+   * Si `monthKey` est avant la 1ère échéance → on retourne `dette.montant` initial.
+   * ─────────────────────────────────────────────────────────────────────── */
+  H.getCapitalRestantAt = function (dette, monthKey) {
+    if (!dette) return 0;
+    if (!monthKey) return H.pf(dette.montant);
+    var sched = H.calcAmortSchedule(dette);
+    if (!sched || !sched.length) return H.pf(dette.montant);
+
+    var lastBefore = null;
+    for (var i = 0; i < sched.length; i++) {
+      if (sched[i].monthKey < monthKey) lastBefore = sched[i];
+      else break;
+    }
+    if (!lastBefore) return H.pf(dette.montant); // monthKey antérieur à toutes les échéances
+    return Math.max(0, lastBefore.solde || 0);
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * H.calcMensualiteFromCapital(capital, taux, duree, amort)
+   * ───────────────────────────────────────────────────────────────────────
+   * Calcule la mensualité (totale, capital + intérêts) attendue pour un
+   * emprunt donné. Pour `lineaire`, retourne la MOYENNE (la mensualité
+   * varie chaque mois pour ce type).
+   * Pour `infine`, retourne la mensualité d'intérêts seuls (la dernière
+   * échéance contient en plus le capital total).
+   * ─────────────────────────────────────────────────────────────────────── */
+  H.calcMensualiteFromCapital = function (capital, taux, duree, amort) {
+    var c = H.pf(capital), t = H.pf(taux), n = parseInt(duree, 10) || 0;
+    if (c <= 0 || n <= 0) return 0;
+    var i = (t / 100) / 12;
+    if (i <= 0) return c / n;
+    amort = amort || 'constant';
+    if (amort === 'constant') {
+      return c * (i * Math.pow(1 + i, n)) / (Math.pow(1 + i, n) - 1);
+    }
+    if (amort === 'lineaire') {
+      // Mensualité moyenne : capital constant + intérêts moyens
+      // intérêts moyens = c × i × (n+1) / (2n) → mensualité moyenne = c/n + c×i×(n+1)/(2n)
+      return c / n + c * i * (n + 1) / (2 * n);
+    }
+    if (amort === 'fixe') {
+      return c / n + c * i;
+    }
+    if (amort === 'infine') {
+      return c * i;
+    }
+    return c / n;
+  };
+
+  /* ───────────────────────────────────────────────────────────────────────
+   * H.calcDureeFromMensualite(capital, taux, mensualite, amort)
+   * ───────────────────────────────────────────────────────────────────────
+   * Inverse : trouve la durée (en mois) qui donne la mensualité saisie.
+   * - constant : formule fermée n = -ln(1 - C×i/m) / ln(1+i)
+   * - lineaire : approximation (la mensualité varie ; on cherche n tel que
+   *              moyenne = m → n²×i + n×i = 2(m×n - C) → résolution quadratique)
+   * - fixe     : m = C/n + C×i  →  n = C / (m - C×i)  si m > C×i, sinon impossible
+   * - infine   : pas de durée pertinente ; retourne 0 (la durée est libre,
+   *              car la mensualité est juste C×i quel que soit n)
+   *
+   * Retourne 0 si pas de solution réaliste (mensualité trop faible pour
+   * couvrir les intérêts, par exemple).
+   * ─────────────────────────────────────────────────────────────────────── */
+  H.calcDureeFromMensualite = function (capital, taux, mensualite, amort) {
+    var c = H.pf(capital), t = H.pf(taux), m = H.pf(mensualite);
+    if (c <= 0 || m <= 0) return 0;
+    var i = (t / 100) / 12;
+    amort = amort || 'constant';
+
+    if (i <= 0) {
+      var n0 = c / m;
+      return n0 > 0 ? Math.round(n0) : 0;
+    }
+    if (amort === 'constant') {
+      // Pour avoir une solution, il faut m > C×i (sinon les intérêts dévorent la mensualité)
+      if (m <= c * i) return 0;
+      var n = -Math.log(1 - c * i / m) / Math.log(1 + i);
+      return n > 0 && isFinite(n) ? Math.round(n) : 0;
+    }
+    if (amort === 'lineaire') {
+      // Résolution : m_moyen = C/n + C×i×(n+1)/(2n)
+      //   2n×m = 2C + C×i×(n+1)  →  n×(2m - C×i) = C×(2 + i)
+      //   n = C×(2+i) / (2m - C×i)   (si 2m > C×i)
+      if (2 * m <= c * i) return 0;
+      var nL = c * (2 + i) / (2 * m - c * i);
+      return nL > 0 && isFinite(nL) ? Math.round(nL) : 0;
+    }
+    if (amort === 'fixe') {
+      // m = C/n + C×i  →  n = C / (m - C×i)
+      if (m <= c * i) return 0;
+      var nF = c / (m - c * i);
+      return nF > 0 && isFinite(nF) ? Math.round(nF) : 0;
+    }
+    if (amort === 'infine') {
+      return 0; // durée libre, la mensualité est constante et indépendante de n
+    }
+    return 0;
   };
 
   /* ───────────────────────────────────────────────────────────────────────
