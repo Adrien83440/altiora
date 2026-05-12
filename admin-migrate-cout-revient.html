@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>ALTEORE — Migration Coût de revient (Admin)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="favicon.svg">
+<style>
+  :root {
+    --bg:#f7f8fb; --card:#fff; --border:#e5e7eb; --muted:#6b7280;
+    --text:#111827; --primary:#1a1f36; --blue:#3b82f6; --blue-ghost:#eff6ff;
+    --green:#10b981; --green-ghost:#ecfdf5; --orange:#f59e0b; --orange-ghost:#fffbeb;
+    --red:#ef4444; --red-ghost:#fef2f2;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;padding:24px}
+  .wrap{max-width:920px;margin:0 auto}
+  h1{font-size:22px;font-weight:800;margin:0 0 4px;color:var(--primary)}
+  .sub{font-size:13px;color:var(--muted);margin:0 0 24px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;
+    padding:20px;margin-bottom:16px}
+  .card-title{font-size:14px;font-weight:700;margin:0 0 12px;color:var(--primary)}
+  label{display:block;font-size:12px;font-weight:600;color:var(--muted);
+    margin:8px 0 4px;text-transform:uppercase;letter-spacing:0.5px}
+  input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--border);
+    border-radius:8px;font-family:monospace;font-size:13px;background:#fff}
+  input[type=text]:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-ghost)}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .cb-row{display:flex;align-items:center;gap:8px;padding:8px 0;font-size:13px}
+  .cb-row input{accent-color:var(--blue)}
+  .btn{padding:10px 16px;border-radius:8px;border:1px solid var(--border);
+    background:#fff;cursor:pointer;font-weight:600;font-size:13px;
+    transition:all .15s}
+  .btn:hover{background:#f3f4f6}
+  .btn-primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  .btn-primary:hover{background:#2563eb}
+  .btn-danger{background:var(--red);border-color:var(--red);color:#fff}
+  .btn-danger:hover{background:#dc2626}
+  .btn-danger:disabled{opacity:.5;cursor:not-allowed}
+  .btns{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}
+  .alert{padding:12px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;line-height:1.5}
+  .alert-warn{background:var(--orange-ghost);border:1px solid #fde68a;color:#92400e}
+  .alert-info{background:var(--blue-ghost);border:1px solid #bfdbfe;color:#1e40af}
+  .alert-ok{background:var(--green-ghost);border:1px solid #a7f3d0;color:#065f46}
+  .alert-err{background:var(--red-ghost);border:1px solid #fecaca;color:#991b1b}
+  .log{background:#0f172a;color:#e2e8f0;font-family:'SF Mono','Monaco',monospace;
+    font-size:12px;padding:14px;border-radius:8px;max-height:340px;overflow:auto;
+    white-space:pre-wrap;line-height:1.6;margin-top:12px}
+  .log:empty{display:none}
+  .summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+  .stat{background:var(--blue-ghost);padding:10px 14px;border-radius:8px;text-align:center}
+  .stat-num{font-size:22px;font-weight:800;color:var(--blue)}
+  .stat-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-top:2px}
+  .stat-ok .stat-num{color:var(--green)}
+  .stat-ok{background:var(--green-ghost)}
+  .stat-warn .stat-num{color:var(--orange)}
+  .stat-warn{background:var(--orange-ghost)}
+  .stat-err .stat-num{color:var(--red)}
+  .stat-err{background:var(--red-ghost)}
+  .step{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;
+    letter-spacing:1px;margin:18px 0 6px}
+  .helper{font-size:11px;color:var(--muted);margin:4px 0 0}
+  code{background:#f3f4f6;padding:1px 5px;border-radius:3px;font-size:12px}
+  .loading{opacity:.5;pointer-events:none}
+  .spinner{display:inline-block;width:12px;height:12px;border:2px solid #fff;
+    border-top-color:transparent;border-radius:50%;animation:spin .8s linear infinite;
+    vertical-align:middle;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <h1>🔧 Migration Coût de revient</h1>
+  <p class="sub">Outil admin pour transférer le module Coût de revient d'un compte vers un autre. Préserve les IDs (les références entre recettes et fournisseurs restent intactes).</p>
+
+  <div class="alert alert-warn">
+    ⚠️ <strong>Réservé à l'admin.</strong> Cet outil contourne les rules Firestore via le token serveur. À utiliser uniquement pour corriger une erreur d'attribution de données.
+  </div>
+
+  <!-- ── Auth gate ── -->
+  <div class="card" id="authCard">
+    <div class="card-title">🔐 Authentification</div>
+    <div id="authStatus" class="helper">Vérification…</div>
+  </div>
+
+  <!-- ── Form ── -->
+  <div class="card" id="formCard" style="display:none">
+    <div class="card-title">📋 Paramètres de migration</div>
+
+    <label>UID source (compte qui contient les données par erreur)</label>
+    <input type="text" id="sourceUid" placeholder="ex: iEUt2VWixIWoN5oKw3Cgayno82k2" autocomplete="off"/>
+    <p class="helper">L'UID de l'utilisateur DONT on copie les données.</p>
+
+    <label style="margin-top:14px">UID destination (compte qui doit recevoir les données)</label>
+    <input type="text" id="targetUid" placeholder="ex: 0V8VF5bJKrNY8quj6tWZ7SfTtKr2" autocomplete="off"/>
+    <p class="helper">L'UID de l'utilisateur VERS qui on copie.</p>
+
+    <div class="step">Que migrer</div>
+    <div class="cb-row"><input type="checkbox" id="scopeProduits" checked/><label for="scopeProduits" style="margin:0;text-transform:none;letter-spacing:0;font-weight:500;font-size:13px;color:var(--text)">Produits / recettes <code>produits/{uid}/items</code></label></div>
+    <div class="cb-row"><input type="checkbox" id="scopeCategories" checked/><label for="scopeCategories" style="margin:0;text-transform:none;letter-spacing:0;font-weight:500;font-size:13px;color:var(--text)">Catégories manuelles <code>produits/{uid}/meta/categories</code></label></div>
+    <div class="cb-row"><input type="checkbox" id="scopeFournisseurs" checked/><label for="scopeFournisseurs" style="margin:0;text-transform:none;letter-spacing:0;font-weight:500;font-size:13px;color:var(--text)">Fournisseurs <code>fiches/{uid}/items</code></label></div>
+
+    <div class="step">Options</div>
+    <div class="cb-row"><input type="checkbox" id="overwrite"/><label for="overwrite" style="margin:0;text-transform:none;letter-spacing:0;font-weight:500;font-size:13px;color:var(--text)">Écraser si un document du même ID existe déjà côté destination</label></div>
+    <p class="helper">Décoché par défaut : sécurité. Coche uniquement si tu sais que la destination a des doublons à remplacer.</p>
+
+    <div class="btns">
+      <button class="btn btn-primary" id="btnDryRun">🔍 Aperçu (sans écrire)</button>
+      <button class="btn btn-danger" id="btnMigrate" disabled>🚀 Migrer pour de vrai</button>
+    </div>
+  </div>
+
+  <!-- ── Résultats ── -->
+  <div class="card" id="resultCard" style="display:none">
+    <div class="card-title" id="resultTitle">Résultats</div>
+    <div id="resultAlert"></div>
+    <div class="summary" id="summary"></div>
+    <pre class="log" id="logBox"></pre>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════
+     Firebase init + auth gate
+     ════════════════════════════════════════════════════════════════ -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  const app = initializeApp({
+    apiKey: "AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+    authDomain: "altiora-70599.firebaseapp.com",
+    projectId: "altiora-70599",
+    storageBucket: "altiora-70599.firebasestorage.app",
+    messagingSenderId: "120905555746",
+    appId: "1:120905555746:web:618460c65cdc9e57cc8f7b"
+  });
+  const auth = getAuth(app);
+
+  onAuthStateChanged(auth, async function(user) {
+    const authStatus = document.getElementById('authStatus');
+    const formCard = document.getElementById('formCard');
+
+    if (!user) {
+      authStatus.innerHTML = '❌ Non connecté. <a href="index.html">Connecte-toi</a> avec ton compte admin (contact@adrienemily.com) puis reviens sur cette page.';
+      return;
+    }
+    if (user.email !== 'contact@adrienemily.com') {
+      authStatus.innerHTML = `❌ Cette page est réservée à l'admin. Tu es connecté avec <code>${user.email}</code>.`;
+      return;
+    }
+
+    authStatus.innerHTML = `✅ Connecté en admin (<code>${user.email}</code>)`;
+    formCard.style.display = 'block';
+
+    // Récupère l'idToken et expose-le
+    const idToken = await user.getIdToken();
+    window._adminIdToken = idToken;
+    window._adminEmail = user.email;
+  });
+</script>
+
+<!-- ════════════════════════════════════════════════════════════════
+     Logique de migration
+     ════════════════════════════════════════════════════════════════ -->
+<script>
+  function $(id) { return document.getElementById(id); }
+
+  function getParams() {
+    return {
+      sourceUid: $('sourceUid').value.trim(),
+      targetUid: $('targetUid').value.trim(),
+      overwrite: $('overwrite').checked,
+      scope: {
+        produits:     $('scopeProduits').checked,
+        categories:   $('scopeCategories').checked,
+        fournisseurs: $('scopeFournisseurs').checked,
+      }
+    };
+  }
+
+  function renderSummary(counts) {
+    const sum = $('summary');
+    sum.innerHTML = '';
+    const labels = {
+      produits:     { lbl: 'Produits',     ico: '🥖' },
+      categories:   { lbl: 'Catégories',   ico: '🏷️' },
+      fournisseurs: { lbl: 'Fournisseurs', ico: '🏪' },
+    };
+    Object.keys(counts).forEach(function(k) {
+      const c = counts[k];
+      const meta = labels[k] || { lbl: k, ico: '📄' };
+      const tag = c.errors > 0 ? 'stat-err'
+                : c.skipped > c.copied ? 'stat-warn'
+                : c.copied > 0 ? 'stat-ok'
+                : '';
+      sum.insertAdjacentHTML('beforeend',
+        '<div class="stat ' + tag + '">' +
+          '<div class="stat-num">' + c.copied + ' / ' + c.total + '</div>' +
+          '<div class="stat-lbl">' + meta.ico + ' ' + meta.lbl +
+            (c.skipped ? ' · ' + c.skipped + ' ignorés' : '') +
+            (c.errors ? ' · ' + c.errors + ' erreurs' : '') +
+          '</div>' +
+        '</div>'
+      );
+    });
+  }
+
+  async function runMigration(dryRun) {
+    if (!window._adminIdToken) {
+      alert('Token admin non disponible. Recharge la page.');
+      return;
+    }
+    const p = getParams();
+    if (!p.sourceUid || !p.targetUid) {
+      alert('Renseigne sourceUid et targetUid.');
+      return;
+    }
+    if (p.sourceUid === p.targetUid) {
+      alert('Source et destination identiques — annulation.');
+      return;
+    }
+
+    if (!dryRun) {
+      const confirmText = prompt(
+        'Tu vas écrire des données réelles dans Firestore.\n\n' +
+        'Source :  ' + p.sourceUid + '\n' +
+        'Cible  :  ' + p.targetUid + '\n' +
+        'Écraser : ' + (p.overwrite ? 'OUI' : 'non') + '\n\n' +
+        'Tape exactement MIGRER pour confirmer :'
+      );
+      if (confirmText !== 'MIGRER') {
+        alert('Annulé.');
+        return;
+      }
+    }
+
+    const btn = dryRun ? $('btnDryRun') : $('btnMigrate');
+    const originalLabel = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner"></span>' + (dryRun ? 'Aperçu en cours…' : 'Migration en cours…');
+    $('formCard').classList.add('loading');
+
+    const resultCard = $('resultCard');
+    resultCard.style.display = 'block';
+    $('resultTitle').textContent = dryRun ? '🔍 Aperçu (aucune écriture)' : '🚀 Résultats de la migration';
+    $('resultAlert').innerHTML = '';
+    $('summary').innerHTML = '';
+    $('logBox').textContent = '';
+
+    try {
+      const r = await fetch('/api/admin-migrate-cout-revient', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + window._adminIdToken,
+        },
+        body: JSON.stringify({
+          sourceUid: p.sourceUid,
+          targetUid: p.targetUid,
+          dryRun: dryRun,
+          overwrite: p.overwrite,
+          scope: p.scope,
+        }),
+      });
+      const data = await r.json();
+
+      $('logBox').textContent = (data.logs || []).join('\n');
+
+      if (!r.ok || !data.ok) {
+        $('resultAlert').innerHTML = '<div class="alert alert-err">❌ ' + (data.error || 'Erreur inconnue') + '</div>';
+        btn.innerHTML = originalLabel;
+        $('formCard').classList.remove('loading');
+        return;
+      }
+
+      renderSummary(data.result.counts || {});
+
+      if (dryRun) {
+        const totalToCopy = Object.values(data.result.counts).reduce(function(s, c) { return s + (c.copied || 0); }, 0);
+        if (totalToCopy === 0) {
+          $('resultAlert').innerHTML = '<div class="alert alert-warn">⚠️ Aucun document à copier. Vérifie les UIDs ou décoche "Écraser…" si tu veux remplacer.</div>';
+        } else {
+          $('resultAlert').innerHTML = '<div class="alert alert-info">ℹ️ Aperçu uniquement, rien n\'a été écrit. ' + totalToCopy + ' document(s) prêts à copier. Clique sur "Migrer pour de vrai" si tout est OK.</div>';
+          $('btnMigrate').disabled = false;
+        }
+      } else {
+        $('resultAlert').innerHTML = '<div class="alert alert-ok">✅ Migration terminée. Demande à l\'utilisateur de rafraîchir sa page Coût de revient.</div>';
+      }
+    } catch (e) {
+      $('resultAlert').innerHTML = '<div class="alert alert-err">❌ ' + e.message + '</div>';
+    } finally {
+      btn.innerHTML = originalLabel;
+      $('formCard').classList.remove('loading');
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    $('btnDryRun').addEventListener('click', function() { runMigration(true); });
+    $('btnMigrate').addEventListener('click', function() { runMigration(false); });
+
+    // Reset le bouton "Migrer" si l'utilisateur change un paramètre après un dry-run
+    ['sourceUid','targetUid','overwrite','scopeProduits','scopeCategories','scopeFournisseurs']
+      .forEach(function(id) {
+        $(id).addEventListener('input', function() { $('btnMigrate').disabled = true; });
+      });
+  });
+</script>
+
+</body>
+</html>
