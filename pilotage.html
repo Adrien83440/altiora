@@ -1375,7 +1375,7 @@ function defaultData(year, month) {
     facturesPro:  [{client:'', description:'', ht055:'', ht10:'', ht20:''}],
     masseSalariale: {
       mode: 'manuel',
-      lignes: [{label:'', brut:'', tauxCharges:42}],
+      lignes: [{label:'', brut:'', tauxCharges:42, heuresHebdo:35}],
       dirigeant: {type:'tns', remuneration:'', tauxCharges:45, dividendes:'', tauxDividendes:30}
     }
   };
@@ -2790,6 +2790,7 @@ function renderMasseSalariale(data, t, forceRender) {
     '<th>Salarié</th>' +
     (isAuto || isAutoPaie ? '<th>Poste</th><th>Contrat</th>' : '<th style="width:75px">Type</th>') +
     '<th>' + (isAuto || isAutoPaie ? 'Brut mensuel' : 'Salaire') + ' (€)</th>' +
+    (!isAuto && !isAutoPaie ? '<th style="width:78px" title="Heures travaillées par semaine — sert au calcul exact de la réduction générale URSSAF pour les temps partiels">h/sem</th>' : '') +
     '<th>Taux charges (%)</th>' +
     '<th>Coût employeur (€)</th>' +
     (isAutoPaie ? '<th>Source</th>' : '') +
@@ -2851,23 +2852,32 @@ function renderMasseSalariale(data, t, forceRender) {
       var brut = pf(l.brut);
       var taux = parseFloat(l.tauxCharges) || 42;
       var cout = saisieMode === 'net' ? brut : brut * (1 + taux / 100);
+      var pinned = !!l.tauxManuel;
+      var hh = (l.heuresHebdo != null && l.heuresHebdo !== '') ? l.heuresHebdo : 35;
+      var heuresCell = saisieMode === 'net'
+        ? '<td></td>'
+        : '<td style="text-align:center"><input class="cell-input" style="width:58px;text-align:center" type="text" inputmode="decimal" value="' + hh + '" placeholder="35" title="Heures travaillées par semaine (temps plein = 35). Sert au calcul exact de la réduction générale URSSAF pour les temps partiels." oninput="_data.masseSalariale.lignes[' + i + '].heuresHebdo=this.value;_refreshMSLineCout(' + i + ');refreshTotals();scheduleLineURSSAF(' + i + ')"/></td>';
+      var tauxTitle = pinned
+        ? 'Taux figé manuellement — non recalculé automatiquement. Videz la case pour réactiver le calcul URSSAF.'
+        : 'Taux calculé automatiquement via URSSAF (réduction générale incluse). Saisir une valeur fige un taux manuel.';
       var tauxCell = saisieMode === 'net'
         ? '<td></td>'
-        : '<td style="text-align:center"><input class="cell-input" style="width:55px;text-align:center" type="number" value="' + taux + '" min="0" max="100" step="1" oninput="_data.masseSalariale.lignes[' + i + '].tauxCharges=parseFloat(this.value)||42;refreshTotals()"/></td>';
+        : '<td style="text-align:center"><input class="cell-input" id="ms-line-taux-' + i + '" style="width:55px;text-align:center' + (pinned ? ';border-left:3px solid #f59e0b' : '') + '" type="number" value="' + taux + '" min="0" max="100" step="0.01" title="' + tauxTitle + '" oninput="onMSTaux(' + i + ',this)"/></td>';
       html += '<tr>' +
         '<td><input class="cell-input" style="width:130px" value="' + (l.label || '') + '" placeholder="Nom salarié" oninput="_data.masseSalariale.lignes[' + i + '].label=this.value;refreshTotals()"/></td>' +
         '<td style="text-align:center"><select class="cell-input" style="width:68px;font-size:11px;padding:3px 5px;cursor:pointer" title="Saisir en Brut (calcul charges auto) ou Net (charges en Charges variables)" onchange="_data.masseSalariale.lignes[' + i + '].saisieMode=this.value;refreshTotals()">' +
           '<option value="brut"' + (saisieMode === 'brut' ? ' selected' : '') + '>Brut</option>' +
           '<option value="net"' + (saisieMode === 'net' ? ' selected' : '') + '>Net</option>' +
         '</select></td>' +
-        '<td><input class="cell-input" style="width:80px;text-align:right" type="text" inputmode="decimal" value="' + (l.brut || '') + '" placeholder="0.00" oninput="_data.masseSalariale.lignes[' + i + '].brut=this.value;refreshTotals()"/></td>' +
+        '<td><input class="cell-input" style="width:80px;text-align:right" type="text" inputmode="decimal" value="' + (l.brut || '') + '" placeholder="0.00" oninput="_data.masseSalariale.lignes[' + i + '].brut=this.value;_refreshMSLineCout(' + i + ');refreshTotals();scheduleLineURSSAF(' + i + ')"/></td>' +
+        heuresCell +
         tauxCell +
         '<td id="ms-line-cout-' + i + '" style="text-align:right;font-weight:700;color:#f59e0b">' + fmtN(cout) + '</td>' +
         '<td><button class="btn-del" onclick="delMSLigne(' + i + ')" title="Supprimer">\u2715</button></td>' +
         '</tr>';
     });
     if (hasNetLigne) {
-      html += '<tr><td colspan="6" style="padding:6px 10px;background:rgba(249,115,22,.06);border-top:1px dashed rgba(249,115,22,.3)">' +
+      html += '<tr><td colspan="7" style="padding:6px 10px;background:rgba(249,115,22,.06);border-top:1px dashed rgba(249,115,22,.3)">' +
         '<span style="font-size:11px;color:#ea580c">\ud83d\udca1 <b>Mode Net</b> \u2014 N\'oubliez pas d\'ajouter les charges patronales dans vos <b>Charges variables</b>.</span>' +
         '</td></tr>';
     }
@@ -2875,7 +2885,7 @@ function renderMasseSalariale(data, t, forceRender) {
 
   html += '</tbody>' +
     '<tfoot><tr><td colspan="' + ((isAuto || isAutoPaie) ? 3 : 2) + '">TOTAL SALARIÉS</td>' +
-    '<td></td><td></td>' +
+    '<td></td><td></td>' + (!isAuto && !isAutoPaie ? '<td></td>' : '') +
     '<td style="text-align:right;font-weight:800;color:#f59e0b"><span id="tot-msSal">' + fmtN(msCalc.salaries) + '</span> €</td>' +
     (isAutoPaie ? '<td></td>' : (!isAuto ? '<td></td>' : '')) +
     '</tr></tfoot></table>';
@@ -3040,13 +3050,13 @@ function renderMasseSalariale(data, t, forceRender) {
 
 function addMSLigne() {
   if (!_data.masseSalariale) _data.masseSalariale = defaultData(0,0).masseSalariale;
-  _data.masseSalariale.lignes.push({label:'', brut:'', tauxCharges:42});
+  _data.masseSalariale.lignes.push({label:'', brut:'', tauxCharges:42, heuresHebdo:35});
   renderPage(_data, parseInt(document.getElementById('monthSelect').value));
 }
 
 function delMSLigne(i) {
   _data.masseSalariale.lignes.splice(i, 1);
-  if (_data.masseSalariale.lignes.length === 0) _data.masseSalariale.lignes.push({label:'', brut:'', tauxCharges:42});
+  if (_data.masseSalariale.lignes.length === 0) _data.masseSalariale.lignes.push({label:'', brut:'', tauxCharges:42, heuresHebdo:35});
   renderPage(_data, parseInt(document.getElementById('monthSelect').value));
 }
 
@@ -3148,8 +3158,14 @@ async function fetchAllURSSAF() {
   if (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0) {
     empList = window._rhEmployes;
   } else {
-    empList = (ms.lignes || []).filter(function(l){ return l.label && pf(l.brut) > 0; }).map(function(l,i){
-      return {id:'manual_'+i, salaireBrut: pf(l.brut), categoriePoste: 'employe', typeContrat: 'CDI', _manual: true, _idx: i};
+    // Lignes manuelles : on utilise l'index RÉEL (pas l'index filtré) pour viser
+    // la bonne ligne. On exclut le mode Net (pas de taux) et les taux figés.
+    (ms.lignes || []).forEach(function(l, idx){
+      if (!l.label || pf(l.brut) <= 0) return;
+      if ((l.saisieMode || 'brut') === 'net') return;
+      if (l.tauxManuel) return;
+      empList.push({ id:'manual_'+idx, salaireBrut: pf(l.brut), heuresHebdo: pf(l.heuresHebdo) || 35,
+                     categoriePoste: 'employe', typeContrat: 'CDI', _manual: true, _idx: idx });
     });
   }
 
@@ -3164,6 +3180,7 @@ async function fetchAllURSSAF() {
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({
         brutMensuel: brut,
+        heuresHebdo: parseFloat(emp.heuresHebdo) || 35,
         cadre: (emp.categoriePoste || '') === 'cadre',
         apprenti: (emp.typeContrat || '').toLowerCase().indexOf('apprenti') >= 0,
         cdd: (emp.typeContrat || '') === 'CDD'
@@ -3215,6 +3232,7 @@ async function fetchAllURSSAF() {
 
   if (btn) { btn.textContent = '🔄 Taux URSSAF ' + new Date().getFullYear(); btn.disabled = false; }
   if (updated > 0) {
+    scheduleSave();
     renderPage(_data, parseInt(document.getElementById('monthSelect').value));
     showToast('✅ ' + updated + ' taux URSSAF mis à jour' + (errors > 0 ? ' (' + errors + ' erreur)' : ''), 'success');
   } else if (errors > 0) {
@@ -3223,15 +3241,18 @@ async function fetchAllURSSAF() {
 }
 
 // Auto-fetch silencieux au chargement (1 seule fois)
-var _urssafAutoFetched = false;
+var _urssafAutoFetchedMonths = {};
 async function autoFetchMSUrssaf() {
-  if (_urssafAutoFetched) return;
+  var _msel = document.getElementById('monthSelect');
+  var _mk = _msel ? _msel.value : null;
+  if (_mk == null) return;
+  if (_urssafAutoFetchedMonths[_mk]) return;
   var ms = _data.masseSalariale || {};
   var hasEmployes = (ms.mode === 'auto' && window._rhEmployes && window._rhEmployes.length > 0)
     || (ms.lignes && ms.lignes.some(function(l){ return l.label && pf(l.brut) > 0; }));
   var hasDir = pf((ms.dirigeant||{}).remuneration) > 0;
   if (!hasEmployes && !hasDir) return;
-  _urssafAutoFetched = true;
+  _urssafAutoFetchedMonths[_mk] = true;
   await fetchAllURSSAF();
 }
 
@@ -3267,10 +3288,82 @@ function scheduleDirURSSAF() {
             if (_ne) _ne.textContent = '≈ ' + Math.round(_netEst).toLocaleString('fr-FR') + ' € net';
           }
           refreshTotals();
+          scheduleSave();
         }
       }
     } catch(e) {}
   }, 1000);
+}
+
+// ─── Recalcul URSSAF par ligne manuelle (masse salariale) ───────────────────
+// Déclenché (débounce 900 ms) à chaque modification du brut ou des heures.
+// Ignore les lignes en mode Net et les taux figés manuellement (tauxManuel).
+var _lineUrssafTimers = {};
+function scheduleLineURSSAF(i) {
+  clearTimeout(_lineUrssafTimers[i]);
+  _lineUrssafTimers[i] = setTimeout(async function() {
+    var l = (_data.masseSalariale && _data.masseSalariale.lignes) ? _data.masseSalariale.lignes[i] : null;
+    if (!l) return;
+    if (l.tauxManuel) return;
+    if ((l.saisieMode || 'brut') === 'net') return;
+    var brut = pf(l.brut);
+    if (brut <= 0) return;
+    var heures = pf(l.heuresHebdo) || 35;
+    try {
+      var resp = await fetch('/api/urssaf-cost', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ brutMensuel: brut, heuresHebdo: heures })
+      });
+      if (!resp.ok) return;
+      var d = await resp.json();
+      if (!d || d.tauxEffectif === null || d.tauxEffectif === undefined) return;
+      // La ligne a pu être figée pendant la requête → on revérifie avant d'écrire.
+      if (l.tauxManuel) return;
+      l.tauxCharges = d.tauxEffectif;
+      var inp = document.getElementById('ms-line-taux-' + i);
+      if (inp && document.activeElement !== inp) inp.value = d.tauxEffectif;
+      _refreshMSLineCout(i);
+      refreshTotals();
+      scheduleSave();
+    } catch (e) {}
+  }, 900);
+}
+
+// Met à jour la cellule "Coût employeur" d'une ligne manuelle sans re-render global.
+function _refreshMSLineCout(i) {
+  var l = (_data.masseSalariale && _data.masseSalariale.lignes) ? _data.masseSalariale.lignes[i] : null;
+  if (!l) return;
+  var cell = document.getElementById('ms-line-cout-' + i);
+  if (!cell) return;
+  var brut = pf(l.brut);
+  var taux = parseFloat(l.tauxCharges); if (isNaN(taux)) taux = 42;
+  var cout = (l.saisieMode || 'brut') === 'net' ? brut : brut * (1 + taux / 100);
+  cell.textContent = fmtN(cout);
+}
+
+// Saisie manuelle du taux d'une ligne : fige la ligne (tauxManuel) ;
+// vider la case réactive le calcul URSSAF automatique.
+function onMSTaux(i, el) {
+  var l = (_data.masseSalariale && _data.masseSalariale.lignes) ? _data.masseSalariale.lignes[i] : null;
+  if (!l) return;
+  var v = (el.value || '').toString().trim();
+  if (v === '') {
+    l.tauxManuel = false;
+    l.tauxCharges = 42;
+    el.style.borderLeft = '';
+    el.title = 'Taux calculé automatiquement via URSSAF (réduction générale incluse). Saisir une valeur fige un taux manuel.';
+    _refreshMSLineCout(i);
+    refreshTotals();
+    scheduleLineURSSAF(i);
+  } else {
+    l.tauxCharges = pf(v);
+    l.tauxManuel = true;
+    el.style.borderLeft = '3px solid #f59e0b';
+    el.title = 'Taux figé manuellement — non recalculé automatiquement. Videz la case pour réactiver le calcul URSSAF.';
+    _refreshMSLineCout(i);
+    refreshTotals();
+    scheduleSave();
+  }
 }
 
 // ═══════════════════════════════════════════
