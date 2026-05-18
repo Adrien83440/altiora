@@ -2,23 +2,39 @@
 // + calcul forfaitaire pour dirigeants assimilés salariés (SAS/SASU/SARL minoritaire)
 //
 // Calcule le coût employeur et le net mensuel pour :
-//   • Salarié classique : POST { brutMensuel, cadre, apprenti, cdd } → API URSSAF (RGDU/Fillon inclus)
-//   • TNS               : POST { brutMensuel, dirigeant: 'tns' }     → API URSSAF (régime indépendant)
+//   • Salarié classique : POST { brutMensuel, heuresHebdo, cadre, apprenti, cdd } → API URSSAF
+//   • TNS               : POST { brutMensuel, dirigeant: 'tns' }      → API URSSAF (régime indépendant)
 //   • Assimilé dirigeant : POST { brutMensuel, dirigeant: 'assimile' } → forfait 42% patronal / 22% salarial
 //
-// Pourquoi un forfait pour l'assimilé dirigeant ?
-// Le moteur Publicodes URSSAF applique par défaut la réduction générale dégressive
-// (RGDU / ex-Fillon) sur tout namespace `salarié . ...`. Or les mandataires sociaux
-// (président SAS/SASU, gérant minoritaire SARL) en sont **explicitement exclus**.
-// Source officielle : https://mon-entreprise.urssaf.fr/simulateurs/sasu
-//   « Le dirigeant assimilé-salarié ne paye pas de cotisations chômage. Par ailleurs,
-//     il ne bénéficie pas de la réduction générale dégressive unique de cotisations »
-// Sans neutralisation explicite (catégorie juridique + ACRE non), l'API renvoie un
-// taux faussement bas (~13-14% à 2 000 € au lieu de ~42%). On applique donc des
-// taux URSSAF de référence stables qui ne dépendent pas du moteur Publicodes :
-//   • Patronal : 42 % (URSSAF + Agirc-Arrco + AT/MP, hors chômage exclu)
-//   • Salarial : 22 % (URSSAF + retraite cadre + CSG/CRDS)
-// Précis à ±1-2 points sur la plage 1 500 € – 10 000 € de brut mensuel.
+// ─── Gestion du temps partiel (correctif réduction générale) ───────────────
+// La réduction générale dégressive (RGDU / ex-Fillon) dépend du SALAIRE HORAIRE
+// comparé au SMIC, pas du volume d'heures. Le moteur Publicodes URSSAF suppose
+// par défaut un contrat temps plein 35 h : lui envoyer le brut mensuel brut d'un
+// temps partiel (ex. 757 €) revient à lui décrire un temps plein très en dessous
+// du SMIC → il applique une réduction générale aberrante → taux faussement bas
+// (~5-6% au lieu de ~10-15%).
+//
+// Solution : le taux de charges effectif étant invariant d'échelle (il ne dépend
+// que du salaire horaire), on évalue toujours sur l'ÉQUIVALENT TEMPS PLEIN :
+//     brutETP = brutMensuel × 35 / heuresHebdo
+// puis on ré-exprime coût / cotisations / net sur le brut réel du salarié.
+//
+// Garde-fou : un salaire temps plein ne peut pas être inférieur au SMIC. Si
+// brutETP tombe sous le SMIC mensuel, on évalue AU SMIC (= point de réduction
+// générale maximale légitime). Cela neutralise définitivement la sur-réduction,
+// même quand les heures ne sont pas renseignées (défaut 35 h).
+//
+// ─── Pourquoi un forfait pour l'assimilé dirigeant ? ───────────────────────
+// Le moteur Publicodes applique la réduction générale sur tout namespace
+// `salarié . ...`. Or les mandataires sociaux (président SAS/SASU, gérant
+// minoritaire SARL) en sont explicitement exclus.
+// Source : https://mon-entreprise.urssaf.fr/simulateurs/sasu
+// On applique donc des taux URSSAF de référence stables :
+//   • Patronal : 42 %  • Salarial : 22 %  (précis à ±1-2 pts sur 1 500-10 000 €)
+
+// SMIC mensuel brut temps plein (35 h). Plancher anti sur-réduction.
+// ⚠️ À actualiser à chaque revalorisation du SMIC (révision annuelle au 1ᵉʳ janvier).
+const SMIC_MENSUEL_TEMPS_PLEIN = 1850;
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
@@ -28,7 +44,7 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
   try {
-    const { brutMensuel, cadre, apprenti, cdd, dirigeant } = req.body || {};
+    const { brutMensuel, heuresHebdo, cadre, apprenti, cdd, dirigeant } = req.body || {};
     const brut = parseFloat(brutMensuel);
     if (!brut || brut <= 0) return res.status(400).json({ error: 'brutMensuel requis (> 0)' });
 
@@ -52,6 +68,8 @@ module.exports = async (req, res) => {
     }
 
     let expressions, situation;
+    let brutEvalue = brut;   // brut réellement transmis au moteur URSSAF
+    let heuresUsed = 35;
 
     if (dirigeant === 'tns') {
       situation = {
@@ -62,9 +80,22 @@ module.exports = async (req, res) => {
         'dirigeant . indépendant . revenu net de cotisations',
       ];
     } else {
-      // Salarié classique (RGDU/Fillon appliquée par le moteur, c'est ce qu'on veut)
+      // ─── Salarié classique ───────────────────────────────────────────────
+      // Conversion en équivalent temps plein pour que la réduction générale
+      // soit calculée sur le bon salaire horaire (cf. en-tête du fichier).
+      let heures = parseFloat(heuresHebdo);
+      if (!heures || heures <= 0) heures = 35;
+      if (heures > 35) heures = 35; // >35 h : pas de prorata (heures supp = régime spécifique)
+      heuresUsed = heures;
+      const ratioETP = 35 / heures;
+      const brutETP = Math.round(brut * ratioETP * 100) / 100;
+      // Garde-fou : un temps plein ne descend jamais sous le SMIC. En dessous,
+      // le moteur applique une réduction générale supérieure aux cotisations
+      // réductibles → on évalue au SMIC, point de réduction maximale légitime.
+      brutEvalue = Math.max(brutETP, SMIC_MENSUEL_TEMPS_PLEIN);
+
       situation = {
-        'salarié . contrat . salaire brut': `${brut} €/mois`,
+        'salarié . contrat . salaire brut': `${brutEvalue} €/mois`,
       };
       if (cadre) situation['salarié . contrat . statut cadre'] = 'oui';
       else situation['salarié . contrat . statut cadre'] = 'non';
@@ -109,10 +140,6 @@ module.exports = async (req, res) => {
       const cotisMens = cotisAnnuelles !== null ? Math.round(cotisAnnuelles / 12 * 100) / 100 : null;
       const tauxEffectif = (cotisMens !== null && brut > 0)
         ? Math.round((cotisMens / brut) * 10000) / 100 : null;
-      // Le moteur Publicodes ne renvoie pas toujours `revenu net de cotisations` selon
-      // les versions du modèle. Fallback fiable : net = brut - cotisations mensuelles.
-      // (l'URSSAF prélève les cotisations sur la rémunération brute du TNS, donc
-      // le net qui reste effectivement = brut - cotisations).
       let netMensuel = netAnnuel !== null ? Math.round(netAnnuel / 12 * 100) / 100 : null;
       if (netMensuel === null && cotisMens !== null) {
         netMensuel = Math.round((brut - cotisMens) * 100) / 100;
@@ -125,16 +152,36 @@ module.exports = async (req, res) => {
         tauxEffectif,
       };
     } else {
-      const coutTotal = extract(evaluate[0]);
-      const cotisPatronales = extract(evaluate[1]);
-      const netAvantImpot = extract(evaluate[2]);
-      const tauxEffectif = (cotisPatronales !== null && brut > 0)
-        ? Math.round((cotisPatronales / brut) * 10000) / 100 : null;
+      // ─── Salarié : taux calculés sur l'ETP, ré-exprimés sur le brut réel ───
+      const cotisPatronalesETP = extract(evaluate[1]);
+      const netETP = extract(evaluate[2]);
+
+      // Taux effectifs (fractions) — invariants d'échelle : valables aussi bien
+      // pour l'équivalent temps plein que pour le brut partiel réel.
+      const tauxPatronal = (cotisPatronalesETP !== null && brutEvalue > 0)
+        ? cotisPatronalesETP / brutEvalue : null;
+      const tauxSalarial = (netETP !== null && brutEvalue > 0)
+        ? (brutEvalue - netETP) / brutEvalue : null;
+
+      // Ré-expression sur le brut RÉEL du salarié (temps partiel inclus).
+      const cotisationsPatronales = tauxPatronal !== null
+        ? Math.round(brut * tauxPatronal * 100) / 100 : null;
+      const coutEmployeur = cotisationsPatronales !== null
+        ? Math.round((brut + cotisationsPatronales) * 100) / 100 : null;
+      const netAvantImpot = tauxSalarial !== null
+        ? Math.round(brut * (1 - tauxSalarial) * 100) / 100 : null;
+      const tauxEffectif = tauxPatronal !== null
+        ? Math.round(tauxPatronal * 10000) / 100 : null;
+
       result = {
         mode: 'salarie',
-        brutMensuel: brut, coutEmployeur: coutTotal,
-        cotisationsPatronales: cotisPatronales,
-        netAvantImpot, tauxEffectif,
+        brutMensuel: brut,
+        heuresHebdo: heuresUsed,
+        brutEquivalentTempsPlein: brutEvalue,
+        coutEmployeur,
+        cotisationsPatronales,
+        netAvantImpot,
+        tauxEffectif,
       };
     }
     result.source = 'mon-entreprise.urssaf.fr';
