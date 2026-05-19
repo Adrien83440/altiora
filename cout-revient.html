@@ -599,6 +599,7 @@
             </div>
             <div class="fiche-head-actions">
               <button class="btn btn-outline btn-sm" @click="currentId=null" title="Fermer la fiche">← Fermer</button>
+              <button class="btn btn-outline btn-sm" @click="duplicateProduct()" title="Créer une copie de ce produit (variante)">⧉ Dupliquer</button>
               <button class="btn btn-danger btn-sm" @click="deleteProduct()">🗑 Supprimer</button>
             </div>
           </div>
@@ -2017,6 +2018,23 @@ function coutRevientApp(){
         delete this.products[id];this.products=Object.assign({},this.products);
         this.currentId=null;showToast('Produit supprimé','ok');
       }catch(e){showToast('Erreur : '+e.message,'err');console.error(e);}
+    },
+    async duplicateProduct(){
+      // Duplique le produit courant à l'identique (ingrédients, MO, charges,
+      // emballages, livraison, prix, allergènes…) pour créer une variante
+      // sans tout ressaisir. Bascule directement sur la nouvelle fiche.
+      if(!this.currentId||!this.products[this.currentId])return;
+      var src=this.products[this.currentId];
+      var copie=JSON.parse(JSON.stringify(src));
+      copie.nom=((src.nom||'Produit').trim())+' (copie)';
+      var id='prod_'+Date.now();
+      this.products[id]=copie;
+      this.products=Object.assign({},this.products);
+      this.currentId=id;this.currentFournisseurId=null;this.activeTab='produits';
+      if(window._uid){try{
+        await window._setDoc(window._doc(window._db,'produits',window._uid,'items',id),JSON.parse(JSON.stringify(copie)));
+        showToast('✅ Produit dupliqué','success');
+      }catch(e){console.error('Duplicate product error:',e);showToast('Erreur sauvegarde','warning');}}
     },
 
     get importMatchedCount(){return this.importMatchedLines.filter(function(l){return !l.ignore&&l.matchedArticle;}).length;},
