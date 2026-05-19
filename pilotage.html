@@ -2208,6 +2208,7 @@ function renderPage(data, month) {
       '<table class="data-table"><thead><tr><th>Pointé</th><th>Fournisseur</th><th>Type</th><th>Montant HT</th><th>TVA %</th><th>Total TTC</th><th>Déductible</th><th title="Périodicité de la charge (mensuelle, trimestrielle, etc.)">Périodicité</th><th></th></tr></thead>' +
       '<tbody id="cf-tbody">' + secTbody('cf', renderCharges(data.chargesFixe, 'chargesFixe')) + '</tbody>' +
       '<tfoot><tr><td colspan="3">TOTAL CHARGES FIXES HT</td><td><span id="tot-fixHT">' + fmtN(t.fixesHT) + '</span> €</td><td>—</td><td><span id="tot-fixTTC">' + fmtN(t.fixesTTC) + '</span> €</td><td colspan="2">TVA déd. : <span id="tot-fixTVA">' + fmtN(t.fixesTVA) + '</span> €</td></tr>' +
+      (t.fixesNonPointeTTC > 0 ? '<tr id="fix-nonpointe-row"><td colspan="3" style="color:#b45309;font-size:11px;padding:5px 9px">🟠 Reste à pointer (non payé)</td><td colspan="2" style="color:#b45309;font-weight:700">' + fmtN(t.fixesNonPointeTTC) + ' €</td><td colspan="3" style="color:#b45309;font-size:11px">' + t.fixesNonPointeNb + (t.fixesNonPointeNb > 1 ? ' lignes' : ' ligne') + '</td></tr>' : '<tr id="fix-nonpointe-row" style="display:none"></tr>') +
       '<tr><td colspan="8" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCharge(\'chargesFixe\',\'cf-tbody\')">+ Ligne</button></td></tr></tfoot>' +
       '</table>' +
       '</div>' +
@@ -2224,6 +2225,7 @@ function renderPage(data, month) {
       '<tfoot>' +
         '<tr><td colspan="3">TOTAL CHARGES VARIABLES HT</td><td><span id="tot-varHT">' + fmtN(t.varHT) + '</span> €</td><td>—</td><td><span id="tot-varTTC">' + fmtN(t.varTTC) + '</span> €</td><td colspan="3">TVA déd. : <span id="tot-varTVA">' + fmtN(t.varTVA) + '</span> €</td></tr>' +
         (t.varHT_excep > 0 ? '<tr id="var-excep-row"><td colspan="3" style="color:#f97316;font-size:11px;padding:5px 9px">⚡ Dont exceptionnel (exclu du total)</td><td style="color:#f97316;font-weight:700">' + fmtN(t.varHT_excep) + ' €</td><td>—</td><td style="color:#f97316;font-weight:700">' + fmtN(t.varTTC_excep) + ' €</td><td colspan="3"></td></tr>' : '<tr id="var-excep-row" style="display:none"></tr>') +
+        (t.varNonPointeTTC > 0 ? '<tr id="var-nonpointe-row"><td colspan="3" style="color:#b45309;font-size:11px;padding:5px 9px">🟠 Reste à pointer (non payé)</td><td colspan="2" style="color:#b45309;font-weight:700">' + fmtN(t.varNonPointeTTC) + ' €</td><td colspan="4" style="color:#b45309;font-size:11px">' + t.varNonPointeNb + (t.varNonPointeNb > 1 ? ' lignes' : ' ligne') + '</td></tr>' : '<tr id="var-nonpointe-row" style="display:none"></tr>') +
         '<tr><td colspan="9" style="padding:6px 9px"><button class="btn btn-outline btn-sm tfoot-add-btn" onclick="addCharge(\'chargesVar\',\'cv-tbody\')">+ Ligne</button></td></tr>' +
       '</tfoot>' +
       '</table>' +
@@ -3396,8 +3398,9 @@ function pointeSelectHtml(key, i, currentValue) {
   var opts = POINTE_OPTIONS.map(function(o){
     return '<option value="' + o + '"' + (v === o ? ' selected' : '') + '>' + o + '</option>';
   }).join('');
-  // onchange : applique la valeur, rafraîchit le style, propage au groupe (wave 3), sauvegarde
-  var fullOnchange = "_data['" + key + "'][" + i + "].pointe=this.value;refreshPointeStyle(this);propagatePointeToGroup(this,'" + key + "'," + i + ");scheduleSave()";
+  // onchange : applique la valeur, rafraîchit le style, propage au groupe (wave 3),
+  // recalcule les totaux (décompte "reste à pointer"), sauvegarde
+  var fullOnchange = "_data['" + key + "'][" + i + "].pointe=this.value;refreshPointeStyle(this);propagatePointeToGroup(this,'" + key + "'," + i + ");refreshTotals();scheduleSave()";
   return '<select class="cell-input pointe-select" style="' + styleAttr + '" onchange="' + fullOnchange + '">' + opts + '</select>';
 }
 
@@ -5486,9 +5489,12 @@ function calcTotals(data) {
   var caTTC = Math.round((caTTC_j + caTTC_fp)*100)/100;
   var rentreesSupp = data.rentreesSupp.reduce(function(s,r){return s+(parseFloat(r.montant)||0);},0);
   var prevCA = data.previsionCA.reduce(function(s,r){return s+(parseFloat(r.montant)||0);},0);
-  var fixesHT=0,fixesTTC=0,fixesTVA=0;
-  data.chargesFixe.forEach(function(r){var h=pf(r.montantHT);var rate=(r.tvaRate||0)/100;fixesHT+=h;fixesTTC+=Math.round(h*(1+rate)*100)/100;if(r.deductible==='Oui')fixesTVA+=Math.round(h*rate*100)/100;});
-  var varHT=0,varTTC=0,varTVA=0,varHT_excep=0,varTTC_excep=0;
+  var fixesHT=0,fixesTTC=0,fixesTVA=0,fixesNonPointeTTC=0,fixesNonPointeNb=0;
+  data.chargesFixe.forEach(function(r){var h=pf(r.montantHT);var rate=(r.tvaRate||0)/100;var ttc=Math.round(h*(1+rate)*100)/100;fixesHT+=h;fixesTTC+=ttc;if(r.deductible==='Oui')fixesTVA+=Math.round(h*rate*100)/100;
+    // Reste à pointer : tout sauf 'Oui' et 'CB' (CB = réglé par carte). Lignes vides ignorées.
+    if(h>0 && r.pointe!=='Oui' && r.pointe!=='CB'){fixesNonPointeTTC+=ttc;fixesNonPointeNb++;}
+  });
+  var varHT=0,varTTC=0,varTVA=0,varHT_excep=0,varTTC_excep=0,varNonPointeTTC=0,varNonPointeNb=0;
   data.chargesVar.forEach(function(r){
     var h=pf(r.montantHT);
     var rate=(r.tvaRate||0)/100;
@@ -5499,6 +5505,9 @@ function calcTotals(data) {
       varHT+=h; varTTC+=ttc;
       if(r.deductible==='Oui') varTVA+=Math.round(h*rate*100)/100;
     }
+    // Reste à pointer : tout sauf 'Oui' et 'CB'. Inclut les exceptionnelles
+    // (ce sont de vraies sorties de trésorerie). Lignes vides ignorées.
+    if(h>0 && r.pointe!=='Oui' && r.pointe!=='CB'){varNonPointeTTC+=ttc;varNonPointeNb++;}
   });
   var leasingHT=0,leasingTTC=0,leasingTVA=0;
   var curMonthKey = getMonthKey ? getMonthKey() : '';
@@ -5593,7 +5602,7 @@ function calcTotals(data) {
                - leasingTTC
                - masseSalHT;
   var delta = resultat-(prevCA-chargesHT);
-  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caHTCust,caTTC,caTTC_j,caTTC_fp,tvaCollectee,tvaC_j,tvaC_fp,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,varHT,varTTC,varTVA,varHT_excep,varTTC_excep,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,resultatEconomique,cashflow,delta,caFP055,caFP10,caFP20,caFP0,caFPCust,masseSalHT,prelevementPriveHT};
+  return {caHT,caHT_j,caFP_HT,caHT055,caHT10,caHT20,caHTCust,caTTC,caTTC_j,caTTC_fp,tvaCollectee,tvaC_j,tvaC_fp,rentreesSupp,prevCA,fixesHT,fixesTTC,fixesTVA,fixesNonPointeTTC,fixesNonPointeNb,varHT,varTTC,varTVA,varHT_excep,varTTC_excep,varNonPointeTTC,varNonPointeNb,leasingHT,leasingTTC,leasingTVA,creditsPrincipal,creditsInteret,creditsTVA,chargesHT,tvaDed,tvaDue,resultat,resultatEconomique,cashflow,delta,caFP055,caFP10,caFP20,caFP0,caFPCust,masseSalHT,prelevementPriveHT};
 }
 
 // ═══════════════════════════════════════════
@@ -5754,6 +5763,31 @@ function refreshTotals() {
   }
   s('tot-fixHT',t.fixesHT);s('tot-fixTTC',t.fixesTTC);s('tot-fixTVA',t.fixesTVA);
   s('tot-varHT',t.varHT);s('tot-varTTC',t.varTTC);s('tot-varTVA',t.varTVA);
+  // Lignes "Reste à pointer" (charges fixes + variables) — masquées si tout est pointé
+  var fixNpRow = document.getElementById('fix-nonpointe-row');
+  if (fixNpRow) {
+    if (t.fixesNonPointeTTC > 0) {
+      fixNpRow.style.display = '';
+      fixNpRow.innerHTML = '<td colspan="3" style="color:#b45309;font-size:11px;padding:5px 9px">🟠 Reste à pointer (non payé)</td>' +
+        '<td colspan="2" style="color:#b45309;font-weight:700">' + fmtN(t.fixesNonPointeTTC) + ' €</td>' +
+        '<td colspan="3" style="color:#b45309;font-size:11px">' + t.fixesNonPointeNb + (t.fixesNonPointeNb > 1 ? ' lignes' : ' ligne') + '</td>';
+    } else {
+      fixNpRow.style.display = 'none';
+      fixNpRow.innerHTML = '';
+    }
+  }
+  var varNpRow = document.getElementById('var-nonpointe-row');
+  if (varNpRow) {
+    if (t.varNonPointeTTC > 0) {
+      varNpRow.style.display = '';
+      varNpRow.innerHTML = '<td colspan="3" style="color:#b45309;font-size:11px;padding:5px 9px">🟠 Reste à pointer (non payé)</td>' +
+        '<td colspan="2" style="color:#b45309;font-weight:700">' + fmtN(t.varNonPointeTTC) + ' €</td>' +
+        '<td colspan="4" style="color:#b45309;font-size:11px">' + t.varNonPointeNb + (t.varNonPointeNb > 1 ? ' lignes' : ' ligne') + '</td>';
+    } else {
+      varNpRow.style.display = 'none';
+      varNpRow.innerHTML = '';
+    }
+  }
   // Ligne exceptionnel
   var excepRow = document.getElementById('var-excep-row');
   if (excepRow) {
