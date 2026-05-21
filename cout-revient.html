@@ -8,6 +8,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 <style>
     *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -134,6 +135,15 @@
     .fiche-head{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
     .fiche-head-left{display:flex;align-items:center;gap:12px;}
     .fiche-emoji-btn{font-size:28px;background:var(--blue-ghost);border:none;border-radius:10px;width:50px;height:50px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+    /* Bouton photo produit — affiche un placeholder ou l'image redimensionnée */
+    .fiche-photo-btn{background:#f8fafc;border:1.5px dashed #cbd5e1;border-radius:10px;width:54px;height:54px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;overflow:hidden;transition:.15s;position:relative;}
+    .fiche-photo-btn:hover{border-color:var(--blue-main);background:var(--blue-ghost);}
+    .fiche-photo-btn.has-photo{border-style:solid;border-color:#10b981;}
+    .fiche-photo-btn img{width:100%;height:100%;object-fit:cover;display:block;}
+    .fiche-photo-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;color:#94a3b8;font-size:16px;line-height:1;}
+    .fiche-photo-label{font-size:8px;font-weight:600;margin-top:2px;text-transform:uppercase;letter-spacing:0.3px;}
+    .fiche-photo-remove{position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:#ef4444;color:#fff;border:2px solid #fff;font-size:10px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;padding:0;}
+    .fiche-photo-remove:hover{background:#dc2626;}
     .fiche-name-input{font-size:18px;font-weight:800;border:none;outline:none;font-family:'Plus Jakarta Sans',sans-serif;color:var(--text);width:260px;}
     .fiche-name-input::placeholder{color:#d1d5db;}
     .fiche-type-select{padding:4px 10px;border:1.5px solid var(--border);border-radius:20px;font-family:'Plus Jakarta Sans',sans-serif;font-size:12px;font-weight:600;color:var(--muted);outline:none;cursor:pointer;}
@@ -583,6 +593,19 @@
                   <template x-for="e in emojiList" :key="e"><button class="ep-btn" @click="p.emoji=e;showEmoji=false" x-text="e"></button></template>
                 </div>
               </div>
+              <!-- ── Photo produit (optionnelle, utilisée dans le PDF) ── -->
+              <div style="position:relative">
+                <input type="file" accept="image/jpeg,image/png,image/webp" style="display:none" x-ref="photoInput" @change="handlePhotoUpload($event)"/>
+                <button class="fiche-photo-btn" @click="$refs.photoInput.click()" :title="p.photo ? 'Cliquer pour changer la photo' : 'Ajouter une photo (utilisée dans la fiche PDF)'" :class="{'has-photo': !!p.photo}">
+                  <template x-if="p.photo">
+                    <img :src="p.photo" alt="Photo produit"/>
+                  </template>
+                  <template x-if="!p.photo">
+                    <span class="fiche-photo-placeholder">📸<span class="fiche-photo-label">Photo</span></span>
+                  </template>
+                </button>
+                <button x-show="p.photo" @click.stop="removePhoto()" class="fiche-photo-remove" title="Retirer la photo">✕</button>
+              </div>
               <div>
                 <input class="fiche-name-input" placeholder="Nom du produit" x-model="p.nom"/>
                 <div style="display:flex;gap:8px;margin-top:4px;align-items:center">
@@ -600,6 +623,7 @@
             <div class="fiche-head-actions">
               <button class="btn btn-outline btn-sm" @click="currentId=null" title="Fermer la fiche">← Fermer</button>
               <button class="btn btn-outline btn-sm" @click="duplicateProduct()" title="Créer une copie de ce produit (variante)">⧉ Dupliquer</button>
+              <button class="btn btn-outline btn-sm" @click="openExportPDFModal()" title="Générer une fiche produit PDF pour vos équipes">📄 Fiche PDF</button>
               <button class="btn btn-danger btn-sm" @click="deleteProduct()">🗑 Supprimer</button>
             </div>
           </div>
@@ -817,9 +841,32 @@
               </div>
             </div>
 
+            <!-- PRÉPARATION (utilisé dans le PDF) -->
+            <div class="fiche-section">
+              <div class="fiche-section-head" @click="sections.prep = !sections.prep">
+                <div class="fiche-section-title">👨‍🍳 Préparation <span class="section-badge sb-blue" x-show="(p.preparation||'').trim().length>0">Renseignée</span></div>
+                <span style="font-size:11px;color:var(--muted)">›</span>
+              </div>
+              <div class="fiche-section-body" x-show="sections.prep" x-transition>
+                <textarea class="cell-in" style="width:100%;height:140px;border:1.5px solid var(--border);border-radius:8px;resize:vertical;padding:8px 10px;font-family:inherit;line-height:1.5" placeholder="Étapes de préparation, dosages, températures, temps de cuisson… (apparaîtra dans la fiche PDF imprimable)" x-model="p.preparation"></textarea>
+                <div style="font-size:11px;color:var(--muted);background:var(--blue-ghost);padding:8px 12px;border-radius:6px;margin-top:8px">💡 Cette section est destinée à vos équipes. Listez les étapes (1. Préchauffer four 180°C / 2. Mélanger…) — apparaît telle quelle dans la fiche PDF.</div>
+              </div>
+            </div>
+
+            <!-- CONSERVATION / DLC (utilisé dans le PDF) -->
+            <div class="fiche-section">
+              <div class="fiche-section-head" @click="sections.cons = !sections.cons">
+                <div class="fiche-section-title">🧊 Conservation / DLC <span class="section-badge sb-blue" x-show="(p.conservation||'').trim().length>0">Renseignée</span></div>
+                <span style="font-size:11px;color:var(--muted)">›</span>
+              </div>
+              <div class="fiche-section-body" x-show="sections.cons" x-transition>
+                <textarea class="cell-in" style="width:100%;height:80px;border:1.5px solid var(--border);border-radius:8px;resize:vertical;padding:8px 10px;font-family:inherit;line-height:1.5" placeholder="Ex: Au frais 3 jours · Congélation OK 1 mois · DLC J+5" x-model="p.conservation"></textarea>
+              </div>
+            </div>
+
             <!-- NOTES -->
             <div class="fiche-section">
-              <div class="fiche-section-head" @click="sections.notes = !sections.notes"><div class="fiche-section-title">📝 Notes</div></div>
+              <div class="fiche-section-head" @click="sections.notes = !sections.notes"><div class="fiche-section-title">📝 Notes / Remarques internes</div></div>
               <div class="fiche-section-body" x-show="sections.notes" x-transition>
                 <textarea class="cell-in" style="width:100%;height:80px;border:1.5px solid var(--border);border-radius:8px;resize:vertical;padding:8px 10px" placeholder="Remarques, variantes..." x-model="p.notes"></textarea>
               </div>
@@ -1576,6 +1623,44 @@
       </div>
     </div>
   </div>
+  <!-- ════ MODAL EXPORT FICHE PDF ════ -->
+  <div class="modal-overlay" :class="{ show: showExportPDFModal }" @click.self="showExportPDFModal=false">
+    <div class="modal" style="max-width:480px">
+      <div class="modal-head"><h3>📄 Exporter la fiche produit en PDF</h3><button class="modal-close" @click="showExportPDFModal=false">✕</button></div>
+      <div class="modal-body">
+        <div style="font-size:12px;color:#1e40af;background:var(--blue-ghost);padding:10px 12px;border-radius:8px;margin-bottom:14px;line-height:1.5">
+          💡 La fiche est destinée à vos équipes (cuisine, atelier, production). Elle contient les <strong>ingrédients, étapes, allergènes</strong> — <strong>aucune donnée financière</strong> (pas de coûts, ni de prix de vente).
+        </div>
+
+        <div class="modal-field">
+          <label class="modal-label">Quantité à produire</label>
+          <div style="display:flex;gap:12px;align-items:center">
+            <div style="flex:1">
+              <div style="font-size:11px;color:var(--muted);margin-bottom:3px">Multiplicateur</div>
+              <div style="display:flex;align-items:center;gap:6px">
+                <span style="font-size:14px;color:var(--muted)">×</span>
+                <input class="modal-input" type="text" inputmode="decimal" x-model="exportMultiplicateur" @input="exportMultiplicateur=$event.target.value.replace(',','.')" style="width:80px;text-align:center"/>
+              </div>
+            </div>
+            <div style="flex:2;background:#f8fafc;border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+              <div style="font-size:11px;color:var(--muted)">Fiche pour</div>
+              <div style="font-size:16px;font-weight:700;color:var(--blue-main)" x-text="exportFichePourLabel()"></div>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">
+            ×1 = recette de base · ×2 = double · ×0.5 = moitié · etc.
+          </div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn btn-outline" @click="showExportPDFModal=false">Annuler</button>
+        <button class="btn btn-primary" @click="confirmExportPDF()" :disabled="exportPDFInProgress">
+          <span x-show="!exportPDFInProgress">📥 Télécharger la fiche</span>
+          <span x-show="exportPDFInProgress">Génération en cours…</span>
+        </button>
+      </div>
+    </div>
+  </div>
 
 </div><!-- /main -->
 
@@ -1647,6 +1732,499 @@ function _calcDetails(p){
   return{ingr:ingr,mo:mo,cf:cf,emb:emb,liv:liv,total:total,cr:cr,pv:pv,margeHT:margeHT,txMarge:txMarge,pvTTC:pvTTC,qte:qte,mult:mult,margeIngr:margeIngr};
 }
 
+// ═══════════════════════════════════════════════════════════════
+// HELPERS IMAGE + PDF
+// ═══════════════════════════════════════════════════════════════
+
+// Redimensionne une image (File) à maxDim × maxDim max en JPEG.
+// Retourne une promise qui résout en data URL.
+function _resizeImageFile(file, maxDim, quality){
+  return new Promise(function(resolve, reject){
+    var reader = new FileReader();
+    reader.onerror = function(){ reject(new Error('Lecture fichier impossible')); };
+    reader.onload = function(e){
+      var img = new Image();
+      img.onerror = function(){ reject(new Error('Image illisible')); };
+      img.onload = function(){
+        var w = img.naturalWidth, h = img.naturalHeight;
+        if(w === 0 || h === 0){ reject(new Error('Dimensions image invalides')); return; }
+        if(w > maxDim || h > maxDim){
+          if(w > h){ h = Math.round(h * maxDim / w); w = maxDim; }
+          else     { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        var canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        var ctx = canvas.getContext('2d');
+        // Fond blanc (au cas où l'image est transparente / PNG)
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        try{
+          resolve(canvas.toDataURL('image/jpeg', quality || 0.85));
+        }catch(err){
+          reject(err);
+        }
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// Convertit un emoji en image PNG (data URL) via canvas, pour l'embed
+// dans le PDF. jsPDF + Helvetica ne supportent pas les glyphes Unicode
+// emoji, donc on rasterize côté navigateur.
+function _emojiToPng(emoji, sizePx){
+  try{
+    var s = sizePx || 64;
+    var canvas = document.createElement('canvas');
+    canvas.width = s; canvas.height = s;
+    var ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, s, s);
+    ctx.font = Math.round(s * 0.78) + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(emoji || '📦', s / 2, s / 2 + s * 0.02);
+    return canvas.toDataURL('image/png');
+  }catch(e){ return null; }
+}
+
+// Slug pour nom de fichier (accents → ASCII, espaces → _, retire chars spéciaux)
+function _slugify(str){
+  return (str || 'fiche')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase()
+    .substring(0, 60) || 'fiche';
+}
+
+// Format quantité affichage propre (entier si entier, sinon 2 décimales sans zéros traînants)
+function _fmtQty(n){
+  var v = parseFloat(n) || 0;
+  if(Math.abs(v - Math.round(v)) < 0.001) return String(Math.round(v));
+  return v.toFixed(2).replace(/\.?0+$/, '').replace('.', ',');
+}
+
+// Charge le profil entreprise (logo + nom) à la volée pour le PDF.
+// Retourne {logo, nom} ou {logo:null, nom:''} si pas disponible.
+async function _loadProfilForPDF(){
+  if(!window._uid || !window._db || !window._getDoc) return { logo:null, nom:'' };
+  try{
+    var ref = window._doc(window._db, 'profil', window._uid, 'data', 'profil');
+    var snap = await window._getDoc(ref);
+    if(!snap.exists()) return { logo:null, nom:'' };
+    var data = snap.data() || {};
+    return {
+      logo: data.logo || null,
+      nom:  data.commercial || data.nom || ''
+    };
+  }catch(e){
+    console.warn('Profil load for PDF failed:', e);
+    return { logo:null, nom:'' };
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GENERATE FICHE PRODUIT PDF
+// ═══════════════════════════════════════════════════════════════
+// Génère et télécharge une fiche produit imprimable A4.
+// Pas de données financières (coûts, marge, fournisseurs).
+//
+// Args:
+//   p          : objet produit (issu de this.p)
+//   mult       : multiplicateur des quantités (1 = recette de base, 2 = double, etc.)
+//   allergenList : liste de référence pour mapper id → {label,icon}
+window.generateFichePDF = async function(p, mult, allergenList){
+  if(!window.jspdf || !window.jspdf.jsPDF){
+    throw new Error('jsPDF non chargé');
+  }
+  var jsPDF = window.jspdf.jsPDF;
+
+  // Profil entreprise (logo + nom) chargé à la volée
+  var profil = await _loadProfilForPDF();
+
+  var doc = new jsPDF({ orientation:'p', unit:'mm', format:'a4' });
+  var pageW = 210, pageH = 297;
+  var marginX = 14, marginTop = 12, marginBottom = 14;
+  var contentW = pageW - marginX * 2;
+
+  // Couleurs Alteore
+  var COLOR_BLUE      = [37, 99, 235];     // #2563eb
+  var COLOR_BLUE_DARK = [15, 31, 92];      // #0f1f5c
+  var COLOR_TEXT      = [30, 41, 59];      // #1e293b
+  var COLOR_MUTED     = [100, 116, 139];   // #64748b
+  var COLOR_BORDER    = [226, 232, 240];   // #e2e8f0
+  var COLOR_BG_SOFT   = [248, 250, 252];   // #f8fafc
+  var COLOR_RED       = [220, 38, 38];     // #dc2626  (allergènes présents)
+  var COLOR_ORANGE    = [234, 88, 12];     // #ea580c  (allergènes en traces)
+  var COLOR_GREEN     = [16, 185, 129];    // #10b981
+
+  // Helpers de dessin
+  function setColor(c){ doc.setTextColor(c[0], c[1], c[2]); }
+  function setFill(c){ doc.setFillColor(c[0], c[1], c[2]); }
+  function setDraw(c){ doc.setDrawColor(c[0], c[1], c[2]); }
+
+  // Ajoute une page si la zone restante n'est pas suffisante (h en mm)
+  function ensureSpace(y, needed){
+    if(y + needed > pageH - marginBottom){
+      doc.addPage();
+      return marginTop;
+    }
+    return y;
+  }
+
+  // ── HEADER (logo + nom entreprise + titre "Fiche produit") ──
+  function drawHeader(){
+    var y = marginTop;
+    // Logo (si présent et c'est bien une data URL image)
+    var logoSize = 12;
+    var logoX = marginX, logoY = y;
+    if(profil.logo && typeof profil.logo === 'string' && profil.logo.startsWith('data:image/')){
+      try{
+        var fmt = profil.logo.indexOf('data:image/png') === 0 ? 'PNG' : 'JPEG';
+        doc.addImage(profil.logo, fmt, logoX, logoY, logoSize, logoSize, undefined, 'FAST');
+      }catch(e){ /* logo invalide → on skip */ }
+    } else {
+      // Placeholder bleu avec "A"
+      setFill(COLOR_BLUE);
+      doc.roundedRect(logoX, logoY, logoSize, logoSize, 2, 2, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      setColor([255,255,255]);
+      doc.text('A', logoX + logoSize/2, logoY + logoSize/2 + 1.4, { align:'center' });
+    }
+    // Nom entreprise
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    setColor(COLOR_BLUE_DARK);
+    var nameX = logoX + logoSize + 4;
+    var entrepriseName = profil.nom || '';
+    if(entrepriseName){
+      doc.text(entrepriseName, nameX, logoY + 5);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      setColor(COLOR_MUTED);
+      doc.text('Fiche produit interne', nameX, logoY + 9.5);
+    } else {
+      doc.setFontSize(10);
+      doc.text('Fiche produit', nameX, logoY + 7);
+    }
+    // Date à droite
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    setColor(COLOR_MUTED);
+    var dateStr = 'Générée le ' + new Date().toLocaleDateString('fr-FR', { day:'2-digit', month:'long', year:'numeric' });
+    doc.text(dateStr, pageW - marginX, logoY + 7, { align:'right' });
+
+    // Trait séparateur bleu
+    setDraw(COLOR_BLUE);
+    doc.setLineWidth(0.6);
+    doc.line(marginX, logoY + logoSize + 3, pageW - marginX, logoY + logoSize + 3);
+    doc.setLineWidth(0.2);
+    return logoY + logoSize + 8;
+  }
+
+  var y = drawHeader();
+
+  // ── TITRE PRODUIT (nom + meta) ──
+  function drawTitle(yStart){
+    // Block titre dans un container léger
+    var nom = (p.nom || 'Produit sans nom').toString();
+    var type = (p.type || 'recette');
+    var typeLabels = { recette:'Recette', physique:'Produit physique', service:'Prestation', revente:'Revente' };
+    var typeLabel = typeLabels[type] || 'Produit';
+    var cat = (p.categorie || '').toString().trim();
+    var qte = parseFloat(p.quantiteProduites) || 1;
+    var unite = (p.uniteProduction || 'unité').toString();
+    var qteFinale = qte * mult;
+    var qteStr = _fmtQty(qteFinale) + ' ' + unite + (qteFinale > 1 && !unite.endsWith('s') ? 's' : '');
+
+    // Nom du produit en grand
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(22);
+    setColor(COLOR_TEXT);
+    var splittedName = doc.splitTextToSize(nom.toUpperCase(), contentW - 4);
+    doc.text(splittedName, marginX, yStart + 6);
+    var titleH = splittedName.length * 8;
+
+    // Meta : Catégorie · Type · Pour X
+    var metaParts = [];
+    if(cat)       metaParts.push(cat);
+    metaParts.push(typeLabel);
+    metaParts.push('Pour ' + qteStr);
+    if(mult !== 1){
+      metaParts.push('(×' + _fmtQty(mult) + ' base)');
+    }
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    setColor(COLOR_MUTED);
+    doc.text(metaParts.join(' · '), marginX, yStart + 6 + titleH + 1);
+    return yStart + 6 + titleH + 6;
+  }
+  y = drawTitle(y);
+
+  // ── PHOTO + ALLERGÈNES (côte à côte) ──
+  function drawPhotoAndAllergens(yStart){
+    var blockH = 56; // hauteur de la zone photo/allergènes
+    var photoSize = 50;
+    var photoX = marginX;
+    var photoY = yStart;
+    var allerX = photoX + photoSize + 8;
+    var allerW = contentW - photoSize - 8;
+
+    // Cadre photo (image ou emoji rasterisé ou placeholder bleu)
+    setDraw(COLOR_BORDER);
+    setFill(COLOR_BG_SOFT);
+    doc.roundedRect(photoX, photoY, photoSize, photoSize, 3, 3, 'FD');
+
+    if(p.photo && typeof p.photo === 'string' && p.photo.startsWith('data:image/')){
+      try{
+        var fmt = p.photo.indexOf('data:image/png') === 0 ? 'PNG' : 'JPEG';
+        // Insérer la photo avec un léger inset pour ne pas mordre sur le bord
+        doc.addImage(p.photo, fmt, photoX + 1, photoY + 1, photoSize - 2, photoSize - 2, undefined, 'FAST');
+      }catch(e){ /* image invalide → fallback emoji */ }
+    } else if(p.emoji){
+      // Rasterize l'emoji
+      var emojiPng = _emojiToPng(p.emoji, 200);
+      if(emojiPng){
+        try{
+          doc.addImage(emojiPng, 'PNG', photoX + 5, photoY + 5, photoSize - 10, photoSize - 10, undefined, 'FAST');
+        }catch(e){}
+      }
+    }
+
+    // Encadré allergènes à droite
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    setColor(COLOR_RED);
+    doc.text('ALLERGENES', allerX, photoY + 5);
+
+    // Construire les listes
+    var present = [], traces = [];
+    var alg = p.allergenes || {};
+    (allergenList || []).forEach(function(a){
+      var s = alg[a.id];
+      if(s === 'present') present.push(a);
+      else if(s === 'traces') traces.push(a);
+    });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+
+    var yA = photoY + 11;
+    if(present.length === 0 && traces.length === 0){
+      setColor(COLOR_MUTED);
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(9);
+      doc.text('Aucun allergène renseigné', allerX, yA + 4);
+    } else {
+      if(present.length > 0){
+        setColor(COLOR_RED);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('PRÉSENTS :', allerX, yA + 3);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        setColor(COLOR_TEXT);
+        var presentLine = present.map(function(a){ return a.label; }).join(' · ');
+        var ptxt = doc.splitTextToSize(presentLine, allerW - 2);
+        doc.text(ptxt, allerX, yA + 8);
+        yA += 8 + (ptxt.length * 4.5);
+      }
+      if(traces.length > 0){
+        yA += 1.5;
+        setColor(COLOR_ORANGE);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('TRACES POSSIBLES :', allerX, yA + 3);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(10);
+        setColor(COLOR_TEXT);
+        var tracesLine = traces.map(function(a){ return a.label; }).join(' · ');
+        var ttxt = doc.splitTextToSize(tracesLine, allerW - 2);
+        doc.text(ttxt, allerX, yA + 8);
+      }
+    }
+    return yStart + blockH + 4;
+  }
+  y = drawPhotoAndAllergens(y);
+
+  // ── HELPER : titre de section (bandeau bleu clair) ──
+  function drawSectionTitle(yStart, title){
+    yStart = ensureSpace(yStart, 12);
+    var h = 7.5;
+    setFill([239, 246, 255]); // blue-ghost
+    doc.roundedRect(marginX, yStart, contentW, h, 1.5, 1.5, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    setColor(COLOR_BLUE_DARK);
+    doc.text(title, marginX + 3, yStart + 5.3);
+    return yStart + h + 2.5;
+  }
+
+  // ── INGRÉDIENTS ──
+  function drawIngredients(yStart){
+    var ings = (p.ingredients || []).filter(function(r){ return (r.nom||'').trim().length > 0; });
+    if(ings.length === 0){
+      yStart = drawSectionTitle(yStart, p.type === 'service' ? 'FOURNITURES / CONSOMMABLES' : 'INGRÉDIENTS / MATIÈRES PREMIÈRES');
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(10);
+      setColor(COLOR_MUTED);
+      doc.text('Aucun ingrédient renseigné.', marginX + 2, yStart + 4);
+      return yStart + 8;
+    }
+    yStart = drawSectionTitle(yStart, p.type === 'service' ? 'FOURNITURES / CONSOMMABLES' : 'INGRÉDIENTS / MATIÈRES PREMIÈRES');
+
+    // Construire les lignes [nom, quantité affichée]
+    var rows = ings.map(function(r){
+      var qte = parseFloat(r.qte) || 0;
+      var qFinale = qte * mult;
+      var u = (r.unite || '').toString();
+      return {
+        nom:  (r.nom || '').toString(),
+        qte:  _fmtQty(qFinale) + (u ? ' ' + u : '')
+      };
+    });
+
+    // Largeurs : nom (gauche) prend 75%, quantité (droite) 25% alignée à droite
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    setColor(COLOR_TEXT);
+    var nameW = contentW * 0.72;
+    var qteX  = pageW - marginX;
+    var lh    = 6.5;
+
+    for(var i = 0; i < rows.length; i++){
+      yStart = ensureSpace(yStart, lh);
+      // Petit point bleu
+      setFill(COLOR_BLUE);
+      doc.circle(marginX + 2, yStart + 2.2, 0.9, 'F');
+      // Nom (wrap si trop long)
+      var nameLines = doc.splitTextToSize(rows[i].nom, nameW - 8);
+      setColor(COLOR_TEXT);
+      doc.setFont('helvetica', 'normal');
+      doc.text(nameLines[0] || '', marginX + 5, yStart + 3);
+      // Quantité (droite, bold)
+      doc.setFont('helvetica', 'bold');
+      doc.text(rows[i].qte, qteX, yStart + 3, { align:'right' });
+      // Pointillés entre nom et qté
+      doc.setFont('helvetica', 'normal');
+      setColor(COLOR_BORDER);
+      var dotStart = marginX + 5 + doc.getTextWidth(nameLines[0] || '') + 1.5;
+      var qteW = doc.getTextWidth(rows[i].qte);
+      var dotEnd = qteX - qteW - 1.5;
+      if(dotEnd > dotStart){
+        // Trait pointillé léger pour faciliter la lecture
+        var dotY = yStart + 2.5;
+        doc.setLineDashPattern([0.4, 0.8], 0);
+        setDraw(COLOR_BORDER);
+        doc.line(dotStart, dotY, dotEnd, dotY);
+        doc.setLineDashPattern([], 0);
+      }
+      yStart += lh;
+      // Lignes wrap supplémentaires
+      if(nameLines.length > 1){
+        setColor(COLOR_TEXT);
+        for(var k = 1; k < nameLines.length; k++){
+          yStart = ensureSpace(yStart, lh);
+          doc.text(nameLines[k], marginX + 5, yStart + 3);
+          yStart += lh;
+        }
+      }
+    }
+    return yStart + 3;
+  }
+  y = drawIngredients(y);
+
+  // ── EMBALLAGES (optionnel) ──
+  function drawEmballages(yStart){
+    var embs = (p.emballages || []).filter(function(r){ return (r.description||'').trim().length > 0; });
+    if(embs.length === 0) return yStart;
+    yStart = drawSectionTitle(yStart, 'EMBALLAGES');
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    var lh = 6;
+    for(var i = 0; i < embs.length; i++){
+      yStart = ensureSpace(yStart, lh);
+      var q = parseFloat(embs[i].qte) || 0;
+      var qStr = q > 0 ? (_fmtQty(q * mult) + ' × ') : '';
+      var line = qStr + (embs[i].description || '');
+      setFill(COLOR_BLUE);
+      doc.circle(marginX + 2, yStart + 2.2, 0.9, 'F');
+      setColor(COLOR_TEXT);
+      var wraps = doc.splitTextToSize(line, contentW - 8);
+      doc.text(wraps[0], marginX + 5, yStart + 3);
+      yStart += lh;
+      for(var k = 1; k < wraps.length; k++){
+        yStart = ensureSpace(yStart, lh);
+        doc.text(wraps[k], marginX + 5, yStart + 3);
+        yStart += lh;
+      }
+    }
+    return yStart + 3;
+  }
+  y = drawEmballages(y);
+
+  // ── HELPER générique : section texte libre ──
+  function drawTextSection(yStart, title, content){
+    var txt = (content || '').toString().trim();
+    if(txt.length === 0) return yStart;
+    yStart = drawSectionTitle(yStart, title);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    setColor(COLOR_TEXT);
+    // Préserver les sauts de ligne saisis par l'utilisateur
+    var lines = txt.split(/\r?\n/);
+    var lh = 5.5;
+    for(var i = 0; i < lines.length; i++){
+      var rawLine = lines[i];
+      if(rawLine.trim().length === 0){
+        yStart += lh * 0.6;
+        continue;
+      }
+      var wraps = doc.splitTextToSize(rawLine, contentW - 4);
+      for(var k = 0; k < wraps.length; k++){
+        yStart = ensureSpace(yStart, lh);
+        doc.text(wraps[k], marginX + 2, yStart + 3);
+        yStart += lh;
+      }
+    }
+    return yStart + 3;
+  }
+
+  // ── PRÉPARATION ──
+  y = drawTextSection(y, 'PRÉPARATION', p.preparation);
+
+  // ── CONSERVATION ──
+  y = drawTextSection(y, 'CONSERVATION / DLC', p.conservation);
+
+  // ── NOTES INTERNES ──
+  y = drawTextSection(y, 'NOTES / REMARQUES', p.notes);
+
+  // ── FOOTER (sur toutes les pages) ──
+  function drawFooter(){
+    var pageCount = doc.internal.getNumberOfPages();
+    for(var pIdx = 1; pIdx <= pageCount; pIdx++){
+      doc.setPage(pIdx);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      setColor(COLOR_MUTED);
+      var footY = pageH - 7;
+      var leftTxt = (profil.nom ? profil.nom + ' · ' : '') + 'Fiche produit interne · Alteore.com';
+      doc.text(leftTxt, marginX, footY);
+      if(pageCount > 1){
+        doc.text('Page ' + pIdx + '/' + pageCount, pageW - marginX, footY, { align:'right' });
+      }
+    }
+  }
+  drawFooter();
+
+  // ── SAVE ──
+  var filename = 'fiche_' + _slugify(p.nom) + '.pdf';
+  doc.save(filename);
+};
+
 // ═══ LOAD CATALOGUE + FOURNISSEURS ═══
 async function loadCatalogue(){
   if(!window._uid){setTimeout(loadCatalogue,500);return;}
@@ -1688,7 +2266,11 @@ function coutRevientApp(){
     manualCategories:[],showNewCatInput:false,newCatName:'',
     newProd:{nom:'',categorie:'',type:'recette'},
     newFourn:{nom:'',adresse:'',siret:'',telephone:'',email:'',notes:''},
-    sections:{prod:true,ingr:true,mo:false,cf:false,emb:false,liv:false,pv:true,notes:false,alg:false},
+    sections:{prod:true,ingr:true,mo:false,cf:false,emb:false,liv:false,pv:true,prep:false,cons:false,notes:false,alg:false},
+    // ── State export PDF ──
+    showExportPDFModal:false,
+    exportMultiplicateur:'1',
+    exportPDFInProgress:false,
     fournSections:{info:true,articles:true},
     allergenList:[
       {id:'gluten',icon:'🌾',label:'Gluten'},
@@ -2035,6 +2617,93 @@ function coutRevientApp(){
         await window._setDoc(window._doc(window._db,'produits',window._uid,'items',id),JSON.parse(JSON.stringify(copie)));
         showToast('✅ Produit dupliqué','success');
       }catch(e){console.error('Duplicate product error:',e);showToast('Erreur sauvegarde','warning');}}
+    },
+
+    // ═══════════════════════════════════════════════════════════════
+    // PHOTO PRODUIT (utilisée dans la fiche PDF)
+    // ═══════════════════════════════════════════════════════════════
+    // Le fichier est redimensionné côté client à max 800×800 en JPEG q=0.85
+    // pour rester sous la limite de 1 Mo / doc Firestore.
+    // Stocké en data URL dans `p.photo`. L'auto-save Firestore (watcher
+    // sur `products`, debounce 1.5 s) persiste tout seul.
+    async handlePhotoUpload(event){
+      var file = event.target.files && event.target.files[0];
+      if(!file) return;
+      // Reset l'input pour pouvoir re-sélectionner la même image plus tard
+      event.target.value = '';
+      if(!/^image\/(jpeg|png|webp)$/.test(file.type)){
+        showToast('Format non supporté (JPG, PNG, WebP)','warning');
+        return;
+      }
+      if(file.size > 8 * 1024 * 1024){
+        showToast('Image trop lourde (max 8 Mo)','warning');
+        return;
+      }
+      try{
+        var dataUrl = await _resizeImageFile(file, 800, 0.85);
+        // Vérifie que le résultat ne dépasse pas ~700 Ko (data URL = ~33 % plus
+        // gros que les bytes, et un doc Firestore est plafonné à 1 Mo)
+        if(dataUrl.length > 950000){
+          // 2e passe plus agressive si trop gros
+          dataUrl = await _resizeImageFile(file, 600, 0.75);
+        }
+        this.p.photo = dataUrl;
+        // Forcer la réactivité (Alpine watch deep ok mais on s'assure)
+        this.products = Object.assign({}, this.products);
+        showToast('📸 Photo ajoutée','success');
+      }catch(e){
+        console.error('Photo upload error:', e);
+        showToast('Impossible de charger la photo','err');
+      }
+    },
+    removePhoto(){
+      if(!this.p) return;
+      if(!confirm('Retirer la photo de ce produit ?')) return;
+      delete this.p.photo;
+      this.products = Object.assign({}, this.products);
+      showToast('Photo retirée','ok');
+    },
+
+    // ═══════════════════════════════════════════════════════════════
+    // EXPORT FICHE PDF
+    // ═══════════════════════════════════════════════════════════════
+    openExportPDFModal(){
+      if(!this.p) return;
+      this.exportMultiplicateur = '1';
+      this.showExportPDFModal = true;
+    },
+    exportFichePourLabel(){
+      // Calcule "Pour X portions" en temps réel selon le multiplicateur
+      if(!this.p) return '—';
+      var mult = parseFloat((this.exportMultiplicateur || '1').toString().replace(',','.'));
+      if(!isFinite(mult) || mult <= 0) mult = 1;
+      var qte = parseFloat(this.p.quantiteProduites) || 1;
+      var u = this.p.uniteProduction || 'unité';
+      var total = qte * mult;
+      // Affichage propre : entier si possible, sinon 2 décimales
+      var totalStr = (Math.abs(total - Math.round(total)) < 0.01)
+        ? String(Math.round(total))
+        : total.toFixed(2).replace(/\.?0+$/,'');
+      return totalStr + ' ' + u + (total > 1 && !u.endsWith('s') ? 's' : '');
+    },
+    async confirmExportPDF(){
+      if(!this.p || this.exportPDFInProgress) return;
+      var mult = parseFloat((this.exportMultiplicateur || '1').toString().replace(',','.'));
+      if(!isFinite(mult) || mult <= 0){
+        showToast('Multiplicateur invalide','warning');
+        return;
+      }
+      this.exportPDFInProgress = true;
+      try{
+        await window.generateFichePDF(this.p, mult, this.allergenList);
+        this.showExportPDFModal = false;
+        showToast('📄 Fiche PDF générée','success');
+      }catch(e){
+        console.error('Export PDF error:', e);
+        showToast('Erreur génération PDF : '+(e.message||'inconnue'),'err');
+      }finally{
+        this.exportPDFInProgress = false;
+      }
     },
 
     get importMatchedCount(){return this.importMatchedLines.filter(function(l){return !l.ignore&&l.matchedArticle;}).length;},
