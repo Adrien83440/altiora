@@ -25,10 +25,13 @@ const FS_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT
 const ADMIN_EMAIL = 'contact@adrienemily.com';
 
 // Tarifs (utilisés pour le MRR estimé)
+// - monthly     : prix mensuel HT du plan en mensuel
+// - yearly      : prix mensuel HT lissé sur 12 mois si le client a pris l'annuel
+// - yearlyTotal : prix annuel HT réellement facturé (sortie cash unique)
 const PLAN_PRICING = {
-  pro:    { monthly: 69,  yearly: 660  / 12 },
-  max:    { monthly: 99,  yearly: 948  / 12 },
-  master: { monthly: 169, yearly: 1620 / 12 },
+  pro:    { monthly: 69,  yearly: 660  / 12, yearlyTotal: 660  },
+  max:    { monthly: 99,  yearly: 948  / 12, yearlyTotal: 948  },
+  master: { monthly: 169, yearly: 1620 / 12, yearlyTotal: 1620 },
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -328,26 +331,37 @@ async function aggregateStats(token) {
 
   // ── 9bis. Liste détaillée des clients payants (pour la section dédiée) ──
   // On collecte les vrais abonnés Stripe avec leur info de contribution MRR
+  // + signaux d'incohérence (billing manquant) pour qu'Adrien voie tout de suite
+  // les utilisateurs qui auraient besoin du backfill /api/admin-sync-billing.
   const payingCustomers = [];
+  let billingMissingCount = 0;
   for (const u of users) {
     const p = u.plan;
     if (!PLAN_PRICING[p]) continue;
     const status = u.subscriptionStatus || '';
     const hasActiveSub = !!u.stripeSubscriptionId && (status === 'active' || status === 'trialing');
     if (!hasActiveSub) continue;
-    const billing = (u.billing || u.pendingBilling || '').toLowerCase();
-    const isYearly = billing === 'yearly' || billing === 'annual' || billing === 'annuel';
+    const billingRaw = (u.billing || u.pendingBilling || '').toLowerCase();
+    const isYearly = billingRaw === 'yearly' || billingRaw === 'annual' || billingRaw === 'annuel';
+    const billingMissing = !billingRaw;
+    if (billingMissing) billingMissingCount++;
+
     const monthlyContribution = isYearly ? PLAN_PRICING[p].yearly : PLAN_PRICING[p].monthly;
+    const annualBilled        = isYearly ? PLAN_PRICING[p].yearlyTotal : PLAN_PRICING[p].monthly * 12;
+
     payingCustomers.push({
       uid: u.uid,
       email: u.email || '?',
       name: u.name || '',
       plan: p,
       billing: isYearly ? 'yearly' : 'monthly',
+      billingMissing,                    // ⚠️ true si `billing` absent du doc Firestore
       monthlyContribution: Math.round(monthlyContribution),
+      annualBilled: Math.round(annualBilled),
       subscriptionStatus: status,
       stripeCustomerId: u.stripeCustomerId || '',
       stripeSubscriptionId: u.stripeSubscriptionId || '',
+      stripePriceId: u.stripePriceId || '',
       createdAt: u.createdAt || '',
       agentEnabled: u.agentEnabled === true
     });
@@ -471,7 +485,8 @@ async function aggregateStats(token) {
     dau, wau, mau,
     trackedLogins,                  // users avec au moins 1 connexion trackée
     trialConversionRate,
-    countMonthly, countYearly
+    countMonthly, countYearly,
+    billingMissingCount             // ⚠️ nb de payants sans `billing` posé (à backfill)
   };
 
   return {

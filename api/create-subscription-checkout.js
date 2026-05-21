@@ -166,6 +166,7 @@ module.exports = async (req, res) => {
       // Copier les metadata sur la subscription (accessibles dans invoice.payment_succeeded)
       ...(uid ? { 'subscription_data[metadata][uid]': uid } : {}),
       'subscription_data[metadata][plan]': plan,
+      'subscription_data[metadata][billing]': billing || 'monthly',
       ...(referralCode ? { 'subscription_data[metadata][referralCode]': referralCode.toUpperCase().trim() } : {}),
     };
 

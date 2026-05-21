@@ -20,6 +20,19 @@ const PRICE_TO_PLAN = {
   'price_1TGEOcRZYcAavmfvrOqqrjQu': 'master',  // Master annuel
 };
 
+// ── Déterminer la fréquence de facturation depuis le priceId Stripe ──
+// Source de vérité froide : Adrien peut auditer dans le code quel priceId
+// correspond à quel rythme. Le fallback `recurring.interval` plus bas
+// nous protège si un nouveau priceId est ajouté sans MAJ de cette table.
+const PRICE_TO_BILLING = {
+  'price_1TGEKdRZYcAavmfvmuICL8yc': 'monthly',  // Pro mensuel
+  'price_1TGEMARZYcAavmfvvRkZnSap': 'yearly',   // Pro annuel
+  'price_1TGENeRZYcAavmfvU4Oxr4cZ': 'monthly',  // Max mensuel
+  'price_1TGENeRZYcAavmfvm5Mao8Yi': 'yearly',   // Max annuel
+  'price_1TGEOERZYcAavmfvY16T0pCS': 'monthly',  // Master mensuel
+  'price_1TGEOcRZYcAavmfvrOqqrjQu': 'yearly',   // Master annuel
+};
+
 // ── Price IDs de l'addon Léa (via env vars pour rester flexibles) ──
 // STRIPE_PRICE_ADDON_LEA_MONTHLY = price_1TNpWsRZYcAavmfvtTd2vcqy
 // STRIPE_PRICE_ADDON_LEA_YEARLY  = price_1TNpWsRZYcAavmfvbbHtMCFX
@@ -32,6 +45,9 @@ function getAgentPriceIds() {
 
 // ── Analyser les items d'une subscription (plan principal + addon Léa) ──
 // Une sub peut contenir 1 item (plan seul) ou 2 items (plan + addon Léa).
+// Renvoie aussi le priceId du plan et la fréquence de facturation (monthly/yearly),
+// avec un fallback double-vérification via `price.recurring.interval` (Stripe)
+// au cas où PRICE_TO_BILLING n'est pas à jour.
 function analyzeSubscriptionItems(subscription) {
   const items = subscription?.items?.data || [];
   const agentPriceIds = getAgentPriceIds();
@@ -48,9 +64,27 @@ function analyzeSubscriptionItems(subscription) {
     }
   }
 
+  // ── Détermination du `billing` du plan principal ──
+  // Priorité 1 : mapping PRICE_TO_BILLING (source de vérité explicite)
+  // Priorité 2 : `price.recurring.interval` retourné par Stripe (auto-correctif)
+  let billing = '';
+  let planPriceId = '';
+  if (planItem) {
+    planPriceId = planItem.price?.id || '';
+    if (PRICE_TO_BILLING[planPriceId]) {
+      billing = PRICE_TO_BILLING[planPriceId];
+    } else {
+      const interval = planItem.price?.recurring?.interval;
+      if (interval === 'year')       billing = 'yearly';
+      else if (interval === 'month') billing = 'monthly';
+    }
+  }
+
   return {
     plan: planItem ? PRICE_TO_PLAN[planItem.price.id] : null,
     planSubscriptionItemId: planItem?.id || '',
+    planPriceId: planPriceId,
+    billing: billing,
     agentEnabled: !!agentItem,
     agentSubscriptionItemId: agentItem?.id || '',
     agentPriceId: agentItem?.price?.id || '',
@@ -386,6 +420,7 @@ module.exports = async (req, res) => {
         let trialEnd = null;
         let subStatus = 'trialing';
         let agentFields = {};
+        let billingFields = {};
         if (subscriptionId && stripeKey) {
           const subRes = await fetch(`https://api.stripe.com/v1/subscriptions/${subscriptionId}`, {
             headers: { Authorization: 'Bearer ' + stripeKey }
@@ -405,6 +440,18 @@ module.exports = async (req, res) => {
               agentDegradedMode:         false,
             };
           }
+
+          // ── billing (monthly/yearly) + stripePriceId ──
+          // Source de vérité : on dérive du priceId de Stripe.
+          // Fallback metadata session si jamais l'analyse échoue.
+          if (analysis.billing) {
+            billingFields.billing = analysis.billing;
+          } else if (session.metadata?.billing) {
+            billingFields.billing = session.metadata.billing;
+          }
+          if (analysis.planPriceId) {
+            billingFields.stripePriceId = analysis.planPriceId;
+          }
         }
 
         // Si pas de trial (abonnement direct) → plan actif immédiatement
@@ -419,10 +466,11 @@ module.exports = async (req, res) => {
           ...(isTrial && trialEnd ? { trialEnd } : {}),
           ...(isTrial ? { pendingPlan: plan } : { pendingPlan: '' }),
           subscriptionStatus:   subStatus,
+          ...billingFields,
           ...agentFields,
         });
 
-        console.log(`[Webhook] checkout.session.completed uid=${uid} plan=${activePlan} status=${subStatus}`);
+        console.log(`[Webhook] checkout.session.completed uid=${uid} plan=${activePlan} status=${subStatus} billing=${billingFields.billing || '?'}`);
 
         // Envoyer l'email de bienvenue adapté (trial ou payé)
         if (!isTrial) {
@@ -523,11 +571,13 @@ module.exports = async (req, res) => {
         plan:                 newPlan,
         stripeSubscriptionId: sub.id,
         subscriptionStatus:   sub.status,
+        ...(analysis.billing ? { billing: analysis.billing } : {}),
+        ...(analysis.planPriceId ? { stripePriceId: analysis.planPriceId } : {}),
         ...(newPlan !== 'trial' ? { pendingPlan: '' } : {}),
         ...agentFields,
       });
 
-      console.log(`[Webhook] Subscription updated uid=${uid} plan=${newPlan} status=${sub.status} agent=${nowAgentEnabled}`);
+      console.log(`[Webhook] Subscription updated uid=${uid} plan=${newPlan} status=${sub.status} billing=${analysis.billing || '?'} agent=${nowAgentEnabled}`);
     }
 
     // ════════════════════════════════════════════
@@ -597,6 +647,7 @@ module.exports = async (req, res) => {
       // Récupérer la subscription pour connaître le plan
       let plan = null;
       let agentFields = {};
+      let billingFields = {};
       if (invoiceSubscriptionId && stripeKey) {
         const subRes = await fetch(`https://api.stripe.com/v1/subscriptions/${invoiceSubscriptionId}`, {
           headers: { Authorization: 'Bearer ' + stripeKey }
@@ -605,6 +656,10 @@ module.exports = async (req, res) => {
         const analysis = analyzeSubscriptionItems(sub);
         plan = analysis.plan;
         if (!plan) console.warn(`[Webhook] getPlanFromSubscription returned null. priceId=${sub?.items?.data?.[0]?.price?.id}, sub.plan=${sub?.plan?.id}`);
+
+        // ── billing + stripePriceId : on les pose à chaque vraie facture ──
+        if (analysis.billing)     billingFields.billing       = analysis.billing;
+        if (analysis.planPriceId) billingFields.stripePriceId = analysis.planPriceId;
 
         // Gestion addon Léa : on synchronise à chaque paiement
         const prevUserDoc = await fsGet(`users/${uid}`);
@@ -631,9 +686,10 @@ module.exports = async (req, res) => {
           subscriptionStatus: 'active',
           lastPayment:        new Date().toISOString().split('T')[0],
           pendingPlan:        '',
+          ...billingFields,
           ...agentFields,
         });
-        console.log(`[Webhook] Paiement OK uid=${uid} plan=${plan} montant=${invoice.amount_paid} agent=${!!agentFields.agentEnabled}`);
+        console.log(`[Webhook] Paiement OK uid=${uid} plan=${plan} billing=${billingFields.billing || '?'} montant=${invoice.amount_paid} agent=${!!agentFields.agentEnabled}`);
 
         // ── PARRAINAGE : récompenser le parrain à la 1ère vraie facture du filleul ──
         // On ne récompense que sur billing_reason = 'subscription_create' ou 'subscription_cycle'
