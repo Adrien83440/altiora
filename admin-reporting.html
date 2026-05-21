@@ -120,6 +120,7 @@
     <div class="topbar-actions">
       <span class="refresh-info"><span class="pulse"></span><span id="last-refresh">—</span></span>
       <button onclick="loadStats()">🔄 Refresh</button>
+      <button onclick="syncBilling(false)" title="Synchronise les champs billing/stripePriceId depuis Stripe pour tous les abonnés actifs">🔧 Sync billing</button>
       <button onclick="adminLogout()">Déconnexion</button>
     </div>
   </div>
@@ -276,6 +277,71 @@ async function loadStats() {
   }
 }
 
+// ─── Backfill billing/stripePriceId depuis Stripe ───────────────
+// Appel /api/admin-sync-billing :
+//   • dryRun=true  → renvoie le diff sans rien écrire
+//   • dryRun=false → applique les modifs en Firestore
+// Workflow standard : 1) clic → dry run automatique → afficher le résumé →
+//                     2) demander confirmation → relancer en mode write
+async function syncBilling(skipConfirm) {
+  if (!window._adminUser) return;
+  try {
+    const idToken = await window._adminUser.getIdToken();
+
+    // Étape 1 : dry run pour estimer l'impact
+    const dryRes = await fetch('/api/admin-sync-billing', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + idToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dryRun: true })
+    });
+    if (!dryRes.ok) {
+      alert('❌ Sync billing échec (dry run) : ' + (await dryRes.text()));
+      return;
+    }
+    const dry = await dryRes.json();
+    const toSync = dry.summary?.synced || 0;
+    const aligned = dry.summary?.aligned || 0;
+    const errors = dry.summary?.errors || 0;
+    const skipped = dry.summary?.skipped || 0;
+
+    if (toSync === 0) {
+      alert(`✅ Tout est déjà aligné — ${aligned} abonné(s) cohérent(s), ${skipped} ignoré(s), ${errors} erreur(s).`);
+      return;
+    }
+
+    // Construire un résumé lisible des candidats à la modif
+    const lines = (dry.synced || []).slice(0, 20).map(function (e) {
+      return '• ' + e.email + ' (' + e.plan + ') : '
+        + (e.before.billing || '∅') + ' → ' + e.after.billing
+        + (e.before.stripePriceId !== e.after.stripePriceId ? ' / priceId ' + (e.before.stripePriceId || '∅') + ' → ' + e.after.stripePriceId : '');
+    }).join('\n');
+
+    const msg = `🔧 Synchronisation billing/stripePriceId\n\n`
+      + `${toSync} abonné(s) à mettre à jour, ${aligned} déjà cohérent(s).\n\n`
+      + lines + (toSync > 20 ? `\n… +${toSync - 20} autres` : '')
+      + `\n\nAppliquer ces modifications ?`;
+
+    if (!confirm(msg)) return;
+
+    // Étape 2 : write
+    const wRes = await fetch('/api/admin-sync-billing', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + idToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ dryRun: false })
+    });
+    if (!wRes.ok) {
+      alert('❌ Sync billing échec : ' + (await wRes.text()));
+      return;
+    }
+    const w = await wRes.json();
+    alert(`✅ Sync OK\n\nSynchronisés : ${w.summary?.synced || 0}\nDéjà alignés : ${w.summary?.aligned || 0}\nIgnorés : ${w.summary?.skipped || 0}\nErreurs : ${w.summary?.errors || 0}`);
+    // Recharger les stats pour voir les nouveaux montants
+    loadStats();
+  } catch (e) {
+    alert('❌ Erreur : ' + (e.message || 'Inconnue'));
+  }
+}
+
 function renderStats(s) {
   const sum = s.summary || {};
   const html = `
@@ -316,6 +382,12 @@ function renderStats(s) {
     <!-- Clients payants Stripe (NOUVELLE SECTION) -->
     <div class="section">
       <h2>💎 Clients payants Stripe <span class="count">${(s.payingCustomers || []).length}</span></h2>
+      ${(sum.billingMissingCount || 0) > 0 ? `
+        <div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#92400e;line-height:1.5">
+          ⚠️ <strong>${sum.billingMissingCount}</strong> abonné(s) sans champ <code>billing</code> dans Firestore — la fréquence (mensuel/annuel) est <strong>déduite par défaut comme mensuel</strong>, ce qui peut fausser le MRR.
+          Clique sur <strong>🔧 Sync billing</strong> en haut de page pour aligner Firestore sur Stripe (lit chaque subscription et déduit la bonne fréquence).
+        </div>
+      ` : ''}
       ${renderPayingCustomersTable(s.payingCustomers || [])}
     </div>
 
@@ -578,6 +650,7 @@ function renderPayingCustomersTable(rows) {
         <th>Plan</th>
         <th>Facturation</th>
         <th>Contribution MRR</th>
+        <th>Montant annuel</th>
         <th>Status</th>
         <th>Inscrit</th>
         <th>Stripe</th>
@@ -588,17 +661,25 @@ function renderPayingCustomersTable(rows) {
             ? 'https://dashboard.stripe.com/customers/' + encodeURIComponent(r.stripeCustomerId)
             : '';
           const billingLabel = r.billing === 'yearly' ? '📅 Annuel' : '🔁 Mensuel';
+          // Badge orange si billing manquant dans Firestore — invite à lancer le sync
+          const billingWarn = r.billingMissing
+            ? ' <span title="billing absent dans Firestore — lance Sync billing" style="display:inline-block;background:#fef3c7;color:#92400e;font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px;margin-left:4px;border:1px solid #fbbf24">⚠ déduit</span>'
+            : '';
           const statusBadge = r.subscriptionStatus === 'active' ? 'ok'
                             : r.subscriptionStatus === 'trialing' ? 'warn'
                             : 'urgent';
+          const annualLabel = r.billing === 'yearly'
+            ? `<strong>${r.annualBilled}€</strong><span style="font-size:10px;color:#94a3b8">/an (facturé)</span>`
+            : `<span style="font-size:11px;color:#94a3b8">${r.annualBilled}€/an (lissé)</span>`;
           return `<tr>
             <td>
               <div style="font-weight:700">${escapeHtml(r.email)}</div>
               <div style="font-size:10px;color:#94a3b8">${escapeHtml(r.name || '—')}${r.agentEnabled ? ' · 🤖 Léa' : ''}</div>
             </td>
             <td>${planBadge(r.plan)}</td>
-            <td><span style="font-size:11px;color:#475569">${billingLabel}</span></td>
+            <td><span style="font-size:11px;color:#475569">${billingLabel}</span>${billingWarn}</td>
             <td><strong style="color:#10b981">${r.monthlyContribution}€</strong>/mois</td>
+            <td style="color:#475569">${annualLabel}</td>
             <td><span class="badge ${statusBadge}">${escapeHtml(r.subscriptionStatus || '?')}</span></td>
             <td style="font-size:11px;color:#64748b">${fmtDateShort(r.createdAt)}</td>
             <td>${stripeUrl
