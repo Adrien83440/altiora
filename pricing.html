@@ -394,6 +394,17 @@ async function startCheckout(plan, skipTrial=false, promoCode='', referralCode='
     if (user) { uid = user.uid; email = user.email; idToken = await user.getIdToken(); }
   } catch(e) {}
 
+  // GATE : pas de compte connecté → on impose l'inscription/connexion AVANT le paiement.
+  // (sinon paiement Stripe orphelin : aucun uid en metadata → le webhook ne peut rattacher
+  //  le plan à aucun compte Alteore, et dashboard.html rebondit vers index.html.)
+  if (!uid) {
+    let _q = 'then=pricing&plan=' + encodeURIComponent(plan);
+    if (promoCode && promoCode.trim())       _q += '&promo=' + encodeURIComponent(promoCode.trim().toUpperCase());
+    if (referralCode && referralCode.trim()) _q += '&ref='   + encodeURIComponent(referralCode.trim().toUpperCase());
+    window.location.href = 'login.html?' + _q;
+    return;
+  }
+
   try {
     const body = { priceId, plan, billing: isAnnual ? 'annual' : 'monthly', skipTrial };
     if (uid)                body.uid = uid;
@@ -557,6 +568,24 @@ let _pendingSkip = false;
     window._autoRef = ref.toUpperCase().trim();
   }
 })();
+
+// Pré-remplir plan + code promo depuis l'URL (?plan=max&promo=ELITE12)
+// → ouvre directement la modale du bon plan, code pré-rempli.
+// Utilisé par le parcours bienvenue (code Stripe détecté) et le retour de login?then=pricing.
+window.addEventListener('load', function() {
+  try {
+    var _p     = new URLSearchParams(location.search);
+    var _plan  = _p.get('plan');
+    var _promo = _p.get('promo');
+    if (_plan && PRICES[_plan]) {
+      startCheckoutWithModal(_plan);
+      if (_promo) {
+        var _mp = document.getElementById('modalPromoInput');
+        if (_mp) _mp.value = _promo.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      }
+    }
+  } catch (e) {}
+});
 
 function startCheckoutWithModal(plan, skipTrial=false) {
   _pendingPlan = plan;

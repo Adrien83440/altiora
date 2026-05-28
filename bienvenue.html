@@ -217,6 +217,12 @@ select.field-input{cursor:pointer;-webkit-appearance:none;background:white url("
       <button class="btn btn-outline" onclick="goStep(1)">← Retour</button>
       <button class="btn btn-primary" onclick="goStep(3)">Continuer →</button>
     </div>
+
+    <div style="text-align:center;margin-top:14px">
+      <a onclick="goToPaidPlans()" style="cursor:pointer;color:#1a3dce;font-weight:600;font-size:13px;text-decoration:none">
+        Je préfère souscrire un plan payant maintenant →
+      </a>
+    </div>
   </div>
 
   <!-- ═══ STEP 3 : PROFIL ENTREPRISE ═══ -->
@@ -355,6 +361,24 @@ select.field-input{cursor:pointer;-webkit-appearance:none;background:white url("
 <script>
 // ── STEPPER ──
 var _currentStep = 1;
+
+// Code Stripe détecté à l'étape 1 (mémorisé pour le routage vers pricing)
+window._stripePromo = window._stripePromo || null;
+
+// Aller souscrire un plan payant depuis bienvenue (déjà connecté → checkout rattaché au compte,
+// donc PAS de paiement orphelin). Embarque le code promo + le plan ciblé s'ils ont été détectés.
+function goToPaidPlans() {
+  var params = [];
+  var sp = window._stripePromo;
+  if (sp && sp.plan) params.push('plan='  + encodeURIComponent(sp.plan));
+  if (sp && sp.code) params.push('promo=' + encodeURIComponent(sp.code));
+  window.location.href = 'pricing.html' + (params.length ? '?' + params.join('&') : '');
+}
+window.goToPaidPlans = goToPaidPlans;
+
+// Bouton "Souscrire maintenant" affiché après la saisie d'un code Stripe valide à l'étape 1.
+function goToPaidWithPromo() { goToPaidPlans(); }
+window.goToPaidWithPromo = goToPaidWithPromo;
 
 function goStep(n) {
   _currentStep = n;
@@ -502,8 +526,15 @@ async function activatePromo() {
         });
         var stripeData = await stripeCheck.json();
         if (stripeData.valid) {
+          // Code Stripe valide : il ne s'active PAS ici (un code Stripe = paiement obligatoire),
+          // on le mémorise et on propose d'aller souscrire le plan ciblé, code déjà appliqué.
+          window._stripePromo = { code: input.value.trim().toUpperCase(), plan: stripeData.plan || null };
+          var _planTxt = stripeData.plan
+            ? (' sur le plan <strong>' + stripeData.plan.charAt(0).toUpperCase() + stripeData.plan.slice(1) + '</strong>')
+            : '';
           input.style.borderColor = '#10b981';
-          statusEl.innerHTML = '✅ <strong>' + stripeData.label + '</strong> — ce code sera appliqué lors de la souscription à un plan.';
+          statusEl.innerHTML = '✅ <strong>' + stripeData.label + '</strong>' + _planTxt
+            + '.<br><button class="btn btn-primary" style="margin-top:12px" onclick="goToPaidWithPromo()">Souscrire maintenant →</button>';
           statusEl.style.color = '#10b981';
           btn.disabled = false;
           btn.textContent = 'Activer';
