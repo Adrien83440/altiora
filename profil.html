@@ -1369,7 +1369,7 @@ const ANNUAL_TOTAL = {pro:662, max:950, master:1622};
 let _isAnnual = false;
 let _currentPlan = 'trial';
 
-function loadPlanUI(plan) {
+function loadPlanUI(plan, subStatus, subId) {
   _currentPlan = plan || 'trial';
   const p = PLANS[_currentPlan] || PLANS.trial;
   document.getElementById('cur-plan-icon').textContent = p.icon;
@@ -1393,6 +1393,11 @@ function loadPlanUI(plan) {
   // Afficher uniquement les plans supérieurs au plan actuel
   const PLAN_RANK = { free: 0, trial: 0, pro: 1, max: 2, master: 3, past_due: 0, dev: 99 };
   const currentRank = PLAN_RANK[_currentPlan] ?? 0;
+  // Un abonnement Stripe RÉEL est en cours dès que subId existe ET que le statut
+  // est payant (active) ou en essai carte-en-main (trialing). Sinon (trial
+  // d'inscription, promo/code offert, expiré, free…) aucun paiement n'a eu lieu
+  // → on autorise la souscription payante de N'IMPORTE quel plan.
+  const hasLiveSub = !!subId && (subStatus === 'active' || subStatus === 'trialing');
 
   ['pro','max','master'].forEach(pl => {
     const card = document.getElementById('card-' + pl);
@@ -1400,7 +1405,15 @@ function loadPlanUI(plan) {
     if (!card || !cta) return;
     const plRank = PLAN_RANK[pl];
 
-    if (_currentPlan === 'dev' || plRank > currentRank) {
+    if (!hasLiveSub) {
+      // Aucun paiement Stripe en cours → tous les plans sont proposables.
+      card.style.display = '';
+      card.classList.remove('current');
+      cta.className = 'plan-cta plan-cta-upgrade';
+      cta.textContent = 'S\'abonner maintenant';
+      cta.disabled = false;
+      cta.onclick = function(){ startUpgrade(pl, true); };
+    } else if (_currentPlan === 'dev' || plRank > currentRank) {
       // Plan supérieur → afficher avec bouton S'abonner
       card.style.display = '';
       card.classList.remove('current');
@@ -1422,10 +1435,10 @@ function loadPlanUI(plan) {
   });
   // Bouton portail Stripe
   const portalBtn = document.getElementById('portalBtn');
-  if (portalBtn) portalBtn.style.display = (_currentPlan !== 'trial' && _currentPlan !== 'dev') ? 'inline-flex' : 'none';
+  if (portalBtn) portalBtn.style.display = hasLiveSub ? 'inline-flex' : 'none';
   // Carte désabonnement (uniquement plans payants actifs)
   const unsubCard = document.getElementById('unsub-card');
-  if (unsubCard) unsubCard.style.display = (['pro','max','master'].includes(_currentPlan)) ? 'block' : 'none';
+  if (unsubCard) unsubCard.style.display = hasLiveSub ? 'block' : 'none';
   // Charger les vraies factures selon le plan
   renderFactures(_currentPlan);
 }
@@ -2078,7 +2091,8 @@ onAuthStateChanged(auth, async function(user) {
       badge.style.opacity = '1';
     }
     if (uplan) uplan.textContent = PLAN_NAMES[plan] || plan;
-    if (typeof window.loadPlanUI === 'function') window.loadPlanUI(plan);
+    const _ud0 = planSnap.exists() ? planSnap.data() : {};
+    if (typeof window.loadPlanUI === 'function') window.loadPlanUI(plan, _ud0.subscriptionStatus, _ud0.stripeSubscriptionId);
 
     // ── Préférences de gestion (fiscalStart, viewMode) ──
     if (planSnap.exists()) {
