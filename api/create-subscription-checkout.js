@@ -31,6 +31,116 @@ async function verifyFirebaseToken(idToken) {
   return { uid: user.localId, email: user.email };
 }
 
+// ══════════════════════════════════════════════════════════════════
+// ÉLIGIBILITÉ ESSAI GRATUIT — décision SERVEUR (strict, anti-abus)
+//
+// Le flag `skipTrial` envoyé par le client ne peut que REFUSER l'essai,
+// jamais l'accorder. L'octroi des 15 jours est décidé ici, à partir de
+// l'historique réel du compte (Firebase + Stripe).
+//
+// On REFUSE l'essai si le compte a déjà bénéficié d'une période gratuite :
+//   - promoCode / promoActivatedAt / promoEnd → promo interne déjà utilisée (ex OFFRE2MOIS)
+//   - trialStart                              → essai Stripe déjà démarré par le passé
+//   - stripeSubscriptionId                    → abonnement Stripe déjà lié
+//   - trialEnd dans le passé                  → essai gratuit d'inscription déjà consommé
+//   - (strict) le customer Stripe possède déjà ≥1 subscription (status=all)
+//
+// NB : login.html pose `trialEnd` SANS `trialStart` à l'inscription. Un
+//      nouveau compte en cours d'essai gratuit (trialEnd futur, aucun autre
+//      signal) reste éligible — on ne casse pas le parcours légitime.
+//
+// Fail-closed : doc illisible ou identité non vérifiée → REFUS.
+// ══════════════════════════════════════════════════════════════════
+const FIREBASE_PROJECT = 'altiora-70599';
+
+// Lecture Firestore REST avec le token de l'utilisateur (rules : owner lit son users/{uid}).
+async function fsGet(path, idToken) {
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}`;
+  const r = await fetch(url, { headers: { Authorization: 'Bearer ' + idToken } });
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error('Firestore GET failed: ' + (await r.text()));
+  return r.json();
+}
+
+// Extraction d'un champ Firestore REST.
+function fv(doc, field) {
+  const f = doc?.fields?.[field];
+  if (!f) return null;
+  return f.stringValue ?? f.integerValue ?? f.booleanValue ?? f.timestampValue ?? null;
+}
+
+// Id customer Stripe à partir de l'email.
+async function findStripeCustomerId(stripeKey, email) {
+  try {
+    const r = await fetch(
+      'https://api.stripe.com/v1/customers?limit=1&email=' + encodeURIComponent(email),
+      { headers: { Authorization: 'Bearer ' + stripeKey } }
+    );
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d.data?.[0]?.id || null;
+  } catch (e) {
+    console.warn('[Checkout] findStripeCustomerId error:', e.message);
+    return null;
+  }
+}
+
+// True si le customer Stripe a déjà au moins une subscription (tous statuts).
+async function stripeCustomerHasSubscription(stripeKey, customerId) {
+  try {
+    const r = await fetch(
+      'https://api.stripe.com/v1/subscriptions?limit=1&status=all&customer=' + encodeURIComponent(customerId),
+      { headers: { Authorization: 'Bearer ' + stripeKey } }
+    );
+    if (!r.ok) return false;
+    const d = await r.json();
+    return Array.isArray(d.data) && d.data.length > 0;
+  } catch (e) {
+    console.warn('[Checkout] stripeCustomerHasSubscription error:', e.message);
+    return false;
+  }
+}
+
+// Décision d'éligibilité (strict, fail-closed).
+async function isTrialEligible(stripeKey, idToken, uid, email) {
+  if (!idToken || !uid) return false; // identité non vérifiable → refus
+
+  let userDoc;
+  try {
+    userDoc = await fsGet(`users/${uid}`, idToken);
+  } catch (e) {
+    console.warn('[Checkout] isTrialEligible: lecture user échouée → refus:', e.message);
+    return false;
+  }
+  if (!userDoc) return false;
+
+  const trialStart       = fv(userDoc, 'trialStart');
+  const promoCode        = fv(userDoc, 'promoCode');
+  const promoActivatedAt = fv(userDoc, 'promoActivatedAt');
+  const promoEnd         = fv(userDoc, 'promoEnd');
+  const subId            = fv(userDoc, 'stripeSubscriptionId');
+  const trialEnd         = fv(userDoc, 'trialEnd');
+  const custId           = fv(userDoc, 'stripeCustomerId');
+
+  let trialExpired = false;
+  if (trialEnd) {
+    const te = new Date(trialEnd);
+    trialExpired = !isNaN(te.getTime()) && te < new Date();
+  }
+
+  const firebaseClean =
+    !trialStart && !promoCode && !promoActivatedAt && !promoEnd && !subId && !trialExpired;
+  if (!firebaseClean) return false;
+
+  // Strict : vérification croisée Stripe.
+  const resolvedCust = custId || (email ? await findStripeCustomerId(stripeKey, email) : null);
+  if (resolvedCust && (await stripeCustomerHasSubscription(stripeKey, resolvedCust))) {
+    return false;
+  }
+
+  return true;
+}
+
 // ── Coupon filleul parrainage : -50% sur le 1er mois ──
 // Utilise un coupon Stripe fixe (id = PARRAINAGE_FILLEUL_50), le crée s'il n'existe pas
 const FILLEUL_COUPON_ID = 'PARRAINAGE_FILLEUL_50';
@@ -108,6 +218,16 @@ module.exports = async (req, res) => {
   const baseUrl = process.env.APP_URL || 'https://alteore.com';
 
   try {
+    // ── Décision SERVEUR d'éligibilité à l'essai gratuit ──
+    // skipTrial (client) ne peut que refuser ; l'octroi est tranché ici.
+    let grantTrial = false;
+    if (skipTrial !== true) {
+      grantTrial = await isTrialEligible(stripeKey, idToken, uid, email);
+      if (!grantTrial) {
+        console.log(`[Checkout] Essai refusé (compte non éligible) uid=${uid || '?'} email=${email || '?'}`);
+      }
+    }
+
     // ── Si un code promo est fourni, le résoudre en promotion_code ID Stripe ──
     let promoId = null;
     if (promoCode) {
@@ -153,7 +273,7 @@ module.exports = async (req, res) => {
       'line_items[0][price]': priceId,
       'line_items[0][quantity]': '1',
       'automatic_tax[enabled]': 'true',
-      ...(!skipTrial ? { 'subscription_data[trial_period_days]': '15' } : {}),
+      ...(grantTrial ? { 'subscription_data[trial_period_days]': '15' } : {}),
       'payment_method_collection': 'if_required',
       ...discountParams,
       success_url: baseUrl + '/dashboard.html?subscription=success&plan=' + plan,
