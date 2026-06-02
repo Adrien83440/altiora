@@ -669,8 +669,8 @@
 <!-- MODAL charges fixes -->
 <div class="modal-overlay" id="fixedModal">
   <div class="modal">
-    <h3>⚡ Appliquer les charges fixes</h3>
-    <p>Les <strong id="modal-nb-lignes">X</strong> lignes de charges fixes du mois en cours seront copiées sur la période choisie.</p>
+    <h3 id="fixedModalTitle">⚡ Appliquer les charges fixes</h3>
+    <p>Les <strong id="modal-nb-lignes">X</strong> lignes de <span id="fixedModalKindLbl">charges fixes</span> du mois en cours seront copiées sur la période choisie.</p>
 
     <div style="margin:14px 0">
       <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Période de duplication</div>
@@ -3920,6 +3920,7 @@ function renderCharges(rows, key) {
       '</td>' : '') +
       '<td style="white-space:nowrap;display:flex;gap:4px;align-items:center;padding:5px 7px;">' +
         (isFixe ? '<button class="btn btn-orange btn-sm" style="font-size:10px;padding:3px 8px;" onclick="duplicateFixeLine(' + i + ')">⚡ Année</button>' : '') +
+        (key==='chargesVar' ? '<button class="btn btn-orange btn-sm" style="font-size:10px;padding:3px 8px;" title="Reporter cette charge sur une période / l\'année" onclick="duplicateFixeLine(' + i + ',\'chargesVar\')">⚡ Année</button>' : '') +
         (!isFixe && key==='leasing' ? '<button class="btn btn-orange btn-sm" style="font-size:10px;padding:3px 8px" onclick="propagateLeasing(' + i + ')">⚡ Propager</button>' : '') +
         (key==='leasing'||key==='chargesVar'||key==='chargesFixe' ? '<button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 8px" title="Modifier le prix sur plusieurs mois" onclick="openChargeScopeUpdate(\'' + key + '\',' + i + ')">✏️</button>' : '') +
         (key==='chargesVar'||key==='chargesFixe' ? '<button class="btn btn-outline btn-sm" style="font-size:10px;padding:3px 8px" title="Ventiler la TVA (plusieurs taux)" onclick="openSplitCharge(\'' + key + '\',' + i + ')">✂️</button>' : '') +
@@ -5295,12 +5296,18 @@ function updateChargeTVARate(key, i, value) {
 }
 
 var _dupLineIdx = null;
-function duplicateFixeLine(i) {
+function duplicateFixeLine(i, key) {
+  key = key || 'chargesFixe';
   _dupLineIdx = i;
-  var ligne = _data.chargesFixe[i];
+  var ligne = _data[key][i];
   var label = (ligne.fournisseur||'') + (ligne.type?' – '+ligne.type:'');
   var el = document.getElementById('modal-nb-lignes');
   if(el) el.textContent = '"' + (label||'cette ligne') + '"';
+  // Adapter le wording de la modale selon le type de charge
+  var titleEl = document.getElementById('fixedModalTitle');
+  if(titleEl) titleEl.textContent = (key==='chargesVar') ? '⚡ Reporter la charge variable' : '⚡ Appliquer les charges fixes';
+  var kindEl = document.getElementById('fixedModalKindLbl');
+  if(kindEl) kindEl.textContent = (key==='chargesVar') ? 'charges variables' : 'charges fixes';
   var currentM = parseInt(document.getElementById('monthSelect').value);
   var fromSel = document.getElementById('modal-from');
   var toSel = document.getElementById('modal-to');
@@ -5317,6 +5324,7 @@ function duplicateFixeLine(i) {
   // Changer le bouton appliquer pour mode ligne unique
   document.getElementById('fixedModal').classList.add('show');
   document.getElementById('fixedModal').dataset.mode = 'line';
+  document.getElementById('fixedModal').dataset.targetKey = key;
 }
 
 function openFixedModal() {
@@ -5324,6 +5332,10 @@ function openFixedModal() {
   var nb = _data.chargesFixe.filter(function(c){return c.fournisseur||c.montantHT;}).length;
   var el = document.getElementById('modal-nb-lignes');
   if(el) el.textContent = nb + ' ligne' + (nb>1?'s':'');
+  var titleEl = document.getElementById('fixedModalTitle');
+  if(titleEl) titleEl.textContent = '⚡ Appliquer les charges fixes';
+  var kindEl = document.getElementById('fixedModalKindLbl');
+  if(kindEl) kindEl.textContent = 'charges fixes';
   var currentM = parseInt(document.getElementById('monthSelect').value);
   var fromSel = document.getElementById('modal-from');
   var toSel = document.getElementById('modal-to');
@@ -5338,6 +5350,7 @@ function openFixedModal() {
   if(yearNext) { yearNext.value = window._year+1; yearNext.textContent = window._year+1; }
   if(yearSel) yearSel.value = window._year;
   document.getElementById('fixedModal').dataset.mode = 'all';
+  document.getElementById('fixedModal').dataset.targetKey = 'chargesFixe';
   document.getElementById('fixedModal').classList.add('show');
 }
 
@@ -6113,13 +6126,14 @@ async function applyFixedCharges() {
   if (!window._uid) return;
   var currentM = parseInt(document.getElementById('monthSelect').value);
   var isLineMode = document.getElementById('fixedModal').dataset.mode === 'line';
+  var targetKey = document.getElementById('fixedModal').dataset.targetKey || 'chargesFixe';
   var fixedCharges;
   if (isLineMode && _dupLineIdx !== null) {
-    var l = _data.chargesFixe[_dupLineIdx];
+    var l = _data[targetKey][_dupLineIdx];
     fixedCharges = (l.fournisseur||l.montantHT) ? [JSON.parse(JSON.stringify(l))] : [];
   } else {
     fixedCharges = JSON.parse(JSON.stringify(
-      _data.chargesFixe.filter(function(c){return c.fournisseur||c.montantHT;})
+      _data[targetKey].filter(function(c){return c.fournisseur||c.montantHT;})
     ));
   }
   if (!fixedCharges.length) { showToast('Aucune charge à dupliquer', 'warning'); return; }
@@ -6161,20 +6175,20 @@ async function applyFixedCharges() {
         var existing = snap.data();
         Object.keys(existing).forEach(function(k){ md[k] = existing[k]; });
       }
-      var hasCharges = md.chargesFixe && md.chargesFixe.some(function(c){return c.fournisseur||c.montantHT;});
+      var hasCharges = md[targetKey] && md[targetKey].some(function(c){return c.fournisseur||c.montantHT;});
       if (isLineMode) {
         // Mode ligne : ajouter si n'existe pas déjà ET si la périodicité l'autorise
         if (!shouldAppearOnTarget(fixedCharges[0], tgt)) continue;
-        if(!md.chargesFixe) md.chargesFixe = [];
-        var already = md.chargesFixe.some(function(c){return c.fournisseur===fixedCharges[0].fournisseur && c.type===fixedCharges[0].type;});
-        if(!already) { md.chargesFixe.push(fixedCharges[0]); await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md); count++; }
+        if(!md[targetKey]) md[targetKey] = [];
+        var already = md[targetKey].some(function(c){return c.fournisseur===fixedCharges[0].fournisseur && c.type===fixedCharges[0].type;});
+        if(!already) { md[targetKey].push(fixedCharges[0]); await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md); count++; }
         continue;
       }
       // Mode "all" : on filtre les charges selon leur périodicité individuelle
       var chargesForThisMonth = fixedCharges.filter(function(c){ return shouldAppearOnTarget(c, tgt); });
       if (chargesForThisMonth.length === 0) continue;
       if (mode === 'all' || !hasCharges) {
-        md.chargesFixe = chargesForThisMonth;
+        md[targetKey] = chargesForThisMonth;
         await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',key), md);
         count++;
       }
