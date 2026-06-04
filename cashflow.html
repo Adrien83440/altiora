@@ -579,7 +579,7 @@ function _calcMS(d) {
 }
 
 function calcMonth(m, raw, isFuture, monthKey) {
-  if (!raw) return { m, hasData:false, caHT:0, caTTC:0, caTotal:0, rentreeSupp:0, prevCA:0, chargesHT:0, chargesTTC:0, fixesHT:0, fixesTTC:0, varHT:0, varTTC:0, leasingHT:0, leasingTTC:0, masseSalHT:0, creditsPrincipal:0, creditsInteret:0, cashflow:0, tvaCollectee:0, tvaDed:0, tvaDue:0, prevCharges:0, prevChargesTTC:0, isFuture:!!isFuture };
+  if (!raw) return { m, hasData:false, caHT:0, caTTC:0, caTotal:0, rentreeSupp:0, prevCA:0, chargesHT:0, chargesTTC:0, chargesCertainesTTC:0, fixesHT:0, fixesTTC:0, varHT:0, varTTC:0, leasingHT:0, leasingTTC:0, masseSalHT:0, creditsPrincipal:0, creditsInteret:0, cashflow:0, tvaCollectee:0, tvaDed:0, tvaDue:0, prevCharges:0, prevChargesTTC:0, isFuture:!!isFuture };
 
   // CA journalier
   let caHT = 0, caTTC = 0, tvaC = 0;
@@ -685,15 +685,17 @@ function calcMonth(m, raw, isFuture, monthKey) {
     - masseSalHT
   );
 
+  // Sorties certaines (engagements récurrents propagés : crédit + fixes + leasing)
+  const chargesCertainesTTC = fixesTTC + leasingTTC + creditsPrincipal + creditsInteret;
   return { m, hasData:true,
     caHT: caHTReel, caTTC: isFuture ? 0 : caTTC, caTotal: caTotalReel, rentreeSupp: isFuture?0:rentreeSupp,
-    prevCA: prevCAFinal, prevCharges, prevChargesTTC: isFuture ? chargesTTC : 0, isFuture: !!isFuture,
-    chargesHT: isFuture?0:chargesHT, chargesTTC: isFuture?0:chargesTTC,
-    fixesHT: isFuture?0:fixesHT, fixesTTC: isFuture?0:fixesTTC,
-    varHT: isFuture?0:varHT, varTTC: isFuture?0:varTTC,
-    leasingHT: isFuture?0:leasingHT, leasingTTC: isFuture?0:leasingTTC,
-    masseSalHT: isFuture?0:masseSalHT,
-    creditsPrincipal: isFuture?0:creditsPrincipal, creditsInteret: isFuture?0:creditsInteret,
+    prevCA: prevCAFinal, prevCharges, prevChargesTTC: chargesTTC, isFuture: !!isFuture,
+    chargesHT, chargesTTC, chargesCertainesTTC,
+    fixesHT, fixesTTC,
+    varHT, varTTC,
+    leasingHT, leasingTTC,
+    masseSalHT,
+    creditsPrincipal, creditsInteret,
     cashflow, tvaCollectee: isFuture?0:tvaC, tvaDed: isFuture?0:tvaDed, tvaDue: isFuture?0:tvaDue };
 }
 
@@ -728,6 +730,9 @@ function buildPrevSection(data, labels, year, tresoDisponible, tauxTTC) {
   });
 
   const soldeFinalProjeté = startingBalance + prevCF_tot;
+  // Scénario prudent : on ne retire que les sorties certaines (crédit + fixes + leasing)
+  const sortiesCertaines_tot = futurMois.reduce((s,d) => s + (d.chargesCertainesTTC||0), 0);
+  const soldePrudent = startingBalance - sortiesCertaines_tot;
 
   const scoreColor = prevResultat > 0 ? '#059669' : prevResultat < 0 ? '#dc2626' : '#f59e0b';
 
@@ -769,7 +774,7 @@ function buildPrevSection(data, labels, year, tresoDisponible, tauxTTC) {
       <div class="prev-kpi">
         <div class="prev-kpi-lbl">Solde projeté fin de période</div>
         <div class="prev-kpi-val" style="color:${soldeFinalProjeté>=0?'#059669':'#dc2626'}">${fmtK(soldeFinalProjeté)}</div>
-        <div class="prev-kpi-sub">${startingLabel} + prévi ${fmtK(prevCF_tot)}</div>
+        <div class="prev-kpi-sub">Réaliste (avec CA prévi) · Prudent : ${fmtK(soldePrudent)}</div>
       </div>
     </div>
 
@@ -816,8 +821,8 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
     const parts = (d.key||'').split('-');
     return parseInt(parts[0])===_curY && parseInt(parts[1])-1===_curM;
   });
-  const filled = data.filter(d => d.hasData);
-  // filled = mois ayant des données (passés uniquement pour les réels)
+  const filled = data.filter(d => !d.isFuture && d.hasData);
+  // filled = mois réels passés uniquement (les charges futures ne gonflent pas les totaux réels)
   const allFilled   = data.filter(d => d.hasData);
   // Taux TTC/HT moyen du CA réel — convertit le CA prévisionnel (saisi en HT, sans
   // détail TVA) en TTC. Défaut 1.20 si aucun CA réel pour estimer le taux.
@@ -840,10 +845,11 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
   const totalCred   = filled.reduce((s,d) => s+d.creditsPrincipal+d.creditsInteret, 0);
   const totalMassSal = filled.reduce((s,d) => s+(d.masseSalHT||0), 0);
 
-  // ─── Solde cumulé — ancré sur le MOIS de la date de saisie de la trésorerie ───
-  // Le solde saisi est un point de mesure réel : il vaut tresoDisponible au mois de
-  // tresoDate (ex: 12 500 € en juin). On reconstitue les mois antérieurs à rebours
-  // et on projette les mois postérieurs (réel si dispo, prévisionnel sur la 2e courbe).
+  // ─── Solde de trésorerie — ancré sur le MOIS de la date de saisie ───
+  // Point de mesure réel = tresoDisponible au mois de tresoDate (ex: 12 500 € en juin).
+  // Le passé n'est PAS reconstitué. À partir de l'ancrage, deux projections :
+  //   • réaliste : + CA prévi (TTC) − toutes les charges du mois (TTC)
+  //   • prudent  : − sorties certaines (crédit + charges fixes + leasing)
   let anchorIdx = -1;
   if (tresoDisponible !== null && tresoDate) {
     const _tp = String(tresoDate).split('-');
@@ -854,42 +860,31 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
     });
   }
   if (anchorIdx < 0) {
-    // Pas de date exploitable (ou hors année affichée) : ancrer au mois courant,
-    // sinon au dernier mois réel, sinon au dernier mois.
     if (curMonth >= 0) anchorIdx = curMonth;
     else { for (let i = data.length - 1; i >= 0; i--) { if (data[i].hasData && !data[i].isFuture) { anchorIdx = i; break; } } }
     if (anchorIdx < 0) anchorIdx = data.length - 1;
   }
 
-  let cumulArr;
-  let cumulPrevArr = new Array(data.length).fill(null);
+  // Cashflow projeté d'un mois futur
+  const cfRealMois = d => (d.prevCA||0)*tauxTTC - (d.chargesTTC||0);   // avec CA prévi
+  const cfPruMois  = d => -(d.chargesCertainesTTC||0);                  // sorties certaines seules
+
+  let cumulArr     = new Array(data.length).fill(null);  // solde réel = point d'ancrage
+  let cumulRealArr = new Array(data.length).fill(null);  // projection réaliste
+  let cumulPruArr  = new Array(data.length).fill(null);  // projection prudente
   if (tresoDisponible !== null) {
-    cumulArr = new Array(data.length).fill(null);
-    cumulArr[anchorIdx] = tresoDisponible;
-    // Reconstitution des mois antérieurs : solde(i) = solde(i+1) − cashflow(i+1)
-    let cBack = tresoDisponible;
-    for (let i = anchorIdx - 1; i >= 0; i--) {
-      const nxt = data[i + 1];
-      cBack -= (!nxt.isFuture && nxt.hasData) ? nxt.cashflow : 0;
-      cumulArr[i] = (!data[i].isFuture && data[i].hasData) ? cBack : null;
-    }
-    // Mois postérieurs RÉELS (cas où l'ancrage n'est pas le dernier mois réel)
-    let cFwd = tresoDisponible;
+    cumulArr[anchorIdx]     = tresoDisponible;
+    cumulRealArr[anchorIdx] = tresoDisponible;
+    cumulPruArr[anchorIdx]  = tresoDisponible;
+    let cReal = tresoDisponible, cPru = tresoDisponible;
     for (let i = anchorIdx + 1; i < data.length; i++) {
-      if (!data[i].isFuture && data[i].hasData) { cFwd += data[i].cashflow; cumulArr[i] = cFwd; }
-      else cumulArr[i] = null;
-    }
-    // 2e courbe : projection PRÉVISIONNELLE raccordée au solde réel à l'ancrage
-    cumulPrevArr[anchorIdx] = tresoDisponible;
-    let cPrev = tresoDisponible;
-    for (let i = anchorIdx + 1; i < data.length; i++) {
-      cPrev += (data[i].prevCA || 0) * tauxTTC - (data[i].prevChargesTTC || 0);
-      cumulPrevArr[i] = cPrev;
+      cReal += cfRealMois(data[i]); cumulRealArr[i] = cReal;
+      cPru  += cfPruMois(data[i]);  cumulPruArr[i]  = cPru;
     }
   } else {
-    // Pas de trésorerie saisie : cumul relatif depuis 0 (comportement historique)
+    // Pas de trésorerie saisie : cumul relatif des flux réels passés (base 0), pas de projection
     let c = 0;
-    cumulArr = data.map(d => { if (d.hasData) c += d.cashflow; return d.hasData ? c : null; });
+    cumulArr = data.map(d => { if (!d.isFuture && d.hasData) { c += d.cashflow; return c; } return null; });
   }
 
   // Score santé
@@ -989,7 +984,8 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
           <thead><tr><th>Mois</th><th>CA Réel TTC</th><th>Prévision</th><th>Charges TTC</th><th>Fixes</th><th>Variables</th><th>Crédits</th><th>Masse sal.</th><th>Cashflow</th><th>TVA due</th><th>Solde cumulé</th><th></th></tr></thead>
           <tbody>
             ${data.map((d,i) => {
-              const cv = cumulArr[i];
+              const cv = cumulRealArr[i];
+              const cfAff = d.isFuture ? cfRealMois(d) : d.cashflow;
               const isCur = i === curMonth;
               return `<tr style="${isCur?'background:#f0f4ff;font-weight:600':''}">
                 <td style="font-weight:700">${isCur?'▶ ':''}${labels[i]||MS[d.m]}</td>
@@ -1000,7 +996,7 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
                 <td class="neu">${d.hasData&&d.varTTC>0?fmt(d.varTTC):'—'}</td>
                 <td class="neu">${d.hasData&&(d.creditsPrincipal+d.creditsInteret)>0?fmt(d.creditsPrincipal+d.creditsInteret):'—'}</td>
                 <td class="neu">${d.hasData&&(d.masseSalHT||0)>0?fmt(d.masseSalHT):'—'}</td>
-                <td class="${!d.hasData?'neu':d.cashflow>=0?'pos':'neg'}">${d.hasData?fmt(d.cashflow):'<span style="color:#d1d5db">—</span>'}</td>
+                <td class="${!d.hasData?'neu':cfAff>=0?'pos':'neg'}">${d.hasData?fmt(cfAff):'<span style="color:#d1d5db">—</span>'}</td>
                 <td style="${d.hasData&&d.tvaDue>0?'color:var(--teal)':''}">${d.hasData?fmt(Math.abs(d.tvaDue))+(d.tvaDue<0?' <span style="font-size:9px">(crédit)</span>':''):'—'}</td>
                 <td class="${cv===null?'neu':cv>=0?'pos':'neg'}">${cv!==null?fmt(cv):'—'}</td>
                 <td><a href="pilotage.html?year=${year}" class="mlink">Voir →</a></td>
@@ -1011,7 +1007,7 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
             <tr><td>TOTAL ${year}</td><td>${fmt(totCA)}</td><td>${totPrev>0?fmt(totPrev):'—'}</td><td>${fmt(totCharges)}</td><td>${fmt(totalFixe)}</td><td>${fmt(totalVar)}</td><td>${fmt(totalCred)}</td><td>${totalMassSal>0?fmt(totalMassSal):'—'}</td>
             <td class="${totCF>=0?'pos':'neg'}">${fmt(totCF)}</td>
             <td style="color:var(--teal)">${fmt(totTVA)}</td>
-            <td class="${(cumulArr[11]||0)>=0?'pos':'neg'}">${cumulArr.filter(v=>v!==null).pop()!==undefined?fmt(cumulArr.filter(v=>v!==null).pop()):'—'}</td>
+            <td class="${(cumulRealArr[11]||0)>=0?'pos':'neg'}">${cumulRealArr.filter(v=>v!==null).pop()!==undefined?fmt(cumulRealArr.filter(v=>v!==null).pop()):'—'}</td>
             <td></td></tr>
           </tfoot>
         </table>
@@ -1068,8 +1064,9 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
       data: {
         labels: labels,
         datasets:[
-          { label:'Solde réel', data:cumulArr, borderColor:'#0d9488', backgroundColor:'rgba(13,148,136,.08)', borderWidth:2.5, pointRadius:5, pointBackgroundColor: cumulArr.map(v=>v===null?'transparent':v>=0?'#0d9488':'#ef4444'), tension:.4, fill:true, spanGaps:false },
-          { label:'Projection prévi.', data:cumulPrevArr, borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,.06)', borderWidth:2, borderDash:[5,4], pointRadius:4, pointBackgroundColor: cumulPrevArr.map(v=>v===null?'transparent':'#f59e0b'), tension:.4, fill:false, spanGaps:false }
+          { label:'Solde réel', data:cumulArr, borderColor:'#0d9488', backgroundColor:'rgba(13,148,136,.10)', borderWidth:3, pointRadius:6, pointBackgroundColor: cumulArr.map(v=>v===null?'transparent':v>=0?'#0d9488':'#ef4444'), tension:.4, fill:false, spanGaps:false },
+          { label:'Projection (avec CA prévi)', data:cumulRealArr, borderColor:'#0d9488', backgroundColor:'rgba(13,148,136,.06)', borderWidth:2, borderDash:[6,4], pointRadius:4, pointBackgroundColor: cumulRealArr.map(v=>v===null?'transparent':v>=0?'#0d9488':'#ef4444'), tension:.4, fill:false, spanGaps:false },
+          { label:'Projection prudente', data:cumulPruArr, borderColor:'#ef4444', backgroundColor:'rgba(239,68,68,.05)', borderWidth:2, borderDash:[3,3], pointRadius:4, pointBackgroundColor: cumulPruArr.map(v=>v===null?'transparent':'#ef4444'), tension:.4, fill:false, spanGaps:false }
         ]
       },
       options: {
