@@ -579,7 +579,7 @@ function _calcMS(d) {
 }
 
 function calcMonth(m, raw, isFuture, monthKey) {
-  if (!raw) return { m, hasData:false, caHT:0, caTTC:0, caTotal:0, rentreeSupp:0, prevCA:0, chargesHT:0, fixesHT:0, fixesTTC:0, varHT:0, varTTC:0, leasingHT:0, leasingTTC:0, masseSalHT:0, creditsPrincipal:0, creditsInteret:0, cashflow:0, tvaCollectee:0, tvaDed:0, tvaDue:0, prevCharges:0, isFuture:!!isFuture };
+  if (!raw) return { m, hasData:false, caHT:0, caTTC:0, caTotal:0, rentreeSupp:0, prevCA:0, chargesHT:0, chargesTTC:0, fixesHT:0, fixesTTC:0, varHT:0, varTTC:0, leasingHT:0, leasingTTC:0, masseSalHT:0, creditsPrincipal:0, creditsInteret:0, cashflow:0, tvaCollectee:0, tvaDed:0, tvaDue:0, prevCharges:0, prevChargesTTC:0, isFuture:!!isFuture };
 
   // CA journalier
   let caHT = 0, caTTC = 0, tvaC = 0;
@@ -659,6 +659,8 @@ function calcMonth(m, raw, isFuture, monthKey) {
 
   const masseSalHT = _calcMS(raw);
   const chargesHT = fixesHT + varHT + leasingHT + creditsPrincipal + creditsInteret + masseSalHT;
+  // TTC : charges réelles telles qu'elles sortent du compte (crédits + salaires sans TVA)
+  const chargesTTC = fixesTTC + varTTC + leasingTTC + creditsPrincipal + creditsInteret + masseSalHT;
   const tvaDed = tvaDedF + tvaDedV + tvaDedL;
   const tvaDue = tvaC - tvaDed;
 
@@ -685,8 +687,8 @@ function calcMonth(m, raw, isFuture, monthKey) {
 
   return { m, hasData:true,
     caHT: caHTReel, caTTC: isFuture ? 0 : caTTC, caTotal: caTotalReel, rentreeSupp: isFuture?0:rentreeSupp,
-    prevCA: prevCAFinal, prevCharges, isFuture: !!isFuture,
-    chargesHT: isFuture?0:chargesHT,
+    prevCA: prevCAFinal, prevCharges, prevChargesTTC: isFuture ? chargesTTC : 0, isFuture: !!isFuture,
+    chargesHT: isFuture?0:chargesHT, chargesTTC: isFuture?0:chargesTTC,
     fixesHT: isFuture?0:fixesHT, fixesTTC: isFuture?0:fixesTTC,
     varHT: isFuture?0:varHT, varTTC: isFuture?0:varTTC,
     leasingHT: isFuture?0:leasingHT, leasingTTC: isFuture?0:leasingTTC,
@@ -696,14 +698,15 @@ function calcMonth(m, raw, isFuture, monthKey) {
 }
 
 /* ── SECTION PRÉVISIONNELLE ── */
-function buildPrevSection(data, labels, year, tresoDisponible) {
+function buildPrevSection(data, labels, year, tresoDisponible, tauxTTC) {
   const futurMois = data.filter(d => d.isFuture);
   if (futurMois.length === 0) return '';
+  const _t = tauxTTC || 1.20; // CA prévi (HT) → TTC ; charges prévi déjà en TTC
 
-  const prevCA_tot     = futurMois.reduce((s,d) => s + (d.prevCA||0), 0);
-  const prevCharges_tot= futurMois.reduce((s,d) => s + (d.prevCharges||0), 0);
+  const prevCA_tot     = futurMois.reduce((s,d) => s + (d.prevCA||0), 0) * _t;
+  const prevCharges_tot= futurMois.reduce((s,d) => s + (d.prevChargesTTC||0), 0);
   const prevResultat   = prevCA_tot - prevCharges_tot;
-  const prevCF_tot     = futurMois.reduce((s,d) => s + (d.prevCA||0) - (d.prevCharges||0), 0);
+  const prevCF_tot     = prevCA_tot - prevCharges_tot;
 
   // Solde cumulé réel à fin du dernier mois réel
   const realMois = data.filter(d => !d.isFuture && d.hasData);
@@ -715,12 +718,12 @@ function buildPrevSection(data, labels, year, tresoDisponible) {
     ? `Trésorerie réelle : ${fmtK(tresoDisponible)}`
     : `Cashflow cumulé : ${fmtK(soldeCumulReel)}`;
 
-  // Projection solde cumulé avec prévisionnel
+  // Projection solde cumulé avec prévisionnel (TTC)
   let cumul = startingBalance;
   const cumulPrev = data.map(d => {
     if (!d.isFuture && d.hasData) { return null; }
     if (!d.isFuture && !d.hasData) return null;
-    cumul += (d.prevCA||0) - (d.prevCharges||0);
+    cumul += (d.prevCA||0)*_t - (d.prevChargesTTC||0);
     return cumul;
   });
 
@@ -729,14 +732,14 @@ function buildPrevSection(data, labels, year, tresoDisponible) {
   const scoreColor = prevResultat > 0 ? '#059669' : prevResultat < 0 ? '#dc2626' : '#f59e0b';
 
   const rows = futurMois.map(d => {
-    const res = (d.prevCA||0) - (d.prevCharges||0);
+    const res = (d.prevCA||0)*_t - (d.prevChargesTTC||0);
     const idx = data.indexOf(d);
     const mLabel = labels[idx] || MS[d.m];
     return `<tr>
       <td style="font-weight:700;color:#92400e">${mLabel}</td>
-      <td class="${(d.prevCA||0)>0?'prev-pos':'prev-neu'}">${(d.prevCA||0)>0?fmt(d.prevCA):'<span style="color:#d1d5db">Non saisi</span>'}</td>
-      <td class="prev-neu">${(d.prevCharges||0)>0?fmt(d.prevCharges):'—'}</td>
-      <td class="${res>0?'prev-pos':res<0?'prev-neg':'prev-neu'}">${(d.prevCA||0)>0||(d.prevCharges||0)>0?fmt(res):'—'}</td>
+      <td class="${(d.prevCA||0)>0?'prev-pos':'prev-neu'}">${(d.prevCA||0)>0?fmt((d.prevCA||0)*_t):'<span style="color:#d1d5db">Non saisi</span>'}</td>
+      <td class="prev-neu">${(d.prevChargesTTC||0)>0?fmt(d.prevChargesTTC):'—'}</td>
+      <td class="${res>0?'prev-pos':res<0?'prev-neg':'prev-neu'}">${(d.prevCA||0)>0||(d.prevChargesTTC||0)>0?fmt(res):'—'}</td>
       <td><a href="pilotage.html" style="color:#f59e0b;text-decoration:none;font-size:11px;font-weight:700">Saisir →</a></td>
     </tr>`;
   }).join('');
@@ -816,19 +819,24 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
   const filled = data.filter(d => d.hasData);
   // filled = mois ayant des données (passés uniquement pour les réels)
   const allFilled   = data.filter(d => d.hasData);
-  const totCA       = filled.reduce((s,d) => s+d.caTotal, 0);
-  const totCharges  = filled.reduce((s,d) => s+d.chargesHT, 0);
+  // Taux TTC/HT moyen du CA réel — convertit le CA prévisionnel (saisi en HT, sans
+  // détail TVA) en TTC. Défaut 1.20 si aucun CA réel pour estimer le taux.
+  const _caHTReelSum  = filled.reduce((s,d) => s+d.caTotal, 0);
+  const _caTTCReelSum = filled.reduce((s,d) => s+d.caTTC, 0);
+  const tauxTTC = _caHTReelSum > 0 ? (_caTTCReelSum / _caHTReelSum) : 1.20;
+  const totCA       = _caTTCReelSum;
+  const totCharges  = filled.reduce((s,d) => s+d.chargesTTC, 0);
   const totCF       = filled.reduce((s,d) => s+d.cashflow, 0);
   const totTVA      = filled.reduce((s,d) => s+d.tvaDue, 0);
-  const totPrev     = filled.reduce((s,d) => s+d.prevCA, 0);
+  const totPrev     = filled.reduce((s,d) => s+(d.prevCA||0), 0) * tauxTTC;
   // Prévisionnel (mois futurs avec charges saisies)
-  const totPrevCharges = data.reduce((s,d) => s+d.prevCharges, 0);
-  const totPrevCA      = data.reduce((s,d) => s+(d.isFuture?(d.prevCA||0):0), 0);
+  const totPrevCharges = data.reduce((s,d) => s+(d.prevChargesTTC||0), 0);
+  const totPrevCA      = data.reduce((s,d) => s+(d.isFuture?(d.prevCA||0):0), 0) * tauxTTC;
   const totPrevResultat= totPrevCA - totPrevCharges;
   const delta       = totCA - totPrev;
-  const totalFixe   = filled.reduce((s,d) => s+d.fixesHT, 0);
-  const totalVar    = filled.reduce((s,d) => s+d.varHT, 0);
-  const totalLeas   = filled.reduce((s,d) => s+d.leasingHT, 0);
+  const totalFixe   = filled.reduce((s,d) => s+d.fixesTTC, 0);
+  const totalVar    = filled.reduce((s,d) => s+d.varTTC, 0);
+  const totalLeas   = filled.reduce((s,d) => s+d.leasingTTC, 0);
   const totalCred   = filled.reduce((s,d) => s+d.creditsPrincipal+d.creditsInteret, 0);
   const totalMassSal = filled.reduce((s,d) => s+(d.masseSalHT||0), 0);
 
@@ -875,7 +883,7 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
     cumulPrevArr[anchorIdx] = tresoDisponible;
     let cPrev = tresoDisponible;
     for (let i = anchorIdx + 1; i < data.length; i++) {
-      cPrev += (data[i].prevCA || 0) - (data[i].prevCharges || 0);
+      cPrev += (data[i].prevCA || 0) * tauxTTC - (data[i].prevChargesTTC || 0);
       cumulPrevArr[i] = cPrev;
     }
   } else {
@@ -917,8 +925,8 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
         <div class="kpi-val ${tresoDisponible===null?'blue':tresoDisponible>=0?'green':'red'}">${tresoDisponible!==null?fmtK(tresoDisponible):'<span style="font-size:13px;color:#d1d5db">Non renseigné</span>'}</div>
         <div class="kpi-sub">${tresoDate?'Mis à jour le '+tresoDate:'Cliquer pour saisir votre solde'}</div>
       </div>
-      <div class="kpi blue"><div class="kpi-icon">💰</div><div class="kpi-label">CA Total HT</div><div class="kpi-val blue">${fmtK(totCA)}</div><div class="kpi-sub">${filled.length} mois enregistrés</div></div>
-      <div class="kpi ${totCharges>totCA?'red':'orange'}"><div class="kpi-icon">📦</div><div class="kpi-label">Charges réelles HT</div><div class="kpi-val ${totCharges>totCA?'red':'orange'}">${fmtK(totCharges)}</div><div class="kpi-sub">${totPrevCharges>0?`<span style="color:#b45309">+ ${fmtK(totPrevCharges)} prévi</span>`:(totCA>0?Math.round((totCharges/totCA)*100)+'% du CA':'—')}</div></div>
+      <div class="kpi blue"><div class="kpi-icon">💰</div><div class="kpi-label">CA Total TTC</div><div class="kpi-val blue">${fmtK(totCA)}</div><div class="kpi-sub">${filled.length} mois enregistrés</div></div>
+      <div class="kpi ${totCharges>totCA?'red':'orange'}"><div class="kpi-icon">📦</div><div class="kpi-label">Charges réelles TTC</div><div class="kpi-val ${totCharges>totCA?'red':'orange'}">${fmtK(totCharges)}</div><div class="kpi-sub">${totPrevCharges>0?`<span style="color:#b45309">+ ${fmtK(totPrevCharges)} prévi</span>`:(totCA>0?Math.round((totCharges/totCA)*100)+'% du CA':'—')}</div></div>
       <div class="kpi ${totCF>=0?'green':'red'}"><div class="kpi-icon">💧</div><div class="kpi-label">Cashflow Net</div><div class="kpi-val ${totCF>=0?'green':'red'}">${fmtK(totCF)}</div><div class="kpi-sub">${totCF>=0?'Excédent':'Déficit'} annuel</div></div>
       <div class="kpi teal"><div class="kpi-icon">🧾</div><div class="kpi-label">TVA ${totTVA>=0?'à payer':'Crédit'}</div><div class="kpi-val teal">${fmtK(Math.abs(totTVA))}</div><div class="kpi-sub">${totTVA>=0?'à reverser à l\'État':'crédit TVA'}</div></div>
       <div class="kpi ${totPrevCharges>0?(totPrevResultat>=0?'teal':'orange'):(delta>=0?'green':'red')}"><div class="kpi-icon">${totPrevCharges>0?'🔮':(delta>=0?'🎯':'📉')}</div><div class="kpi-label">${totPrevCharges>0?'Résultat prévisionnel':'Delta Prévi/Réel'}</div><div class="kpi-val ${totPrevCharges>0?(totPrevResultat>=0?'teal':'orange'):(delta>=0?'green':'red')}">${totPrevCharges>0?fmtK(totPrevResultat):(totPrev>0?fmtK(delta):'—')}</div><div class="kpi-sub">${totPrevCharges>0?`Charges futures : ${fmtK(totPrevCharges)}`:(totPrev>0?'Prévi : '+fmtK(totPrev):'Pas de prévision')}</div></div>
@@ -969,7 +977,7 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
       </div>
     </div>
 
-    ${buildPrevSection(data, labels, year, tresoDisponible)}
+    ${buildPrevSection(data, labels, year, tresoDisponible, tauxTTC)}
 
     <div class="card" style="margin-bottom:16px">
       <div class="card-head">
@@ -978,18 +986,18 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
       </div>
       <div style="overflow-x:auto">
         <table class="mtable">
-          <thead><tr><th>Mois</th><th>CA Réel HT</th><th>Prévision</th><th>Charges HT</th><th>Fixes</th><th>Variables</th><th>Crédits</th><th>Masse sal.</th><th>Cashflow</th><th>TVA due</th><th>Solde cumulé</th><th></th></tr></thead>
+          <thead><tr><th>Mois</th><th>CA Réel TTC</th><th>Prévision</th><th>Charges TTC</th><th>Fixes</th><th>Variables</th><th>Crédits</th><th>Masse sal.</th><th>Cashflow</th><th>TVA due</th><th>Solde cumulé</th><th></th></tr></thead>
           <tbody>
             ${data.map((d,i) => {
               const cv = cumulArr[i];
               const isCur = i === curMonth;
               return `<tr style="${isCur?'background:#f0f4ff;font-weight:600':''}">
                 <td style="font-weight:700">${isCur?'▶ ':''}${labels[i]||MS[d.m]}</td>
-                <td class="${d.hasData?(d.caTotal>0?'pos':'neu'):'neu'}">${d.hasData?fmt(d.caTotal):'<span style="color:#d1d5db">—</span>'}</td>
-                <td class="neu">${d.hasData&&d.prevCA>0?fmt(d.prevCA):'<span style="color:#d1d5db">—</span>'}</td>
-                <td class="${d.hasData?'neg':'neu'}">${d.hasData?fmt(d.chargesHT):'<span style="color:#d1d5db">—</span>'}</td>
-                <td class="neu">${d.hasData&&d.fixesHT>0?fmt(d.fixesHT):'—'}</td>
-                <td class="neu">${d.hasData&&d.varHT>0?fmt(d.varHT):'—'}</td>
+                <td class="${d.hasData?(d.caTTC>0?'pos':'neu'):'neu'}">${d.hasData?fmt(d.caTTC):'<span style="color:#d1d5db">—</span>'}</td>
+                <td class="neu">${d.hasData&&d.prevCA>0?fmt(d.prevCA*tauxTTC):'<span style="color:#d1d5db">—</span>'}</td>
+                <td class="${d.hasData?'neg':'neu'}">${d.hasData?fmt(d.chargesTTC):'<span style="color:#d1d5db">—</span>'}</td>
+                <td class="neu">${d.hasData&&d.fixesTTC>0?fmt(d.fixesTTC):'—'}</td>
+                <td class="neu">${d.hasData&&d.varTTC>0?fmt(d.varTTC):'—'}</td>
                 <td class="neu">${d.hasData&&(d.creditsPrincipal+d.creditsInteret)>0?fmt(d.creditsPrincipal+d.creditsInteret):'—'}</td>
                 <td class="neu">${d.hasData&&(d.masseSalHT||0)>0?fmt(d.masseSalHT):'—'}</td>
                 <td class="${!d.hasData?'neu':d.cashflow>=0?'pos':'neg'}">${d.hasData?fmt(d.cashflow):'<span style="color:#d1d5db">—</span>'}</td>
@@ -1029,19 +1037,19 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
   // Chart cashflow — réel + prévisionnel superposé
   const cfCtx = document.getElementById('cfChart');
   if (cfCtx) {
-    const caReelData   = data.map(d => (!d.isFuture && d.hasData) ? d.caTotal : null);
-    const caPreviData  = data.map(d => d.isFuture ? (d.prevCA||null) : null);
+    const caReelData   = data.map(d => (!d.isFuture && d.hasData) ? d.caTTC : null);
+    const caPreviData  = data.map(d => d.isFuture ? (d.prevCA ? d.prevCA*tauxTTC : null) : null);
     const cfReelData   = data.map(d => (!d.isFuture && d.hasData) ? d.cashflow : null);
-    const cfPreviData  = data.map(d => d.isFuture ? ((d.prevCA||0) - (d.prevCharges||0)) : null);
+    const cfPreviData  = data.map(d => d.isFuture ? ((d.prevCA||0)*tauxTTC - (d.prevChargesTTC||0)) : null);
 
     new Chart(cfCtx, {
       data: {
         labels: labels,
         datasets: [
-          { type:'line', label:'CA HT réel',     data: caReelData,  borderColor:'#60a5fa', backgroundColor:'rgba(79,126,248,.06)',  borderWidth:2, pointRadius:4, pointBackgroundColor:'#60a5fa', tension:.4, fill:false, spanGaps:false },
+          { type:'line', label:'CA TTC réel',     data: caReelData,  borderColor:'#60a5fa', backgroundColor:'rgba(79,126,248,.06)',  borderWidth:2, pointRadius:4, pointBackgroundColor:'#60a5fa', tension:.4, fill:false, spanGaps:false },
           { type:'line', label:'CA prévisionnel', data: caPreviData, borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,.08)', borderWidth:2, borderDash:[5,4], pointRadius:4, pointBackgroundColor:'#f59e0b', tension:.4, fill:false, spanGaps:false },
           { type:'bar',  label:'Cashflow réel',   data: cfReelData,  backgroundColor: data.map(d=>(!d.isFuture&&d.hasData)?(d.cashflow>=0?'rgba(16,185,129,.8)':'rgba(239,68,68,.8)'):'transparent'), borderRadius:5 },
-          { type:'bar',  label:'Cashflow prévi.', data: cfPreviData, backgroundColor: data.map(d=>d.isFuture?((d.prevCA||0)-(d.prevCharges||0)>=0?'rgba(245,158,11,.45)':'rgba(239,68,68,.35)'):'transparent'), borderRadius:5, borderWidth:1.5, borderColor: data.map(d=>d.isFuture?'#f59e0b':'transparent') }
+          { type:'bar',  label:'Cashflow prévi.', data: cfPreviData, backgroundColor: data.map(d=>d.isFuture?((d.prevCA||0)*tauxTTC-(d.prevChargesTTC||0)>=0?'rgba(245,158,11,.45)':'rgba(239,68,68,.35)'):'transparent'), borderRadius:5, borderWidth:1.5, borderColor: data.map(d=>d.isFuture?'#f59e0b':'transparent') }
         ]
       },
       options: {
@@ -1077,9 +1085,9 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
   if (prevCtx) {
     const futurMois = data.filter(d => d.isFuture);
     const futurLabels = futurMois.map((d,i) => labels[data.indexOf(d)] || MS[d.m]);
-    const caP = futurMois.map(d => d.prevCA||0);
-    const chP = futurMois.map(d => d.prevCharges||0);
-    const cfP = futurMois.map(d => (d.prevCA||0) - (d.prevCharges||0));
+    const caP = futurMois.map(d => (d.prevCA||0)*tauxTTC);
+    const chP = futurMois.map(d => d.prevChargesTTC||0);
+    const cfP = futurMois.map(d => (d.prevCA||0)*tauxTTC - (d.prevChargesTTC||0));
     new Chart(prevCtx, {
       data: {
         labels: futurLabels,
@@ -1101,8 +1109,8 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
   const prevDCtx = document.getElementById('prevDoughnut');
   if (prevDCtx) {
     const futurMois = data.filter(d => d.isFuture);
-    const prevCA_tot = futurMois.reduce((s,d)=>s+(d.prevCA||0),0);
-    const prevCharges_tot = futurMois.reduce((s,d)=>s+(d.prevCharges||0),0);
+    const prevCA_tot = futurMois.reduce((s,d)=>s+(d.prevCA||0),0) * tauxTTC;
+    const prevCharges_tot = futurMois.reduce((s,d)=>s+(d.prevChargesTTC||0),0);
     const prevResultat = prevCA_tot - prevCharges_tot;
     new Chart(prevDCtx, {
       type:'doughnut',
