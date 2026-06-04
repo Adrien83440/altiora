@@ -412,7 +412,7 @@
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
   import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-  import { initializeFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { initializeFirestore, doc, setDoc, getDoc, collection, getDocs, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
   const app = initializeApp({
     apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
     authDomain:"altiora-70599.firebaseapp.com",
@@ -423,11 +423,13 @@
   });
   const auth=getAuth(app);const db=initializeFirestore(app,{experimentalAutoDetectLongPolling:true});
   window._auth=auth;window._db=db;window._doc=doc;window._setDoc=setDoc;window._getDoc=getDoc;window._signOut=signOut;
+  window._collection=collection;window._getDocs=getDocs;window._query=query;window._orderBy=orderBy;
   onAuthStateChanged(auth,u=>{
     if(!u){window.location.href='index.html';return;}
     window._uid=u.uid;
     window._firebaseReady=true;
     loadProgress();
+    if(window.loadVideos) window.loadVideos();
   });
 </script>
 
@@ -2681,28 +2683,37 @@ function showToast(msg,type){
 // ════════════════════════════════════════════════════════
 // TUTORIELS VIDÉO (embed Tella)
 // ════════════════════════════════════════════════════════
-// ▼▼▼ COLLE ICI L'URL D'EMBED TELLA DE CHAQUE VIDÉO ▼▼▼
+// Les vidéos sont gérées depuis la page admin /admin-tutos.html
+// et stockées dans Firestore (collection "tuto_videos").
+// Chaque doc : { icon, title, desc, duration, embed, poster, order }
+// La section reste masquée tant qu'aucune vidéo n'est enregistrée.
 //
-// Pour chaque vidéo :
-//  1. Sur Tella, ouvre la vidéo → "Share" / "Embed" → copie le code <iframe>.
-//  2. Dans ce code, repère src="..." et copie UNIQUEMENT ce qui est entre les guillemets.
-//     Ex : https://www.tella.tv/video/vid_xxxxxxxxxxxx/embed?b=1&title=1&a=1&loop=0&t=0&muted=0&wt=1&o=1
-//  3. Colle cette URL dans le champ `embed` ci-dessous.
-//
-// Une carte ne s'affiche QUE si son `embed` est rempli → tu peux livrer puis compléter au fur et à mesure.
-// `poster` (optionnel) = URL d'une image de miniature pour la carte. Sinon : dégradé + bouton play.
-//
-const TUTO_VIDEOS = [
-  // ← exemple pré-rempli pour test : réassigne cette URL au bon module si besoin
-  { icon:'🧭', title:'Le Pilotage de A à Z',        desc:'Saisir le CA et les charges, lire vos résultats mensuels.', duration:'', embed:'https://www.tella.tv/video/vid_cmpzh7r2c04fr04la48az6xu4/embed?b=1&title=1&a=1&loop=0&t=0&muted=0&wt=1&o=1', poster:'' },
-  { icon:'🏠', title:'Tableau de bord & démarrage',  desc:'Première connexion, profil entreprise, vue d\'ensemble.',    duration:'', embed:'', poster:'' },
-  { icon:'🎯', title:'Marges & coût de revient',     desc:'Calculer vos marges produit et votre seuil de rentabilité.', duration:'', embed:'', poster:'' },
-  { icon:'🏦', title:'Banque & imports',             desc:'Connexion bancaire et catégorisation des transactions.',    duration:'', embed:'', poster:'' },
-  { icon:'🤖', title:'Intelligence IA',              desc:'Copilote, prévisions et analyse de bilan par l\'IA.',        duration:'', embed:'', poster:'' },
-  { icon:'👥', title:'Ressources Humaines',          desc:'Employés, planning, émargements et congés.',                duration:'', embed:'', poster:'' },
-  { icon:'🎁', title:'Fidélisation & SMS',           desc:'Programme de fidélité et campagnes SMS clients.',            duration:'', embed:'', poster:'' }
-];
-// ▲▲▲ FIN DE LA LISTE ▲▲▲
+let TUTO_VIDEOS = [];
+
+async function loadVideos(){
+  if(!window._db || !window._collection || !window._getDocs || !window._query || !window._orderBy) return;
+  try{
+    const q = window._query(window._collection(window._db,'tuto_videos'), window._orderBy('order','asc'));
+    const snap = await window._getDocs(q);
+    const arr = [];
+    snap.forEach(d=>{
+      const v = d.data() || {};
+      arr.push({
+        icon:     v.icon     || '🎬',
+        title:    v.title    || '',
+        desc:     v.desc     || '',
+        duration: v.duration || '',
+        embed:    v.embed    || '',
+        poster:   v.poster   || ''
+      });
+    });
+    TUTO_VIDEOS = arr;
+    renderVideoSection();
+  }catch(e){
+    console.warn('[tutoriels] loadVideos:', e);
+  }
+}
+window.loadVideos = loadVideos;
 
 function renderVideoSection(){
   const sec = document.getElementById('videoSection');
