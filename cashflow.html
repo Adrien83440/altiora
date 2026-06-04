@@ -832,10 +832,57 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
   const totalCred   = filled.reduce((s,d) => s+d.creditsPrincipal+d.creditsInteret, 0);
   const totalMassSal = filled.reduce((s,d) => s+(d.masseSalHT||0), 0);
 
-  // Solde cumulé — part de la trésorerie réelle si disponible
-  let cumul = tresoDisponible !== null ? tresoDisponible : 0;
-  const cumulBase = cumul;
-  const cumulArr = data.map(d => { if (d.hasData) cumul += d.cashflow; return d.hasData ? cumul : null; });
+  // ─── Solde cumulé — ancré sur le MOIS de la date de saisie de la trésorerie ───
+  // Le solde saisi est un point de mesure réel : il vaut tresoDisponible au mois de
+  // tresoDate (ex: 12 500 € en juin). On reconstitue les mois antérieurs à rebours
+  // et on projette les mois postérieurs (réel si dispo, prévisionnel sur la 2e courbe).
+  let anchorIdx = -1;
+  if (tresoDisponible !== null && tresoDate) {
+    const _tp = String(tresoDate).split('-');
+    const _ty = parseInt(_tp[0]), _tm = parseInt(_tp[1]) - 1;
+    anchorIdx = data.findIndex(d => {
+      const p = (d.key || '').split('-');
+      return parseInt(p[0]) === _ty && (parseInt(p[1]) - 1) === _tm;
+    });
+  }
+  if (anchorIdx < 0) {
+    // Pas de date exploitable (ou hors année affichée) : ancrer au mois courant,
+    // sinon au dernier mois réel, sinon au dernier mois.
+    if (curMonth >= 0) anchorIdx = curMonth;
+    else { for (let i = data.length - 1; i >= 0; i--) { if (data[i].hasData && !data[i].isFuture) { anchorIdx = i; break; } } }
+    if (anchorIdx < 0) anchorIdx = data.length - 1;
+  }
+
+  let cumulArr;
+  let cumulPrevArr = new Array(data.length).fill(null);
+  if (tresoDisponible !== null) {
+    cumulArr = new Array(data.length).fill(null);
+    cumulArr[anchorIdx] = tresoDisponible;
+    // Reconstitution des mois antérieurs : solde(i) = solde(i+1) − cashflow(i+1)
+    let cBack = tresoDisponible;
+    for (let i = anchorIdx - 1; i >= 0; i--) {
+      const nxt = data[i + 1];
+      cBack -= (!nxt.isFuture && nxt.hasData) ? nxt.cashflow : 0;
+      cumulArr[i] = (!data[i].isFuture && data[i].hasData) ? cBack : null;
+    }
+    // Mois postérieurs RÉELS (cas où l'ancrage n'est pas le dernier mois réel)
+    let cFwd = tresoDisponible;
+    for (let i = anchorIdx + 1; i < data.length; i++) {
+      if (!data[i].isFuture && data[i].hasData) { cFwd += data[i].cashflow; cumulArr[i] = cFwd; }
+      else cumulArr[i] = null;
+    }
+    // 2e courbe : projection PRÉVISIONNELLE raccordée au solde réel à l'ancrage
+    cumulPrevArr[anchorIdx] = tresoDisponible;
+    let cPrev = tresoDisponible;
+    for (let i = anchorIdx + 1; i < data.length; i++) {
+      cPrev += (data[i].prevCA || 0) - (data[i].prevCharges || 0);
+      cumulPrevArr[i] = cPrev;
+    }
+  } else {
+    // Pas de trésorerie saisie : cumul relatif depuis 0 (comportement historique)
+    let c = 0;
+    cumulArr = data.map(d => { if (d.hasData) c += d.cashflow; return d.hasData ? c : null; });
+  }
 
   // Score santé
   const posM = filled.filter(d => d.cashflow > 0).length;
@@ -1012,11 +1059,14 @@ function renderPage(data, dettes, year, labels, labelPeriode, tresorerieConfig) 
       type:'line',
       data: {
         labels: labels,
-        datasets:[{ label:'Solde cumulé', data:cumulArr, borderColor:'#0d9488', backgroundColor:'rgba(13,148,136,.08)', borderWidth:2.5, pointRadius:5, pointBackgroundColor: cumulArr.map(v=>v===null?'transparent':v>=0?'#0d9488':'#ef4444'), tension:.4, fill:true, spanGaps:false }]
+        datasets:[
+          { label:'Solde réel', data:cumulArr, borderColor:'#0d9488', backgroundColor:'rgba(13,148,136,.08)', borderWidth:2.5, pointRadius:5, pointBackgroundColor: cumulArr.map(v=>v===null?'transparent':v>=0?'#0d9488':'#ef4444'), tension:.4, fill:true, spanGaps:false },
+          { label:'Projection prévi.', data:cumulPrevArr, borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,.06)', borderWidth:2, borderDash:[5,4], pointRadius:4, pointBackgroundColor: cumulPrevArr.map(v=>v===null?'transparent':'#f59e0b'), tension:.4, fill:false, spanGaps:false }
+        ]
       },
       options: {
         responsive:true, maintainAspectRatio:false,
-        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => ctx.raw!==null ? 'Solde: '+ctx.raw.toLocaleString('fr-FR',{maximumFractionDigits:0})+' €' : '—' } } },
+        plugins:{ legend:{display:true, position:'top', labels:{ font:{ family:'Plus Jakarta Sans', size:11 }, boxWidth:12, padding:10 }}, tooltip:{ callbacks:{ label: ctx => ctx.raw!==null ? ctx.dataset.label+': '+ctx.raw.toLocaleString('fr-FR',{maximumFractionDigits:0})+' €' : null, filter: item => item.raw !== null } } },
         scales:{ y:{ ticks:{ callback: v => Math.abs(v)>=1000?(v/1000).toFixed(0)+'k€':v+'€', font:{size:10} }, grid:{color:'#f0f4ff'} }, x:{ ticks:{font:{size:11}, color:function(ctx){return window._saisonMonthKeys[ctx.index]?_saisonTickColor(window._saisonMonthKeys[ctx.index].m):'#9ca3af';}}, grid:{display:false} } }
       }
     });
