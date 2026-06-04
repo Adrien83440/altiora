@@ -65,8 +65,13 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
 
 /* Liste */
 .vid-list{display:flex;flex-direction:column;gap:12px;}
-.vid-row{background:#fafafc;border:1px solid var(--border);border-radius:var(--rlg);padding:16px 20px;display:flex;justify-content:space-between;align-items:center;gap:14px;transition:all .2s;}
+.vid-row{background:#fafafc;border:1px solid var(--border);border-radius:var(--rlg);padding:16px 20px;display:flex;justify-content:space-between;align-items:center;gap:14px;transition:border-color .2s,box-shadow .2s;}
 .vid-row:hover{border-color:var(--blue);box-shadow:0 2px 10px rgba(0,0,0,.04);}
+.vid-row.dragging{opacity:.45;}
+.vid-row.drop-before{box-shadow:0 -3px 0 0 var(--blue);}
+.vid-row.drop-after{box-shadow:0 3px 0 0 var(--blue);}
+.vid-handle{cursor:grab;font-size:17px;color:var(--subtle);flex-shrink:0;padding:0 2px;user-select:none;line-height:1;}
+.vid-handle:active,.vid-row.dragging .vid-handle{cursor:grabbing;}
 .vid-info{flex:1;min-width:0;display:flex;align-items:center;gap:12px;}
 .vid-emo{font-size:24px;flex-shrink:0;}
 .vid-txt{min-width:0;}
@@ -208,6 +213,7 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
 
   let editingId = null;
   let items = []; // liste en mémoire (triée par order) pour le réordonnancement
+  let dragId = null; // id de la vidéo en cours de glisser-déposer
 
   // ── Auth gate ──
   onAuthStateChanged(auth, async function (user) {
@@ -351,8 +357,9 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
     box.innerHTML = items.map((v, idx) => {
       const okChip = v.embed ? '<span class="vid-chip">Embed OK</span>' : '<span class="vid-chip warn">Embed manquant</span>';
       const dur = v.duration ? ' · ' + escapeHtml(v.duration) : '';
-      return `<div class="vid-row">
+      return `<div class="vid-row" draggable="true" data-id="${v.id}">
         <div class="vid-info">
+          <div class="vid-handle" title="Glisser pour réordonner">⠿</div>
           <div class="vid-emo">${escapeHtml(v.icon || '🎬')}</div>
           <div class="vid-txt">
             <div class="vid-t">${escapeHtml(v.title || '(sans titre)')} ${okChip}</div>
@@ -372,6 +379,42 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
     box.querySelectorAll('[data-action="delete"]').forEach(b => b.addEventListener('click', () => deleteItem(b.dataset.id)));
     box.querySelectorAll('[data-action="up"]').forEach(b => b.addEventListener('click', () => moveItem(b.dataset.id, -1)));
     box.querySelectorAll('[data-action="down"]').forEach(b => b.addEventListener('click', () => moveItem(b.dataset.id, 1)));
+
+    // ── Glisser-déposer ──
+    function clearDropMarkers() {
+      box.querySelectorAll('.vid-row').forEach(r => r.classList.remove('drop-before', 'drop-after'));
+    }
+    box.querySelectorAll('.vid-row').forEach(row => {
+      row.addEventListener('dragstart', e => {
+        dragId = row.dataset.id;
+        row.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', dragId); } catch (_) {}
+      });
+      row.addEventListener('dragend', () => {
+        dragId = null;
+        row.classList.remove('dragging');
+        clearDropMarkers();
+      });
+      row.addEventListener('dragover', e => {
+        if (!dragId || row.dataset.id === dragId) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const rect = row.getBoundingClientRect();
+        const after = (e.clientY - rect.top) > rect.height / 2;
+        clearDropMarkers();
+        row.classList.add(after ? 'drop-after' : 'drop-before');
+      });
+      row.addEventListener('drop', e => {
+        if (!dragId || row.dataset.id === dragId) { clearDropMarkers(); return; }
+        e.preventDefault();
+        const rect = row.getBoundingClientRect();
+        const after = (e.clientY - rect.top) > rect.height / 2;
+        const from = dragId;
+        clearDropMarkers();
+        dropReorder(from, row.dataset.id, after);
+      });
+    });
   }
 
   function escapeHtml(s) {
@@ -423,6 +466,24 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
         updateDoc(doc(db, COL, a.id), { order: orderB }),
         updateDoc(doc(db, COL, b.id), { order: orderA })
       ]);
+      await loadList();
+    } catch (e) {
+      toast('Erreur : ' + e.message, 'error');
+    }
+  }
+
+  // ── Réordonnancement par glisser-déposer (réindexe order = 0..n) ──
+  async function dropReorder(fromId, toId, after) {
+    const fromIdx = items.findIndex(i => i.id === fromId);
+    if (fromIdx < 0) return;
+    const moved = items[fromIdx];
+    const rest = items.slice(0, fromIdx).concat(items.slice(fromIdx + 1));
+    let toIdx = rest.findIndex(i => i.id === toId);
+    if (toIdx < 0) return;
+    if (after) toIdx += 1;
+    rest.splice(toIdx, 0, moved);
+    try {
+      await Promise.all(rest.map((it, i) => updateDoc(doc(db, COL, it.id), { order: i })));
       await loadList();
     } catch (e) {
       toast('Erreur : ' + e.message, 'error');
