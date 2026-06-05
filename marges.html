@@ -662,7 +662,7 @@ html, body { overflow-x: hidden; max-width: 100vw; }
               <div class="marge-meta">
                 <span class="meta-badge" x-text="p.categorie || 'Sans catégorie'"></span>
                 <span x-show="p.source==='cout-revient'" class="meta-badge" style="background:#f0fdf4;color:#10b981">📥 Importé du Coût de revient</span>
-                <span style="font-size:12px;color:var(--muted)">PV : <b x-text="fmtE(p.pv)"></b> HT · Qté : <b x-text="p.qte||1"></b> <span x-text="uLbl(p,true)"></span>/période</span>
+                <span style="font-size:12px;color:var(--muted)">PV : <b x-text="fmtE(p.pv)"></b> HT · <template x-if="p.source==='cout-revient'"><span>Rendement recette : <b x-text="p.qte||1"></b> <span x-text="uLbl(p,true)"></span> · Vol. vendu/période : <b x-text="cfVol()"></b></span></template><template x-if="p.source!=='cout-revient'"><span>Qté : <b x-text="p.qte||1"></b> <span x-text="uLbl(p,true)"></span>/période</span></template></span>
               </div>
             </div>
             <div style="display:flex;gap:8px">
@@ -836,7 +836,20 @@ html, body { overflow-x: hidden; max-width: 100vw; }
               <input class="cle-input" type="number" placeholder="Ex: 5000" x-model.number="p.cfTotal"/>
             </div>
           </div>
+          <!-- Volume vendu / période (CR uniquement) : diviseur d'étalement des charges fixes -->
+          <div x-show="p.source==='cout-revient'" style="margin-top:12px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+            <div style="flex:1;min-width:240px">
+              <label style="display:block;font-size:12px;font-weight:600;color:var(--text);margin-bottom:4px">📦 Volume vendu / période <span style="font-weight:400;color:var(--muted)">— sur combien d'unités étaler les charges fixes (≠ rendement recette)</span></label>
+              <input class="cle-input" type="number" min="1" placeholder="Ex: 76923" x-model.number="p.volPeriode" style="width:100%"/>
+            </div>
+            <button x-show="p.cle.type==='ca' && p.pv>0 && p.cle.produit>0" class="btn btn-outline btn-sm" type="button"
+                    @click="p.volPeriode = Math.max(1, Math.round((p.cle.produit||0)/(p.pv||1)))"
+                    title="Volume = CA de ce produit ÷ prix de vente unitaire">📥 Déduire du CA</button>
+          </div>
           <div class="cle-result" x-html="p.cle.total>0 && p.cle.produit>0 ? '✅ Quote-part : <b>'+((p.cle.produit||0)/(p.cle.total||1)*100).toFixed(1)+'%</b> → <b>'+fmtE(calc.cfImpute)+'</b> de charges fixes imputées par '+uLbl(p) : (p.cfTotal>0 ? '⚠️ <b>Clé de répartition manquante</b> — vos charges fixes de '+fmtE(p.cfTotal)+' ne sont PAS imputées à ce produit. Renseignez les valeurs ci-dessus pour calculer votre vraie marge nette.' : '⚠️ Renseignez les valeurs pour calculer la quote-part de charges fixes')"></div>
+          <div x-show="calc.cfImpute > p.pv && p.pv > 0" style="margin-top:10px;padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:12px;color:#b91c1c;font-weight:600;line-height:1.5">
+            🚨 Vos charges fixes par unité (<b x-text="fmtE(calc.cfImpute)"></b>) dépassent le prix de vente (<b x-text="fmtE(p.pv)"></b>). C'est presque toujours le signe que la <b>quantité</b> et la <b>base de votre clé</b> ne couvrent pas la même période. <template x-if="p.source==='cout-revient'"><span>Corrigez le « Volume vendu / période » ci-dessus.</span></template><template x-if="p.source!=='cout-revient'"><span>Vérifiez la quantité produite/période du produit et la base de la clé.</span></template>
+          </div>
         </div>
 
         <!-- SIMULATEUR -->
@@ -966,8 +979,8 @@ html, body { overflow-x: hidden; max-width: 100vw; }
                   </div>
                 </div>
                 <div style="flex:1;margin-top:18px">
-                  <input type="range" class="sim-slider" min="1" :max="Math.max((p.qte||1)*10,500)" step="1" x-model.number="p.sim.vol" style="width:100%"/>
-                  <div class="sim-range-labels"><span>1</span><span x-text="Math.max((p.qte||1)*10,500)+' '+uLbl(p,true)"></span></div>
+                  <input type="range" class="sim-slider" min="1" :max="Math.max((cfVol()||1)*10,500)" step="1" x-model.number="p.sim.vol" style="width:100%"/>
+                  <div class="sim-range-labels"><span>1</span><span x-text="Math.max((cfVol()||1)*10,500)+' '+uLbl(p,true)"></span></div>
                 </div>
               </div>
             </div>
@@ -1147,6 +1160,18 @@ function _calcMB(p) {
   return {cv:cv, mb:mb, txMB:txMB};
 }
 
+// Volume sur lequel étaler les charges fixes (= volume vendu sur la période).
+// Distinct du rendement recette (qte) qui sert aux coûts variables.
+// CR : champ dédié volPeriode (défaut = qte). Direct : qte joue ce rôle (option a).
+function _cfVolume(p) {
+  if (!p) return 1;
+  if (p.source === 'cout-revient') {
+    var v = parseFloat(p.volPeriode);
+    return Math.max(v > 0 ? v : (parseFloat(p.qte)||1), 1);
+  }
+  return Math.max(parseFloat(p.qte)||1, 1);
+}
+
 function _calcCleRep(p) {
   var cle = p.cle || {type:'temps', produit:0, total:0};
   var prod = parseFloat(cle.produit)||0;
@@ -1161,7 +1186,7 @@ function _calcCleRep(p) {
   // un warning dans l'UI pour l'inciter à remplir la clé de répartition.
   var cfImpute = 0;
   if (cf > 0 && prod > 0 && total > 0) {
-    cfImpute = cf * mult * ratio / Math.max(parseFloat(p.qte)||1, 1);
+    cfImpute = cf * mult * ratio / _cfVolume(p);
   }
   return {ratio:ratio, cfImpute:cfImpute, saisonMult:mult};
 }
@@ -1184,7 +1209,7 @@ function _calcSim(p, sim) {
   var mpSim = mp0 * (1 - (parseFloat(sim.mp)||0)/100);
   var moSim = mo0 * (1 - (parseFloat(sim.mo)||0)/100);
   var cfSim = (p.cfTotal||0) * (1 - (parseFloat(sim.cf)||0)/100);
-  var volSim = parseFloat(sim.vol) || parseFloat(p.qte) || 1;
+  var volSim = parseFloat(sim.vol) || _cfVolume(p);
   var cvSim = mpSim + moSim + (parseFloat(p.emb)||0) + (parseFloat(p.liv)||0);
   var mbSim = pvSim - cvSim;
   var txMBSim = pvSim > 0 ? mbSim/pvSim*100 : 0;
@@ -1215,15 +1240,21 @@ function _normalize(p) {
   p.emb = parseFloat(p.emb)||0;
   p.liv = parseFloat(p.liv)||0;
   p.qte = parseFloat(p.qte||p.quantiteProduites)||1;
+  // Volume vendu sur la période — étalement des charges fixes (CR uniquement).
+  // Défaut = rendement recette (p.qte) ; éditable et persisté côté UI.
+  if(p.source === 'cout-revient'){
+    p.volPeriode = parseFloat(p.volPeriode);
+    if(!(p.volPeriode > 0)) p.volPeriode = p.qte;
+  }
   if(!p.cfTotal) p.cfTotal = 0;
-  if(!p.sim) p.sim = {pv:0, mp:0, mo:0, cf:0, vol:p.qte};
+  if(!p.sim) p.sim = {pv:0, mp:0, mo:0, cf:0, vol:_cfVolume(p)};
   if(!p.cle) p.cle = {type:'temps', produit:0, total:0};
   // Ensure sim values are numbers
   p.sim.pv  = parseFloat(p.sim.pv)||0;
   p.sim.mp  = parseFloat(p.sim.mp)||0;
   p.sim.mo  = parseFloat(p.sim.mo)||0;
   p.sim.cf  = parseFloat(p.sim.cf)||0;
-  p.sim.vol = parseFloat(p.sim.vol) || p.qte;
+  p.sim.vol = parseFloat(p.sim.vol) || _cfVolume(p);
   p.cle.produit = parseFloat(p.cle.produit)||0;
   p.cle.total   = parseFloat(p.cle.total)||0;
   return p;
@@ -1283,6 +1314,9 @@ async function loadProducts() {
       if(products[d.id]) {
         if(data.cle) { products[d.id].cle = data.cle; _normalize(products[d.id]); }
         if(data.sim) { products[d.id].sim = data.sim; _normalize(products[d.id]); }
+        if(data.volPeriode != null && parseFloat(data.volPeriode) > 0) {
+          products[d.id].volPeriode = parseFloat(data.volPeriode); _normalize(products[d.id]);
+        }
       }
     });
   } catch(e) { console.warn('Params load:', e); }
@@ -1412,15 +1446,15 @@ function margesApp() {
         {label:'Prix vente HT',     cur:this.p.pv,             sim:s.pvSim},
         {label:'Marge brute',        cur:c.mb, sim:s.mbSim,    curPct:c.txMB, simPct:s.txMBSim},
         {label:'Marge nette',        cur:c.mn, sim:s.mnSim,    curPct:c.txMN, simPct:s.txMNSim},
-        {label:'Marge brute totale', cur:c.mb*(this.p.qte||1), sim:s.margeTotSim},
-        {label:'Marge nette totale', cur:c.mn*(this.p.qte||1), sim:s.margeNetTotSim},
+        {label:'Marge brute totale', cur:c.mb*this.cfVol(), sim:s.margeTotSim},
+        {label:'Marge nette totale', cur:c.mn*this.cfVol(), sim:s.margeNetTotSim},
       ];
     },
 
     // ── Comparison table rows ──
     get compRows() {
       if(!this.p || !this.sim) return [];
-      var c = this.calc, s = this.sim, qte = this.p.qte||1;
+      var c = this.calc, s = this.sim, qte = this.cfVol();
       return [
         {label:'Prix de vente HT',      cur:this.p.pv,   sim:s.pvSim},
         {label:'Coûts variables',        cur:c.cv,        sim:s.cvSim,        inversed:true},
@@ -1465,7 +1499,7 @@ function margesApp() {
       this.$watch(function() {
         if(!self.p) return '';
         var s = self.p.sim;
-        return self.currentId + '_' + self.p.cle.type + '_' + self.p.cle.produit + '_' + self.p.cle.total + '_' + self.p.cfTotal + '_' + s.pv + '_' + s.mp + '_' + s.mo + '_' + s.cf + '_' + s.vol;
+        return self.currentId + '_' + self.p.cle.type + '_' + self.p.cle.produit + '_' + self.p.cle.total + '_' + self.p.cfTotal + '_' + self.p.volPeriode + '_' + s.pv + '_' + s.mp + '_' + s.mo + '_' + s.cf + '_' + s.vol;
       }, function(val, oldVal) {
         if(!oldVal || !self.p || !window._uid) return; // skip initial
         clearTimeout(self._saveTimer);
@@ -1479,7 +1513,7 @@ function margesApp() {
       var p = this.p;
       try {
         if(p.source === 'cout-revient') {
-          await window._setDoc(window._doc(window._db,'marges',window._uid,'params',p.id), {cle:p.cle||{}, sim:p.sim||{}});
+          await window._setDoc(window._doc(window._db,'marges',window._uid,'params',p.id), {cle:p.cle||{}, sim:p.sim||{}, volPeriode:(parseFloat(p.volPeriode)||p.qte||1)});
         } else {
           await window._setDoc(window._doc(window._db,'marges',window._uid,'produits',p.id.replace('mg_','')), JSON.parse(JSON.stringify(p)));
         }
@@ -1490,6 +1524,7 @@ function margesApp() {
     // ── Helpers ──
     fmtE: fmtE,
     calcMB: _calcMB,
+    cfVol() { return this.p ? _cfVolume(this.p) : 1; },
 
     mbCls(prod) {
       var tx = _calcMB(prod).txMB;
@@ -1536,7 +1571,7 @@ function margesApp() {
       var p = this.p;
       if(p.source === 'cout-revient') {
         try {
-          await window._setDoc(window._doc(window._db,'marges',window._uid,'params',p.id), {cle:p.cle||{}, sim:p.sim||{}});
+          await window._setDoc(window._doc(window._db,'marges',window._uid,'params',p.id), {cle:p.cle||{}, sim:p.sim||{}, volPeriode:(parseFloat(p.volPeriode)||p.qte||1)});
           showToast('✅ Paramètres sauvegardés !','success');
         } catch(e) { showToast('Erreur','warning'); console.error(e); }
       } else {
@@ -1617,7 +1652,7 @@ function margesApp() {
           var p = this.products[this.modalEdit];
           try {
             if(p.source === 'cout-revient') {
-              await window._setDoc(window._doc(window._db,'marges',window._uid,'params',p.id), {cle:p.cle||{}, sim:p.sim||{}});
+              await window._setDoc(window._doc(window._db,'marges',window._uid,'params',p.id), {cle:p.cle||{}, sim:p.sim||{}, volPeriode:(parseFloat(p.volPeriode)||p.qte||1)});
             } else {
               await window._setDoc(window._doc(window._db,'marges',window._uid,'produits',p.id.replace('mg_','')), JSON.parse(JSON.stringify(p)));
             }
