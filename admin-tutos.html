@@ -49,8 +49,8 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
 .form-field{display:flex;flex-direction:column;gap:6px;}
 .form-field.span2{grid-column:1/-1;}
 .form-field label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
-.form-field input,.form-field textarea{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:12px;font-family:inherit;font-size:14px;background:white;color:var(--text);transition:border-color .2s;}
-.form-field input:focus,.form-field textarea:focus{outline:none;border-color:var(--blue);}
+.form-field input,.form-field textarea,.form-field select{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:12px;font-family:inherit;font-size:14px;background:white;color:var(--text);transition:border-color .2s;}
+.form-field input:focus,.form-field textarea:focus,.form-field select:focus{outline:none;border-color:var(--blue);}
 .form-field textarea{resize:vertical;min-height:74px;line-height:1.55;}
 .form-field textarea.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;}
 .form-field .hint{font-size:11.5px;color:var(--subtle);margin-top:2px;line-height:1.5;}
@@ -65,6 +65,8 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
 
 /* Liste */
 .vid-list{display:flex;flex-direction:column;gap:12px;}
+.vid-section-head{font-size:12px;font-weight:800;color:var(--blue);text-transform:uppercase;letter-spacing:.06em;margin-top:14px;padding-bottom:6px;border-bottom:1px solid var(--border);}
+.vid-section-head:first-child{margin-top:0;}
 .vid-row{background:#fafafc;border:1px solid var(--border);border-radius:var(--rlg);padding:16px 20px;display:flex;justify-content:space-between;align-items:center;gap:14px;transition:border-color .2s,box-shadow .2s;}
 .vid-row:hover{border-color:var(--blue);box-shadow:0 2px 10px rgba(0,0,0,.04);}
 .vid-row.dragging{opacity:.45;}
@@ -139,6 +141,16 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
         <span class="hint">Sur Tella : ouvre la vidéo → <b>Share</b> → <b>Embed</b> → copie le bloc. Tu peux coller le code complet, l'URL est extraite automatiquement.</span>
       </div>
 
+      <div class="form-field span2">
+        <label for="f-category">Section</label>
+        <select id="f-category">
+          <option value="pilotage">Pilotage &amp; KPI's</option>
+          <option value="fidelisation">Fidélisation</option>
+          <option value="rh">RH</option>
+        </select>
+        <span class="hint">Détermine sous quelle rubrique la vidéo apparaît sur la page Tutoriels.</span>
+      </div>
+
       <div class="form-field">
         <label for="f-title">Titre</label>
         <input id="f-title" type="text" placeholder="Le Pilotage de A à Z"/>
@@ -211,9 +223,26 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
   const ADMIN_EMAIL = 'contact@adrienemily.com';
   const COL = 'tuto_videos';
 
+  // Sections de regroupement des vidéos (ordre = ordre d'affichage sur tutoriels.html)
+  // Pour en ajouter une : ajoute une ligne ici ET la même dans tutoriels.html.
+  const TUTO_SECTIONS = [
+    { id: 'pilotage',     label: "Pilotage & KPI's" },
+    { id: 'fidelisation', label: 'Fidélisation' },
+    { id: 'rh',           label: 'RH' }
+  ];
+  function secIndex(cat) { const i = TUTO_SECTIONS.findIndex(s => s.id === cat); return i < 0 ? TUTO_SECTIONS.length : i; }
+  function secLabel(cat) { const s = TUTO_SECTIONS.find(x => x.id === cat); return s ? s.label : 'Non classé'; }
+  function sortItems() {
+    items.sort((a, b) => {
+      const d = secIndex(a.category) - secIndex(b.category);
+      return d !== 0 ? d : ((a.order || 0) - (b.order || 0));
+    });
+  }
+
   let editingId = null;
   let items = []; // liste en mémoire (triée par order) pour le réordonnancement
   let dragId = null; // id de la vidéo en cours de glisser-déposer
+  let dragCat = null; // section de la vidéo en cours de glisser-déposer (drag restreint à la section)
 
   // ── Auth gate ──
   onAuthStateChanged(auth, async function (user) {
@@ -278,6 +307,7 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
     const icon = document.getElementById('f-icon').value.trim() || '🎬';
     const duration = document.getElementById('f-duration').value.trim();
     const poster = document.getElementById('f-poster').value.trim();
+    const category = document.getElementById('f-category').value || TUTO_SECTIONS[0].id;
 
     if (!title) { toast('Le titre est obligatoire.', 'error'); return; }
     if (!embed) { toast("Code embed invalide : aucune URL détectée.", 'error'); return; }
@@ -286,7 +316,7 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
     try {
       if (editingId) {
         await updateDoc(doc(db, COL, editingId), {
-          icon, title, desc, duration, embed, poster,
+          icon, title, desc, duration, embed, poster, category,
           updatedAt: new Date().toISOString()
         });
         toast('✅ Vidéo mise à jour');
@@ -294,7 +324,7 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
         const id = 'tv_' + Date.now();
         const maxOrder = items.length ? Math.max(...items.map(i => i.order || 0)) : 0;
         await setDoc(doc(db, COL, id), {
-          icon, title, desc, duration, embed, poster,
+          icon, title, desc, duration, embed, poster, category,
           order: maxOrder + 1,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
@@ -320,6 +350,7 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
     document.getElementById('f-icon').value = '';
     document.getElementById('f-duration').value = '';
     document.getElementById('f-poster').value = '';
+    document.getElementById('f-category').value = TUTO_SECTIONS[0].id;
     document.getElementById('formTitle').textContent = 'Ajouter une vidéo';
     document.getElementById('btnSave').textContent = 'Enregistrer la vidéo';
     document.getElementById('btnCancel').style.display = 'none';
@@ -354,10 +385,21 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
       return;
     }
 
+    sortItems();
+
+    let lastCat = '__none__';
     box.innerHTML = items.map((v, idx) => {
       const okChip = v.embed ? '<span class="vid-chip">Embed OK</span>' : '<span class="vid-chip warn">Embed manquant</span>';
       const dur = v.duration ? ' · ' + escapeHtml(v.duration) : '';
-      return `<div class="vid-row" draggable="true" data-id="${v.id}">
+      const prev = items[idx - 1], next = items[idx + 1];
+      const firstOfSec = !prev || prev.category !== v.category;
+      const lastOfSec = !next || next.category !== v.category;
+      let head = '';
+      if (v.category !== lastCat) {
+        head = `<div class="vid-section-head">${escapeHtml(secLabel(v.category))}</div>`;
+        lastCat = v.category;
+      }
+      return head + `<div class="vid-row" draggable="true" data-id="${v.id}" data-cat="${escapeHtml(v.category || '')}">
         <div class="vid-info">
           <div class="vid-handle" title="Glisser pour réordonner">⠿</div>
           <div class="vid-emo">${escapeHtml(v.icon || '🎬')}</div>
@@ -367,8 +409,8 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
           </div>
         </div>
         <div class="vid-actions">
-          <button class="vid-btn ord" data-action="up" data-id="${v.id}" title="Monter" ${idx === 0 ? 'disabled' : ''}>↑</button>
-          <button class="vid-btn ord" data-action="down" data-id="${v.id}" title="Descendre" ${idx === items.length - 1 ? 'disabled' : ''}>↓</button>
+          <button class="vid-btn ord" data-action="up" data-id="${v.id}" title="Monter" ${firstOfSec ? 'disabled' : ''}>↑</button>
+          <button class="vid-btn ord" data-action="down" data-id="${v.id}" title="Descendre" ${lastOfSec ? 'disabled' : ''}>↓</button>
           <button class="vid-btn" data-action="edit" data-id="${v.id}">Modifier</button>
           <button class="vid-btn del" data-action="delete" data-id="${v.id}">Supprimer</button>
         </div>
@@ -387,17 +429,20 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
     box.querySelectorAll('.vid-row').forEach(row => {
       row.addEventListener('dragstart', e => {
         dragId = row.dataset.id;
+        dragCat = row.dataset.cat;
         row.classList.add('dragging');
         e.dataTransfer.effectAllowed = 'move';
         try { e.dataTransfer.setData('text/plain', dragId); } catch (_) {}
       });
       row.addEventListener('dragend', () => {
         dragId = null;
+        dragCat = null;
         row.classList.remove('dragging');
         clearDropMarkers();
       });
       row.addEventListener('dragover', e => {
         if (!dragId || row.dataset.id === dragId) return;
+        if (row.dataset.cat !== dragCat) return; // déplacement uniquement au sein d'une section
         e.preventDefault();
         e.dataTransfer.dropEffect = 'move';
         const rect = row.getBoundingClientRect();
@@ -406,7 +451,7 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
         row.classList.add(after ? 'drop-after' : 'drop-before');
       });
       row.addEventListener('drop', e => {
-        if (!dragId || row.dataset.id === dragId) { clearDropMarkers(); return; }
+        if (!dragId || row.dataset.id === dragId || row.dataset.cat !== dragCat) { clearDropMarkers(); return; }
         e.preventDefault();
         const rect = row.getBoundingClientRect();
         const after = (e.clientY - rect.top) > rect.height / 2;
@@ -432,6 +477,7 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
     document.getElementById('f-icon').value = v.icon || '';
     document.getElementById('f-duration').value = v.duration || '';
     document.getElementById('f-poster').value = v.poster || '';
+    document.getElementById('f-category').value = (v.category && TUTO_SECTIONS.some(s => s.id === v.category)) ? v.category : TUTO_SECTIONS[0].id;
     document.getElementById('formTitle').textContent = 'Modifier la vidéo';
     document.getElementById('btnSave').textContent = 'Enregistrer les modifications';
     document.getElementById('btnCancel').style.display = 'inline-block';
@@ -453,41 +499,43 @@ header.hdr{display:flex;align-items:center;justify-content:space-between;margin-
     }
   }
 
-  // ── Réordonnancement (échange des champs order entre 2 voisins) ──
-  async function moveItem(id, dir) {
-    const idx = items.findIndex(i => i.id === id);
-    const swapIdx = idx + dir;
-    if (idx < 0 || swapIdx < 0 || swapIdx >= items.length) return;
-    const a = items[idx], b = items[swapIdx];
-    const orderA = (typeof a.order === 'number') ? a.order : idx;
-    const orderB = (typeof b.order === 'number') ? b.order : swapIdx;
+  // ── Persiste l'ordre courant du tableau items (order = 0..n) ──
+  // items est trié [section, order] → réassigner l'index garde le groupement cohérent.
+  async function persistFlatOrder() {
     try {
-      await Promise.all([
-        updateDoc(doc(db, COL, a.id), { order: orderB }),
-        updateDoc(doc(db, COL, b.id), { order: orderA })
-      ]);
+      await Promise.all(items.map((it, i) => updateDoc(doc(db, COL, it.id), { order: i })));
       await loadList();
     } catch (e) {
       toast('Erreur : ' + e.message, 'error');
     }
   }
 
-  // ── Réordonnancement par glisser-déposer (réindexe order = 0..n) ──
+  // ── Monter / descendre d'un cran (au sein de la section uniquement) ──
+  function moveItem(id, dir) {
+    const idx = items.findIndex(i => i.id === id);
+    const swapIdx = idx + dir;
+    if (idx < 0 || swapIdx < 0 || swapIdx >= items.length) return;
+    if (items[swapIdx].category !== items[idx].category) return; // pas de saut de section
+    const tmp = items[idx];
+    items[idx] = items[swapIdx];
+    items[swapIdx] = tmp;
+    persistFlatOrder();
+  }
+
+  // ── Réordonnancement par glisser-déposer (au sein de la section) ──
   async function dropReorder(fromId, toId, after) {
     const fromIdx = items.findIndex(i => i.id === fromId);
-    if (fromIdx < 0) return;
+    const toItem = items.find(i => i.id === toId);
+    if (fromIdx < 0 || !toItem) return;
+    if (items[fromIdx].category !== toItem.category) return; // même section uniquement
     const moved = items[fromIdx];
     const rest = items.slice(0, fromIdx).concat(items.slice(fromIdx + 1));
     let toIdx = rest.findIndex(i => i.id === toId);
     if (toIdx < 0) return;
     if (after) toIdx += 1;
     rest.splice(toIdx, 0, moved);
-    try {
-      await Promise.all(rest.map((it, i) => updateDoc(doc(db, COL, it.id), { order: i })));
-      await loadList();
-    } catch (e) {
-      toast('Erreur : ' + e.message, 'error');
-    }
+    items = rest;
+    await persistFlatOrder();
   }
 </script>
 
