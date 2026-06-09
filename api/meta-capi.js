@@ -2,9 +2,22 @@
 // Reçoit l'event du navigateur (même event_id que le pixel → dédup) et le relaie à Meta.
 // Le token n'est JAMAIS dans le code client : il vit dans la variable d'env META_CAPI_TOKEN.
 
+import crypto from 'node:crypto';
+
 const DATASET_ID = '2069940677253298';   // = ton ID pixel / jeu de données
 const GRAPH_VERSION = 'v21.0';
 const ALLOWED_ORIGINS = ['https://alteore.com', 'https://www.alteore.com'];
+// Mode test : pose META_TEST_EVENT_CODE dans Vercel pour voir les events dans "Test des événements".
+// Laisse vide / supprime la variable en prod.
+const TEST_EVENT_CODE = process.env.META_TEST_EVENT_CODE || '';
+
+// Meta exige les données perso hachées en SHA-256 (email normalisé : trim + minuscules)
+function sha256(v) {
+  return crypto.createHash('sha256').update(String(v)).digest('hex');
+}
+function hashEmail(e) {
+  return sha256(String(e).trim().toLowerCase());
+}
 
 export default async function handler(req, res) {
   // CORS (au cas où www et apex ne soient pas le même origin)
@@ -27,7 +40,9 @@ export default async function handler(req, res) {
       event_id,
       event_source_url,
       fbp,
-      fbc
+      fbc,
+      email,
+      external_id
     } = body;
 
     // IP + User-Agent réels du visiteur (Vercel ajoute x-forwarded-for)
@@ -41,6 +56,9 @@ export default async function handler(req, res) {
     };
     if (fbp) user_data.fbp = fbp;
     if (fbc) user_data.fbc = fbc;
+    // Données perso hachées → boost du match quality sur les events de conversion
+    if (email) user_data.em = [hashEmail(email)];
+    if (external_id) user_data.external_id = [sha256(String(external_id))];
 
     const payload = {
       data: [
@@ -53,8 +71,8 @@ export default async function handler(req, res) {
           user_data
         }
       ]
-      // test_event_code: 'TEST86410'     // décommenter UNIQUEMENT pour retester
     };
+    if (TEST_EVENT_CODE) payload.test_event_code = TEST_EVENT_CODE;
 
     const url = `https://graph.facebook.com/${GRAPH_VERSION}/${DATASET_ID}/events?access_token=${token}`;
     const r = await fetch(url, {
