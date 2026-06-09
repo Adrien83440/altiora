@@ -1492,73 +1492,69 @@ document.querySelectorAll('[data-count]').forEach(el=>cntObs.observe(el));
 const whyObs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('anim');whyObs.unobserve(e.target);}});},{threshold:.4});
 const wc=document.getElementById('whyCard');if(wc)whyObs.observe(wc);
 
-/* 7 — Scroll story */
+/* 7 — Scroll story (carte épinglée en position:fixed, pilotée au scroll) */
 (function(){
-  const steps=document.querySelectorAll('.ss-step');
-  const slides=document.querySelectorAll('.ss-slide');
+  var steps=document.querySelectorAll('.ss-step');
+  var slides=document.querySelectorAll('.ss-slide');
   if(!steps.length) return;
-  function activate(i){steps.forEach((s,j)=>s.classList.toggle('vis',i===j));slides.forEach((s,j)=>s.classList.toggle('act',i===j));}
+  function activate(i){steps.forEach(function(s,j){s.classList.toggle('vis',i===j);});slides.forEach(function(s,j){s.classList.toggle('act',i===j);});}
+
+  /* Mobile : cartes empilées, pas d'épinglage. */
   if(window.innerWidth<=900){
-    steps.forEach(s=>new IntersectionObserver(es=>{if(es[0].isIntersecting)s.classList.add('vis');},{threshold:.4}).observe(s));
+    steps.forEach(function(s){ new IntersectionObserver(function(es){ if(es[0].isIntersecting) s.classList.add('vis'); },{threshold:.4}).observe(s); });
     return;
   }
-  /* Sélection du module au scroll (déterministe, identique sur tous les
-     navigateurs). L'IntersectionObserver avec rootMargin négatif en %
-     était capricieux sur Safari/WebKit -> la carte restait bloquée sur le
-     module 01. On active le module dont le centre est le plus proche de la
-     ligne ~42% de l'écran. */
-  var curIdx=-1, ticking=false;
-  function pickStep(){
-    ticking=false;
-    var line=window.innerHeight*0.42, best=0, bestDist=Infinity;
-    steps.forEach(function(s,j){
-      var r=s.getBoundingClientRect();
-      var d=Math.abs((r.top+r.height/2)-line);
-      if(d<bestDist){bestDist=d;best=j;}
-    });
-    if(best!==curIdx){curIdx=best;activate(best);}
-  }
-  function onScroll(){ if(!ticking){ticking=true;requestAnimationFrame(pickStep);} }
-  window.addEventListener('scroll',onScroll,{passive:true});
-  window.addEventListener('resize',onScroll,{passive:true});
-  pickStep();
 
-  /* Verrou de hauteur : les cartes sans GIF (04 Dettes, 06 IA) sont plus
-     courtes -> le wrap se contractait en arrivant dessus (saut visuel).
-     On fixe la hauteur du wrap sur la carte la plus haute. offsetHeight
-     ignore les transforms (scale), donc les slides inactives sont mesurées
-     correctement. */
+  var inner=document.querySelector('.ss-inner');
+  var col=document.querySelector('.ss-sticky');
   var vwrap=document.getElementById('ssVwrap');
-  /* Hauteur explicite de la colonne sticky = hauteur de la colonne de droite.
-     C'est ce qui donne au sticky de quoi défiler, sans dépendre du stretch
-     flex/grid (non fiable sur WebKit). */
-  var stickyCol=document.querySelector('.ss-sticky');
-  var stepsCol=document.getElementById('ssSteps');
-  function syncStickyHeight(){
-    if(stickyCol && stepsCol) stickyCol.style.height=stepsCol.offsetHeight+'px';
-  }
-  function lockVwrapHeight(){
-    if(!vwrap) return;
+  if(!inner||!col||!vwrap) return;
+  var navH=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--nav-h'),10)||52;
+
+  /* Hauteur stable de la carte = carte la plus haute (04 Dettes / 06 IA sont
+     plus courtes faute de GIF) -> pas de saut. offsetHeight ignore le scale. */
+  function lockHeight(){
     var max=0;
-    slides.forEach(function(s){
-      var w=s.querySelector('.ss-wrap');
-      if(w && w.offsetHeight>max) max=w.offsetHeight;
-    });
+    slides.forEach(function(s){ var w=s.querySelector('.ss-wrap'); if(w && w.offsetHeight>max) max=w.offsetHeight; });
     if(max>0) vwrap.style.minHeight=max+'px';
   }
-  function refreshSS(){ lockVwrapHeight(); syncStickyHeight(); }
-  refreshSS();
-  window.addEventListener('resize',refreshSS);
-  /* Les GIF changent la hauteur des cartes une fois chargés -> on relock. */
-  if(vwrap){
-    vwrap.querySelectorAll('img').forEach(function(img){
-      if(img.complete) return;
-      img.addEventListener('load',refreshSS);
-    });
+
+  /* Épinglage. position:fixed est relatif au viewport sur TOUS les navigateurs
+     (Safari compris) : insensible à overflow du body, aux items flex, au stretch.
+     Seul un ancêtre transformé le casserait, il n'y en a pas ici. On recalcule
+     la position verticale au scroll pour imiter un sticky borné par la section. */
+  var curIdx=-1, ticking=false;
+  function frame(){
+    ticking=false;
+    if(window.innerWidth<=900){ vwrap.style.position=''; vwrap.style.top=''; vwrap.style.left=''; vwrap.style.width=''; vwrap.style.margin=''; return; }
+    var vh=window.innerHeight;
+    var R=inner.getBoundingClientRect();
+    var C=col.getBoundingClientRect();
+    var cardH=vwrap.offsetHeight;
+    var boxH=vh-navH;
+    var boxTop=Math.max(R.top, Math.min(navH, R.bottom-boxH));
+    var cardTop=boxTop+(boxH-cardH)/2;
+    var gutter=40;
+    var cardW=Math.min(440, C.width-gutter);
+    var cardLeft=C.left+((C.width-gutter)-cardW)/2;
+    vwrap.style.position='fixed';
+    vwrap.style.top=Math.round(cardTop)+'px';
+    vwrap.style.left=Math.round(cardLeft)+'px';
+    vwrap.style.width=Math.round(cardW)+'px';
+    vwrap.style.margin='0';
+    var lineY=vh*0.42, best=0, bestDist=Infinity;
+    steps.forEach(function(s,j){ var r=s.getBoundingClientRect(); var d=Math.abs((r.top+r.height/2)-lineY); if(d<bestDist){bestDist=d;best=j;} });
+    if(best!==curIdx){ curIdx=best; activate(best); }
   }
-  /* Filets de sécurité (polices / GIF lents). */
-  setTimeout(refreshSS,500);
-  setTimeout(refreshSS,1500);
+  function onScroll(){ if(!ticking){ ticking=true; requestAnimationFrame(frame); } }
+  function refresh(){ lockHeight(); frame(); }
+
+  refresh();
+  window.addEventListener('scroll',onScroll,{passive:true});
+  window.addEventListener('resize',refresh,{passive:true});
+  vwrap.querySelectorAll('img').forEach(function(img){ if(!img.complete) img.addEventListener('load',refresh); });
+  setTimeout(refresh,500);
+  setTimeout(refresh,1500);
 })();
 
 /* 8 — Testimonials */
