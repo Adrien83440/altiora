@@ -242,6 +242,17 @@ module.exports = async (req, res) => {
       // Si code invalide, on continue sans — le client pourra le retaper sur Stripe
     }
 
+    // ── Code promo valide appliqué → on saute l'essai 15j ──
+    // Le code fournit déjà la période gratuite (ex ELITE12 = 12 mois offerts).
+    // Inutile d'empiler un essai Stripe par-dessus : ça afficherait « Essai »
+    // au lieu du vrai plan et créerait de la confusion (cas vécu). En sautant
+    // l'essai, la sub démarre en `active` (1ère facture 0€ couverte par le
+    // coupon) → le webhook passe Firestore directement en max/master.
+    if (promoId && grantTrial) {
+      grantTrial = false;
+      console.log('[Checkout] Essai 15j sauté : code promo appliqué (' + promoCode.trim().toUpperCase() + ')');
+    }
+
     // ── Si un code parrainage est fourni, préparer le coupon filleul -50% ──
     let filleulCouponId = null;
     if (referralCode) {
