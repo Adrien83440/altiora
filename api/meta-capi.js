@@ -52,8 +52,8 @@ export default async function handler(req, res) {
           action_source: 'website',
           user_data
         }
-      ],
-      test_event_code: 'TEST86410'     // ⚠️ MODE TEST — recommenter (//) après validation
+      ]
+      // test_event_code: 'TEST86410'     // décommenter UNIQUEMENT pour retester
     };
 
     const url = `https://graph.facebook.com/${GRAPH_VERSION}/${DATASET_ID}/events?access_token=${token}`;
