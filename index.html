@@ -410,10 +410,12 @@
   /* SCROLL STORY                            */
   /* ──────────────────────────────────────── */
   .scroll-story{background:white;padding:0;}
-  .ss-inner{display:flex;align-items:stretch;max-width:1100px;margin:0 auto;padding:0 24px;}
-  /* .ss-sticky = colonne (item flex statique, étirée en hauteur). Le sticky
-     est porté par .ss-stuck à l'intérieur : Safari/WebKit ne gère pas
-     position:sticky directement sur un item flex, d'où l'écran blanc. */
+  .ss-inner{display:flex;align-items:flex-start;max-width:1100px;margin:0 auto;padding:0 24px;}
+  /* .ss-sticky = colonne (item flex). Sa hauteur est fixée en JS = hauteur de
+     la colonne de droite, pour donner au sticky de quoi défiler (WebKit ne
+     stretch pas un item flex auto vers la hauteur intrinsèque du voisin).
+     Le sticky est porté par .ss-stuck à l'intérieur : Safari ne gère pas
+     position:sticky directement sur un item flex. */
   .ss-sticky{width:50%;flex-shrink:0;}
   .ss-stuck{position:-webkit-sticky;position:sticky;top:var(--nav-h);min-height:calc(100vh - var(--nav-h));display:flex;align-items:center;justify-content:center;padding:60px 40px 60px 0;}
   .ss-vwrap{position:relative;width:100%;max-width:440px;}
@@ -1527,6 +1529,14 @@ const wc=document.getElementById('whyCard');if(wc)whyObs.observe(wc);
      ignore les transforms (scale), donc les slides inactives sont mesurées
      correctement. */
   var vwrap=document.getElementById('ssVwrap');
+  /* Hauteur explicite de la colonne sticky = hauteur de la colonne de droite.
+     C'est ce qui donne au sticky de quoi défiler, sans dépendre du stretch
+     flex/grid (non fiable sur WebKit). */
+  var stickyCol=document.querySelector('.ss-sticky');
+  var stepsCol=document.getElementById('ssSteps');
+  function syncStickyHeight(){
+    if(stickyCol && stepsCol) stickyCol.style.height=stepsCol.offsetHeight+'px';
+  }
   function lockVwrapHeight(){
     if(!vwrap) return;
     var max=0;
@@ -1536,18 +1546,19 @@ const wc=document.getElementById('whyCard');if(wc)whyObs.observe(wc);
     });
     if(max>0) vwrap.style.minHeight=max+'px';
   }
-  lockVwrapHeight();
-  window.addEventListener('resize',lockVwrapHeight);
+  function refreshSS(){ lockVwrapHeight(); syncStickyHeight(); }
+  refreshSS();
+  window.addEventListener('resize',refreshSS);
   /* Les GIF changent la hauteur des cartes une fois chargés -> on relock. */
   if(vwrap){
     vwrap.querySelectorAll('img').forEach(function(img){
       if(img.complete) return;
-      img.addEventListener('load',lockVwrapHeight);
+      img.addEventListener('load',refreshSS);
     });
   }
   /* Filets de sécurité (polices / GIF lents). */
-  setTimeout(lockVwrapHeight,500);
-  setTimeout(lockVwrapHeight,1500);
+  setTimeout(refreshSS,500);
+  setTimeout(refreshSS,1500);
 })();
 
 /* 8 — Testimonials */
