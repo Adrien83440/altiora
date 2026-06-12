@@ -254,12 +254,21 @@ function updateBlogIndex(currentHtml, draft) {
 }
 
 // ─────────────────────────────────────────────────────────
-// Auth: admin humain uniquement (la publication n'est pas automatisée)
+// Auth: admin humain (Bearer idToken) OU cron interne (x-cron-secret)
+// Le header x-cron-secret permet à /api/cron-generate-blog de publier
+// automatiquement les articles générés chaque vendredi.
 // ─────────────────────────────────────────────────────────
 
 const ADMIN_EMAIL = (process.env.BLOG_ADMIN_EMAIL || 'contact@adrienemily.com').toLowerCase();
 
 async function requireHumanAdminAuth(req) {
+  // 1. Voie cron : header x-cron-secret (appel serveur → serveur)
+  const cronSecret = req.headers['x-cron-secret'] || '';
+  if (process.env.CRON_SECRET && cronSecret === process.env.CRON_SECRET) {
+    return { ok: true, email: 'cron-internal' };
+  }
+
+  // 2. Voie humaine : Bearer idToken Firebase de l'admin
   const authHeader = req.headers.authorization || '';
   const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
   if (!idToken) return { ok: false, status: 401, error: 'Missing Bearer idToken' };

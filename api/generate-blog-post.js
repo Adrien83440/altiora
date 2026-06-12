@@ -21,6 +21,37 @@
 
 const FIREBASE_PROJECT_ID = 'altiora-70599';
 const ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
+const ADMIN_EMAIL = (process.env.BLOG_ADMIN_EMAIL || 'contact@adrienemily.com').toLowerCase();
+
+// ─────────────────────────────────────────────────────────
+// Auth : cron interne (x-cron-secret) OU admin humain (Bearer idToken)
+// Sans cette barrière l'endpoint était public → n'importe qui pouvait
+// consommer les crédits Anthropic.
+// ─────────────────────────────────────────────────────────
+
+async function requireCronOrAdminAuth(req) {
+  // 1. Voie cron : header x-cron-secret
+  const cronSecret = req.headers['x-cron-secret'] || '';
+  if (process.env.CRON_SECRET && cronSecret === process.env.CRON_SECRET) {
+    return { ok: true, email: 'cron-internal' };
+  }
+
+  // 2. Voie humaine : Bearer idToken Firebase de l'admin (admin-blog.html)
+  const authHeader = req.headers.authorization || '';
+  const idToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+  if (!idToken) return { ok: false, status: 401, error: 'Missing Bearer idToken or x-cron-secret' };
+
+  const r = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.FIREBASE_API_KEY}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken }),
+  });
+  if (!r.ok) return { ok: false, status: 401, error: 'Invalid idToken' };
+  const data = await r.json();
+  const email = ((data.users || [])[0]?.email || '').toLowerCase();
+  if (email !== ADMIN_EMAIL) return { ok: false, status: 403, error: 'Forbidden (email mismatch)' };
+  return { ok: true, email };
+}
 
 // ─────────────────────────────────────────────────────────
 // Firebase helpers (REST API + admin token)
@@ -567,6 +598,10 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
+    // 🔐 Auth check (cron secret ou admin humain)
+    const auth = await requireCronOrAdminAuth(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+
     const { topic, metier = 'all', category = 'guides', length = 'medium' } = req.body || {};
     if (!topic || typeof topic !== 'string') {
       return res.status(400).json({ error: 'Missing "topic" (string)' });
