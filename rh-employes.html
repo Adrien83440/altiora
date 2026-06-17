@@ -3109,18 +3109,28 @@ async function _fetchURSSAF(brut, estCadre) {
   var result = document.getElementById('urssaf-result');
   if (btn) { btn.textContent = '⏳...'; btn.disabled = true; }
   try {
-    var resp = await fetch('/api/urssaf-cost', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        brutMensuel: brut,
-        cadre: estCadre,
-        apprenti: (contrat || '').toLowerCase().indexOf('apprenti') >= 0,
-        cdd: contrat === 'CDD'
-      })
-    });
-    if (!resp.ok) throw new Error('API error ' + resp.status);
-    var d = await resp.json();
+    var _body = {
+      brutMensuel: brut,
+      cadre: estCadre,
+      apprenti: (contrat || '').toLowerCase().indexOf('apprenti') >= 0,
+      cdd: contrat === 'CDD'
+    };
+    // Cache front mémoire (session) : un même profil n'est jamais re-fetché.
+    window._urssafFrontCache = window._urssafFrontCache || {};
+    var _key = JSON.stringify(_body);
+    var d;
+    if (Object.prototype.hasOwnProperty.call(window._urssafFrontCache, _key)) {
+      d = window._urssafFrontCache[_key];
+    } else {
+      var resp = await fetch('/api/urssaf-cost', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(_body)
+      });
+      if (!resp.ok) throw new Error('API error ' + resp.status);
+      d = await resp.json();
+      if (d) window._urssafFrontCache[_key] = d;
+    }
     if (d.tauxEffectif !== null && d.tauxEffectif !== undefined) {
       // Use URSSAF taux as the real one
       window._currentTauxCharges = d.tauxEffectif;

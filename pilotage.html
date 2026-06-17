@@ -3156,6 +3156,11 @@ function onDirTypeChange(val) {
   if (val !== 'prelevement') scheduleDirURSSAF();
 }
 
+// Cache front mémoire (session) partagé par fetchAllURSSAF / scheduleDirURSSAF /
+// scheduleLineURSSAF. Clé = JSON du payload envoyé à l'API. Évite de re-fetcher
+// un brut déjà calculé pendant la session (s'ajoute au cache Firestore serveur).
+window._urssafFrontCache = window._urssafFrontCache || {};
+
 async function fetchAllURSSAF() {
   var btn = document.getElementById('ms-urssaf-btn');
   if (btn) { btn.textContent = '⏳ Mise à jour...'; btn.disabled = true; }
@@ -3178,36 +3183,76 @@ async function fetchAllURSSAF() {
 
   var updated = 0, errors = 0;
 
-  // Fetch TOUS les salariés en parallèle
-  var empPromises = empList.map(function(emp) {
+  // ─── Anti-429 : appels SÉQUENTIELS + déduplication + cache mémoire ──────────
+  // L'API URSSAF (publique, gratuite) applique un rate-limit IP. Lancer un fetch
+  // par salarié en parallèle (ancien Promise.all) saturait la limite → 429 → 502
+  // en cascade. On regroupe désormais les profils identiques (même payload → même
+  // taux) pour ne taper l'API qu'une fois par profil unique, et on espace les
+  // appels distincts d'un court délai. _urssafFrontCache mémorise les réponses
+  // de la session : un brut déjà calculé n'est jamais re-fetché.
+  var _payloadOf = function(emp) {
     var brut = parseFloat(emp.salaireBrut) || 0;
-    if (brut <= 0) return Promise.resolve(null);
-    return fetch('/api/urssaf-cost', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        brutMensuel: brut,
-        heuresHebdo: parseFloat(emp.heuresHebdo) || 35,
-        cadre: (emp.categoriePoste || '') === 'cadre',
-        apprenti: (emp.typeContrat || '').toLowerCase().indexOf('apprenti') >= 0,
-        cdd: (emp.typeContrat || '') === 'CDD'
-      })
-    }).then(function(resp){ return resp.ok ? resp.json() : null; })
-      .catch(function(){ return null; });
-  });
+    return {
+      brutMensuel: brut,
+      heuresHebdo: parseFloat(emp.heuresHebdo) || 35,
+      cadre: (emp.categoriePoste || '') === 'cadre',
+      apprenti: (emp.typeContrat || '').toLowerCase().indexOf('apprenti') >= 0,
+      cdd: (emp.typeContrat || '') === 'CDD'
+    };
+  };
 
-  // Ajouter le dirigeant au batch parallèle
   var dir = ms.dirigeant || {};
   var remDir = pf(dir.remuneration);
-  var dirPromise = (remDir > 0 && dir.type !== 'prelevement')
-    ? fetch('/api/urssaf-cost', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ brutMensuel: remDir, dirigeant: dir.type === 'Assimilé salarié' ? 'assimile' : 'tns' })
-      }).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; })
-    : Promise.resolve(null);
 
-  var allResults = await Promise.all(empPromises.concat([dirPromise]));
+  // Construire la liste des appels UNIQUES (clé = JSON du payload).
+  // Chaque entrée : { key, body, targets:[index dans allResults] }
+  var callMap = {};         // key -> { body, targets:[] }
+  var allResults = [];      // aligné sur empList puis [dirigeant]
+  empList.forEach(function(emp, i) {
+    allResults[i] = null;
+    var brut = parseFloat(emp.salaireBrut) || 0;
+    if (brut <= 0) return;
+    var body = _payloadOf(emp);
+    var key = JSON.stringify(body);
+    if (!callMap[key]) callMap[key] = { body: body, targets: [] };
+    callMap[key].targets.push(i);
+  });
+
+  // Index du dirigeant = dernière position
+  var dirIndex = empList.length;
+  allResults[dirIndex] = null;
+  if (remDir > 0 && dir.type !== 'prelevement') {
+    var dirBody = { brutMensuel: remDir, dirigeant: dir.type === 'Assimilé salarié' ? 'assimile' : 'tns' };
+    var dirKey = JSON.stringify(dirBody);
+    if (!callMap[dirKey]) callMap[dirKey] = { body: dirBody, targets: [] };
+    callMap[dirKey].targets.push(dirIndex);
+  }
+
+  // Exécuter les appels uniques EN SÉQUENTIEL avec petit délai entre chaque.
+  var uniqueCalls = Object.keys(callMap);
+  for (var ci = 0; ci < uniqueCalls.length; ci++) {
+    var entry = callMap[uniqueCalls[ci]];
+    var cacheK = uniqueCalls[ci];
+    var d = null;
+    if (Object.prototype.hasOwnProperty.call(window._urssafFrontCache, cacheK)) {
+      d = window._urssafFrontCache[cacheK]; // hit cache session : aucun appel
+    } else {
+      try {
+        var resp = await fetch('/api/urssaf-cost', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(entry.body)
+        });
+        d = resp.ok ? await resp.json() : null;
+      } catch (e) { d = null; }
+      if (d) window._urssafFrontCache[cacheK] = d; // on ne cache que les succès
+      // Délai entre appels DISTINCTS uniquement (pas après le dernier).
+      if (ci < uniqueCalls.length - 1) {
+        await new Promise(function(r){ setTimeout(r, 250); });
+      }
+    }
+    // Redistribuer le résultat sur toutes les cibles de ce profil.
+    entry.targets.forEach(function(t){ allResults[t] = d; });
+  }
 
   // Appliquer résultats employés
   empList.forEach(function(emp, i) {
@@ -3274,12 +3319,21 @@ function scheduleDirURSSAF() {
     if (rem <= 0) return;
     try {
       var modeDir = dir.type === 'Assimilé salarié' ? 'assimile' : 'tns';
-      var resp = await fetch('/api/urssaf-cost', {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ brutMensuel: rem, dirigeant: modeDir })
-      });
-      if (resp.ok) {
-        var d = await resp.json();
+      var _dirBody = { brutMensuel: rem, dirigeant: modeDir };
+      var _dirKey = JSON.stringify(_dirBody);
+      var d;
+      if (Object.prototype.hasOwnProperty.call(window._urssafFrontCache, _dirKey)) {
+        d = window._urssafFrontCache[_dirKey];
+      } else {
+        var resp = await fetch('/api/urssaf-cost', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(_dirBody)
+        });
+        if (!resp.ok) return;
+        d = await resp.json();
+        if (d) window._urssafFrontCache[_dirKey] = d;
+      }
+      if (d) {
         if (d.tauxEffectif !== null) {
           _data.masseSalariale.dirigeant.tauxCharges = d.tauxEffectif;
           var inp = document.getElementById('ms-dir-taux');
@@ -3317,12 +3371,20 @@ function scheduleLineURSSAF(i) {
     if (brut <= 0) return;
     var heures = pf(l.heuresHebdo) || 35;
     try {
-      var resp = await fetch('/api/urssaf-cost', {
-        method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ brutMensuel: brut, heuresHebdo: heures })
-      });
-      if (!resp.ok) return;
-      var d = await resp.json();
+      var _lineBody = { brutMensuel: brut, heuresHebdo: heures };
+      var _lineKey = JSON.stringify(_lineBody);
+      var d;
+      if (Object.prototype.hasOwnProperty.call(window._urssafFrontCache, _lineKey)) {
+        d = window._urssafFrontCache[_lineKey];
+      } else {
+        var resp = await fetch('/api/urssaf-cost', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify(_lineBody)
+        });
+        if (!resp.ok) return;
+        d = await resp.json();
+        if (d) window._urssafFrontCache[_lineKey] = d;
+      }
       if (!d || d.tauxEffectif === null || d.tauxEffectif === undefined) return;
       // La ligne a pu être figée pendant la requête → on revérifie avant d'écrire.
       if (l.tauxManuel) return;

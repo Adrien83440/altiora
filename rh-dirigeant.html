@@ -1475,14 +1475,22 @@ async function callUrssafAPI(statut, brut, net, regime) {
     var body = { brutMensuel: brutMensuel };
     if (dirigeantParam) body.dirigeant = dirigeantParam;
 
-    var resp = await fetch('/api/urssaf-cost', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
-
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    var data = await resp.json();
+    // Cache front mémoire (session) : même payload → pas de nouvel appel réseau.
+    window._urssafFrontCache = window._urssafFrontCache || {};
+    var _key = JSON.stringify(body);
+    var data;
+    if (Object.prototype.hasOwnProperty.call(window._urssafFrontCache, _key)) {
+      data = window._urssafFrontCache[_key];
+    } else {
+      var resp = await fetch('/api/urssaf-cost', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      data = await resp.json();
+      if (data && !data.error) window._urssafFrontCache[_key] = data;
+    }
     if (data.error) throw new Error(data.error);
 
     loading.style.display = 'none';
