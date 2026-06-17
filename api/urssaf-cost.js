@@ -31,10 +31,155 @@
 // Source : https://mon-entreprise.urssaf.fr/simulateurs/sasu
 // On applique donc des taux URSSAF de référence stables :
 //   • Patronal : 42 %  • Salarial : 22 %  (précis à ±1-2 pts sur 1 500-10 000 €)
+//
+// ─── Anti 429 (rate-limit URSSAF) ──────────────────────────────────────────
+// L'API mon-entreprise.urssaf.fr est publique et applique un rate-limit IP.
+// Toutes les fonctions Vercel sortent sur un petit pool d'IPs partagées : un
+// recalcul de plusieurs salariés (ou plusieurs users simultanés) sature vite
+// la limite → 429 → on renvoyait des 502 en cascade.
+//
+// Deux parades, cumulées :
+//   1. CACHE Firestore PARTAGÉ entre tous les users. Le taux de charges ne
+//      dépend que de (brut équivalent, statut, type contrat, régime) et du
+//      barème de l'année — il ne change qu'à chaque revalorisation (~1×/an).
+//      Path : urssaf_cache/barometre_{année}/entries/{clé}
+//      Accès 100% via admin token REST (pattern api@altiora.app) — aucune
+//      règle Firestore à déployer, le client ne touche jamais cette collection.
+//   2. RETRY avec backoff exponentiel + jitter sur 429/5xx avant d'abandonner.
+//
+// Le comportement vu par le front est INCHANGÉ : même payload de réponse, et
+// toujours un 502 final si l'URSSAF reste injoignable après retries.
 
 // SMIC mensuel brut temps plein (35 h). Plancher anti sur-réduction.
 // ⚠️ À actualiser à chaque revalorisation du SMIC (révision annuelle au 1ᵉʳ janvier).
 const SMIC_MENSUEL_TEMPS_PLEIN = 1850;
+
+const FIREBASE_PROJECT = 'altiora-70599';
+
+// ───────────────────────────────────────────────────────────────────────────
+// Admin token REST (pattern identique aux autres API : cancel-subscription.js).
+// Mis en cache au niveau du module pour survivre entre invocations chaudes
+// (le idToken Firebase vit ~1 h ; on le rafraîchit avec 5 min de marge).
+// ───────────────────────────────────────────────────────────────────────────
+let _adminTokenCache = { token: null, exp: 0 };
+
+async function getAdminToken() {
+  const now = Date.now();
+  if (_adminTokenCache.token && now < _adminTokenCache.exp) return _adminTokenCache.token;
+
+  const fbKey = process.env.FIREBASE_API_KEY || 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
+  const email = process.env.FIREBASE_API_EMAIL;
+  const password = process.env.FIREBASE_API_PASSWORD;
+  if (!email || !password) return null;
+
+  try {
+    const r = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${fbKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, returnSecureToken: true })
+      }
+    );
+    const data = await r.json();
+    if (!data.idToken) return null;
+    // expiresIn est en secondes (≈3600). On garde 5 min de marge.
+    const ttlMs = ((parseInt(data.expiresIn, 10) || 3600) - 300) * 1000;
+    _adminTokenCache = { token: data.idToken, exp: now + ttlMs };
+    return data.idToken;
+  } catch (e) {
+    console.error('[urssaf-cost] admin token error:', e.message);
+    return null;
+  }
+}
+
+// Lecture d'un doc de cache. Renvoie l'objet { ...payload } ou null.
+async function cacheGet(key, token) {
+  if (!token) return null;
+  const year = new Date().getFullYear();
+  const path = `urssaf_cache/barometre_${year}/entries/${key}`;
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}`;
+  try {
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
+    if (!res.ok) return null; // 404 = pas en cache, comportement normal
+    const doc = await res.json();
+    const f = doc?.fields?.payload?.stringValue;
+    if (!f) return null;
+    return JSON.parse(f);
+  } catch (e) {
+    console.error('[urssaf-cost] cacheGet error:', e.message);
+    return null;
+  }
+}
+
+// Écriture d'un doc de cache (best-effort, n'interrompt jamais la réponse).
+// On stocke le payload sérialisé en un seul champ pour rester agnostique du schéma.
+async function cacheSet(key, payload, token) {
+  if (!token) return;
+  const year = new Date().getFullYear();
+  const path = `urssaf_cache/barometre_${year}/entries/${key}`;
+  const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}?updateMask.fieldPaths=payload&updateMask.fieldPaths=cachedAt`;
+  const fields = {
+    payload: { stringValue: JSON.stringify(payload) },
+    cachedAt: { stringValue: new Date().toISOString() }
+  };
+  try {
+    await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ fields })
+    });
+  } catch (e) {
+    console.error('[urssaf-cost] cacheSet error:', e.message);
+  }
+}
+
+// Clé de cache déterministe à partir des paramètres normalisés de l'évaluation.
+// On hashe le brut RÉELLEMENT évalué (ETP plafonné au SMIC) + les drapeaux qui
+// changent le résultat. Deux salariés au même profil → même clé → 1 seul appel
+// URSSAF, ensuite plus jamais. (mode assimilé exclu : pas d'appel API.)
+function buildCacheKey(parts) {
+  // parts : objet plat de primitives
+  const norm = Object.keys(parts).sort().map(k => `${k}=${parts[k]}`).join('|');
+  // hash léger (djb2) → string compacte, sûr comme ID de doc Firestore
+  let h = 5381;
+  for (let i = 0; i < norm.length; i++) h = ((h << 5) + h + norm.charCodeAt(i)) >>> 0;
+  return 'k' + h.toString(36);
+}
+
+// fetch URSSAF avec retry/backoff sur 429 et 5xx. Renvoie la Response (ok) ou
+// lance après épuisement des tentatives.
+async function fetchUrssafWithRetry(expressions, situation) {
+  const MAX_ATTEMPTS = 3;
+  let lastStatus = 0, lastText = '';
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const resp = await fetch('https://mon-entreprise.urssaf.fr/api/v1/evaluate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ expressions, situation })
+    });
+    if (resp.ok) return resp;
+
+    lastStatus = resp.status;
+    lastText = await resp.text().catch(() => '');
+    // On ne retente que sur rate-limit / erreurs serveur transitoires.
+    const retriable = resp.status === 429 || (resp.status >= 500 && resp.status < 600);
+    if (!retriable || attempt === MAX_ATTEMPTS) {
+      const err = new Error('URSSAF API error');
+      err.status = resp.status;
+      err.body = lastText;
+      throw err;
+    }
+    // Backoff exponentiel : 400ms, 1200ms (+ jitter ≤300ms).
+    const base = 400 * Math.pow(3, attempt - 1);
+    const wait = base + Math.floor(Math.random() * 300);
+    await new Promise(r => setTimeout(r, wait));
+  }
+  const err = new Error('URSSAF API error');
+  err.status = lastStatus;
+  err.body = lastText;
+  throw err;
+}
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
@@ -49,6 +194,7 @@ module.exports = async (req, res) => {
     if (!brut || brut <= 0) return res.status(400).json({ error: 'brutMensuel requis (> 0)' });
 
     // ─── Court-circuit : dirigeant assimilé salarié (forfait, sans API URSSAF) ───
+    // Instantané et déterministe → pas de cache nécessaire.
     if (dirigeant === 'assimile') {
       const TAUX_PATRONAL = 42; // Charges patronales dirigeant SAS/SASU (RGDU exclue)
       const TAUX_SALARIAL = 22; // Charges salariales dirigeant SAS/SASU (cadre, hors chômage)
@@ -70,6 +216,7 @@ module.exports = async (req, res) => {
     let expressions, situation;
     let brutEvalue = brut;   // brut réellement transmis au moteur URSSAF
     let heuresUsed = 35;
+    let cacheParts;          // paramètres qui déterminent le résultat (→ clé)
 
     if (dirigeant === 'tns') {
       situation = {
@@ -79,6 +226,9 @@ module.exports = async (req, res) => {
         'dirigeant . indépendant . cotisations et contributions',
         'dirigeant . indépendant . revenu net de cotisations',
       ];
+      // Pour le TNS le résultat n'est pas un simple taux invariant (barème par
+      // tranches) → la clé inclut le brut exact.
+      cacheParts = { m: 'tns', brut: brut };
     } else {
       // ─── Salarié classique ───────────────────────────────────────────────
       // Conversion en équivalent temps plein pour que la réduction générale
@@ -106,32 +256,51 @@ module.exports = async (req, res) => {
         'salarié . cotisations . employeur',
         'salarié . rémunération . net . à payer avant impôt',
       ];
+      // Le taux salarié est invariant d'échelle : il ne dépend que du brut
+      // ÉVALUÉ (ETP plafonné SMIC) et des drapeaux de statut/contrat. La clé
+      // n'inclut donc PAS le brut réel ni les heures → forte mutualisation.
+      cacheParts = {
+        m: 'salarie',
+        be: brutEvalue,
+        cadre: cadre ? 1 : 0,
+        appr: apprenti ? 1 : 0,
+        cdd: cdd ? 1 : 0,
+      };
     }
 
-    const response = await fetch('https://mon-entreprise.urssaf.fr/api/v1/evaluate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({ expressions, situation }),
-    });
+    // ─── Cache Firestore partagé (lecture) ───────────────────────────────────
+    const token = await getAdminToken();
+    const cacheKey = buildCacheKey(cacheParts);
+    const cached = await cacheGet(cacheKey, token);
 
-    if (!response.ok) {
-      const text = await response.text();
-      console.error('URSSAF API error:', response.status, text);
-      return res.status(502).json({ error: 'URSSAF API error', status: response.status });
+    let evaluate;
+    if (cached && Array.isArray(cached.evaluate)) {
+      evaluate = cached.evaluate;
+    } else {
+      // ─── Appel URSSAF avec retry/backoff ───────────────────────────────────
+      let response;
+      try {
+        response = await fetchUrssafWithRetry(expressions, situation);
+      } catch (e) {
+        console.error('URSSAF API error:', e.status, e.body);
+        return res.status(502).json({ error: 'URSSAF API error', status: e.status || 0 });
+      }
+
+      const data = await response.json();
+      evaluate = data.evaluate || data;
+      if (!Array.isArray(evaluate)) {
+        return res.status(502).json({ error: 'Format URSSAF inattendu', raw: data });
+      }
+      // Écriture cache best-effort (ne bloque pas la réponse).
+      cacheSet(cacheKey, { evaluate }, token);
     }
 
-    const data = await response.json();
     const extract = (evalResult) => {
       if (!evalResult) return null;
       if (typeof evalResult.nodeValue === 'number') return Math.round(evalResult.nodeValue * 100) / 100;
       if (typeof evalResult === 'number') return Math.round(evalResult * 100) / 100;
       return null;
     };
-
-    const evaluate = data.evaluate || data;
-    if (!Array.isArray(evaluate)) {
-      return res.status(502).json({ error: 'Format URSSAF inattendu', raw: data });
-    }
 
     let result;
     if (dirigeant === 'tns') {
