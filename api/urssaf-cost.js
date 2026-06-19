@@ -43,8 +43,13 @@
 //      dépend que de (brut équivalent, statut, type contrat, régime) et du
 //      barème de l'année — il ne change qu'à chaque revalorisation (~1×/an).
 //      Path : urssaf_cache/barometre_{année}/entries/{clé}
-//      Accès 100% via admin token REST (pattern api@altiora.app) — aucune
-//      règle Firestore à déployer, le client ne touche jamais cette collection.
+//      Accès 100% via admin token REST (pattern api@altiora.app) — le client
+//      ne touche jamais cette collection.
+//      ⚠️ REQUIERT le bloc Firestore :
+//          match /urssaf_cache/{document=**} { allow read, write: if isAdmin(); }
+//      Le token admin REST est soumis aux rules comme n'importe quel user :
+//      sans ce bloc, il tombe dans le « refus par défaut » → 403 sur chaque
+//      get/set → cache mort → 429 URSSAF en cascade.
 //   2. RETRY avec backoff exponentiel + jitter sur 429/5xx avant d'abandonner.
 //
 // Le comportement vu par le front est INCHANGÉ : même payload de réponse, et
@@ -101,7 +106,14 @@ async function cacheGet(key, token) {
   const url = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/${path}`;
   try {
     const res = await fetch(url, { headers: { Authorization: 'Bearer ' + token } });
-    if (!res.ok) return null; // 404 = pas en cache, comportement normal
+    if (res.status === 404) return null; // pas en cache : comportement normal
+    if (!res.ok) {
+      // 403 = bloc Firestore `urssaf_cache` manquant → cache HS → 429 en cascade.
+      // Tout autre statut = anomalie Firestore/réseau. On le rend visible.
+      console.error('[urssaf-cost] cacheGet HTTP ' + res.status +
+        ' — cache désactivé ? Vérifier la règle match /urssaf_cache/{document=**}');
+      return null;
+    }
     const doc = await res.json();
     const f = doc?.fields?.payload?.stringValue;
     if (!f) return null;
@@ -124,11 +136,15 @@ async function cacheSet(key, payload, token) {
     cachedAt: { stringValue: new Date().toISOString() }
   };
   try {
-    await fetch(url, {
+    const res = await fetch(url, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
       body: JSON.stringify({ fields })
     });
+    if (!res.ok) {
+      console.error('[urssaf-cost] cacheSet HTTP ' + res.status +
+        ' — écriture cache refusée ? Vérifier la règle match /urssaf_cache/{document=**}');
+    }
   } catch (e) {
     console.error('[urssaf-cost] cacheSet error:', e.message);
   }
