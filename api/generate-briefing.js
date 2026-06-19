@@ -29,7 +29,7 @@ const FIREBASE_PROJECT = 'altiora-70599';
 const FB_KEY = 'AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4';
 const FS_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents`;
 
-const CLAUDE_MODEL = 'claude-sonnet-4-5-20250929';
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
 const CLAUDE_MAX_TOKENS = 1500;
 
 // ══════════════════════════════════════════════════════════════════

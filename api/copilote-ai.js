@@ -394,7 +394,7 @@ export default async function handler(req, res) {
       // Charger la mémoire Léa + construire le prompt enrichi
       const memory = await loadLeaMemory(auth.uid);
       prompt = buildLeaPrompt(metrics, prenom, jour, memory);
-      model = 'claude-sonnet-4-5-20250929';
+      model = 'claude-sonnet-4-6';
       maxTokens = 1800;
     } else {
       // Mode standard (comportement historique)

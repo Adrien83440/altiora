@@ -183,7 +183,7 @@ RÈGLES FINALES :
 
     content.push({ type: 'text', text: PROMPT });
 
-    const model = hasText ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-20250514';
+    const model = hasText ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-6';
     console.log('[parse-invoice] model=' + model + ' mode=' + (hasText ? 'text' : 'vision') + ' file=' + (fileName || '?'));
 
     const response = await callWithRetry({

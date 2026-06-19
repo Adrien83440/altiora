@@ -26,7 +26,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const FIREBASE_PROJECT    = 'altiora-70599';
-const MODEL               = 'claude-sonnet-4-5-20250929';
+const MODEL               = 'claude-sonnet-4-6';
 const MAX_TOOL_ITERATIONS = 10;
 const QUOTA_CHAT_MESSAGES = 100;
 const MAX_MESSAGE_LENGTH  = 4000;

@@ -139,7 +139,7 @@ Montants = entiers. Ratios = décimal (ex: 14.65). 4-6 conseils actionnables.${c
     });
 
     const response = await callWithRetry({
-      model: hasText ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-20250514',
+      model: hasText ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-6',
       max_tokens: 3000,
       messages: [{ role: 'user', content: content }]
     });

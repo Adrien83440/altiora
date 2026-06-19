@@ -122,7 +122,7 @@ Réponds UNIQUEMENT en JSON brut (sans markdown, sans backticks) :
 {"transactions":[{"date":"06/02/2026","label":"COMMISSIONS SUR REMISE CB NO 563964","tiers":"LCL Commissions","montant":0.13,"type":"debit","monthKey":"2026-02"}],"bankName":"NOM_BANQUE","accountHolder":"NOM_TITULAIRE","periodStart":"JJ/MM/AAAA","periodEnd":"JJ/MM/AAAA","totalDebit":0,"totalCredit":0}`
     });
 
-    var model = hasText ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-20250514';
+    var model = hasText ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-6';
     console.log('[parse-releve] Using model: ' + model + ', mode: ' + (hasText ? 'text' : 'vision') + ', file: ' + (fileName || '?'));
 
     var response = await callWithRetry({

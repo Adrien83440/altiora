@@ -339,7 +339,7 @@ export default async function handler(req, res) {
     if (leaMode) {
       const memory = await loadLeaMemoryLight(auth.uid);
       prompt = buildLeaPrompt(question, metrics || {}, prenom, memory);
-      model = 'claude-sonnet-4-5-20250929';
+      model = 'claude-sonnet-4-6';
       maxTokens = 350; // court, c'est de l'oral
     } else {
       prompt = buildStandardPrompt(question, metrics || {}, prenom);

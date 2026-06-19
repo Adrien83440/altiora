@@ -23,7 +23,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const FIREBASE_PROJECT = 'altiora-70599';
-const MODEL = 'claude-sonnet-4-5-20250929';
+const MODEL = 'claude-sonnet-4-6';
 
 // ── Firestore helpers (pattern standard) ──
 

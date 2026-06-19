@@ -20,7 +20,7 @@
  */
 
 const FIREBASE_PROJECT_ID = 'altiora-70599';
-const ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
+const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
 const ADMIN_EMAIL = (process.env.BLOG_ADMIN_EMAIL || 'contact@adrienemily.com').toLowerCase();
 
 // ─────────────────────────────────────────────────────────

@@ -48,7 +48,7 @@ const TOPICS_FETCH_LIMIT = 300;     // historique complet pour la déduplication
 // Modèle utilisé pour la génération de SUJETS (léger — quelques centaines de
 // tokens, ~1 fois toutes les 6 semaines). Même modèle que les articles pour
 // garantir un ID valide.
-const ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
+const ANTHROPIC_MODEL = 'claude-sonnet-4-6';
 
 // ─────────────────────────────────────────────────────────
 // Connaissance produit Alteore injectée dans la génération de sujets.

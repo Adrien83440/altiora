@@ -92,7 +92,7 @@ export default async function handler(req, res) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         // Force minimum 24k tokens car certains plannings complexes (10+ employés, contraintes) tronquent en dessous
         max_tokens: Math.min(Math.max(max_tokens || 16000, 24000), 32000),
         messages: [{ role: 'user', content: prompt }]
