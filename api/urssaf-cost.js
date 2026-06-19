@@ -36,9 +36,16 @@
 // L'API mon-entreprise.urssaf.fr est publique et applique un rate-limit IP.
 // Toutes les fonctions Vercel sortent sur un petit pool d'IPs partagées : un
 // recalcul de plusieurs salariés (ou plusieurs users simultanés) sature vite
-// la limite → 429 → on renvoyait des 502 en cascade.
+// la limite → 429. Et plus on tape sous rate-limit, plus on l'entretient.
 //
-// Deux parades, cumulées :
+// PRINCIPE NON NÉGOCIABLE (données de paie) : tout chiffre de charges servi au
+// front provient EXCLUSIVEMENT de l'API URSSAF officielle, soit en direct soit
+// via le cache (qui ne mémorise que SES réponses). On ne fabrique JAMAIS de taux
+// estimé. Quand l'URSSAF est injoignable et que le profil n'est pas en cache, on
+// renvoie 503 « indisponible » (sans chiffre) ; le front conserve la dernière
+// valeur connue. Dès que l'API répond, le taux exact arrive et se met en cache.
+//
+// Trois parades, cumulées :
 //   1. CACHE Firestore PARTAGÉ entre tous les users. Le taux de charges ne
 //      dépend que de (brut équivalent, statut, type contrat, régime) et du
 //      barème de l'année — il ne change qu'à chaque revalorisation (~1×/an).
@@ -50,10 +57,20 @@
 //      Le token admin REST est soumis aux rules comme n'importe quel user :
 //      sans ce bloc, il tombe dans le « refus par défaut » → 403 sur chaque
 //      get/set → cache mort → 429 URSSAF en cascade.
-//   2. RETRY avec backoff exponentiel + jitter sur 429/5xx avant d'abandonner.
+//   2. CIRCUIT BREAKER partagé (doc urssaf_cache/_circuit). Au premier 429 on
+//      cesse de taper l'URSSAF pendant un cooldown progressif (5 → 15 → 30 →
+//      60 min). Toutes les instances Vercel le voient → l'IP refroidit au lieu
+//      d'être martelée, l'API redevient joignable, puis le cache s'amorce. Le
+//      breaker se réarme plus longtemps si le 429 persiste, et se réinitialise
+//      dès qu'un appel réussit (half-open).
+//   3. PAS DE RETRY sur 429 (un rate-limit ne se résout pas en réessayant : ça
+//      l'aggrave). Un seul retry court reste autorisé sur 5xx (erreur serveur
+//      transitoire URSSAF, ≠ rate-limit).
 //
-// Le comportement vu par le front est INCHANGÉ : même payload de réponse, et
-// toujours un 502 final si l'URSSAF reste injoignable après retries.
+// Le front reste compatible sans modification : il traite tout statut non-ok
+// comme un échec et conserve le dernier taux. Le 503 « indisponible » est
+// simplement plus précis qu'un 502 (et expose `unavailable`/`reason` pour un
+// éventuel message UX dédié plus tard).
 
 // SMIC mensuel brut temps plein (35 h). Plancher anti sur-réduction.
 // ⚠️ À actualiser à chaque revalorisation du SMIC (révision annuelle au 1ᵉʳ janvier).
@@ -150,6 +167,71 @@ async function cacheSet(key, payload, token) {
   }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// CIRCUIT BREAKER partagé (doc urssaf_cache/_circuit)
+//
+// But : dès qu'un 429 est rencontré, on cesse de taper l'URSSAF pendant un
+// cooldown — toutes les instances Vercel le voient via Firestore, l'IP de
+// sortie refroidit au lieu d'être martelée. Le cooldown grandit si le 429
+// persiste (5 → 15 → 30 → 60 min) et se réinitialise dès qu'un appel réussit.
+//
+// Couvert par la même règle que le cache : match /urssaf_cache/{document=**}.
+// Lecture fail-open : si Firestore hoquette, on n'empêche pas le calcul.
+// ───────────────────────────────────────────────────────────────────────────
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+const CIRCUIT_COOLDOWNS_MS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000];
+function circuitCooldownMs(strikes) {
+  const i = Math.min(Math.max(strikes - 1, 0), CIRCUIT_COOLDOWNS_MS.length - 1);
+  return CIRCUIT_COOLDOWNS_MS[i];
+}
+
+const CIRCUIT_URL =
+  `https://firestore.googleapis.com/v1/projects/${FIREBASE_PROJECT}/databases/(default)/documents/urssaf_cache/_circuit`;
+
+// Renvoie { untilMs, strikes }. untilMs = epoch ms jusqu'où le circuit est ouvert.
+async function circuitGet(token) {
+  const fallback = { untilMs: 0, strikes: 0 };
+  if (!token) return fallback;
+  try {
+    const res = await fetch(CIRCUIT_URL, { headers: { Authorization: 'Bearer ' + token } });
+    if (res.status === 404) return fallback;       // jamais armé : circuit fermé
+    if (!res.ok) {
+      console.error('[urssaf-cost] circuitGet HTTP ' + res.status);
+      return fallback;                              // fail-open
+    }
+    const f = (await res.json())?.fields || {};
+    return {
+      untilMs: parseInt(f.untilMs?.integerValue || '0', 10) || 0,
+      strikes: parseInt(f.strikes?.integerValue || '0', 10) || 0
+    };
+  } catch (e) {
+    console.error('[urssaf-cost] circuitGet error:', e.message);
+    return fallback;
+  }
+}
+
+// Écrit l'état du circuit (best-effort, ne bloque jamais la réponse).
+async function circuitSet(token, strikes, untilMs) {
+  if (!token) return;
+  const url = CIRCUIT_URL
+    + '?updateMask.fieldPaths=untilMs&updateMask.fieldPaths=strikes&updateMask.fieldPaths=updatedAt';
+  const fields = {
+    untilMs: { integerValue: String(untilMs) },
+    strikes: { integerValue: String(strikes) },
+    updatedAt: { stringValue: new Date().toISOString() }
+  };
+  try {
+    await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ fields })
+    });
+  } catch (e) {
+    console.error('[urssaf-cost] circuitSet error:', e.message);
+  }
+}
+
 // Clé de cache déterministe à partir des paramètres normalisés de l'évaluation.
 // On hashe le brut RÉELLEMENT évalué (ETP plafonné au SMIC) + les drapeaux qui
 // changent le résultat. Deux salariés au même profil → même clé → 1 seul appel
@@ -163,38 +245,40 @@ function buildCacheKey(parts) {
   return 'k' + h.toString(36);
 }
 
-// fetch URSSAF avec retry/backoff sur 429 et 5xx. Renvoie la Response (ok) ou
-// lance après épuisement des tentatives.
-async function fetchUrssafWithRetry(expressions, situation) {
-  const MAX_ATTEMPTS = 3;
-  let lastStatus = 0, lastText = '';
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const resp = await fetch('https://mon-entreprise.urssaf.fr/api/v1/evaluate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({ expressions, situation })
-    });
-    if (resp.ok) return resp;
-
-    lastStatus = resp.status;
-    lastText = await resp.text().catch(() => '');
-    // On ne retente que sur rate-limit / erreurs serveur transitoires.
-    const retriable = resp.status === 429 || (resp.status >= 500 && resp.status < 600);
-    if (!retriable || attempt === MAX_ATTEMPTS) {
-      const err = new Error('URSSAF API error');
-      err.status = resp.status;
-      err.body = lastText;
-      throw err;
+// Appel URSSAF — PAS de retry sur 429 (un rate-limit ne se résout pas en
+// réessayant : on le confie au circuit breaker). Un seul retry court reste
+// autorisé sur 5xx / erreur réseau (transitoire, ≠ rate-limit).
+// Renvoie un résultat discriminé :
+//   { ok: Response } | { rateLimited: true } | { error: true, status, body }
+async function callUrssaf(expressions, situation) {
+  const MAX_5XX_RETRY = 1;
+  for (let attempt = 0; ; attempt++) {
+    let resp;
+    try {
+      resp = await fetch('https://mon-entreprise.urssaf.fr/api/v1/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ expressions, situation })
+      });
+    } catch (e) {
+      // Erreur réseau = transitoire → traitée comme un 5xx.
+      if (attempt < MAX_5XX_RETRY) { await sleep(800); continue; }
+      return { error: true, status: 0, body: e.message || 'network error' };
     }
-    // Backoff exponentiel : 400ms, 1200ms (+ jitter ≤300ms).
-    const base = 400 * Math.pow(3, attempt - 1);
-    const wait = base + Math.floor(Math.random() * 300);
-    await new Promise(r => setTimeout(r, wait));
+    if (resp.ok) return { ok: resp };
+    if (resp.status === 429) return { rateLimited: true };   // ne PAS réessayer
+    if (resp.status >= 500 && resp.status < 600) {
+      if (attempt < MAX_5XX_RETRY) {
+        await sleep(800 + Math.floor(Math.random() * 300));
+        continue;
+      }
+      const body = await resp.text().catch(() => '');
+      return { error: true, status: resp.status, body };
+    }
+    // Autre 4xx (400, etc.) : erreur de requête, non transitoire.
+    const body = await resp.text().catch(() => '');
+    return { error: true, status: resp.status, body };
   }
-  const err = new Error('URSSAF API error');
-  err.status = lastStatus;
-  err.body = lastText;
-  throw err;
 }
 
 module.exports = async (req, res) => {
@@ -291,24 +375,54 @@ module.exports = async (req, res) => {
 
     let evaluate;
     if (cached && Array.isArray(cached.evaluate)) {
-      evaluate = cached.evaluate;
+      evaluate = cached.evaluate;   // profil déjà connu : taux officiel mémorisé
     } else {
-      // ─── Appel URSSAF avec retry/backoff ───────────────────────────────────
-      let response;
-      try {
-        response = await fetchUrssafWithRetry(expressions, situation);
-      } catch (e) {
-        console.error('URSSAF API error:', e.status, e.body);
-        return res.status(502).json({ error: 'URSSAF API error', status: e.status || 0 });
+      // ─── Circuit breaker : ne pas taper l'URSSAF si l'IP est en cooldown ────
+      const now = Date.now();
+      const circuit = await circuitGet(token);
+      if (circuit.untilMs && now < circuit.untilMs) {
+        // Rate-limit en cours → on ne fabrique AUCUN chiffre, on signale juste
+        // l'indisponibilité. Le front conserve la dernière valeur connue.
+        return res.status(503).json({
+          error: 'URSSAF temporairement indisponible',
+          unavailable: true,
+          reason: 'circuit_open',
+          retryAfterSec: Math.ceil((circuit.untilMs - now) / 1000),
+        });
       }
 
-      const data = await response.json();
+      // ─── Appel URSSAF (source de vérité unique pour les taux) ───────────────
+      const call = await callUrssaf(expressions, situation);
+
+      if (call.rateLimited) {
+        // 429 : armer le breaker (cooldown progressif) et signaler l'indispo.
+        const strikes = (circuit.strikes || 0) + 1;
+        const cooldownMs = circuitCooldownMs(strikes);
+        await circuitSet(token, strikes, now + cooldownMs);
+        console.error('[urssaf-cost] 429 → circuit ouvert ' +
+          Math.round(cooldownMs / 60000) + ' min (strike ' + strikes + ')');
+        return res.status(503).json({
+          error: 'URSSAF temporairement indisponible',
+          unavailable: true,
+          reason: 'rate_limited',
+          retryAfterSec: Math.ceil(cooldownMs / 1000),
+        });
+      }
+
+      if (call.error) {
+        console.error('URSSAF API error:', call.status, call.body);
+        return res.status(502).json({ error: 'URSSAF API error', status: call.status || 0 });
+      }
+
+      const data = await call.ok.json();
       evaluate = data.evaluate || data;
       if (!Array.isArray(evaluate)) {
         return res.status(502).json({ error: 'Format URSSAF inattendu', raw: data });
       }
-      // Écriture cache best-effort (ne bloque pas la réponse).
+      // Succès : écriture cache best-effort + réinitialisation du breaker s'il
+      // était armé (half-open → fermé).
       cacheSet(cacheKey, { evaluate }, token);
+      if (circuit.strikes && circuit.strikes > 0) circuitSet(token, 0, 0);
     }
 
     const extract = (evalResult) => {
