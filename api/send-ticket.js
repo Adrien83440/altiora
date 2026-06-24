@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { ticketId, nom, prenom, telephone, email, sujet, description, page, uid, plan } = req.body;
+    const { ticketId, nom, prenom, telephone, email, sujet, description, page, uid, plan, lien, attachment, attachmentName } = req.body;
     if (!nom || !prenom || !email || !sujet || !description) {
       return res.status(400).json({ error: 'Champs obligatoires manquants' });
     }
@@ -28,6 +28,23 @@ export default async function handler(req, res) {
     };
     const planInfo = PLAN_LABELS[userPlan] || { label: userPlan, color: '#6b7280', bg: '#f9fafb', priority: '' };
     const isMaster = userPlan === 'master';
+
+    // ── Traitement pièce jointe ──
+    let attachments = [];
+    let attachmentHtml = '';
+    if (attachment && attachmentName) {
+      // attachment = data URL (data:image/png;base64,xxxx)
+      const matches = attachment.match(/^data:([^;]+);base64,(.+)$/);
+      if (matches) {
+        const mimeType = matches[1];
+        const b64      = matches[2];
+        attachments = [{ filename: attachmentName, content: b64, type: mimeType, disposition: 'attachment' }];
+        const isImage = mimeType.startsWith('image/');
+        attachmentHtml = isImage
+          ? `<div style="margin-top:12px"><div style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📎 Pièce jointe</div><img src="${attachment}" style="max-width:100%;border-radius:8px;border:1px solid #e2e8f0"/></div>`
+          : `<div style="margin-top:12px;padding:10px 14px;background:#f8faff;border:1px solid #e2e8f0;border-radius:8px;font-size:13px">📎 <strong>Pièce jointe :</strong> ${attachmentName}</div>`;
+      }
+    }
 
     // 1. Sauvegarder dans Firestore
     try {
@@ -73,6 +90,7 @@ export default async function handler(req, res) {
             from: 'ALTEORE Support <noreply@alteore.com>',
             to: ['support@alteore.com'],
             subject: `${isMaster ? '🔴 PRIORITAIRE — ' : ''}Ticket ${id} — ${sujet}`,
+            ...(attachments.length > 0 ? { attachments } : {}),
             html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;background:#f8faff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0">
               ${isMaster ? '<div style="background:#7c3aed;padding:10px 28px;text-align:center;color:white;font-size:13px;font-weight:700;letter-spacing:0.5px">🔴 CLIENT MASTER — SUPPORT PRIORITAIRE</div>' : ''}
               <div style="background:linear-gradient(135deg,#0f1f5c,#1a3dce);padding:24px 28px;color:white">
@@ -89,6 +107,8 @@ export default async function handler(req, res) {
                   <tr><td style="padding:8px 0;color:#6b7280"><strong>Plan</strong></td><td><span style="display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;background:${planInfo.bg};color:${planInfo.color}">${planInfo.label}</span>${planInfo.priority ? ' <span style="color:#ef4444;font-weight:700;font-size:12px">' + planInfo.priority + '</span>' : ''}</td></tr>
                 </table>
                 <div style="margin-top:16px;padding:16px;background:white;border:1px solid #e2e8f0;border-radius:8px;white-space:pre-wrap;font-size:14px;line-height:1.6">${description}</div>
+                ${lien ? `<div style="margin-top:12px;padding:12px 16px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;font-size:13px">🎬 <strong>Lien vidéo :</strong> <a href="${lien}" style="color:#1a3dce">${lien}</a></div>` : ''}
+                ${attachmentHtml}
                 <div style="margin-top:20px;text-align:center">
                   <a href="mailto:${email}?subject=Re: Votre ticket ${id} — ALTEORE Support" style="display:inline-block;padding:10px 24px;background:#1a3dce;color:white;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px">Répondre au client</a>
                 </div>
