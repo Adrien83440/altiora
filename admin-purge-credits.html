@@ -98,6 +98,23 @@ input[type=checkbox]{width:15px;height:15px;accent-color:var(--red);cursor:point
 
 /* MONTHS DETAIL */
 .months-row{display:none;background:#f8faff}
+
+/* DOUBLONS INTRA-MOIS */
+.intra-wrap{background:rgba(255,255,255,.85);backdrop-filter:var(--glass-blur);border:2px solid rgba(220,38,38,.25);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:18px;overflow:hidden}
+.intra-hd{background:rgba(220,38,38,.06);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.intra-hd-title{font-size:14px;font-weight:800;color:var(--red);display:flex;align-items:center;gap:8px}
+.intra-hd-sub{font-size:12px;color:var(--muted);font-weight:500}
+.btn-purge-intra{padding:8px 16px;border-radius:8px;border:none;background:var(--red);color:#fff;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:6px}
+.btn-purge-intra:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 4px 12px rgba(220,38,38,.3)}
+.btn-purge-intra:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.intra-month{border-top:1px solid rgba(220,38,38,.12);padding:12px 20px}
+.intra-month-key{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.intra-row{display:flex;align-items:center;gap:10px;padding:6px 10px;border-radius:8px;background:rgba(220,38,38,.03);border:1px solid rgba(220,38,38,.1);margin-bottom:5px}
+.intra-chk{width:15px;height:15px;accent-color:var(--red);cursor:pointer;flex-shrink:0}
+.intra-name{font-weight:700;font-size:13px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.intra-meta{font-size:11px;color:var(--muted);white-space:nowrap}
+.intra-badge{background:#fef2f2;border:1px solid #fecaca;color:var(--red);font-size:10px;font-weight:700;padding:2px 8px;border-radius:12px;flex-shrink:0}
+.intra-sel-count{font-size:12px;font-weight:700;color:var(--red)}
 .months-row.open{display:table-row}
 .months-inner{padding:12px 20px;display:flex;flex-wrap:wrap;gap:6px}
 .mtag{background:#eff6ff;color:var(--blue);font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;font-family:monospace}
@@ -204,6 +221,24 @@ input[type=checkbox]{width:15px;height:15px;accent-color:var(--red);cursor:point
       <div class="stat"><div class="stat-n n-blue" id="s-total">—</div><div class="stat-l">Lignes nommées</div></div>
       <div class="stat"><div class="stat-n n-green" id="s-actif">—</div><div class="stat-l">Avec montant actif</div></div>
       <div class="stat"><div class="stat-n n-orange" id="s-months">—</div><div class="stat-l">Mois scannés</div></div>
+      <div class="stat"><div class="stat-n" id="s-intra" style="color:var(--red)">—</div><div class="stat-l">Doublons intra-mois</div></div>
+    </div>
+
+    <!-- DOUBLONS INTRA-MOIS -->
+    <div id="intra-section" style="display:none">
+      <div class="intra-wrap">
+        <div class="intra-hd">
+          <div>
+            <div class="intra-hd-title">⚠️ Doublons détectés dans un même mois</div>
+            <div class="intra-hd-sub">Ces lignes apparaissent plusieurs fois dans le même mois. Cochez les doublons à supprimer (conservez l'original).</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+            <span class="intra-sel-count" id="intra-sel-count" style="display:none">0 sélectionné(s)</span>
+            <button class="btn-purge-intra" id="btn-purge-intra" onclick="purgeIntra()" disabled>🗑 Supprimer les doublons sélectionnés</button>
+          </div>
+        </div>
+        <div id="intra-list"></div>
+      </div>
     </div>
 
     <!-- TOOLBAR -->
@@ -291,6 +326,8 @@ onAuthStateChanged(auth, async function(user) {
 
 <script>
 var _credits  = [];
+var _intraDoublons = []; // doublons intra-mois renvoyés par le scan
+var _intraSelected = []; // [{monthKey, indexes:[]}] en cours de sélection
 var _filter   = 'all';
 var _sortKey  = 'fournisseur';
 var _sortAsc  = true;
@@ -326,6 +363,8 @@ async function startScan() {
     if (!r.ok) throw new Error(d.error || 'Erreur API');
 
     _credits = d.credits || [];
+    _intraDoublons = d.intraDoublons || [];
+    _intraSelected = [];
 
     // Client info
     document.getElementById('client-uid-disp').textContent = uid;
@@ -352,13 +391,16 @@ async function startScan() {
     } catch(e) { /* silencieux */ }
 
     const actif = _credits.filter(c => parseFloat(c.montant) > 0).length;
+    const totalIntra = _intraDoublons.reduce((s, m) => s + m.dubIndexes.length, 0);
     document.getElementById('s-total').textContent  = _credits.length;
     document.getElementById('s-actif').textContent  = actif;
     document.getElementById('s-months').textContent = d.monthCount || '—';
+    document.getElementById('s-intra').textContent  = totalIntra > 0 ? totalIntra : '0';
 
     setLoader(false);
     document.getElementById('results').style.display = 'block';
     render();
+    renderIntra();
 
   } catch(e) {
     setLoader(false);
@@ -521,6 +563,118 @@ function openConfirm() {
 
 function closeConfirm() {
   document.getElementById('overlay').classList.remove('show');
+}
+
+// ── Doublons intra-mois ──
+
+function renderIntra() {
+  const section = document.getElementById('intra-section');
+  const list    = document.getElementById('intra-list');
+  if (!_intraDoublons || _intraDoublons.length === 0) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = 'block';
+
+  list.innerHTML = _intraDoublons.map(function(m) {
+    const monthLabel = m.monthKey;
+    const rows = m.dubDetails.map(function(dub) {
+      const mens = parseFloat(dub.mensualite) || parseFloat(dub.montant) || 0;
+      const periode = (dub.dateDebut || '?') + ' → ' + (dub.dateFin || '?');
+      const uid_ = 'intra_' + m.monthKey.replace('-','_') + '_' + dub.index;
+      return '<div class="intra-row">' +
+        '<input type="checkbox" class="intra-chk" id="' + uid_ + '" ' +
+          'onchange="toggleIntra(\'' + m.monthKey + '\',' + dub.index + ',this.checked)">' +
+        '<label for="' + uid_ + '" style="display:contents;cursor:pointer">' +
+          '<span class="intra-name">' + esc(dub.fournisseur || dub.nom || '—') + '</span>' +
+          '<span class="intra-meta">' + (mens > 0 ? fmtE(mens) + ' €' : '—') + '</span>' +
+          '<span class="intra-meta" style="font-size:10px">' + esc(periode) + '</span>' +
+          '<span class="intra-badge">DOUBLON idx ' + dub.index + '</span>' +
+        '</label>' +
+      '</div>';
+    }).join('');
+
+    return '<div class="intra-month">' +
+      '<div class="intra-month-key">📅 ' + monthLabel + ' — ' + m.dubIndexes.length + ' doublon(s)</div>' +
+      rows +
+    '</div>';
+  }).join('');
+}
+
+function toggleIntra(monthKey, index, checked) {
+  // Trouver ou créer l'entrée dans _intraSelected
+  let entry = _intraSelected.find(function(e) { return e.monthKey === monthKey; });
+  if (!entry) {
+    entry = { monthKey: monthKey, indexes: [] };
+    _intraSelected.push(entry);
+  }
+  if (checked) {
+    if (!entry.indexes.includes(index)) entry.indexes.push(index);
+  } else {
+    entry.indexes = entry.indexes.filter(function(i) { return i !== index; });
+    if (entry.indexes.length === 0) {
+      _intraSelected = _intraSelected.filter(function(e) { return e.monthKey !== monthKey; });
+    }
+  }
+  const total = _intraSelected.reduce(function(s, e) { return s + e.indexes.length; }, 0);
+  const btn   = document.getElementById('btn-purge-intra');
+  const cnt   = document.getElementById('intra-sel-count');
+  btn.disabled = total === 0;
+  if (total > 0) {
+    cnt.style.display = 'inline';
+    cnt.textContent = total + ' sélectionné(s)';
+  } else {
+    cnt.style.display = 'none';
+  }
+}
+
+async function purgeIntra() {
+  const total = _intraSelected.reduce(function(s, e) { return s + e.indexes.length; }, 0);
+  if (total === 0) return;
+  if (!confirm('Supprimer définitivement ' + total + ' doublon(s) intra-mois ? Cette action est irréversible.')) return;
+
+  const btn = document.getElementById('btn-purge-intra');
+  btn.disabled = true;
+  btn.textContent = '⏳ Suppression…';
+
+  try {
+    const tok = await getToken();
+    const r = await fetch('/api/admin-purge-credits', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
+      body:    JSON.stringify({ uid: _targetUid, intraDoublons: _intraSelected })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Erreur API');
+
+    // Supprimer localement les entrées nettoyées
+    const cleanedMonths = new Set(_intraSelected.map(function(e) { return e.monthKey; }));
+    _intraDoublons = _intraDoublons.filter(function(m) {
+      if (!cleanedMonths.has(m.monthKey)) return true;
+      // Retirer les dubDetails correspondants
+      const entry = _intraSelected.find(function(e) { return e.monthKey === m.monthKey; });
+      const removed = new Set(entry ? entry.indexes : []);
+      m.dubDetails   = m.dubDetails.filter(function(dub) { return !removed.has(dub.index); });
+      m.dubIndexes   = m.dubIndexes.filter(function(i)   { return !removed.has(i); });
+      return m.dubIndexes.length > 0; // garder le mois s'il a encore des doublons
+    });
+    _intraSelected = [];
+
+    const totalIntra = _intraDoublons.reduce(function(s, m) { return s + m.dubIndexes.length; }, 0);
+    document.getElementById('s-intra').textContent = totalIntra > 0 ? totalIntra : '0';
+
+    const msg = '✅ ' + d.purged + ' mois mis à jour' + (d.errors > 0 ? ' (' + d.errors + ' erreur(s))' : '');
+    document.getElementById('success-txt').textContent = msg;
+    document.getElementById('success-banner').classList.add('show');
+    showToast(msg, 'ok');
+    renderIntra();
+
+  } catch(e) {
+    showToast('❌ ' + esc(e.message), 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🗑 Supprimer les doublons sélectionnés';
+  }
 }
 
 async function doPurge() {
