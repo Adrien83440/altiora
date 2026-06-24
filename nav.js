@@ -263,6 +263,7 @@
     </div>
     <div class="ni${a('aide.html')}" id="nav-aide" onclick="location.href='aide.html'" style="padding:8px 0;margin:0">
       <span>❓</span><span>Centre d'aide</span>
+      <span id="nav-aide-badge" style="display:none;background:#dc2626;color:white;font-size:10px;font-weight:800;padding:1px 6px;border-radius:20px;margin-left:4px"></span>
     </div>
     <!-- Slot admin : rempli dynamiquement si role === 'admin' -->
     <div id="nav-admin-slot"></div>
@@ -920,6 +921,31 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       if (!checkPageAccess(plan)) { applyNavPlan(plan); return; }
       applyNavPlan(plan);
       handleProfilParams();
+
+      // ── BADGE TICKETS NON LUS — best-effort, silencieux ──
+      // Vérifie si le client a des réponses non lues sur ses tickets.
+      // Ne bloque jamais le chargement de la nav.
+      (async function() {
+        try {
+          const u = window._auth && window._auth.currentUser;
+          if (!u) return;
+          const tok = await u.getIdToken();
+          const r = await fetch('/api/get-my-tickets', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok }
+          });
+          if (!r.ok) return;
+          const d = await r.json();
+          const unread = (d.tickets || []).filter(function(t) {
+            return !t.clientRead && t.replies && t.replies.some(function(rep){ return rep.from !== 'client'; });
+          }).length;
+          const badge = document.getElementById('nav-aide-badge');
+          if (badge && unread > 0) {
+            badge.textContent = unread;
+            badge.style.display = 'inline-block';
+          }
+        } catch(e) { /* silencieux */ }
+      })();
 
       // ── TRACKING ACTIVITÉ (fire-and-forget, ne bloque jamais) ──
       // Throttle 5min par user via sessionStorage. Indépendant de window._setDoc

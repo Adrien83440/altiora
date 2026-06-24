@@ -106,6 +106,37 @@
     .tsuccess p{font-size:13px;color:var(--muted);line-height:1.7}
     .tsuccess .tid{background:var(--blue-ghost);padding:8px 16px;border-radius:8px;font-size:14px;font-weight:700;color:var(--blue-main);display:inline-block;margin:12px 0;font-family:monospace}
 
+    /* MES TICKETS */
+    .my-ticket-card{background:white;border:1.5px solid var(--border);border-radius:14px;margin-bottom:18px;overflow:hidden;transition:box-shadow .2s}
+    .my-ticket-card:hover{box-shadow:0 4px 20px rgba(37,99,235,.08)}
+    .my-ticket-card.has-reply{border-color:#bae6fd}
+    .mtk-head{padding:16px 20px;display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+    .mtk-id{font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:.5px;font-family:monospace}
+    .mtk-sujet{font-size:14px;font-weight:700;color:var(--text);flex:1}
+    .mtk-badge{font-size:10px;font-weight:700;padding:3px 9px;border-radius:20px;white-space:nowrap}
+    .mtk-badge.open{background:#fef9c3;color:#a16207}
+    .mtk-badge.in_progress{background:#dbeafe;color:#1d4ed8}
+    .mtk-badge.resolved{background:#dcfce7;color:#15803d}
+    .mtk-badge.closed{background:#f1f5f9;color:#64748b}
+    .mtk-new{background:#dc2626;color:white;font-size:10px;font-weight:800;padding:2px 8px;border-radius:20px;animation:pulse-badge 1.5s infinite}
+    @keyframes pulse-badge{0%,100%{opacity:1}50%{opacity:.6}}
+    .mtk-body{padding:0 20px 18px;border-top:1px solid var(--border)}
+    .mtk-desc{font-size:13px;color:var(--muted);line-height:1.6;padding:14px 0 10px;white-space:pre-wrap}
+    .mtk-replies{margin-top:10px}
+    .mtk-reply{padding:12px 14px;border-radius:10px;margin-bottom:8px;font-size:13px;line-height:1.6;white-space:pre-wrap}
+    .mtk-reply.from-admin{background:#eff6ff;border:1px solid #bae6fd;color:#0c4a6e}
+    .mtk-reply.from-client{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d}
+    .mtk-reply-meta{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;opacity:.7}
+    .mtk-reply-form{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+    .mtk-reply-form textarea{resize:vertical;min-height:80px;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;font-family:inherit;font-size:13px;color:var(--text);outline:none;transition:border-color .2s}
+    .mtk-reply-form textarea:focus{border-color:var(--blue-main);box-shadow:0 0 0 3px rgba(37,99,235,.08)}
+    .mtk-reply-btn{align-self:flex-end;padding:8px 18px;border:none;border-radius:9px;background:linear-gradient(135deg,var(--blue-main),var(--blue-light));color:white;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:.2s}
+    .mtk-reply-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(37,99,235,.25)}
+    .mtk-reply-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+    .mtk-empty{text-align:center;padding:48px 20px;color:var(--muted);font-size:14px}
+    .mtk-chevron{font-size:12px;transition:transform .2s;color:#94a3b8}
+    .mtk-chevron.open{transform:rotate(90deg)}
+
     /* TOAST */
     .toast{position:fixed;bottom:24px;right:24px;background:#1a1f36;color:white;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;transform:translateY(80px);opacity:0;transition:.3s}
     .toast.show{transform:translateY(0);opacity:1}.toast.success{background:var(--green)}
@@ -215,6 +246,10 @@
       <button class="htab" :class="{ on: tab === 'guides' }" @click="tab = 'guides'">🗺️ Guides pas à pas <span class="hcnt" :class="{ on: tab === 'guides' }" x-text="guides.length"></span></button>
       <button class="htab" :class="{ on: tab === 'videos' }" @click="tab = 'videos'">🎬 Vidéos <span class="hcnt" :class="{ on: tab === 'videos' }" x-text="videos.length"></span></button>
       <button class="htab" :class="{ on: tab === 'ticket' }" @click="tab = 'ticket'">🎫 Ouvrir un ticket</button>
+      <button class="htab" :class="{ on: tab === 'mes-tickets' }" @click="tab = 'mes-tickets'; loadMyTickets()">
+        📬 Mes tickets
+        <span x-show="myTicketsUnread > 0" class="mtk-new" x-text="myTicketsUnread" style="margin-left:4px"></span>
+      </button>
     </div>
 
     <!-- ═══════════════════════════════════════ -->
@@ -385,6 +420,78 @@
       </div>
     </div>
 
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!--  MES TICKETS                                           -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'mes-tickets'" x-transition.opacity>
+      <div class="ticket-wrap">
+        <div class="ticket-head">
+          <h3>📬 Mes tickets</h3>
+          <p>Historique de vos demandes et fil de discussion avec l'équipe support</p>
+        </div>
+        <div class="ticket-body">
+
+          <!-- Chargement -->
+          <div x-show="myTicketsLoading" style="text-align:center;padding:32px;color:var(--muted);font-size:14px">
+            ⏳ Chargement de vos tickets…
+          </div>
+
+          <!-- Vide -->
+          <div x-show="!myTicketsLoading && myTickets.length === 0" class="mtk-empty">
+            <div style="font-size:40px;margin-bottom:12px">🎫</div>
+            <div style="font-weight:700;margin-bottom:6px">Aucun ticket pour l'instant</div>
+            <div>Ouvrez un ticket depuis l'onglet <strong>🎫 Ouvrir un ticket</strong> si vous avez une question ou un problème.</div>
+          </div>
+
+          <!-- Liste des tickets -->
+          <template x-for="(t, ti) in myTickets" :key="t.ticketId">
+            <div class="my-ticket-card" :class="{ 'has-reply': t.replies && t.replies.some(r => r.from !== 'client') && !t.clientRead }">
+
+              <!-- En-tête cliquable -->
+              <div class="mtk-head" @click="t._open = !t._open; if(t._open && !t.clientRead && t.replies && t.replies.some(r => r.from !== 'client')) markTicketRead(t)">
+                <span class="mtk-id" x-text="t.ticketId"></span>
+                <span class="mtk-sujet" x-text="t.sujet"></span>
+                <template x-if="t.replies && t.replies.some(r => r.from !== 'client') && !t.clientRead">
+                  <span class="mtk-new">Nouvelle réponse</span>
+                </template>
+                <span class="mtk-badge" :class="t.status" x-text="{ open: 'Ouvert', in_progress: 'En cours', resolved: 'Résolu', closed: 'Clôturé' }[t.status] || t.status"></span>
+                <span class="mtk-chevron" :class="{ open: t._open }">▶</span>
+              </div>
+
+              <!-- Corps dépliable -->
+              <div class="mtk-body" x-show="t._open" x-transition.opacity>
+
+                <!-- Description initiale -->
+                <div class="mtk-desc" x-text="t.description"></div>
+                <div style="font-size:11px;color:#94a3b8;margin-bottom:10px" x-text="'Envoyé le ' + formatTicketDate(t.createdAt)"></div>
+
+                <!-- Fil des réponses -->
+                <div class="mtk-replies" x-show="t.replies && t.replies.length > 0">
+                  <template x-for="(r, ri) in t.replies" :key="ri">
+                    <div class="mtk-reply" :class="r.from === 'client' ? 'from-client' : 'from-admin'">
+                      <div class="mtk-reply-meta" x-text="r.from === 'client' ? '💬 Vous · ' + formatTicketDate(r.sentAt) : '🛡 Support ALTEORE · ' + formatTicketDate(r.sentAt)"></div>
+                      <span x-text="r.text"></span>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- Formulaire de réponse client (seulement si pas résolu/clôturé) -->
+                <div class="mtk-reply-form" x-show="t.status !== 'resolved' && t.status !== 'closed'">
+                  <textarea :id="'reply-ta-' + ti" placeholder="Votre réponse…" rows="3"></textarea>
+                  <button class="mtk-reply-btn" :disabled="t._sending" @click="sendClientReply(t, ti)" x-text="t._sending ? '⏳ Envoi…' : '📨 Répondre'"></button>
+                </div>
+                <div x-show="t.status === 'resolved' || t.status === 'closed'" style="font-size:12px;color:var(--muted);padding-top:8px;font-style:italic">
+                  Ce ticket est clôturé. Ouvrez un nouveau ticket si vous avez d'autres questions.
+                </div>
+              </div>
+
+            </div>
+          </template>
+
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -438,6 +545,12 @@ function aideApp() {
     submitting: false,
     ticketSent: false,
     ticketId: '',
+
+    // ── Mes tickets ──
+    myTickets: [],
+    myTicketsLoaded: false,
+    myTicketsLoading: false,
+    myTicketsUnread: 0,
 
     // ── Vidéos ──
     videoOpen: false,
@@ -570,6 +683,92 @@ function aideApp() {
           this.ticket.nom = parts.slice(1).join(' ')||'';
         }
       }
+    },
+
+    // ══════════════════════════════════════════════
+    //  MES TICKETS
+    // ══════════════════════════════════════════════
+
+    async loadMyTickets() {
+      if (this.myTicketsLoaded || this.myTicketsLoading) return;
+      if (!window._auth || !window._auth.currentUser) return;
+      this.myTicketsLoading = true;
+      try {
+        const idToken = await window._auth.currentUser.getIdToken();
+        const resp = await fetch('/api/get-my-tickets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken }
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erreur chargement');
+        this.myTickets = (data.tickets || []).map(function(t) {
+          return Object.assign({ _open: false, _sending: false }, t);
+        });
+        this.myTicketsUnread = this.myTickets.filter(function(t) {
+          return !t.clientRead && t.replies && t.replies.some(function(r){ return r.from !== 'client'; });
+        }).length;
+        this.myTicketsLoaded = true;
+      } catch(e) {
+        console.error('[mes-tickets] loadMyTickets:', e);
+      } finally {
+        this.myTicketsLoading = false;
+      }
+    },
+
+    async sendClientReply(t, ti) {
+      if (!window._auth || !window._auth.currentUser) return;
+      const ta = document.getElementById('reply-ta-' + ti);
+      const text = (ta && ta.value || '').trim();
+      if (!text || text.length < 3) { showToast('⚠️ Message trop court', 'err'); return; }
+      t._sending = true;
+      try {
+        const idToken = await window._auth.currentUser.getIdToken();
+        const resp = await fetch('/api/send-ticket-reply', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          body: JSON.stringify({
+            from: 'client',
+            ticketId: t.ticketId,
+            subject: t.sujet,
+            replyText: text
+          })
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || 'Erreur envoi');
+        // Mettre à jour l'état local sans rechargement
+        if (!t.replies) t.replies = [];
+        t.replies.push({ text: text, sentAt: new Date().toISOString(), from: 'client' });
+        t.clientRead = true;
+        if (ta) ta.value = '';
+        showToast('✅ Réponse envoyée', 'success');
+      } catch(e) {
+        console.error('[mes-tickets] sendClientReply:', e);
+        showToast('❌ ' + (e.message || 'Erreur'), 'err');
+      } finally {
+        t._sending = false;
+      }
+    },
+
+    async markTicketRead(t) {
+      // Marque clientRead=true côté Firestore (silencieux, best-effort)
+      if (!window._auth || !window._auth.currentUser) return;
+      t.clientRead = true;
+      this.myTicketsUnread = Math.max(0, this.myTicketsUnread - 1);
+      try {
+        const idToken = await window._auth.currentUser.getIdToken();
+        await fetch('/api/mark-ticket-read', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
+          body: JSON.stringify({ ticketId: t.ticketId })
+        });
+      } catch(e) { /* silencieux */ }
+    },
+
+    formatTicketDate(iso) {
+      if (!iso) return '';
+      try {
+        return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+      } catch(e) { return iso; }
     },
 
     // ══════════════════════════════════════════════
