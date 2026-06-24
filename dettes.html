@@ -2139,10 +2139,21 @@ async function loadFromPilotage(){
     });
 
     // Helper: check if a pilotage item already exists in manual dettes
-    function alreadyInDettes(pilRef, nom) {
+    // Normalise les noms (tirets, espaces, casse) pour éviter les faux négatifs
+    function normStr(s) {
+      return String(s||'').toLowerCase().replace(/[\s\-–—]+/g,' ').trim();
+    }
+    function alreadyInDettes(pilRef, nom, capitalInitial, taux) {
       return _dettes.some(function(d) {
-        return d._pilotageRef === pilRef || d.id === pilRef
-          || (nom && d.nom && d.nom.toLowerCase() === nom.toLowerCase());
+        if (d._pilotageRef === pilRef || d.id === pilRef) return true;
+        if (nom && d.nom && normStr(d.nom) === normStr(nom)) return true;
+        // Fallback : même capital initial + même taux = même prêt
+        if (capitalInitial && taux && d.montant && d.taux) {
+          var capMatch = Math.abs(parseFloat(d.montant) - parseFloat(capitalInitial)) < 1;
+          var tauxMatch = Math.abs(parseFloat(d.taux) - parseFloat(taux)) < 0.01;
+          if (capMatch && tauxMatch) return true;
+        }
+        return false;
       });
     }
 
@@ -2150,7 +2161,7 @@ async function loadFromPilotage(){
       var fournTrim = l.fournisseur.trim();
       var pilRef = 'pil_leas_' + fournTrim.replace(/\s+/g,'_');
       var nom = (l.type ? l.type + ' — ' : '') + fournTrim;
-      if(alreadyInDettes(pilRef, nom)) return;
+      if(alreadyInDettes(pilRef, nom, l.montantHT, null)) return;
       var loyer=parseFloat(l.montantHT)||0;
       var duree=0;
       var _debN=parseYYYYMM(l.dateDebut), _finN=parseYYYYMM(l.dateFin);
@@ -2176,7 +2187,7 @@ async function loadFromPilotage(){
       var fournTrim = c.fournisseur.trim();
       var pilRef = 'pil_cred_' + fournTrim.replace(/\s+/g,'_');
       var nom = (c.nom&&c.nom.trim()) ? c.nom.trim() : fournTrim;
-      if(alreadyInDettes(pilRef, nom)) return;
+      if(alreadyInDettes(pilRef, nom, c.capitalInitial, c.tauxInteret)) return;
       var mensualite=parseFloat(c.montant)||0;
       var taux=parseFloat(c.tauxInteret)||0;
       var duree=0;
