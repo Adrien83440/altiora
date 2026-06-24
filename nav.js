@@ -75,6 +75,9 @@
   // Génère les années dynamiquement : année courante -1, courante, courante +1
   const CUR_YEAR = new Date().getFullYear();
   const PIL_YEARS = [CUR_YEAR - 1, CUR_YEAR, CUR_YEAR + 1];
+  // _pilYears : liste effective (fusionne PIL_YEARS + années ajoutées par l'user via Firestore)
+  // Initialisée avec PIL_YEARS, mise à jour après lecture du snap users/{uid}
+  window._pilYears = PIL_YEARS.slice();
 
   // ════════════════════════════════════════════════
   // BUILD NAV HTML
@@ -135,7 +138,8 @@
       <span>🧭</span><span style="flex:1">Pilotage</span><span class="chev" id="chev-pil">›</span>
     </div>
     <div class="sub" id="pil-sub" ${pilOpen}>
-      ${PIL_YEARS.map(y => `<div class="si${PAGE === 'pilotage.html' && ACTIVE_YEAR === y ? ' on' : ''}" onclick="location.href='pilotage.html?year=${y}'"><span class="dot"></span>Pilotage ${y}</div>`).join('\n      ')}
+      ${window._pilYears.map(y => `<div data-pil-year="${y}" class="si${PAGE === 'pilotage.html' && ACTIVE_YEAR === y ? ' on' : ''}" onclick="location.href='pilotage.html?year=${y}'"><span class="dot"></span>Pilotage ${y}</div>`).join('\n      ')}
+      <div id="pil-add-year-btn" style="display:flex;align-items:center;gap:8px;padding:7px 20px 7px 44px;color:rgba(255,255,255,.35);font-size:11px;cursor:pointer;transition:.15s" onmouseenter="this.style.color='rgba(255,255,255,.7)'" onmouseleave="this.style.color='rgba(255,255,255,.35)'" onclick="addPilotageYear()"><span style="font-size:14px;line-height:1">＋</span> Ajouter une année</div>
       <div class="si${a('cashflow.html')}" onclick="location.href='cashflow.html'" style="border-top:1px solid rgba(255,255,255,.06);margin-top:4px;padding-top:8px">
         <span class="dot" style="background:#0d9488"></span>💧 Cashflow
       </div>
@@ -947,6 +951,45 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
         } catch(e) { /* silencieux */ }
       })();
 
+      // ── ANNÉES PILOTAGE SUPPLÉMENTAIRES — lecture + patch nav ──
+      // Fusionne PIL_YEARS de base avec les années ajoutées par l'user (Firestore users/{uid}.pilotageYears).
+      // Reconstruit uniquement le contenu des liens d'années dans #pil-sub (safe, ne touche pas au reste).
+      (function() {
+        try {
+          var extra = (snap.exists() && snap.data().pilotageYears) ? snap.data().pilotageYears : [];
+          if (!Array.isArray(extra)) extra = [];
+          // Fusionner + dédupliquer + trier
+          var merged = PIL_YEARS.concat(extra.map(function(y){ return parseInt(y,10); }).filter(function(y){ return !isNaN(y) && y >= 2020 && y <= 2099; }));
+          merged = merged.filter(function(y, i, arr){ return arr.indexOf(y) === i; }).sort(function(a,b){ return a-b; });
+          window._pilYears = merged;
+          // Reconstruire les liens d'années dans #pil-sub sans toucher aux autres éléments (Cashflow, Prévisions)
+          var pilSub = document.getElementById('pil-sub');
+          if (pilSub) {
+            // Supprimer uniquement les anciens liens d'années et l'ancien bouton +
+            Array.from(pilSub.querySelectorAll('[data-pil-year], #pil-add-year-btn')).forEach(function(el){ el.remove(); });
+            // Point d'insertion : avant le premier .si avec border-top (Cashflow)
+            var cashflowEl = pilSub.querySelector('.si[style*="border-top"]');
+            merged.forEach(function(y) {
+              var div = document.createElement('div');
+              div.className = 'si' + (PAGE === 'pilotage.html' && ACTIVE_YEAR === y ? ' on' : '');
+              div.setAttribute('data-pil-year', y);
+              div.onclick = function(){ location.href = 'pilotage.html?year=' + y; };
+              div.innerHTML = '<span class="dot"></span>Pilotage ' + y;
+              pilSub.insertBefore(div, cashflowEl || null);
+            });
+            // Bouton + après les années
+            var addBtn = document.createElement('div');
+            addBtn.id = 'pil-add-year-btn';
+            addBtn.style.cssText = 'display:flex;align-items:center;gap:8px;padding:7px 20px 7px 44px;color:rgba(255,255,255,.35);font-size:11px;cursor:pointer;transition:.15s';
+            addBtn.onmouseenter = function(){ this.style.color = 'rgba(255,255,255,.7)'; };
+            addBtn.onmouseleave = function(){ this.style.color = 'rgba(255,255,255,.35)'; };
+            addBtn.onclick = function(){ addPilotageYear(); };
+            addBtn.innerHTML = '<span style="font-size:14px;line-height:1">＋</span> Ajouter une année';
+            pilSub.insertBefore(addBtn, cashflowEl || null);
+          }
+        } catch(e) { /* silencieux — ne jamais casser la nav */ }
+      })();
+
       // ── TRACKING ACTIVITÉ (fire-and-forget, ne bloque jamais) ──
       // Throttle 5min par user via sessionStorage. Indépendant de window._setDoc
       // (utilise dynamic import pour fonctionner même sur les pages qui n'exposent pas Firestore).
@@ -1098,5 +1141,55 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
     s.defer = true;
     document.body.appendChild(s);
   })();
+
+  // ════════════════════════════════════════════════
+  // AJOUTER UNE ANNÉE PILOTAGE
+  //
+  // Calcule max(années affichées) + 1, écrit dans users/{uid}.pilotageYears
+  // via merge Firestore (setDoc + merge:true), puis navigue vers la nouvelle année.
+  // Ultra-safe : lit window._pilYears (déjà fusionné), ne casse rien si Firestore
+  // est indisponible (fallback navigation directe sans persistance).
+  // Accessible depuis le bouton ＋ dans la sidebar (onclick="addPilotageYear()").
+  // ════════════════════════════════════════════════
+  window.addPilotageYear = async function addPilotageYear() {
+    var btn = document.getElementById('pil-add-year-btn');
+    if (btn) {
+      btn.style.opacity = '0.5';
+      btn.style.pointerEvents = 'none';
+    }
+    try {
+      var currentYears = window._pilYears || [new Date().getFullYear()];
+      var newYear = Math.max.apply(null, currentYears) + 1;
+      // Valider que l'année est raisonnable
+      if (newYear > 2099) {
+        if (btn) { btn.style.opacity = ''; btn.style.pointerEvents = ''; }
+        return;
+      }
+      // Persister dans Firestore si Firebase dispo
+      if (window._uid && window._db && window._doc && window._setDoc) {
+        try {
+          // Récupérer les années extra déjà stockées, ajouter la nouvelle
+          var snap = await window._getDoc(window._doc(window._db, 'users', window._uid));
+          var existing = (snap.exists() && Array.isArray(snap.data().pilotageYears)) ? snap.data().pilotageYears : [];
+          // Merge : ajouter la nouvelle année si pas déjà présente
+          var updated = existing.map(function(y){ return parseInt(y,10); }).filter(function(y){ return !isNaN(y); });
+          if (updated.indexOf(newYear) === -1) updated.push(newYear);
+          await window._setDoc(
+            window._doc(window._db, 'users', window._uid),
+            { pilotageYears: updated },
+            { merge: true }
+          );
+        } catch(fsErr) {
+          // Firestore KO : on navigue quand même, l'année ne sera pas persistée
+          console.warn('[addPilotageYear] Firestore write failed, navigating anyway:', fsErr);
+        }
+      }
+      // Naviguer vers la nouvelle année
+      location.href = 'pilotage.html?year=' + newYear;
+    } catch(e) {
+      console.error('[addPilotageYear]', e);
+      if (btn) { btn.style.opacity = ''; btn.style.pointerEvents = ''; }
+    }
+  };
 
 })();
