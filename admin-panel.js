@@ -52,6 +52,8 @@
         { icon: '🏥', title: 'Diagnostic général', desc: 'Test connexion, santé du système', href: '/diagnostic.html' },
         { icon: '🏦', title: 'Debug banque', desc: 'Log des connexions bancaires Bridge', href: '/api/bank-debug', note: 'API — ouvre en onglet' },
         { icon: '📧', title: 'Test email Resend', desc: 'Envoyer un email de test pour vérifier la config', href: '/api/send-debug-email', note: 'API — ouvre en onglet' },
+        { icon: '💰', title: 'Debug dettes', desc: 'Lire et nettoyer dettes/{uid}/data/all — doublons détectés automatiquement', href: '/admin-purge-dettes.html' },
+        { icon: '📋', title: 'Debug crédits pilotage', desc: 'Lire et nettoyer les crédits dans pilotage/months — doublons intra-mois', href: '/admin-purge-credits.html' },
       ],
     },
     {
