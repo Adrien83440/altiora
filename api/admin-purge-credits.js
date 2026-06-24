@@ -124,7 +124,15 @@ function creditKey(c, monthKey) {
   const fourn   = (c.fournisseur || '').trim();
   const nom     = (c.nom || '').trim();
   const isEmpty = !fourn && !(parseFloat(c.montant) > 0);
-  return isEmpty ? null : `${fourn}||${nom}||${c.ligneType || 'principal'}`;
+  if (isEmpty) return null;
+  // Normaliser dateDebut au format YYYY-MM (ignorer le jour si présent)
+  // ex: "2026-01-20" → "2026-01", "2026-01" → "2026-01"
+  let normDate = '';
+  if (c.dateDebut) {
+    const parts = String(c.dateDebut).split('-');
+    if (parts.length >= 2) normDate = parts[0] + '-' + parts[1];
+  }
+  return `${fourn}||${nom}||${c.ligneType || 'principal'}||${normDate}`;
 }
 
 async function scanCredits(uid, adminToken) {
