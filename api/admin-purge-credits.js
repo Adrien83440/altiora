@@ -1,7 +1,8 @@
 // api/admin-purge-credits.js
-// Deux actions :
-//   GET  ?uid=xxx          → liste tous les crédits uniques de pilotage/{uid}/months/*
-//   POST {uid, keysToDelete:[]} → supprime les lignes ciblées sur tous les mois
+// Trois actions :
+//   GET  ?uid=xxx                    → liste tous les crédits uniques + doublons intra-mois
+//   POST {uid, keysToDelete:[]}      → supprime les clés "inter-mois" ciblées sur tous les mois
+//   POST {uid, intraDoublons:[{monthKey, indexes:[]}]} → supprime les doublons intra-mois ciblés
 //
 // Sécurité : idToken Firebase vérifié, email dans ADMIN_EMAILS obligatoire.
 // Écriture via token admin serveur (signInWithPassword) → Firestore REST PATCH.
@@ -120,24 +121,31 @@ const PLACEHOLDER = {
   dateDebut: '', dateFin: '', amort: 'constant'
 };
 
-function creditKey(c, monthKey) {
+function creditKey(c) {
   const fourn   = (c.fournisseur || '').trim();
-  const nom     = (c.nom || '').trim();
   const isEmpty = !fourn && !(parseFloat(c.montant) > 0);
   if (isEmpty) return null;
   // Normaliser dateDebut au format YYYY-MM (ignorer le jour si présent)
-  // ex: "2026-01-20" → "2026-01", "2026-01" → "2026-01"
   let normDate = '';
   if (c.dateDebut) {
     const parts = String(c.dateDebut).split('-');
     if (parts.length >= 2) normDate = parts[0] + '-' + parts[1];
   }
-  return `${fourn}||${nom}||${c.ligneType || 'principal'}||${normDate}`;
+  return `${fourn}||${(c.nom || '').trim()}||${c.ligneType || 'principal'}||${normDate}`;
+}
+
+// ── Clé de déduplication intra-mois (basée sur le nom, insensible à la casse)
+// Deux lignes dans le même mois avec le même nom (fournisseur ou nom) sont des doublons.
+function intraKey(c) {
+  const fourn = (c.fournisseur || '').trim().toLowerCase();
+  if (!fourn && !(parseFloat(c.montant) > 0)) return null; // placeholder
+  return fourn || (c.nom || '').trim().toLowerCase();
 }
 
 async function scanCredits(uid, adminToken) {
-  const docs   = await listMonths(uid, adminToken);
+  const docs    = await listMonths(uid, adminToken);
   const credMap = {};  // key → {info, moisList}
+  const intraDoublons = []; // liste des doublons intra-mois détectés
 
   for (const fsDoc of docs) {
     const parts    = fsDoc.name.split('/');
@@ -145,9 +153,42 @@ async function scanCredits(uid, adminToken) {
     const d        = decodeDoc(fsDoc);
     const credits  = Array.isArray(d.credits) ? d.credits : [];
 
+    // ── Détecter les doublons INTRA-MOIS ──
+    // Un doublon = deux lignes dans le même mois avec le même nom de fournisseur
+    const seenInMonth = {}; // intraKey → premier index réel
+    const dubIndexes  = []; // indexes des lignes en doublon (à supprimer = les suivantes)
+
+    credits.forEach((c, idx) => {
+      const ik = intraKey(c);
+      if (!ik) return; // placeholder, skip
+      if (seenInMonth[ik] === undefined) {
+        seenInMonth[ik] = idx; // premier = original, on garde
+      } else {
+        dubIndexes.push(idx); // doublon = on propose la suppression
+      }
+    });
+
+    if (dubIndexes.length > 0) {
+      // Construire les détails pour l'affichage côté UI
+      const dubDetails = dubIndexes.map(idx => {
+        const c = credits[idx];
+        return {
+          index: idx,
+          fournisseur: (c.fournisseur || '').trim(),
+          nom: (c.nom || '').trim(),
+          montant: c.montant || '',
+          mensualite: c.mensualite || c.montant || '',
+          dateDebut: c.dateDebut || '',
+          dateFin: c.dateFin || ''
+        };
+      });
+      intraDoublons.push({ monthKey, dubIndexes, dubDetails });
+    }
+
+    // ── Agrégation inter-mois (comportement existant) ──
     for (const c of credits) {
-      const key = creditKey(c, monthKey);
-      if (!key) continue; // skip placeholders — non supprimables via cet outil
+      const key = creditKey(c);
+      if (!key) continue;
 
       if (!credMap[key]) {
         credMap[key] = {
@@ -166,7 +207,6 @@ async function scanCredits(uid, adminToken) {
           moisList:       []
         };
       }
-      // Prendre la valeur non nulle la plus complète
       if (parseFloat(c.montant) > 0 && !(parseFloat(credMap[key].montant) > 0)) {
         Object.assign(credMap[key], {
           montant: c.montant, mensualite: c.mensualite || c.montant,
@@ -178,9 +218,10 @@ async function scanCredits(uid, adminToken) {
     }
   }
 
-  return { credits: Object.values(credMap), monthCount: docs.length };
+  return { credits: Object.values(credMap), monthCount: docs.length, intraDoublons };
 }
 
+// ── Purge inter-mois (comportement existant) ──
 async function purgeCredits(uid, keysToDelete, adminToken) {
   if (!keysToDelete || keysToDelete.length === 0) return { purged: 0, errors: 0 };
 
@@ -194,17 +235,14 @@ async function purgeCredits(uid, keysToDelete, adminToken) {
     const d        = decodeDoc(fsDoc);
     const credits  = Array.isArray(d.credits) ? d.credits : [];
 
-    // Filtrer les lignes à supprimer
     const newCredits = credits.filter(c => {
-      const k = creditKey(c, monthKey);
-      return k === null || !keySet.has(k); // garder placeholders + lignes non ciblées
+      const k = creditKey(c);
+      return k === null || !keySet.has(k);
     });
 
-    // Si aucun changement, skip
     if (newCredits.length === credits.length) continue;
 
-    // Toujours au moins un placeholder
-    if (newCredits.length === 0 || newCredits.every(c => creditKey(c, monthKey) !== null)) {
+    if (newCredits.length === 0 || newCredits.every(c => creditKey(c) !== null)) {
       if (!newCredits.some(c => !(c.fournisseur || '').trim() && !(parseFloat(c.montant) > 0))) {
         newCredits.push({ ...PLACEHOLDER });
       }
@@ -220,14 +258,59 @@ async function purgeCredits(uid, keysToDelete, adminToken) {
         headers: { Authorization: 'Bearer ' + adminToken, 'Content-Type': 'application/json' },
         body:    JSON.stringify(encoded)
       });
-      if (!r.ok) {
-        console.error('[purge] PATCH', monthKey, r.status, await r.text());
-        errors++;
-      } else {
-        purged++;
-      }
+      if (!r.ok) { console.error('[purge] PATCH', monthKey, r.status, await r.text()); errors++; }
+      else        { purged++; }
     } catch(e) {
       console.error('[purge] exception', monthKey, e.message);
+      errors++;
+    }
+  }
+
+  return { purged, errors };
+}
+
+// ── Purge intra-mois (NOUVEAU) ──
+// intraToDelete = [{ monthKey: 'YYYY-MM', indexes: [2, 5, ...] }]
+// On supprime les lignes aux index indiqués dans chaque mois.
+// Sécurité : on charge chaque mois frais depuis Firestore avant de modifier.
+async function purgeIntraDoublons(uid, intraToDelete, adminToken) {
+  if (!intraToDelete || intraToDelete.length === 0) return { purged: 0, errors: 0 };
+
+  let purged = 0, errors = 0;
+
+  for (const { monthKey, indexes } of intraToDelete) {
+    if (!monthKey || !Array.isArray(indexes) || indexes.length === 0) continue;
+    const indexSet = new Set(indexes.map(Number));
+
+    try {
+      // Recharger le mois frais (évite les race conditions)
+      const url = `${FS_BASE}/pilotage/${uid}/months/${monthKey}`;
+      const r   = await fetch(url, { headers: { Authorization: 'Bearer ' + adminToken } });
+      if (!r.ok) { console.error('[purge-intra] GET', monthKey, r.status); errors++; continue; }
+
+      const fsDoc  = await r.json();
+      const d      = decodeDoc(fsDoc);
+      const credits = Array.isArray(d.credits) ? d.credits : [];
+
+      // Filtrer en gardant les lignes dont l'index N'EST PAS dans indexSet
+      const newCredits = credits.filter((_, idx) => !indexSet.has(idx));
+
+      // Toujours au moins un placeholder
+      const hasReal = newCredits.some(c => (c.fournisseur || '').trim() || parseFloat(c.montant) > 0);
+      if (!hasReal) newCredits.push({ ...PLACEHOLDER });
+
+      d.credits = newCredits;
+      const encoded = encodeDoc(d);
+
+      const rPatch = await fetch(url, {
+        method:  'PATCH',
+        headers: { Authorization: 'Bearer ' + adminToken, 'Content-Type': 'application/json' },
+        body:    JSON.stringify(encoded)
+      });
+      if (!rPatch.ok) { console.error('[purge-intra] PATCH', monthKey, rPatch.status, await rPatch.text()); errors++; }
+      else             { purged++; }
+    } catch(e) {
+      console.error('[purge-intra] exception', monthKey, e.message);
       errors++;
     }
   }
@@ -244,7 +327,6 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   try {
-    // ── Auth ──
     const authHeader = req.headers.authorization || '';
     const idToken    = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
     if (!idToken) return res.status(401).json({ error: 'Non authentifié' });
@@ -257,21 +339,33 @@ export default async function handler(req, res) {
       const uid = req.query && req.query.uid;
       if (!uid) return res.status(400).json({ error: 'uid manquant' });
 
-      const { credits, monthCount } = await scanCredits(uid, adminToken);
-      return res.status(200).json({ success: true, credits, monthCount });
+      const { credits, monthCount, intraDoublons } = await scanCredits(uid, adminToken);
+      return res.status(200).json({ success: true, credits, monthCount, intraDoublons });
     }
 
-    // ── POST : purge ──
+    // ── POST : purge inter-mois OU intra-mois ──
     if (req.method === 'POST') {
-      const { uid, keysToDelete } = req.body || {};
+      const body = req.body || {};
+      const uid  = body.uid;
       if (!uid) return res.status(400).json({ error: 'uid manquant' });
+
+      // Purge intra-mois (doublons au sein d'un même mois)
+      if (Array.isArray(body.intraDoublons) && body.intraDoublons.length > 0) {
+        if (body.intraDoublons.length > 100) {
+          return res.status(400).json({ error: 'Trop d\'entrées intraDoublons (max 100)' });
+        }
+        const { purged, errors } = await purgeIntraDoublons(uid, body.intraDoublons, adminToken);
+        return res.status(200).json({ success: true, purged, errors });
+      }
+
+      // Purge inter-mois (comportement existant)
+      const { keysToDelete } = body;
       if (!Array.isArray(keysToDelete) || keysToDelete.length === 0) {
-        return res.status(400).json({ error: 'keysToDelete vide' });
+        return res.status(400).json({ error: 'keysToDelete vide (et intraDoublons absent)' });
       }
       if (keysToDelete.length > 200) {
         return res.status(400).json({ error: 'Trop de clés (max 200 par appel)' });
       }
-
       const { purged, errors } = await purgeCredits(uid, keysToDelete, adminToken);
       return res.status(200).json({ success: true, purged, errors });
     }
