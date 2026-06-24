@@ -45,10 +45,12 @@ async function verifyCallerIsAdmin(idToken) {
 
 function decodeValue(v) {
   if (!v) return null;
-  if (v.stringValue  !== undefined) return v.stringValue;
-  if (v.booleanValue !== undefined) return v.booleanValue;
-  if (v.integerValue !== undefined) return Number(v.integerValue);
-  if (v.doubleValue  !== undefined) return v.doubleValue;
+  if (v.stringValue    !== undefined) return v.stringValue;
+  if (v.booleanValue   !== undefined) return v.booleanValue;
+  if (v.integerValue   !== undefined) return Number(v.integerValue);
+  if (v.doubleValue    !== undefined) return v.doubleValue;
+  if (v.timestampValue !== undefined) return v.timestampValue; // garder comme string ISO
+  if (v.nullValue      !== undefined) return null;
   if (v.arrayValue)  return (v.arrayValue.values || []).map(decodeValue);
   if (v.mapValue) {
     const obj = {};
@@ -62,8 +64,12 @@ function encodeValue(v) {
   if (v === null || v === undefined) return { nullValue: null };
   if (typeof v === 'boolean') return { booleanValue: v };
   if (typeof v === 'number')  return Number.isInteger(v) ? { integerValue: String(v) } : { doubleValue: v };
-  if (typeof v === 'string')  return { stringValue: v };
-  if (Array.isArray(v))       return { arrayValue: { values: v.map(encodeValue) } };
+  if (typeof v === 'string') {
+    // Détecter les strings ISO datetime → encoder comme timestamp Firestore
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v)) return { timestampValue: v };
+    return { stringValue: v };
+  }
+  if (Array.isArray(v)) return { arrayValue: { values: v.map(encodeValue) } };
   if (typeof v === 'object') {
     const fields = {};
     for (const k of Object.keys(v)) fields[k] = encodeValue(v[k]);
