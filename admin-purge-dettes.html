@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Admin — Dettes & Emprunts doublons</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --blue:#2563eb;--blue2:#60a5fa;--bg:#f4f6fb;
+  --border:rgba(0,0,0,0.07);--text:#0f172a;--muted:#64748b;
+  --green:#059669;--red:#dc2626;--orange:#d97706;
+  --glass-blur:blur(20px) saturate(180%);
+  --shadow:0 2px 8px rgba(0,0,0,0.04),0 8px 32px rgba(0,0,0,0.06);
+  --radius:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Plus Jakarta Sans',sans-serif;background:#f4f6fb;color:var(--text);min-height:100vh;font-size:13px;-webkit-font-smoothing:antialiased}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:-1;
+  background:radial-gradient(ellipse 60% 50% at 15% 10%,rgba(147,197,253,0.12),transparent),
+             radial-gradient(ellipse 50% 40% at 85% 25%,rgba(196,181,253,0.08),transparent)}
+.hdr{background:linear-gradient(135deg,#0f1f5c,#1a3dce);padding:18px 28px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 4px 24px rgba(15,31,92,0.25)}
+.hdr-left{display:flex;align-items:center;gap:12px}
+.hdr-ico{width:36px;height:36px;background:rgba(255,255,255,.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:17px}
+.hdr-title{color:#fff;font-size:15px;font-weight:800}
+.hdr-sub{color:rgba(255,255,255,.45);font-size:11px;margin-top:2px}
+.badge-admin{background:rgba(251,191,36,.2);border:1px solid rgba(251,191,36,.35);color:#fbbf24;font-size:10px;font-weight:800;padding:2px 9px;border-radius:20px;letter-spacing:.5px;margin-left:8px}
+.btn-back{color:rgba(255,255,255,.6);font-size:12px;font-weight:600;padding:7px 14px;border:1px solid rgba(255,255,255,.2);border-radius:8px;background:none;text-decoration:none;display:inline-flex;align-items:center;gap:5px;transition:.15s}
+.btn-back:hover{color:#fff;border-color:rgba(255,255,255,.5)}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px}
+.loader{text-align:center;padding:60px 20px;color:var(--muted)}
+.spin{width:40px;height:40px;border:3px solid rgba(37,99,235,.15);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.err-box{background:#fef2f2;border:1.5px solid #fecaca;border-radius:12px;padding:18px 22px;color:var(--red);font-size:13px;line-height:1.7}
+.uid-form{background:rgba(255,255,255,.82);backdrop-filter:var(--glass-blur);border:1px solid var(--border);border-radius:var(--radius);padding:22px 26px;margin-bottom:22px;box-shadow:var(--shadow);display:flex;align-items:flex-end;gap:12px;flex-wrap:wrap}
+.uid-form label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px}
+.uid-input{padding:9px 14px;border:1.5px solid var(--border);border-radius:9px;font-family:monospace;font-size:13px;color:var(--text);outline:none;transition:border-color .2s;width:360px}
+.uid-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.08)}
+.btn{padding:9px 18px;border:none;border-radius:9px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:6px}
+.btn-blue{background:linear-gradient(135deg,var(--blue),var(--blue2));color:#fff;box-shadow:0 3px 10px rgba(37,99,235,.2)}
+.btn-blue:hover{transform:translateY(-1px);box-shadow:0 5px 16px rgba(37,99,235,.28)}
+.btn-blue:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.btn-red{background:var(--red);color:#fff;box-shadow:0 3px 10px rgba(220,38,38,.2)}
+.btn-red:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 5px 16px rgba(220,38,38,.28)}
+.btn-red:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn-outline{background:#fff;color:var(--muted);border:1.5px solid var(--border)}
+.btn-outline:hover{border-color:var(--blue);color:var(--blue)}
+.client-banner{background:rgba(255,255,255,.8);backdrop-filter:var(--glass-blur);border:1px solid var(--border);border-radius:12px;padding:14px 20px;margin-bottom:18px;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.client-uid{font-family:monospace;font-size:12px;color:var(--muted)}
+.client-email{font-size:14px;font-weight:700}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+.stat{background:rgba(255,255,255,.8);backdrop-filter:var(--glass-blur);border:1px solid var(--border);border-radius:12px;padding:15px 18px;box-shadow:var(--shadow)}
+.stat-n{font-size:28px;font-weight:800;line-height:1}
+.stat-l{font-size:11px;color:var(--muted);margin-top:4px;font-weight:600}
+.n-blue{color:var(--blue)}.n-green{color:var(--green)}.n-red{color:var(--red)}
+.toolbar{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.f-btn{padding:6px 14px;border-radius:8px;border:1.5px solid var(--border);background:#fff;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:.15s;color:var(--muted)}
+.f-btn.on{border-color:var(--blue);background:#eff6ff;color:var(--blue)}
+.search{padding:7px 12px;border-radius:8px;border:1.5px solid var(--border);font-family:inherit;font-size:12px;outline:none;transition:border-color .2s;margin-left:auto;width:200px}
+.search:focus{border-color:var(--blue)}
+.tbl-wrap{background:rgba(255,255,255,.85);backdrop-filter:var(--glass-blur);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;margin-bottom:14px}
+table{width:100%;border-collapse:collapse}
+thead tr{background:rgba(37,99,235,.04);border-bottom:2px solid rgba(37,99,235,.08)}
+th{padding:10px 14px;text-align:left;font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+th.chk{width:40px;text-align:center}
+tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover{background:rgba(37,99,235,.02)}
+tbody tr.sel{background:rgba(220,38,38,.04)}
+tbody tr.is-dup{background:rgba(220,38,38,.02)}
+td{padding:11px 14px;vertical-align:middle}
+td.chk{text-align:center}
+input[type=checkbox]{width:15px;height:15px;accent-color:var(--red);cursor:pointer}
+.cn{font-weight:700}.cm{font-family:monospace;font-weight:700}.cg{color:var(--muted);font-size:12px}
+.pill{display:inline-flex;align-items:center;padding:3px 9px;border-radius:20px;font-size:10px;font-weight:700}
+.p-ok{background:#d1fae5;color:#065f46}
+.p-dup{background:#fef2f2;border:1px solid #fecaca;color:var(--red)}
+.p-type{background:#eff6ff;color:var(--blue)}
+.p-inactif{background:#fef3c7;color:#92400e}
+.overlay{position:fixed;inset:0;background:rgba(15,31,92,.45);backdrop-filter:blur(8px);z-index:300;display:none;align-items:center;justify-content:center;padding:20px}
+.overlay.show{display:flex}
+.modal{background:#fff;border-radius:18px;max-width:500px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.2);overflow:hidden}
+.modal-hd{background:linear-gradient(135deg,#fef2f2,#fff1f1);padding:22px 26px;border-bottom:1px solid #fecaca}
+.modal-hd h3{font-size:16px;font-weight:800;color:var(--red);margin-bottom:3px}
+.modal-hd p{font-size:12px;color:var(--muted)}
+.modal-bd{padding:18px 26px}
+.modal-list{max-height:220px;overflow-y:auto;margin-bottom:16px}
+.mli{padding:8px 12px;border-radius:8px;background:#fef2f2;margin-bottom:6px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:8px;border:1px solid #fecaca}
+.mli::before{content:'🗑';font-size:13px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end}
+.btn-cancel{padding:9px 18px;border:1.5px solid var(--border);border-radius:9px;background:#fff;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;color:var(--muted)}
+.btn-cancel:hover{border-color:var(--muted)}
+.success{background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:12px;padding:14px 20px;display:none;align-items:center;gap:10px;margin-bottom:18px;font-size:13px;font-weight:600;color:#065f46}
+.success.show{display:flex}
+.toast{position:fixed;bottom:24px;right:24px;background:#1a1f36;color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:999;transform:translateY(80px);opacity:0;transition:.3s}
+.toast.show{transform:translateY(0);opacity:1}
+.toast.ok{background:var(--green)}.toast.err{background:var(--red)}
+.note{font-size:11px;color:var(--muted);text-align:right;margin-top:6px}
+.dup-banner{background:#fef2f2;border:1.5px solid #fecaca;border-radius:10px;padding:12px 18px;margin-bottom:16px;font-size:12px;font-weight:600;color:var(--red);display:flex;align-items:center;gap:8px}
+@media(max-width:640px){
+  .stats{grid-template-columns:1fr 1fr}
+  .wrap{padding:14px 12px}
+  .uid-input{width:100%}
+  td,th{padding:9px 10px;font-size:12px}
+  .search{width:100%;margin-left:0}
+}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-left">
+    <div class="hdr-ico">💰</div>
+    <div>
+      <div class="hdr-title">Dettes &amp; Emprunts — Doublons <span class="badge-admin">ADMIN</span></div>
+      <div class="hdr-sub">Lecture et nettoyage de dettes/{uid}/data/all</div>
+    </div>
+  </div>
+  <a href="admin-reporting.html" class="btn-back">← Admin</a>
+</div>
+
+<div class="wrap">
+
+  <div class="success" id="success-banner">
+    <span style="font-size:20px">✅</span>
+    <span id="success-txt"></span>
+  </div>
+
+  <div class="loader" id="loader" style="display:none">
+    <div class="spin"></div>
+    <div id="loader-txt" style="font-size:13px;font-weight:600">Chargement…</div>
+  </div>
+
+  <div id="err-wrap" style="display:none;margin-bottom:18px">
+    <div class="err-box" id="err-msg"></div>
+  </div>
+
+  <div class="uid-form" id="uid-form">
+    <div style="flex:1;min-width:200px">
+      <label for="uid-input">UID client à scanner</label>
+      <input class="uid-input" id="uid-input" type="text" placeholder="dXBhZOYY8JV7J7VgaNZmL25QpFF3" spellcheck="false"/>
+    </div>
+    <button class="btn btn-blue" id="scan-btn" onclick="startScan()">🔍 Scanner</button>
+  </div>
+
+  <div id="results" style="display:none">
+
+    <div class="client-banner">
+      <div>
+        <div class="client-email" id="client-email">—</div>
+        <div class="client-uid" id="client-uid-disp">—</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <a id="link-fs" href="#" target="_blank" class="btn btn-outline" style="font-size:12px;padding:6px 12px">🔥 Firestore</a>
+        <button class="btn btn-outline" style="font-size:12px;padding:6px 12px" onclick="startScan()">↺ Rescanner</button>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="stat-n n-blue" id="s-total">—</div><div class="stat-l">Dettes enregistrées</div></div>
+      <div class="stat"><div class="stat-n n-green" id="s-actif">—</div><div class="stat-l">Actives (non archivées)</div></div>
+      <div class="stat"><div class="stat-n n-red" id="s-dup">—</div><div class="stat-l">Doublons détectés</div></div>
+    </div>
+
+    <div id="dup-banner" class="dup-banner" style="display:none">
+      ⚠️ Des doublons ont été détectés (même nom + même type). Cochez les lignes à supprimer puis cliquez sur le bouton rouge.
+    </div>
+
+    <div class="toolbar">
+      <button class="f-btn on" id="f-all"    onclick="setFilter('all')">Tout</button>
+      <button class="f-btn"    id="f-dup"    onclick="setFilter('dup')">Doublons uniquement</button>
+      <button class="f-btn"    id="f-actif"  onclick="setFilter('actif')">Actives</button>
+      <input class="search" id="search" type="text" placeholder="🔍 Rechercher…" oninput="render()"/>
+      <button class="btn btn-red" id="del-btn" onclick="openConfirm()" disabled>
+        🗑 Supprimer la sélection (<span id="del-count">0</span>)
+      </button>
+    </div>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="chk"><input type="checkbox" id="chk-all" onchange="toggleAll(this)" title="Tout sélectionner"/></th>
+            <th>Nom</th>
+            <th>Type</th>
+            <th>Montant</th>
+            <th>Début</th>
+            <th>Durée</th>
+            <th>Statut</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="note">Les dettes supprimées ici sont supprimées définitivement de la collection <code>dettes/{uid}/data/all</code>.</div>
+
+  </div>
+</div>
+
+<!-- CONFIRM MODAL -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-hd">
+      <h3>🗑 Confirmer la suppression</h3>
+      <p>Ces dettes seront supprimées définitivement. Irréversible.</p>
+    </div>
+    <div class="modal-bd">
+      <div class="modal-list" id="modal-list"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeConfirm()">Annuler</button>
+        <button class="btn btn-red" id="btn-confirm" onclick="doPurge()">Supprimer définitivement</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+const auth = getAuth(initializeApp({
+  apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+  authDomain:"altiora-70599.firebaseapp.com", projectId:"altiora-70599",
+  storageBucket:"altiora-70599.firebasestorage.app",
+  messagingSenderId:"120905555746", appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+}));
+
+const ADMIN_EMAILS = ['contact@adrienemily.com','api@altiora.app'];
+
+onAuthStateChanged(auth, async function(user) {
+  if (!user) { window.location.href = 'index.html'; return; }
+  if (!ADMIN_EMAILS.includes(user.email)) {
+    showErr('Accès réservé à l\'équipe ALTEORE.');
+    return;
+  }
+  window._adminUser = user;
+  const uid = new URLSearchParams(location.search).get('uid') || '';
+  if (uid) {
+    document.getElementById('uid-input').value = uid;
+    startScan();
+  }
+});
+</script>
+
+<script>
+var _dettes   = [];   // toutes les dettes du client
+var _doublons = [];   // doublons détectés (ids)
+var _selected = new Set();
+var _filter   = 'all';
+var _targetUid = '';
+
+async function getToken() {
+  if (!window._adminUser) throw new Error('Non connecté');
+  return window._adminUser.getIdToken(true);
+}
+
+async function startScan() {
+  var uid = document.getElementById('uid-input').value.trim();
+  if (!uid) { showToast('⚠️ Entrez un UID', 'err'); return; }
+  _targetUid = uid;
+  _selected.clear();
+
+  document.getElementById('results').style.display  = 'none';
+  document.getElementById('err-wrap').style.display = 'none';
+  document.getElementById('success-banner').classList.remove('show');
+  setLoader(true);
+
+  try {
+    var tok = await getToken();
+    var r = await fetch('/api/admin-purge-dettes?uid=' + encodeURIComponent(uid), {
+      headers: { Authorization: 'Bearer ' + tok }
+    });
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Erreur API');
+
+    _dettes   = d.dettes   || [];
+    _doublons = d.doublons || [];
+
+    document.getElementById('client-uid-disp').textContent = uid;
+    document.getElementById('client-email').textContent = '—';
+    document.getElementById('link-fs').href =
+      'https://console.firebase.google.com/u/0/project/altiora-70599/firestore/databases/-default-/data/dettes/' + uid + '/data/all';
+
+    // Email client
+    try {
+      var ir = await fetch(
+        'https://firestore.googleapis.com/v1/projects/altiora-70599/databases/(default)/documents/users/' + uid,
+        { headers: { Authorization: 'Bearer ' + tok } }
+      );
+      if (ir.ok) {
+        var id = await ir.json();
+        var email = (id.fields && id.fields.email && id.fields.email.stringValue) || '';
+        var name  = (id.fields && id.fields.name  && id.fields.name.stringValue)  || '';
+        document.getElementById('client-email').textContent = (name ? name + ' — ' : '') + (email || uid);
+      }
+    } catch(e) {}
+
+    var actives = _dettes.filter(function(d) { return d.active !== false; }).length;
+    document.getElementById('s-total').textContent = _dettes.length;
+    document.getElementById('s-actif').textContent = actives;
+    document.getElementById('s-dup').textContent   = _doublons.length;
+
+    document.getElementById('dup-banner').style.display = _doublons.length > 0 ? 'flex' : 'none';
+
+    setLoader(false);
+    document.getElementById('results').style.display = 'block';
+    render();
+
+  } catch(e) {
+    setLoader(false);
+    showErr('Erreur scan : ' + esc(e.message));
+  }
+}
+
+function dupIds() {
+  return new Set(_doublons.map(function(d) { return d.id; }));
+}
+
+function render() {
+  var q    = (document.getElementById('search').value || '').toLowerCase();
+  var dups = dupIds();
+
+  var rows = _dettes.filter(function(d, idx) {
+    var id = d.id || String(idx);
+    if (_filter === 'dup')   return dups.has(id);
+    if (_filter === 'actif') return d.active !== false;
+    return true;
+  }).filter(function(d) {
+    if (!q) return true;
+    return ((d.nom || '') + (d.type || '')).toLowerCase().includes(q);
+  });
+
+  if (!rows.length) {
+    document.getElementById('tbody').innerHTML =
+      '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">Aucun résultat</td></tr>';
+    updateDelBtn(); return;
+  }
+
+  document.getElementById('tbody').innerHTML = rows.map(function(d, localIdx) {
+    // Retrouver l'index réel dans _dettes pour l'id
+    var realIdx = _dettes.indexOf(d);
+    var id      = d.id || String(realIdx);
+    var isDup   = dups.has(id);
+    var isSel   = _selected.has(id);
+    var chk     = isSel ? 'checked' : '';
+    var rowCls  = isSel ? ' sel' : (isDup ? ' is-dup' : '');
+
+    var montant = parseFloat(d.montant) || 0;
+    var duree   = parseInt(d.duree)     || parseInt(d.dureeLea) || 0;
+
+    var typePill = '<span class="pill p-type">' + esc(d.type || '—') + '</span>' +
+      (isDup ? ' <span class="pill p-dup">DOUBLON</span>' : '');
+
+    var statut = d.active === false
+      ? '<span class="pill p-inactif">Archivée</span>'
+      : '<span class="pill p-ok">✓ Active</span>';
+
+    return '<tr class="' + rowCls + '">' +
+      '<td class="chk"><input type="checkbox" ' + chk + ' onchange="toggleRow(\'' + esc(id) + '\',this)"/></td>' +
+      '<td><span class="cn">' + esc(d.nom || '—') + '</span>' +
+        (isDup ? '<br><span class="cg" style="font-size:10px">⚠️ doublon de : ' + esc((_doublons.find(function(x){return x.id===id;})||{}).duplicOf||'') + '</span>' : '') +
+        '</td>' +
+      '<td>' + typePill + '</td>' +
+      '<td>' + (montant > 0 ? '<span class="cm">' + fmtE(montant) + ' €</span>' : '<span class="cg">—</span>') + '</td>' +
+      '<td><span class="cg">' + esc(d.debut || '—') + '</span></td>' +
+      '<td><span class="cg">' + (duree > 0 ? duree + ' mois' : '—') + '</span></td>' +
+      '<td>' + statut + '</td>' +
+    '</tr>';
+  }).join('');
+
+  updateDelBtn();
+}
+
+function toggleRow(id, cb) {
+  if (cb.checked) _selected.add(id);
+  else            _selected.delete(id);
+  var row = cb.closest('tr');
+  if (row) row.classList.toggle('sel', cb.checked);
+  updateDelBtn();
+}
+
+function toggleAll(masterCb) {
+  var dups = dupIds();
+  var visible = _dettes.filter(function(d, idx) {
+    var id = d.id || String(idx);
+    if (_filter === 'dup')   return dups.has(id);
+    if (_filter === 'actif') return d.active !== false;
+    return true;
+  });
+  visible.forEach(function(d, idx) {
+    var realIdx = _dettes.indexOf(d);
+    var id = d.id || String(realIdx);
+    if (masterCb.checked) _selected.add(id);
+    else                   _selected.delete(id);
+  });
+  render();
+}
+
+function updateDelBtn() {
+  var n   = _selected.size;
+  var btn = document.getElementById('del-btn');
+  var cnt = document.getElementById('del-count');
+  btn.disabled = n === 0;
+  cnt.textContent = n;
+}
+
+function setFilter(f) {
+  _filter = f;
+  ['all','dup','actif'].forEach(function(k) {
+    var el = document.getElementById('f-' + k);
+    if (el) el.classList.toggle('on', k === f);
+  });
+  render();
+}
+
+function openConfirm() {
+  if (_selected.size === 0) return;
+  var list = document.getElementById('modal-list');
+  var dups = dupIds();
+  list.innerHTML = [..._selected].map(function(id) {
+    var d = _dettes.find(function(x, idx) { return (x.id || String(idx)) === id; });
+    var isDup = dups.has(id);
+    return '<div class="mli">' +
+      (isDup ? '⚠️ DOUBLON — ' : '') +
+      esc((d && d.nom) || id) + ' (' + esc((d && d.type) || '?') + ')' +
+    '</div>';
+  }).join('');
+  document.getElementById('overlay').classList.add('show');
+}
+
+function closeConfirm() {
+  document.getElementById('overlay').classList.remove('show');
+  var btn = document.getElementById('btn-confirm');
+  btn.disabled = false;
+  btn.textContent = 'Supprimer définitivement';
+}
+
+async function doPurge() {
+  var btn = document.getElementById('btn-confirm');
+  btn.disabled = true;
+  btn.textContent = '⏳ Suppression…';
+
+  try {
+    var tok = await getToken();
+    var ids = [..._selected];
+    var r = await fetch('/api/admin-purge-dettes', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
+      body:    JSON.stringify({ uid: _targetUid, toDelete: ids })
+    });
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Erreur API');
+
+    closeConfirm();
+
+    // Retirer localement
+    var deletedSet = new Set(ids);
+    _dettes   = _dettes.filter(function(d, idx) { return !deletedSet.has(d.id || String(idx)); });
+    _doublons = _doublons.filter(function(d) { return !deletedSet.has(d.id); });
+    _selected.clear();
+
+    document.getElementById('s-total').textContent = _dettes.length;
+    document.getElementById('s-actif').textContent = _dettes.filter(function(d){ return d.active !== false; }).length;
+    document.getElementById('s-dup').textContent   = _doublons.length;
+    document.getElementById('dup-banner').style.display = _doublons.length > 0 ? 'flex' : 'none';
+
+    var msg = '✅ ' + (d.purged || ids.length) + ' dette(s) supprimée(s)';
+    document.getElementById('success-txt').textContent = msg;
+    document.getElementById('success-banner').classList.add('show');
+    showToast(msg, 'ok');
+    render();
+
+  } catch(e) {
+    showToast('❌ ' + esc(e.message), 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Supprimer définitivement';
+  }
+}
+
+function setLoader(on) {
+  document.getElementById('loader').style.display = on ? 'block' : 'none';
+  document.getElementById('scan-btn').disabled = on;
+}
+
+function showErr(msg) {
+  setLoader(false);
+  document.getElementById('err-wrap').style.display = 'block';
+  document.getElementById('err-msg').innerHTML = '❌ ' + msg;
+}
+
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtE(n) { return Number(n).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+
+var _toastTimer;
+function showToast(msg, type) {
+  var t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' ' + type : '');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 3500);
+}
+</script>
+</body>
+</html>
