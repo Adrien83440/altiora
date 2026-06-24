@@ -272,8 +272,18 @@ async function startScan() {
     var r = await fetch('/api/admin-purge-dettes?uid=' + encodeURIComponent(uid), {
       headers: { Authorization: 'Bearer ' + tok }
     });
-    var d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Erreur API');
+
+    var d;
+    var rawText = await r.text();
+    try {
+      d = JSON.parse(rawText);
+    } catch(parseErr) {
+      // La réponse n'est pas du JSON — probablement une page HTML 404/500 de Vercel
+      // ce qui arrive si l'API n'est pas encore déployée
+      var preview = rawText.slice(0, 120).replace(/<[^>]+>/g, '').trim();
+      throw new Error('Réponse non-JSON du serveur (API déployée ?). Aperçu : ' + (preview || rawText.slice(0,80)));
+    }
+    if (!r.ok) throw new Error(d.error || 'Erreur API ' + r.status);
 
     _dettes   = d.dettes   || [];
     _doublons = d.doublons || [];
@@ -450,8 +460,11 @@ async function doPurge() {
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
       body:    JSON.stringify({ uid: _targetUid, toDelete: ids })
     });
-    var d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'Erreur API');
+    var d;
+    var rawText2 = await r.text();
+    try { d = JSON.parse(rawText2); }
+    catch(e2) { throw new Error('Réponse non-JSON (POST). ' + rawText2.slice(0,80)); }
+    if (!r.ok) throw new Error(d.error || 'Erreur API ' + r.status);
 
     closeConfirm();
 
