@@ -6084,9 +6084,27 @@ async function executeScopeAction() {
       for (var m = fromM; m <= 11; m++) targets.push({year:selY, month:m});
       for (var m = 0; m <= toM; m++)    targets.push({year:selY+1, month:m});
     }
-  } else { // all — chercher sur 3 ans autour de l'année courante
-    for (var dy = -1; dy <= 2; dy++) {
-      for (var m = 0; m < 12; m++) targets.push({year:window._year+dy, month:m});
+  } else { // all — lire TOUS les mois existants en Firestore (gère les prêts longs jusqu'en 2036+)
+    try {
+      var allSnap = await window._getDocs(
+        window._collection(window._db, 'pilotage', window._uid, 'months')
+      );
+      allSnap.forEach(function(d) {
+        var parts = d.id.split('-');
+        if (parts.length === 2) {
+          var y = parseInt(parts[0]);
+          var m = parseInt(parts[1]) - 1;
+          if (!isNaN(y) && !isNaN(m) && m >= 0 && m < 12) {
+            targets.push({ year: y, month: m });
+          }
+        }
+      });
+    } catch(e) {
+      console.warn('executeScopeAction: impossible de lister les mois, fallback plage fixe', e);
+      // Fallback : plage étendue de 12 ans (2020→2040)
+      for (var dy = -5; dy <= 15; dy++) {
+        for (var m = 0; m < 12; m++) targets.push({ year: window._year + dy, month: m });
+      }
     }
   }
 
