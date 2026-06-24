@@ -137,6 +137,18 @@
     .mtk-chevron{font-size:12px;transition:transform .2s;color:#94a3b8}
     .mtk-chevron.open{transform:rotate(90deg)}
 
+    /* PIÈCES JOINTES */
+    .attach-zone{border:1.5px dashed var(--border);border-radius:10px;padding:10px 14px;cursor:pointer;transition:border-color .2s;background:#fafbff}
+    .attach-zone:hover{border-color:var(--blue-main)}
+    .attach-zone input[type=file]{display:none}
+    .attach-label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;cursor:pointer;pointer-events:none}
+    .attach-preview{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+    .attach-chip{display:inline-flex;align-items:center;gap:5px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--blue-main)}
+    .attach-chip button{background:none;border:none;cursor:pointer;color:#93c5fd;font-size:13px;line-height:1;padding:0}
+    .attach-chip button:hover{color:var(--red)}
+    .link-input{width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-family:inherit;font-size:13px;color:var(--text);outline:none;transition:border-color .2s}
+    .link-input:focus{border-color:var(--blue-main);box-shadow:0 0 0 3px rgba(37,99,235,.07)}
+
     /* TOAST */
     .toast{position:fixed;bottom:24px;right:24px;background:#1a1f36;color:white;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;transform:translateY(80px);opacity:0;transition:.3s}
     .toast.show{transform:translateY(0);opacity:1}.toast.success{background:var(--green)}
@@ -403,6 +415,26 @@
             <label>Description complète du problème <span class="req">*</span></label>
             <textarea class="tinput" x-model="ticket.desc" placeholder="Décrivez votre problème en détail : que faisiez-vous, quel message d'erreur avez-vous vu, sur quelle page...&#10;&#10;Plus vous donnez de détails, plus nous pourrons vous aider rapidement."></textarea>
           </div>
+
+          <div class="tfield">
+            <label>Capture d'écran ou document <span style="font-weight:400;color:var(--muted)">(optionnel — image ou PDF, max 5 Mo)</span></label>
+            <div class="attach-zone" onclick="document.getElementById('ticket-file-input').click()">
+              <input type="file" id="ticket-file-input" accept="image/*,.pdf" @change="onTicketFile($event)"/>
+              <div class="attach-label">📎 Cliquer pour joindre un fichier</div>
+            </div>
+            <div class="attach-preview" x-show="ticket.attachment">
+              <div class="attach-chip">
+                <span x-text="ticket.attachmentName"></span>
+                <button @click.stop="ticket.attachment=null;ticket.attachmentName=''" title="Retirer">✕</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="tfield">
+            <label>Lien vidéo <span style="font-weight:400;color:var(--muted)">(Tella, Loom… — optionnel)</span></label>
+            <input class="link-input" type="url" x-model="ticket.lien" placeholder="https://tella.tv/video/..."/>
+          </div>
+
           <button class="tbtn" :disabled="submitting" @click="submitTicket()" x-text="submitting ? '⏳ Envoi en cours...' : '📨 Envoyer le ticket'"></button>
         </div>
 
@@ -478,6 +510,19 @@
                 <!-- Formulaire de réponse client (seulement si pas résolu/clôturé) -->
                 <div class="mtk-reply-form" x-show="t.status !== 'resolved' && t.status !== 'closed'">
                   <textarea :id="'reply-ta-' + ti" placeholder="Votre réponse…" rows="3"></textarea>
+                  <div>
+                    <div class="attach-zone" @click="document.getElementById('reply-file-' + ti).click()">
+                      <input type="file" :id="'reply-file-' + ti" accept="image/*,.pdf" @change="onReplyFile($event, t)"/>
+                      <div class="attach-label">📎 Joindre une capture ou un PDF <span style="color:#94a3b8;font-weight:400;font-size:11px">(optionnel)</span></div>
+                    </div>
+                    <div class="attach-preview" x-show="t._attachment">
+                      <div class="attach-chip">
+                        <span x-text="t._attachmentName"></span>
+                        <button @click.stop="t._attachment=null;t._attachmentName=''" title="Retirer">✕</button>
+                      </div>
+                    </div>
+                  </div>
+                  <input class="link-input" type="url" :id="'reply-link-' + ti" placeholder="Lien Tella ou Loom (optionnel)"/>
                   <button class="mtk-reply-btn" :disabled="t._sending" @click="sendClientReply(t, ti)" x-text="t._sending ? '⏳ Envoi…' : '📨 Répondre'"></button>
                 </div>
                 <div x-show="t.status === 'resolved' || t.status === 'closed'" style="font-size:12px;color:var(--muted);padding-top:8px;font-style:italic">
@@ -541,7 +586,7 @@ function aideApp() {
     search: '',
 
     // ── Ticket ──
-    ticket: { nom:'', prenom:'', email:'', tel:'', sujet:'', desc:'' },
+    ticket: { nom:'', prenom:'', email:'', tel:'', sujet:'', desc:'', lien:'', attachment:null, attachmentName:'' },
     submitting: false,
     ticketSent: false,
     ticketId: '',
@@ -655,7 +700,10 @@ function aideApp() {
               telephone: t.tel.trim(), email: t.email.trim(),
               sujet: t.sujet, description: t.desc.trim(),
               page: location.pathname, uid: window._uid||'',
-              plan: window._userPlan||'unknown'
+              plan: window._userPlan||'unknown',
+              lien: t.lien ? t.lien.trim() : '',
+              attachment: t.attachment || null,
+              attachmentName: t.attachmentName || ''
             })
           });
         } catch(e) { console.warn('API ticket:', e); }
@@ -672,7 +720,7 @@ function aideApp() {
     resetTicket() {
       this.ticketSent = false;
       this.ticketId = '';
-      this.ticket = { nom:'', prenom:'', email:'', tel:'', sujet:'', desc:'' };
+      this.ticket = { nom:'', prenom:'', email:'', tel:'', sujet:'', desc:'', lien:'', attachment:null, attachmentName:'' };
       // Re-pré-remplir depuis Firebase si dispo
       if(window._auth && window._auth.currentUser) {
         const u = window._auth.currentUser;
@@ -683,6 +731,30 @@ function aideApp() {
           this.ticket.nom = parts.slice(1).join(' ')||'';
         }
       }
+    },
+
+    // ── Fichiers attachés ──
+    onTicketFile(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) { alert('Fichier trop lourd (max 5 Mo).'); return; }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        this.ticket.attachment     = ev.target.result; // base64 data URL
+        this.ticket.attachmentName = file.name;
+      };
+      reader.readAsDataURL(file);
+    },
+    onReplyFile(e, t) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      if (file.size > 5 * 1024 * 1024) { alert('Fichier trop lourd (max 5 Mo).'); return; }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        t._attachment     = ev.target.result;
+        t._attachmentName = file.name;
+      };
+      reader.readAsDataURL(file);
     },
 
     // ══════════════════════════════════════════════
@@ -720,6 +792,8 @@ function aideApp() {
       const ta = document.getElementById('reply-ta-' + ti);
       const text = (ta && ta.value || '').trim();
       if (!text || text.length < 3) { showToast('⚠️ Message trop court', 'err'); return; }
+      const linkEl = document.getElementById('reply-link-' + ti);
+      const lien = linkEl ? linkEl.value.trim() : '';
       t._sending = true;
       try {
         const idToken = await window._auth.currentUser.getIdToken();
@@ -730,16 +804,21 @@ function aideApp() {
             from: 'client',
             ticketId: t.ticketId,
             subject: t.sujet,
-            replyText: text
+            replyText: text,
+            lien: lien || '',
+            attachment: t._attachment || null,
+            attachmentName: t._attachmentName || ''
           })
         });
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || 'Erreur envoi');
-        // Mettre à jour l'état local sans rechargement
         if (!t.replies) t.replies = [];
         t.replies.push({ text: text, sentAt: new Date().toISOString(), from: 'client' });
         t.clientRead = true;
         if (ta) ta.value = '';
+        if (linkEl) linkEl.value = '';
+        t._attachment = null;
+        t._attachmentName = '';
         showToast('✅ Réponse envoyée', 'success');
       } catch(e) {
         console.error('[mes-tickets] sendClientReply:', e);

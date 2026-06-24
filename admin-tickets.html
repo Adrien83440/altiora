@@ -627,11 +627,21 @@ onAuthStateChanged(auth, function(user) {
             '<div class="form-row">' +
               '<label for="reply-textarea">Nouvelle réponse au client</label>' +
               '<textarea id="reply-textarea" placeholder="Votre message à ' + esc(t.prenom || 'au client') + '..."></textarea>' +
+              '<div style="margin-top:8px;display:flex;flex-direction:column;gap:7px">' +
+                '<label style="cursor:pointer;display:flex;align-items:center;gap:6px;padding:7px 12px;border:1.5px dashed #cbd5e1;border-radius:8px;font-size:12px;color:#64748b;background:#fafbff">' +
+                  '<input type="file" id="admin-attach-input" accept="image/*,.pdf" style="display:none" onchange="onAdminAttach(this)"/>📎 Joindre une capture ou un PDF <span style="color:#94a3b8;font-weight:400">(optionnel, max 5 Mo)</span>' +
+                '</label>' +
+                '<span id="admin-attach-preview" style="display:none;align-items:center;gap:6px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;color:#2563eb">' +
+                  '<span id="admin-attach-name"></span>' +
+                  '<button onclick="clearAdminAttach()" style="background:none;border:none;cursor:pointer;color:#93c5fd;font-size:13px;padding:0" title="Retirer">✕</button>' +
+                '</span>' +
+                '<input type="url" id="admin-lien-input" placeholder="Lien vidéo Tella ou Loom (optionnel)" style="padding:7px 12px;border:1.5px solid #e2e8f0;border-radius:8px;font-family:inherit;font-size:12px;color:#0f172a;outline:none;width:100%"/>' +
+              '</div>' +
               '<div class="hint">Envoyée depuis <strong>support@alteore.com</strong> au client (' + esc(t.email) + '). Le ticket passera à "En cours" automatiquement.</div>' +
             '</div>' +
             '<div class="form-actions">' +
               '<button class="btn btn-primary" id="btn-send-reply">📨 Envoyer la réponse</button>' +
-              '<button class="btn btn-ghost" onclick="document.getElementById(\'reply-textarea\').value=\'\'">Effacer</button>' +
+              '<button class="btn btn-ghost" onclick="clearReplyForm()">Effacer</button>' +
             '</div>' +
           '</div>' +
         '</div>' +
@@ -693,11 +703,48 @@ onAuthStateChanged(auth, function(user) {
     }
   }
 
+  // ── Pièce jointe admin ──
+  var _adminAttachment = null;
+  var _adminAttachmentName = '';
+
+  function onAdminAttach(input) {
+    var file = input.files && input.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast('⚠️ Fichier trop lourd (max 5 Mo)', 'err'); input.value = ''; return; }
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      _adminAttachment     = e.target.result;
+      _adminAttachmentName = file.name;
+      var preview = document.getElementById('admin-attach-preview');
+      var nameEl  = document.getElementById('admin-attach-name');
+      if (preview) { preview.style.display = 'inline-flex'; }
+      if (nameEl)  { nameEl.textContent = file.name; }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function clearAdminAttach() {
+    _adminAttachment = null; _adminAttachmentName = '';
+    var input   = document.getElementById('admin-attach-input');
+    var preview = document.getElementById('admin-attach-preview');
+    if (input)   input.value = '';
+    if (preview) preview.style.display = 'none';
+  }
+
+  function clearReplyForm() {
+    var ta = document.getElementById('reply-textarea');
+    var li = document.getElementById('admin-lien-input');
+    if (ta) ta.value = '';
+    if (li) li.value = '';
+    clearAdminAttach();
+  }
+
   // ── Envoyer une réponse (via API) ──
   async function sendReply(id) {
     const t = _tickets.find(function(x) { return x.id === id; });
     if (!t) return;
-    const ta = document.getElementById('reply-textarea');
+    const ta   = document.getElementById('reply-textarea');
+    const lien = (document.getElementById('admin-lien-input') || {}).value || '';
     const text = (ta.value || '').trim();
     if (!text) { toast('⚠️ Réponse vide', 'err'); return; }
     if (text.length < 5) { toast('⚠️ Réponse trop courte', 'err'); return; }
@@ -708,21 +755,20 @@ onAuthStateChanged(auth, function(user) {
     btn.textContent = '⏳ Envoi…';
 
     try {
-      // Récupérer le token admin pour authentifier l'API
       const idToken = await window._auth.currentUser.getIdToken();
 
       const resp = await fetch('/api/send-ticket-reply', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + idToken
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + idToken },
         body: JSON.stringify({
-          ticketId: t.ticketId,
-          to: t.email,
-          clientName: (t.prenom + ' ' + t.nom).trim() || t.prenom || '',
-          subject: t.sujet,
-          replyText: text
+          ticketId:       t.ticketId,
+          to:             t.email,
+          clientName:     (t.prenom + ' ' + t.nom).trim() || t.prenom || '',
+          subject:        t.sujet,
+          replyText:      text,
+          lien:           lien.trim() || '',
+          attachment:     _adminAttachment || null,
+          attachmentName: _adminAttachmentName || ''
         })
       });
       const data = await resp.json();
@@ -744,7 +790,7 @@ onAuthStateChanged(auth, function(user) {
       if (t.status === 'open') t.status = 'in_progress';
       t.updatedAt = new Date().toISOString();
 
-      ta.value = '';
+      clearReplyForm();
       toast(data.firestoreUpdated ? '✅ Réponse envoyée' : '⚠️ Email envoyé (DB non synchro)', 'ok');
 
       updateStats();
