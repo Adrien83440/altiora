@@ -609,6 +609,11 @@
         const d=snap.data();
         if(d.viewMode)_viewMode=d.viewMode;
         if(d.fiscalStart!==undefined)_fiscalStart=parseInt(d.fiscalStart);
+        // Premier exercice long
+        if(d.exerciceStart && d.exerciceEnd){
+          window._exerciceStart=d.exerciceStart; // "YYYY-MM"
+          window._exerciceEnd=d.exerciceEnd;     // "YYYY-MM"
+        }
         if(d.plan){
           document.getElementById('uplan').textContent='Plan '+d.plan.charAt(0).toUpperCase()+d.plan.slice(1);
           window._userPlanDirect=d.plan;
@@ -727,11 +732,37 @@ function setViewMode(mode){
 }
 function setFiscalStart(val){_fiscalStart=parseInt(val);saveViewPrefs();if(typeof reloadView==='function')reloadView();}
 function getFiscalMonths(baseYear){
+  // Premier exercice long ?
+  if(window._exerciceStart && window._exerciceEnd){
+    var sp=window._exerciceStart.split('-'), ep=window._exerciceEnd.split('-');
+    if(sp.length===2 && ep.length===2){
+      var sy=parseInt(sp[0]),sm=parseInt(sp[1])-1;
+      var ey=parseInt(ep[0]),em=parseInt(ep[1])-1;
+      if(baseYear>=sy && baseYear<=ey){
+        var ms=[];var cy=sy,cm=sm;
+        while(cy<ey||(cy===ey&&cm<=em)){ms.push({year:cy,month:cm});cm++;if(cm>11){cm=0;cy++;}if(ms.length>36)break;}
+        return ms;
+      }
+    }
+  }
   var months=[];
   for(var i=0;i<12;i++){var absMonth=_fiscalStart+i;var y=baseYear+Math.floor(absMonth/12);var m=absMonth%12;months.push({year:y,month:m});}
   return months;
 }
 function getFiscalLabel(baseYear){
+  var MONTHS_SHORT_FR=['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+  // Premier exercice long ?
+  if(window._exerciceStart && window._exerciceEnd){
+    var sp=window._exerciceStart.split('-'), ep=window._exerciceEnd.split('-');
+    if(sp.length===2 && ep.length===2){
+      var sy=parseInt(sp[0]),sm=parseInt(sp[1])-1;
+      var ey=parseInt(ep[0]),em=parseInt(ep[1])-1;
+      if(baseYear>=sy && baseYear<=ey){
+        var nbM=(ey-sy)*12+(em-sm)+1;
+        return '1er exercice · '+MONTHS_SHORT_FR[sm]+' '+sy+' – '+MONTHS_SHORT_FR[em]+' '+ey+' ('+nbM+' mois)';
+      }
+    }
+  }
   if(_fiscalStart===0)return String(baseYear);
   var endMonth=(_fiscalStart+11)%12;var endYear=baseYear+(_fiscalStart+11>=12?1:0);
   return MONTHS_SHORT[_fiscalStart]+' '+baseYear+' – '+MONTHS_SHORT[endMonth]+' '+endYear;
@@ -1066,17 +1097,34 @@ async function loadData(_tries){
   // En mode exercice, détecter la bonne année de base.
   // Ex : exercice mai(4)→avril, en février 2026 → year = 2025
   let year = civilYear;
-  if (_viewMode === 'exercice' && _fiscalStart > 0) {
-    // Si le mois courant est AVANT le mois de début d'exercice → exercice a commencé l'année passée
-    if (currentM < _fiscalStart) year = civilYear - 1;
+  if (_viewMode === 'exercice') {
+    if (window._exerciceStart && window._exerciceEnd) {
+      // Premier exercice long : pendant toute sa durée, on affiche l'exercice (année de début)
+      var _esy=parseInt(window._exerciceStart.split('-')[0]);
+      var _eey=parseInt(window._exerciceEnd.split('-')[0]);
+      if (civilYear>=_esy && civilYear<=_eey) year = _esy;
+      else if (_fiscalStart>0 && currentM<_fiscalStart) year = civilYear-1;
+    } else if (_fiscalStart > 0 && currentM < _fiscalStart) {
+      // Si le mois courant est AVANT le mois de début d'exercice → exercice a commencé l'année passée
+      year = civilYear - 1;
+    }
   }
 
   const fiscalMonths=(_viewMode==='exercice')?getFiscalMonths(year):
     Array.from({length:12},function(_,m){return{year:year,month:m};});
+  // Durée de la période : 12 en civil / exercice standard, variable si premier exercice long
+  const _dureePeriode=fiscalMonths.length||12;
+  // Libellé court d'années pour les sous-titres (ex : "2025–2026" pour un exercice long
+  // cross-année, sinon l'année seule → comportement identique en mode normal).
+  let _periodeAnnees=String(year);
+  if(_viewMode==='exercice' && window._exerciceStart && window._exerciceEnd){
+    var _pys=window._exerciceStart.split('-')[0], _pye=window._exerciceEnd.split('-')[0];
+    _periodeAnnees=(_pys===_pye)?_pys:(_pys+'–'+_pye);
+  }
 
-  // Charger les 12 mois
+  // Charger les mois de la période
   const allMonths=[];
-  for(let i=0;i<12;i++){
+  for(let i=0;i<fiscalMonths.length;i++){
     const ym=fiscalMonths[i];
     const key=`${ym.year}-${String(ym.month+1).padStart(2,'0')}`;
     try{
@@ -1095,7 +1143,7 @@ async function loadData(_tries){
   // Données mois courant — trouver l'index du mois courant dans fiscalMonths
   let currentIdx = 0;
   const nowYear = now.getFullYear();
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < fiscalMonths.length; i++) {
     if (fiscalMonths[i].month === currentM && fiscalMonths[i].year === nowYear) {
       currentIdx = i; break;
     }
@@ -1133,8 +1181,8 @@ async function loadData(_tries){
   const _seuilEcoAn=_txMCV>0.01?_cfStruct/_txMCV:0;
   const _seuilFinAn=_txMCV>0.01?(_cfStruct+_annCredLeas)/_txMCV:0;
   const _nbMoisSeuil=monthsData.filter(d=>!d.isFuture&&d.caHT>0).length;
-  const _seuilEcoMens=_nbMoisSeuil>0?_seuilEcoAn/12:0;
-  const _seuilFinMens=_nbMoisSeuil>0?_seuilFinAn/12:0;
+  const _seuilEcoMens=_nbMoisSeuil>0?_seuilEcoAn/_dureePeriode:0;
+  const _seuilFinMens=_nbMoisSeuil>0?_seuilFinAn/_dureePeriode:0;
   const _margeSecu=annualCA-_seuilEcoAn;
   const _margeSecuPct=annualCA>0?_margeSecu/annualCA*100:0;
   const _margeSecuFin=annualCA-_seuilFinAn;
@@ -1157,7 +1205,8 @@ async function loadData(_tries){
   const moisPassesAvecCA=monthsData.filter((d,i)=>!d.isFuture&&d.caHT>0);
   const nbMoisReel=moisPassesAvecCA.length;
   const _ss=saisonGetStats(_saisonConfig);
-  const _projTarget=_ss.active?_ss.moisEquivCA:12;
+  // Projeter sur la durée de la période (12 en civil → identique, variable si exercice long)
+  const _projTarget=_ss.active?_ss.moisEquivCA:_dureePeriode;
   const projCA=nbMoisReel>0?(annualCA/nbMoisReel*_projTarget):0;
   const projResultat=nbMoisReel>0?(annualResultat/nbMoisReel*_projTarget):0;
 
@@ -1374,7 +1423,7 @@ async function loadData(_tries){
     <!-- CONTEXT BAR -->
     <div class="context-bar">
       <div class="context-month">
-        <span class="context-pill"><span class="dot"></span>Données en direct · ${MONTHS[currentM]} ${year}</span>
+        <span class="context-pill"><span class="dot"></span>Données en direct · ${MONTHS[currentM]} ${nowYear}</span>
         ${!hasCurrentData?'<span class="last-update" style="color:#f59e0b;margin-left:8px;">⚠️ Aucune donnée ce mois — <a href="pilotage.html" style="color:var(--blue-main);font-weight:600;">Saisir dans le Pilotage</a></span>':''}
       </div>
       <span class="last-update">${_viewMode==='exercice'?'Exercice '+getFiscalLabel(year):'Année '+year} · ${monthsData.filter(d=>d.caHT>0||d.chargesHT>0).length} mois renseignés${_ss.active?' · <span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:12px;font-weight:700;font-size:10px">🏖️ Saisonnier '+_ss.ouverts+'m ouverts'+((_ss.inter>0)?(' + '+_ss.inter+'m inter'):'')+((_ss.fermes>0)?(' + '+_ss.fermes+'m fermés'):'')+'</span>':''}</span>
@@ -1393,7 +1442,7 @@ async function loadData(_tries){
     </div>
 
     <!-- KPIs MOIS EN COURS -->
-    <div class="section-label">📅 Mois en cours — ${MONTHS[currentM]} ${year}</div>
+    <div class="section-label">📅 Mois en cours — ${MONTHS[currentM]} ${nowYear}</div>
     <div class="kpi-grid-5">
       <div class="kpi-card blue">
         <div class="kpi-icon">💰</div>
@@ -1442,7 +1491,7 @@ async function loadData(_tries){
     ${caJour.length>0?`
     <div class="chart-card" style="margin-bottom:20px">
       <div class="chart-header">
-        <div><div class="chart-title">📈 Ventes du mois — ${MONTHS[currentM]} ${year}</div><div class="chart-sub">CA HT par jour (${caJour.length} entrée${caJour.length>1?'s':''})</div></div>
+        <div><div class="chart-title">📈 Ventes du mois — ${MONTHS[currentM]} ${nowYear}</div><div class="chart-sub">CA HT par jour (${caJour.length} entrée${caJour.length>1?'s':''})</div></div>
         <span class="chart-tag tag-live">● Live</span>
       </div>
       <div class="daily-wrap">
@@ -1458,7 +1507,7 @@ async function loadData(_tries){
         <div class="kpi-icon">💼</div>
         <div class="kpi-label">CA Annuel HT</div>
         <div class="kpi-value ${!hasAnnualData?'empty':''}">${hasAnnualData?fmtE(annualCA):'— €'}</div>
-        <div class="kpi-sub"><span class="neutral">Cumul réel ${year}</span></div>
+        <div class="kpi-sub"><span class="neutral">Cumul réel ${_periodeAnnees}</span></div>
       </div>
       <div class="kpi-card orange">
         <div class="kpi-icon">📉</div>
@@ -1600,12 +1649,12 @@ async function loadData(_tries){
       </div>
       <!-- Projection fin d'année -->
       <div class="prev-card">
-        <div class="prev-header"><div class="prev-title">🔮 Projection ${year}</div></div>
+        <div class="prev-header"><div class="prev-title">🔮 Projection ${(window._exerciceStart&&_viewMode==='exercice')?"fin d'exercice":year}</div></div>
         <div style="display:flex;flex-direction:column;gap:12px">
           <div class="kpi-card blue" style="margin-bottom:0;padding:14px">
             <div class="kpi-label">CA projeté</div>
             <div class="kpi-value" style="font-size:18px">${projCA>0?fmtE(projCA):'—'}</div>
-            <div class="kpi-sub"><span class="neutral">à fin ${year}</span></div>
+            <div class="kpi-sub"><span class="neutral">à fin ${(window._exerciceStart&&_viewMode==='exercice')?"d'exercice":year}</span></div>
           </div>
           <div class="kpi-card ${projResultat>=0?'green':'red'}" style="margin-bottom:0;padding:14px">
             <div class="kpi-label">Résultat projeté</div>
@@ -1615,7 +1664,7 @@ async function loadData(_tries){
           <div class="kpi-card purple" style="margin-bottom:0;padding:14px">
             <div class="kpi-label">TVA annuelle collectée</div>
             <div class="kpi-value" style="font-size:18px">${annualTVA>0?fmtE(annualTVA):'—'}</div>
-            <div class="kpi-sub"><span class="neutral">Cumul ${year}</span></div>
+            <div class="kpi-sub"><span class="neutral">Cumul ${_periodeAnnees}</span></div>
           </div>
           ${nbMoisReel>0?`<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:4px">Projection basée sur ${nbMoisReel} mois de données réelles${_ss.active?' · activité saisonnière ('+_ss.moisEquivCA.toFixed(1)+' mois éq. CA)':''}</div>`:''}
         </div>
@@ -1628,14 +1677,14 @@ async function loadData(_tries){
     <div class="charts-grid">
       <div class="chart-card">
         <div class="chart-header">
-          <div><div class="chart-title">Évolution CA & Charges — ${year}</div><div class="chart-sub">Comparaison mensuelle HT</div></div>
+          <div><div class="chart-title">Évolution CA & Charges — ${_periodeAnnees}</div><div class="chart-sub">Comparaison mensuelle HT</div></div>
           <span class="chart-tag ${hasAnnualData?'tag-live':'tag-blue'}">${hasAnnualData?'● Live':'Placeholder'}</span>
         </div>
         <div class="chart-wrap h220"><canvas id="caChart"></canvas></div>
       </div>
       <div class="chart-card">
         <div class="chart-header">
-          <div><div class="chart-title">Répartition des charges</div><div class="chart-sub">${MONTHS[currentM]} ${year}</div></div>
+          <div><div class="chart-title">Répartition des charges</div><div class="chart-sub">${MONTHS[currentM]} ${nowYear}</div></div>
           <span class="chart-tag tag-orange">Mois</span>
         </div>
         <div class="chart-wrap h220"><canvas id="coutChart"></canvas></div>
@@ -1648,11 +1697,11 @@ async function loadData(_tries){
         <div class="chart-wrap h200"><canvas id="resultatChart"></canvas></div>
       </div>
       <div class="chart-card">
-        <div class="chart-header"><div><div class="chart-title">Cashflow mensuel</div><div class="chart-sub">Flux de trésorerie ${year}</div></div></div>
+        <div class="chart-header"><div><div class="chart-title">Cashflow mensuel</div><div class="chart-sub">Flux de trésorerie ${_periodeAnnees}</div></div></div>
         <div class="chart-wrap h200"><canvas id="cashflowChart"></canvas></div>
       </div>
       <div class="chart-card">
-        <div class="chart-header"><div><div class="chart-title">Cumul CA vs Dépenses</div><div class="chart-sub">Évolution cumulée ${year}</div></div></div>
+        <div class="chart-header"><div><div class="chart-title">Cumul CA vs Dépenses</div><div class="chart-sub">Évolution cumulée ${_periodeAnnees}</div></div></div>
         <div class="chart-wrap h200"><canvas id="cumulChart"></canvas></div>
       </div>
     </div>
@@ -1663,7 +1712,7 @@ async function loadData(_tries){
     <!-- TABLE INDICATEURS MOIS -->
     <div class="table-card">
       <div class="table-head">
-        <div class="table-title">📋 Indicateurs clés — ${MONTHS[currentM]} ${year}</div>
+        <div class="table-title">📋 Indicateurs clés — ${MONTHS[currentM]} ${nowYear}</div>
         <a href="pilotage.html" style="font-size:12px;color:var(--blue-main);font-weight:600;text-decoration:none;">✏️ Modifier dans le Pilotage →</a>
       </div>
       <table>
