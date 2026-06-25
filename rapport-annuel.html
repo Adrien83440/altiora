@@ -437,6 +437,28 @@ function tvaCust(r){return Math.round((parseFloat(r.ht21)||0)*0.021*100)/100+Mat
 window.initRapport=async function(){
   var params=new URLSearchParams(window.location.search);
   if(params.get('year'))_selectedYear=parseInt(params.get('year'));
+  // Pré-détection du premier exercice long AVANT buildControls
+  // → la barre de config affiche directement le bon état (plage libre + badge)
+  try {
+    var uSnap = await window._getDoc(window._doc(window._db,'users',window._uid));
+    if(uSnap.exists()){
+      var ud=uSnap.data();
+      if(ud.exerciceStart && ud.exerciceEnd){
+        var sp=ud.exerciceStart.split('-'), ep=ud.exerciceEnd.split('-');
+        if(sp.length===2 && ep.length===2){
+          var nbM=(parseInt(ep[0])-parseInt(sp[0]))*12+(parseInt(ep[1])-parseInt(sp[1]))+1;
+          // N'auto-activer que si exercice ≠ 12 mois civils
+          if(nbM!==12 || parseInt(sp[1])!==1){
+            _customRange=true;
+            _rangeStart={year:parseInt(sp[0]),month:parseInt(sp[1])-1};
+            _rangeEnd={year:parseInt(ep[0]),month:parseInt(ep[1])-1};
+            _selectedYear=_rangeStart.year;
+            window._autoExercice={start:ud.exerciceStart,end:ud.exerciceEnd,nbM:nbM};
+          }
+        }
+      }
+    }
+  } catch(e){}
   buildControls();
   await loadData(_selectedYear);
 };
@@ -503,6 +525,7 @@ function buildControls(){
       '<div class="config-divider"></div>'+
       '<div class="config-group"><div class="config-label">Commerce</div>'+
         '<input id="nomCommerce" type="text" class="config-select" style="width:160px" placeholder="Mon commerce" value="'+_nomCommerce+'" oninput="_nomCommerce=this.value"></div>'+
+      (window._autoExercice ? '<div style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:20px;font-size:11px;font-weight:700;color:#1d4ed8">📋 1er exercice · '+window._autoExercice.nbM+' mois <span style="font-weight:400;color:#6b7280;cursor:pointer;font-size:12px" onclick="exitAutoExercice()" title="Basculer en mode standard">✕</span></div>' : '')+
       '<div class="config-actions">'+
         '<button class="btn btn-outline" onclick="printReport()" title="Imprimer">🖨️</button>'+
         '<button class="btn btn-primary" onclick="exportPDF()">⬇️ PDF</button>'+
@@ -528,6 +551,15 @@ function setCustomRange(v){
   if(classic)classic.style.display=v?'none':'';
   renderRapport();
 }
+// Sortie du mode "premier exercice" auto → repasse en mode standard.
+// Reconstruit la barre de config pour retirer le badge, puis re-render.
+function exitAutoExercice(){
+  window._autoExercice=null;
+  _customRange=false;
+  buildControls();
+  renderRapport();
+}
+window.exitAutoExercice=exitAutoExercice;
 function applyRange(){
   var sm=document.getElementById('rangeStartM'),sy=document.getElementById('rangeStartY');
   var em=document.getElementById('rangeEndM'),ey=document.getElementById('rangeEndY');
@@ -828,8 +860,11 @@ function renderRapport(){
   // Seuils — formules identiques au Dashboard et Suivi CA
   var seuilAnnuel = txMCV>0 ? (T.fixe+(T.masseSal||0))/(txMCV/100) : 0;
   var seuilFinAnnuel = txMCV>0 ? (T.fixe+(T.masseSal||0)+chargesFin)/(txMCV/100) : 0;
-  var seuil = seuilAnnuel>0 ? seuilAnnuel/12 : 0; // seuil éco mensuel = annuel/12
-  var seuilFinMens = seuilFinAnnuel>0 ? seuilFinAnnuel/12 : 0;
+  // Durée de la période affichée : 12 en année civile / fiscal standard, variable si premier exercice long.
+  // monthly.length vaut 12 en mode civil → comportement strictement identique à avant.
+  var _dureePeriode = monthly.length || 12;
+  var seuil = seuilAnnuel>0 ? seuilAnnuel/_dureePeriode : 0; // seuil éco mensuel = total période / nb mois période
+  var seuilFinMens = seuilFinAnnuel>0 ? seuilFinAnnuel/_dureePeriode : 0;
   // Point mort — basé sur mois avec CA réel (même logique que Dashboard)
   var _caJourMoy = T.moisCA>0 ? T.caHT/(T.moisCA*30) : 0;
   var pointMortJours = _caJourMoy>0 ? seuilAnnuel/_caJourMoy : 0;
@@ -851,8 +886,9 @@ function renderRapport(){
   var evRes=TN1.caHT>0?(T.resultat-TN1.resultat):null;
   var evCharges=TN1.charges>0?(T.charges-TN1.charges)/TN1.charges*100:null;
 
-  // Projection fin d'année (mois manquants)
-  var moisRestants=12-T.moisData;
+  // Projection fin de période (mois manquants)
+  // _dureePeriode = monthly.length (12 en civil → identique à avant, variable si exercice long)
+  var moisRestants=_dureePeriode-T.moisData;
   var projCA=T.caHT+(moisRestants>0?caMens*moisRestants:0);
   var projCharges=T.charges+(moisRestants>0?(T.moisData>0?T.charges/T.moisData:0)*moisRestants:0);
   var projResultat=projCA-projCharges+T.rentrees;
@@ -919,7 +955,7 @@ function renderRapport(){
   html+=kpi(resMens>=0?'green':'red','📊','Résultat mensuel moy.',fmt(resMens),T.moisData+' mois de données',resMens>=0?'positive':'negative');
   html+=kpi('orange','🔒','Dont charges fixes',fmt(T.fixe),fmtPct(txFixe,true)+' du CA');
   html+=kpi('orange','📦','Dont charges var.',fmt(T.variable),fmtPct(txVar,true)+' du CA');
-  if(moisRestants>0)html+=kpi('purple','🔮','Projection fin '+year,fmt(projResultat),projCA>0?'CA proj. '+fmt(projCA):moisRestants+' mois restants',projResultat>=0?'positive':'negative');
+  if(moisRestants>0)html+=kpi('purple','🔮','Projection fin '+((_customRange&&_rangeEnd)?_rangeEnd.year:year),fmt(projResultat),projCA>0?'CA proj. '+fmt(projCA):moisRestants+' mois restants',projResultat>=0?'positive':'negative');
   else html+=kpi('teal','🏆','Mois bénéficiaires',moisBene+'/'+T.moisData,moisBene===T.moisData?'✅ Tous les mois':moisBene<T.moisData/2?'⚠️ Moins de la moitié':'✅ Majorité positive');
   html+=kpi('teal','💡','Seuil éco. /mois',seuil>0?fmt(seuil)+'/mois':'—','Annuel : '+(seuilAnnuel>0?fmt(seuilAnnuel):'—'));
   html+='</div>';
@@ -1604,14 +1640,14 @@ function renderRapport(){
 
   // ── TAB PROJECTION
   var tabProj='';
-  var moisRestantsProj=12-T.moisData;
+  var moisRestantsProj=(monthly.length||12)-T.moisData;
   var caMensMoy=T.moisData>0?T.caHT/T.moisData:0;
   var chargesMensMoy=T.moisData>0?T.charges/T.moisData:0;
 
   tabProj+='<div class="alert-box info" style="margin-bottom:20px;border-radius:10px">ℹ️ La projection est basée sur la moyenne des mois déjà saisis. Elle est indicative et ne tient pas compte de la saisonnalité.</div>';
 
   tabProj+='<div class="kpi-row"><div class="band-title">Projection fin d\'exercice</div>';
-  tabProj+=kpi('blue','💰','CA projeté '+year,fmt(projCA),moisRestantsProj>0?moisRestantsProj+' mois extrapolés':'12 mois complets');
+  tabProj+=kpi('blue','💰','CA projeté '+((_customRange&&_rangeEnd)?_rangeEnd.year:year),fmt(projCA),moisRestantsProj>0?moisRestantsProj+' mois extrapolés':(monthly.length||12)+' mois complets');
   tabProj+=kpi('orange','💸','Charges projetées',fmt(projCharges),moisRestantsProj+' mois extrapolés');
   tabProj+=kpi(projResultat>=0?'green':'red','📊','Résultat projeté',fmt(projResultat),projCA>0?'Marge : '+fmtPct(projResultat/projCA*100,true):'',projResultat>=0?'positive':'negative');
   tabProj+=kpi('purple','📈','vs N-1 (CA)',TN1.caHT>0?fmt(projCA-TN1.caHT):'—',TN1.caHT>0?fmtPct((projCA-TN1.caHT)/TN1.caHT*100)+'':'');
@@ -1627,17 +1663,18 @@ function renderRapport(){
 
   var cumCA=0,cumCh=0,cumRes=0;
   var allMonths=[];
-  for(var pm=0;pm<12;pm++){
-    var pKey=year+'-'+String(pm+1).padStart(2,'0');
-    var pd=_allData[pKey]||null;
-    var pr=computeMonth(pd,pKey);
-    allMonths.push({m:pm,lbl:MONTHS_SHORT[pm],hasReal:!!pd,caHT:pr.hasData?pr.caHT:caMensMoy,charges:pr.hasData?pr.charges:chargesMensMoy,resultat:pr.hasData?pr.resultat:caMensMoy-chargesMensMoy,isProj:!pd});
-  }
+  // Parcourt la période réelle (12 mois en civil, durée variable si exercice long)
+  monthly.forEach(function(mm){
+    var isProj=!mm.hasData;
+    allMonths.push({lbl:mm.lbl,yr:mm.yr,hasReal:!!mm.hasData,caHT:mm.hasData?mm.caHT:caMensMoy,charges:mm.hasData?mm.charges:chargesMensMoy,resultat:mm.hasData?mm.resultat:caMensMoy-chargesMensMoy,isProj:isProj});
+  });
   allMonths.forEach(function(m){
     cumCA+=m.caHT;cumCh+=m.charges;cumRes+=m.resultat;
     var mg=m.caHT>0?m.resultat/m.caHT*100:0;
+    // En mode plage libre, afficher l'année pour lever l'ambiguïté cross-année
+    var lblYr=(_customRange && m.yr!=String(year))?' <span style="font-size:10px;color:var(--muted)">'+m.yr+'</span>':'';
     tabProj+='<tr'+(m.isProj?' class="row-proj"':'')+'>'+
-      '<td><span style="font-size:11px;font-weight:700;padding:2px 8px;background:var(--blue-ghost);color:var(--blue-main);border-radius:20px">'+m.lbl+'</span></td>'+
+      '<td><span style="font-size:11px;font-weight:700;padding:2px 8px;background:var(--blue-ghost);color:var(--blue-main);border-radius:20px">'+m.lbl+'</span>'+lblYr+'</td>'+
       '<td>'+fmt(m.caHT)+'</td>'+
       '<td>'+fmt(m.charges)+'</td>'+
       '<td class="'+(m.resultat>=0?'positive':'negative')+'">'+fmt(m.resultat)+'</td>'+
@@ -1646,7 +1683,7 @@ function renderRapport(){
     '</tr>';
   });
   var mgProj=cumCA>0?cumRes/cumCA*100:0;
-  tabProj+='<tr class="row-total"><td>TOTAL '+year+'</td><td>'+fmt(cumCA)+'</td><td>'+fmt(cumCh)+'</td>'+
+  tabProj+='<tr class="row-total"><td>TOTAL '+(_customRange?'exercice':year)+'</td><td>'+fmt(cumCA)+'</td><td>'+fmt(cumCh)+'</td>'+
     '<td class="'+(cumRes>=0?'positive':'negative')+'">'+fmt(cumRes)+'</td>'+
     '<td class="'+(mgProj>=0?'positive':'negative')+'">'+fmtPct(mgProj,true)+'</td><td></td></tr>';
   tabProj+='</tbody></table></div></div>';
@@ -2361,7 +2398,7 @@ function exportPDF(){
       var piresRes2=moisData2.reduce(function(a,b){return b.resultat<a.resultat?b:a;},moisData2[0]);
       var moisDef  =moisData2.filter(function(m){return m.resultat<0;});
       var moisExc  =moisData2.filter(function(m){return m.resultat>0;});
-      var seuil    =seuilAn>0?seuilAn/12:0; // seuil éco mensuel = annuel/12 (cohérent avec HTML)
+      var seuil    =seuilAn>0?seuilAn/(monthly.length||12):0; // seuil éco mensuel = total période / nb mois (cohérent avec HTML)
 
       var facts=[
         {ic:'Meilleur mois CA',     v:fmtP(meillCA2.caHT),   s:meillCA2.lbl+' — Res: '+fmtP(meillCA2.resultat),    cl:cGR},

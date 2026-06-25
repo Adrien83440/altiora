@@ -391,6 +391,11 @@
         if(d.viewMode) _viewMode = d.viewMode;
         if(d.fiscalStart !== undefined) _fiscalStart = parseInt(d.fiscalStart);
         if(d.saisonnalite && d.saisonnalite.active) window._saisonConfig = d.saisonnalite;
+        // Premier exercice long
+        if(d.exerciceStart && d.exerciceEnd) {
+          window._exerciceStart = d.exerciceStart; // "YYYY-MM"
+          window._exerciceEnd   = d.exerciceEnd;   // "YYYY-MM"
+        }
       }
     } catch(e) {}
     window._firebaseReady = true;
@@ -458,11 +463,11 @@ async function loadYear(_tries){
   const CAN=['trial','pro','max','master','dev'];
   if(!CAN.includes(window._userPlan)){return;}
 
-  // Load all 12 months (civil ou exercice)
+  // Load all months (civil ou exercice — durée variable si premier exercice long)
   const fiscalMonths2 = (_viewMode === 'exercice') ? getFiscalMonths(year) :
     Array.from({length:12}, function(_,m){return {year:year, month:m};});
   const months=[];
-  for(let i=0;i<12;i++){
+  for(let i=0;i<fiscalMonths2.length;i++){
     const ym=fiscalMonths2[i];
     const key=`${ym.year}-${String(ym.month+1).padStart(2,'0')}`;
     try{
@@ -644,13 +649,16 @@ function _calcMS(d) {
   const totMasseSal=data.reduce((s,d)=>s+(d.masseSalHT||0),0);
   // ── SEUIL DE RENTABILITÉ ──
   const _nbMois=data.filter(d=>!d.isFuture&&d.caHT>0).length;
+  // Durée de la période affichée : 12 en année civile / exercice standard, variable si premier exercice long.
+  // data.length vaut 12 en mode civil → comportement strictement identique à avant.
+  const _dureePeriode=data.length||12;
   const _txCV=totCA>0?totVar/totCA:0;
   const _txMCV=1-_txCV;
   const _cfStruct=totFixes+totMasseSal;
   const _seuilEcoAn=_txMCV>0.01?_cfStruct/_txMCV:0;
   const _seuilFinAn=_txMCV>0.01?(_cfStruct+totCredits+totLeasing)/_txMCV:0;
-  const _seuilEcoMens=_nbMois>0?_seuilEcoAn/12:0;
-  const _seuilFinMens=_nbMois>0?_seuilFinAn/12:0;
+  const _seuilEcoMens=_nbMois>0?_seuilEcoAn/_dureePeriode:0;
+  const _seuilFinMens=_nbMois>0?_seuilFinAn/_dureePeriode:0;
   const _margeSecu=totCA-_seuilEcoAn;
   const _margeSecuPct=totCA>0?_margeSecu/totCA*100:0;
   const _margeSecuFin=totCA-_seuilFinAn;
@@ -785,7 +793,7 @@ function _calcMS(d) {
     <!-- TABLEAU CA ANNUEL -->
     <div class="table-section">
       <div class="table-section-head">
-        <div class="table-section-title">💰 CA Annuel <span class="badge badge-blue">${year}</span></div>
+        <div class="table-section-title">💰 CA Annuel <span class="badge badge-blue">${_viewMode==='exercice'?getFiscalLabel(year):year}</span></div>
       </div>
       <div style="overflow-x:auto">
       <table class="annual-table">
@@ -1162,9 +1170,31 @@ function setFiscalStart(val) {
   if (typeof reloadView === 'function') reloadView();
 }
 
-// Retourne les 12 mois de l'exercice sous forme [{year, month}]
-// ex: fiscalStart=9 (oct), baseYear=2025 → oct2025..sep2026
+// Retourne les mois de l'exercice sous forme [{year, month}]
+// Si un premier exercice long est configuré (window._exerciceStart/End),
+// on l'utilise tel quel pour l'année de début concernée.
+// Sinon : 12 mois standard depuis _fiscalStart.
 function getFiscalMonths(baseYear) {
+  // Premier exercice long ?
+  if(window._exerciceStart && window._exerciceEnd){
+    var sp=window._exerciceStart.split('-'), ep=window._exerciceEnd.split('-');
+    if(sp.length===2 && ep.length===2){
+      var sy=parseInt(sp[0]),sm=parseInt(sp[1])-1;
+      var ey=parseInt(ep[0]),em=parseInt(ep[1])-1;
+      // Cet exercice concerne-t-il l'année demandée ?
+      if(baseYear >= sy && baseYear <= ey){
+        var months=[];
+        var cy=sy,cm=sm;
+        while(cy<ey||(cy===ey&&cm<=em)){
+          months.push({year:cy,month:cm});
+          cm++;if(cm>11){cm=0;cy++;}
+          if(months.length>36)break; // sécurité
+        }
+        return months;
+      }
+    }
+  }
+  // Standard : 12 mois depuis fiscalStart
   var months = [];
   for (var i = 0; i < 12; i++) {
     var absMonth = _fiscalStart + i;
@@ -1176,8 +1206,20 @@ function getFiscalMonths(baseYear) {
 }
 
 function getFiscalLabel(baseYear) {
-  if (_fiscalStart === 0) return String(baseYear);
   var MONTHS_SHORT_FR = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+  // Premier exercice long ?
+  if(window._exerciceStart && window._exerciceEnd){
+    var sp=window._exerciceStart.split('-'), ep=window._exerciceEnd.split('-');
+    if(sp.length===2 && ep.length===2){
+      var sy=parseInt(sp[0]),sm=parseInt(sp[1])-1;
+      var ey=parseInt(ep[0]),em=parseInt(ep[1])-1;
+      if(baseYear >= sy && baseYear <= ey){
+        var nbM=(ey-sy)*12+(em-sm)+1;
+        return '1er exercice · '+MONTHS_SHORT_FR[sm]+' '+sy+' – '+MONTHS_SHORT_FR[em]+' '+ey+' ('+nbM+' mois)';
+      }
+    }
+  }
+  if (_fiscalStart === 0) return String(baseYear);
   var endMonth = (_fiscalStart + 11) % 12;
   var endYear = baseYear + (_fiscalStart + 11 >= 12 ? 1 : 0);
   return MONTHS_SHORT_FR[_fiscalStart] + ' ' + baseYear + ' – ' + MONTHS_SHORT_FR[endMonth] + ' ' + endYear;

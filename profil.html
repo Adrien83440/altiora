@@ -743,6 +743,58 @@ html, body { overflow-x: hidden; max-width: 100vw; }
           <div id="exercice-preview" style="margin-top:14px;padding:10px 14px;background:var(--bg);border-radius:8px;font-size:12px;color:var(--muted);display:none">
             📆 Votre exercice en cours : <span id="exercice-preview-txt" style="font-weight:700;color:var(--text)"></span>
           </div>
+
+          <!-- ── PREMIER EXERCICE LONG ── -->
+          <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:18px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+              <div>
+                <div style="font-size:13px;font-weight:700;color:var(--text)">📋 Premier exercice comptable</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">Si votre première année est incomplète (ex : démarrage en octobre 2025, clôture décembre 2026).</div>
+              </div>
+              <label class="rh-toggle" style="margin-left:12px;flex-shrink:0">
+                <input type="checkbox" id="toggle-premier-exercice" onchange="togglePremierExercice(this.checked)"/>
+                <span class="rh-toggle-slider"></span>
+              </label>
+            </div>
+            <div id="premier-exercice-panel" style="display:none;margin-top:14px">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div>
+                  <label class="field-lbl">Début du 1er exercice</label>
+                  <div style="display:flex;gap:6px;margin-top:6px">
+                    <select class="field-sel" id="p-exo-start-m" onchange="updatePremierExercicePreview()" style="flex:1">
+                      <option value="0">Janvier</option><option value="1">Février</option><option value="2">Mars</option>
+                      <option value="3">Avril</option><option value="4">Mai</option><option value="5">Juin</option>
+                      <option value="6">Juillet</option><option value="7">Août</option><option value="8">Septembre</option>
+                      <option value="9">Octobre</option><option value="10">Novembre</option><option value="11">Décembre</option>
+                    </select>
+                    <select class="field-sel" id="p-exo-start-y" onchange="updatePremierExercicePreview()" style="width:82px">
+                      <option value="2022">2022</option><option value="2023">2023</option><option value="2024">2024</option>
+                      <option value="2025">2025</option><option value="2026">2026</option><option value="2027">2027</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label class="field-lbl">Clôture du 1er exercice</label>
+                  <div style="display:flex;gap:6px;margin-top:6px">
+                    <select class="field-sel" id="p-exo-end-m" onchange="updatePremierExercicePreview()" style="flex:1">
+                      <option value="0">Janvier</option><option value="1">Février</option><option value="2">Mars</option>
+                      <option value="3">Avril</option><option value="4">Mai</option><option value="5">Juin</option>
+                      <option value="6">Juillet</option><option value="7">Août</option><option value="8">Septembre</option>
+                      <option value="9">Octobre</option><option value="10">Novembre</option><option value="11">Décembre</option>
+                    </select>
+                    <select class="field-sel" id="p-exo-end-y" onchange="updatePremierExercicePreview()" style="width:82px">
+                      <option value="2022">2022</option><option value="2023">2023</option><option value="2024">2024</option>
+                      <option value="2025">2025</option><option value="2026">2026</option><option value="2027">2027</option>
+                      <option value="2028">2028</option><option value="2029">2029</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div id="premier-exercice-preview" style="margin-top:12px;padding:10px 14px;border-radius:8px;font-size:12px;display:none"></div>
+            </div>
+          </div>
+          <!-- ── FIN PREMIER EXERCICE LONG ── -->
+
         </div>
       </div>
 
@@ -1845,6 +1897,99 @@ function updateExercicePreview() {
   }
 }
 
+// ── PREMIER EXERCICE LONG ────────────────────────────────
+var _MOIS_FR_COURT = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+var _premierExoLoading = false; // true pendant la restauration → évite un write Firestore inutile
+
+function togglePremierExercice(active) {
+  var panel = document.getElementById('premier-exercice-panel');
+  if (!panel) return;
+  panel.style.display = active ? 'block' : 'none';
+  if (!active) {
+    // Effacer les champs et supprimer de Firestore
+    document.getElementById('premier-exercice-preview').style.display = 'none';
+    if (window._uid && window._setDoc) {
+      window._setDoc(window._doc(window._db,'users',window._uid), {exerciceStart: null, exerciceEnd: null}, {merge:true})
+        .catch(function(e){ console.error('Erreur suppression premier exercice:', e); });
+    }
+    return;
+  }
+  updatePremierExercicePreview();
+}
+
+function updatePremierExercicePreview() {
+  var sm = document.getElementById('p-exo-start-m');
+  var sy = document.getElementById('p-exo-start-y');
+  var em = document.getElementById('p-exo-end-m');
+  var ey = document.getElementById('p-exo-end-y');
+  var prev = document.getElementById('premier-exercice-preview');
+  if (!sm || !sy || !em || !ey || !prev) return;
+
+  var startM = parseInt(sm.value), startY = parseInt(sy.value);
+  var endM = parseInt(em.value), endY = parseInt(ey.value);
+
+  // Calcul durée en mois
+  var nbMois = (endY - startY) * 12 + (endM - startM) + 1;
+
+  if (nbMois < 1 || nbMois > 36) {
+    prev.style.display = 'block';
+    prev.style.background = '#fff1f2';
+    prev.style.border = '1.5px solid #fca5a5';
+    prev.style.color = '#dc2626';
+    prev.innerHTML = '⚠️ Vérifiez les dates : la date de fin doit être après le début.';
+    return;
+  }
+
+  var label = _MOIS_FR_COURT[startM] + ' ' + startY + ' → ' + _MOIS_FR_COURT[endM] + ' ' + endY;
+  var color = nbMois === 12 ? '#92400e' : '#1d4ed8';
+  var bg = nbMois === 12 ? '#fefce8' : '#eff6ff';
+  var border = nbMois === 12 ? '1.5px solid #fde68a' : '1.5px solid #bfdbfe';
+  var note = nbMois === 12 ? ' — identique à une année standard' : ' — exercice de <b>' + nbMois + ' mois</b>';
+
+  prev.style.display = 'block';
+  prev.style.background = bg;
+  prev.style.border = border;
+  prev.style.color = color;
+  prev.innerHTML = '📋 ' + label + note;
+
+  // Sauvegarde automatique dans Firestore (sauf pendant la restauration au chargement)
+  if (!_premierExoLoading && window._uid && window._setDoc) {
+    var startKey = startY + '-' + String(startM + 1).padStart(2, '0');
+    var endKey = endY + '-' + String(endM + 1).padStart(2, '0');
+    window._setDoc(window._doc(window._db,'users',window._uid), {
+      exerciceStart: startKey,
+      exerciceEnd: endKey
+    }, {merge:true}).catch(function(e){ console.error('Erreur sauvegarde premier exercice:', e); });
+  }
+}
+
+function loadPremierExerciceUI(exerciceStart, exerciceEnd) {
+  if (!exerciceStart || !exerciceEnd) return;
+  // Parser "YYYY-MM"
+  var sp = exerciceStart.split('-'); var ep = exerciceEnd.split('-');
+  if (sp.length !== 2 || ep.length !== 2) return;
+  var startY = parseInt(sp[0]), startM = parseInt(sp[1]) - 1;
+  var endY = parseInt(ep[0]), endM = parseInt(ep[1]) - 1;
+
+  // Activer le toggle
+  var tog = document.getElementById('toggle-premier-exercice');
+  if (tog) tog.checked = true;
+  var panel = document.getElementById('premier-exercice-panel');
+  if (panel) panel.style.display = 'block';
+
+  // Remplir les selects
+  var sm = document.getElementById('p-exo-start-m'); if (sm) sm.value = String(startM);
+  var sy = document.getElementById('p-exo-start-y'); if (sy) sy.value = String(startY);
+  var em = document.getElementById('p-exo-end-m');   if (em) em.value = String(endM);
+  var ey = document.getElementById('p-exo-end-y');   if (ey) ey.value = String(endY);
+
+  // Restauration : afficher le preview sans réécrire en Firestore
+  _premierExoLoading = true;
+  updatePremierExercicePreview();
+  _premierExoLoading = false;
+}
+// ── FIN PREMIER EXERCICE LONG ────────────────────────────
+
 function loadProfile() {
   // Données chargées via tryFirebase() après auth
   // Fallback legacy localStorage (migration one-time pour les anciens utilisateurs)
@@ -2000,6 +2145,10 @@ async function tryFirebase() {
       } else {
         setProfMode('civil');
       }
+      // Premier exercice long
+      if (ud.exerciceStart && ud.exerciceEnd) {
+        loadPremierExerciceUI(ud.exerciceStart, ud.exerciceEnd);
+      }
       // Saisonnalité
       if (ud.saisonnalite) {
         _saisonConfig = Object.assign({active:false,mois:{},coeffCA:0.4,coeffChargesVar:0.5}, ud.saisonnalite);
@@ -2104,7 +2253,10 @@ onAuthStateChanged(auth, async function(user) {
       if (ud.viewMode && typeof setProfMode === 'function') {
         setProfMode(ud.viewMode);
       }
-
+      // Premier exercice long
+      if (ud.exerciceStart && ud.exerciceEnd && typeof loadPremierExerciceUI === 'function') {
+        loadPremierExerciceUI(ud.exerciceStart, ud.exerciceEnd);
+      }
       // ── Saisonnalité ──
       if (ud.saisonnalite) {
         _saisonConfig = Object.assign({active:false,mois:{},coeffCA:0.4,coeffChargesVar:0.5}, ud.saisonnalite);
