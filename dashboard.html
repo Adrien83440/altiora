@@ -1078,16 +1078,19 @@ async function loadData(_tries){
       if (vHint) vHint.textContent = 'Essaie : "Comment va mon CA ?" · "Mes charges du mois ?" · "Mon objectif est à combien ?" · "Tréso tendue ?"';
     }
   } catch(e) { /* fallback silencieux : icône micro par défaut */ }
-  // Load stock data
-  await loadStockData();
-  // Load RH employees for masse salariale
-  if (!window._rhEmployes) {
-    window._rhEmployes = [];
-    try {
-      var empSnap = await window._getDocs(window._collection(window._db,'rh',window._uid,'employes'));
-      empSnap.forEach(function(d2){ var e=d2.data(); e.id=d2.id; if(e.statut!=='archive' && e.statut!=='inactif') window._rhEmployes.push(e); });
-    } catch(e) {}
-  }
+  // Stock + RH en parallèle (indépendants : écrivent _stockData et _rhEmployes)
+  await Promise.all([
+    loadStockData(),
+    (async function(){
+      if (!window._rhEmployes) {
+        window._rhEmployes = [];
+        try {
+          var empSnap = await window._getDocs(window._collection(window._db,'rh',window._uid,'employes'));
+          empSnap.forEach(function(d2){ var e=d2.data(); e.id=d2.id; if(e.statut!=='archive' && e.statut!=='inactif') window._rhEmployes.push(e); });
+        } catch(e) {}
+      }
+    })()
+  ]);
 
   const now=new Date();
   const civilYear=now.getFullYear();
@@ -1122,16 +1125,13 @@ async function loadData(_tries){
     _periodeAnnees=(_pys===_pye)?_pys:(_pys+'–'+_pye);
   }
 
-  // Charger les mois de la période
-  const allMonths=[];
-  for(let i=0;i<fiscalMonths.length;i++){
-    const ym=fiscalMonths[i];
+  // Charger les mois de la période — en parallèle (Promise.all préserve l'ordre des résultats)
+  const allMonths=await Promise.all(fiscalMonths.map(function(ym){
     const key=`${ym.year}-${String(ym.month+1).padStart(2,'0')}`;
-    try{
-      const snap=await window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key));
-      allMonths.push(snap.exists()?snap.data():null);
-    }catch(e){allMonths.push(null);}
-  }
+    return window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key))
+      .then(function(snap){return snap.exists()?snap.data():null;})
+      .catch(function(){return null;});
+  }));
 
   const nowKey2=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
   const monthsData=allMonths.map((d,i)=>{
@@ -1216,12 +1216,13 @@ async function loadData(_tries){
   const hasCurrentData=current.caHT>0||current.chargesHT>0;
   const hasAnnualData=annualCA>0||annualCharges>0;
 
-  // Fetch async: météo, actu, fidélisation
-  const [weather,news,fidStats]=await Promise.all([
-    fetchWeather(),
-    fetchNews(),
-    (['max','master','trial','dev'].includes(plan))?loadFidStats():Promise.resolve(null)
-  ]);
+  // Météo / actu / fidélisation : chargées en arrière-plan pour NE PAS bloquer
+  // l'affichage du tableau de bord. Les widgets affichent un état d'attente puis
+  // s'enrichissent dès que les données arrivent (voir injection après le rendu).
+  let weather=null, news=null, fidStats=null;
+  const _weatherP=fetchWeather().catch(function(){return null;});
+  const _newsP=fetchNews().catch(function(){return null;});
+  const _fidP=(['max','master','trial','dev'].includes(plan))?loadFidStats().catch(function(){return null;}):Promise.resolve(null);
 
   // Quote du jour
   const quote=getDailyQuote();
@@ -1437,8 +1438,8 @@ async function loadData(_tries){
     </div>
     <!-- MÉTÉO + ACTU -->
     <div style="display:grid;grid-template-columns:1fr 1.8fr;gap:10px;margin-bottom:18px" id="widgets-row">
-      ${buildWeather()}
-      ${buildNews()}
+      <div id="weatherSlot" style="display:contents">${buildWeather()}</div>
+      <div id="newsSlot" style="display:contents">${buildNews()}</div>
     </div>
 
     <!-- KPIs MOIS EN COURS -->
@@ -1670,7 +1671,7 @@ async function loadData(_tries){
         </div>
       </div>
       <!-- Fidélisation -->
-      ${buildFidCard()}
+      <div id="fidSlot" style="display:contents">${buildFidCard()}</div>
     </div>
 
     <!-- GRAPHIQUES -->
@@ -1738,6 +1739,12 @@ async function loadData(_tries){
   }
 
   buildCharts(monthsData,currentIdx,year,hasAnnualData,fiscalMonths);
+
+  // Injection asynchrone des widgets externes (le tableau de bord est déjà affiché).
+  // Chaque widget se remplit dès que sa donnée arrive, sans bloquer le reste.
+  _weatherP.then(function(w){ weather=w; var el=document.getElementById('weatherSlot'); if(el) el.innerHTML=buildWeather(); });
+  _newsP.then(function(n){ news=n; var el=document.getElementById('newsSlot'); if(el) el.innerHTML=buildNews(); });
+  _fidP.then(function(f){ fidStats=f; var el=document.getElementById('fidSlot'); if(el) el.innerHTML=buildFidCard(); });
 
   // COPILOTE IA — collecter les métriques et lancer l'analyse
   var _copiloteMetrics = {
