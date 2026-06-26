@@ -54,6 +54,8 @@
         { icon: '📧', title: 'Test email Resend', desc: 'Envoyer un email de test pour vérifier la config', href: '/api/send-debug-email', note: 'API — ouvre en onglet' },
         { icon: '💰', title: 'Debug dettes', desc: 'Lire et nettoyer dettes/{uid}/data/all — doublons détectés automatiquement', href: '/admin-purge-dettes.html' },
         { icon: '📋', title: 'Debug crédits pilotage', desc: 'Lire et nettoyer les crédits dans pilotage/months — doublons intra-mois', href: '/admin-purge-credits.html' },
+        { icon: '🔎', title: 'Diag écart charges', desc: 'Réconciliation Alteore vs compte 6 — décompose les charges et trouve la différence via IA', href: '/admin-diag-charges.html' },
+        { icon: '♻️', title: 'Reset charges ciblé', desc: 'Vider charges fixes/variables sur une plage de mois (par UID) — sauvegarde + écriture atomique', href: '/admin-reset-charges.html' },
       ],
     },
     {
