@@ -444,6 +444,10 @@
         <div class="sum-label">Charges totales HT</div>
         <div class="sum-value" x-text="fmtSigned(t.chargesHT)" id="s-ch"></div>
         <div class="sum-sub" x-text="'Fixes ' + fmtE(t.fixesHT) + ' · Var. ' + fmtE(t.varHT) + (t.masseSalHT > 0 ? ' · Sal. ' + fmtE(t.masseSalHT) : '')"></div>
+        <div class="sum-sub" x-show="t.creditsPrincipal > 0" style="margin-top:3px" title="Le remboursement du capital d'un emprunt n'est pas une charge comptable : il ne figure pas dans le compte 6 et vient diminuer la dette au bilan. Ce montant exclut le capital remboursé — c'est lui qui se compare au résultat de votre comptable.">
+          <span style="opacity:.75">Charges comptables (hors capital) :</span>
+          <span style="font-weight:700;color:#10b981" x-text="fmtE(t.chargesHT - t.creditsPrincipal)"></span>
+        </div>
       </div>
       <div class="sum-card" :class="t.resultatEconomique >= 0 ? 'green' : 'red'">
         <div class="sum-label">Résultat économique <span x-html="window.CalcHelpers ? window.CalcHelpers.tooltipIcon('resultat_economique') : ''"></span></div>
@@ -1958,6 +1962,45 @@ async function saveAll() {
 }
 
 /* ─── SYNC CRÉDITS → DETTES ─── */
+
+// ── Anti-doublons : matcher robuste crédit pilotage ↔ dette existante ──
+// Normalisation : trim + espaces multiples réduits à un seul + minuscules.
+// (Indispensable : les libellés comme "PRET 693 -  20000" ont des espaces
+//  irréguliers qui faisaient échouer l'égalité stricte → création de doublons.)
+function _normDetteKey(s) {
+  return (s == null ? '' : s).toString().trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+// Retourne l'index de la dette correspondant au crédit, -1 sinon.
+// Cascade de matching (comme CalcHelpers.findDetteForCredit, mais pour l'écriture) :
+//   1) _pilotageRef normalisé == fournisseur normalisé  (lien fort)
+//   2) nom de la dette == fournisseur du crédit          (rattrape les dettes
+//   3) nom de la dette == nom du crédit                   créées à la main sans _pilotageRef)
+// On ignore les leasings et les dettes d'un autre type (jamais un emprunt).
+// On matche quel que soit `active` : le but est de NE JAMAIS recréer le doublon
+// d'un prêt déjà présent dans la liste.
+function _findDetteIdxForCredit(dettes, credit) {
+  if (!dettes || !dettes.length || !credit) return -1;
+  var fourn = _normDetteKey(credit.fournisseur);
+  var cnom  = _normDetteKey(credit.nom);
+  if (!fourn && !cnom) return -1;
+  // Pass 1 : lien fort _pilotageRef
+  for (var i = 0; i < dettes.length; i++) {
+    var d = dettes[i];
+    if (!d || (d.type && d.type !== 'emprunt')) continue;
+    var ref = _normDetteKey(d._pilotageRef);
+    if (ref && ref === fourn) return i;
+  }
+  // Pass 2 : match par nom (fournisseur, puis nom du crédit)
+  for (var j = 0; j < dettes.length; j++) {
+    var d2 = dettes[j];
+    if (!d2 || (d2.type && d2.type !== 'emprunt')) continue;
+    var dn = _normDetteKey(d2.nom);
+    if (dn && (dn === fourn || (cnom && dn === cnom))) return j;
+  }
+  return -1;
+}
+
 async function syncCreditsTosDettes() {
   if (!window._uid || !window._getDoc || !window._setDoc || !window._db) return;
   try {
@@ -1982,9 +2025,7 @@ async function syncCreditsTosDettes() {
         var _nf1 = parseYYYYMM(c.dateFin);
         if (_nf1) { var d1 = new Date(debut + '-01'), d2 = new Date(_nf1 + '-01'); duree = Math.round((d2 - d1) / (1000 * 60 * 60 * 24 * 30.44)); if (duree < 1) duree = 0; }
       }
-      var existingIdx = dettes.findIndex(function(d) {
-        return d._pilotageRef === c.fournisseur.trim();
-      });
+      var existingIdx = _findDetteIdxForCredit(dettes, c);
       // ── Capital initial : nouveau format si présent, sinon legacy montant×durée ──
       // Nouveau format (modale d'ajout post-refonte) : c.capitalInitial est stocké explicitement
       // Legacy : c.montant représente la part capital mensuelle, et capital = montant × durée
@@ -2078,7 +2119,7 @@ async function forceSyncDettes() {
       }
       // montant dans pilotage = mensualité, capital = mensualité × durée
       var capital = duree > 0 ? montant * duree : montant;
-      var existingIdx = dettes.findIndex(function(d) { return d._pilotageRef === c.fournisseur.trim(); });
+      var existingIdx = _findDetteIdxForCredit(dettes, c);
       var detteData = {
         type: 'emprunt', nom: nom, montant: capital, mensualite: montant, debut: debut,
         taux: taux, duree: duree, amort: c.amort || 'constant',
