@@ -23,9 +23,10 @@
   .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
   .field{flex:1;min-width:150px}
   label.lbl{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:5px}
-  input[type=text],input[type=month]{width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:9px;font-size:14px;font-family:inherit;background:#fff;color:var(--text)}
+  input[type=text],input[type=month],select{width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:9px;font-size:14px;font-family:inherit;background:#fff;color:var(--text)}
   input[type=text]{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
-  input:focus{outline:none;border-color:var(--blue)}
+  select{cursor:pointer;-webkit-appearance:menulist;appearance:menulist}
+  input:focus,select:focus{outline:none;border-color:var(--blue)}
   .modules{margin-top:16px}
   .mod-item{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1.5px solid var(--border);border-radius:10px;margin-bottom:8px;cursor:pointer;transition:.12s}
   .mod-item:hover{border-color:var(--blue)}
@@ -89,13 +90,19 @@
       <input type="text" id="clientUid" placeholder="ex : iEUt2VWixIWoN5oKw3Cgayno82k2" autocomplete="off" spellcheck="false">
     </div>
     <div class="row" style="margin-top:12px">
-      <div class="field" style="max-width:200px">
+      <div class="field" style="max-width:320px">
         <label class="lbl">Du (mois)</label>
-        <input type="month" id="moisDebut">
+        <div style="display:flex;gap:8px">
+          <select id="moisDebutM"></select>
+          <select id="moisDebutY"></select>
+        </div>
       </div>
-      <div class="field" style="max-width:200px">
+      <div class="field" style="max-width:320px">
         <label class="lbl">Au (mois inclus)</label>
-        <input type="month" id="moisFin">
+        <div style="display:flex;gap:8px">
+          <select id="moisFinM"></select>
+          <select id="moisFinY"></select>
+        </div>
       </div>
     </div>
     <div class="modules">
@@ -237,11 +244,13 @@ function moduleStats(arr, mField){
 async function loadRange(){
   if(!window._adminReady){ showMsg('loadMsg','Authentification en cours, réessayez dans un instant.','msg-info'); return; }
   var uid = (document.getElementById('clientUid').value || '').trim();
-  var debut = document.getElementById('moisDebut').value;
-  var fin = document.getElementById('moisFin').value;
+  var dM = document.getElementById('moisDebutM').value, dY = document.getElementById('moisDebutY').value;
+  var fM = document.getElementById('moisFinM').value, fY = document.getElementById('moisFinY').value;
+  var debut = (dY && dM) ? dY+'-'+dM : '';
+  var fin = (fY && fM) ? fY+'-'+fM : '';
   var keys = checkedKeys();
   if(!uid){ showMsg('loadMsg','Renseignez l\'UID du client.','msg-err'); return; }
-  if(!debut || !fin){ showMsg('loadMsg','Renseignez la plage (Du / Au).','msg-err'); return; }
+  if(!debut || !fin){ showMsg('loadMsg','Sélectionnez la plage complète (mois ET année, pour Du et Au).','msg-err'); return; }
   if(fin < debut){ showMsg('loadMsg','La date de fin est antérieure à la date de début.','msg-err'); return; }
   if(!keys.length){ showMsg('loadMsg','Cochez au moins un module à réinitialiser.','msg-err'); return; }
 
@@ -415,6 +424,18 @@ async function executeReset(){
     btn.disabled = false; refreshExecBtn();
   }
 }
+
+// Peuple les menus Mois + Année (compatible Safari, qui ne gère pas input[type=month])
+function populateDates(){
+  var yNow = new Date().getFullYear();
+  var monthOpts = '<option value="">— Mois —</option>';
+  for(var mo=1; mo<=12; mo++){ monthOpts += '<option value="'+String(mo).padStart(2,'0')+'">'+NOMS[mo-1]+'</option>'; }
+  var yearOpts = '<option value="">— Année —</option>';
+  for(var y=yNow-3; y<=yNow+1; y++){ yearOpts += '<option value="'+y+'">'+y+'</option>'; }
+  ['moisDebutM','moisFinM'].forEach(function(id){ document.getElementById(id).innerHTML = monthOpts; });
+  ['moisDebutY','moisFinY'].forEach(function(id){ document.getElementById(id).innerHTML = yearOpts; });
+}
+populateDates();
 
 window.loadRange = loadRange;
 window.downloadBackup = downloadBackup;
