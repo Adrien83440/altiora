@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analyse charges (diag) — ALTEORE Admin</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1d212c; --line:#2a2f3c;
+    --txt:#e7e9ee; --mut:#8b93a5; --accent:#6366f1; --orange:#f59e0b;
+    --green:#10b981; --red:#ef4444; --blue:#3b82f6; --purple:#a855f7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--bg);color:var(--txt);font-size:13px;line-height:1.45}
+  header{padding:16px 22px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;font-weight:700}
+  header .sub{font-size:11px;color:var(--mut)}
+  .wrap{padding:18px 22px;max-width:1400px;margin:0 auto}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  input[type=text]{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    padding:8px 11px;border-radius:8px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
+  input.uid{width:330px}
+  input.c6{width:108px;text-align:right;font-family:ui-monospace,Menlo,monospace;padding:5px 7px}
+  button{background:var(--accent);color:#fff;border:0;padding:9px 16px;border-radius:8px;
+    font-size:13px;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
+  .err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#fca5a5;
+    padding:11px 14px;border-radius:8px;margin:10px 0}
+  .info{background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.3);color:#c7d2fe;
+    padding:11px 14px;border-radius:8px;margin:10px 0;font-size:12px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin:16px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .card .lab{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--mut);margin-bottom:5px}
+  .card .val{font-size:19px;font-weight:700;font-family:ui-monospace,Menlo,monospace}
+  .card.warn{border-color:rgba(245,158,11,.5)} .card.warn .val{color:var(--orange)}
+  .card.bad{border-color:rgba(239,68,68,.5)} .card.bad .val{color:var(--red)}
+  .card.ok{border-color:rgba(16,185,129,.4)} .card.ok .val{color:var(--green)}
+  table{width:100%;border-collapse:collapse;font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:8px}
+  th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+  th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;text-align:right;
+    font-size:11px;text-transform:uppercase;letter-spacing:.3px;z-index:2}
+  th:first-child,td:first-child{text-align:left}
+  td.mois{font-weight:700;color:var(--txt)}
+  tr:hover td{background:rgba(255,255,255,.02)}
+  .pos{color:var(--green)} .neg{color:var(--red)} .mut{color:var(--mut)}
+  .badge{display:inline-block;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;font-family:sans-serif}
+  .b-dup{background:rgba(239,68,68,.18);color:#fca5a5}
+  .b-cap{background:rgba(245,158,11,.16);color:#fcd34d}
+  .b-ok{background:rgba(16,185,129,.16);color:#6ee7b7}
+  .sec-title{font-size:13px;font-weight:700;margin:26px 0 6px;color:var(--txt);display:flex;align-items:center;gap:8px}
+  .sec-title .hint{font-size:11px;font-weight:400;color:var(--mut)}
+  details{margin-top:6px}
+  details>summary{cursor:pointer;color:var(--accent);font-size:12px;padding:4px 0;font-family:sans-serif}
+  .ldetail{background:var(--panel);border:1px solid var(--line);border-radius:8px;margin:6px 0 14px;overflow:hidden}
+  .ldetail h4{margin:0;padding:8px 12px;background:var(--panel2);font-size:12px;border-bottom:1px solid var(--line)}
+  .loader{padding:30px;text-align:center;color:var(--mut)}
+  .spin{width:22px;height:22px;border:3px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;animation:s .7s linear infinite;display:inline-block;vertical-align:middle;margin-right:8px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .tbl-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:11px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🩺 Analyse charges — diagnostic</h1>
+  <span class="sub">Lecture seule · réutilise calc-helpers.js (chiffres identiques à Pilotage)</span>
+</header>
+
+<div class="wrap">
+  <div class="row">
+    <input type="text" id="uid-input" class="uid" placeholder="UID client (ex: dXBh...)" autocomplete="off">
+    <button id="scan-btn" onclick="startScan()">Analyser</button>
+    <button class="ghost" onclick="toggleC6()">Saisir compte 6</button>
+    <span class="sub" id="status"></span>
+  </div>
+
+  <div id="err-zone"></div>
+  <div id="out"></div>
+</div>
+
+<!-- ── Firebase (module ES6) ── -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, getDocs, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+  authDomain:"altiora-70599.firebaseapp.com", projectId:"altiora-70599",
+  storageBucket:"altiora-70599.firebasestorage.app",
+  messagingSenderId:"120905555746", appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+});
+const auth = getAuth(app);
+const db   = getFirestore(app);
+
+window._db = db;
+window._collection = collection; window._getDocs = getDocs;
+window._doc = doc; window._getDoc = getDoc;
+
+const ADMIN_EMAILS = ['contact@adrienemily.com','api@altiora.app'];
+
+onAuthStateChanged(auth, function(user) {
+  if (!user) { window.location.href = 'index.html'; return; }
+  if (!ADMIN_EMAILS.includes(user.email)) {
+    document.getElementById('err-zone').innerHTML =
+      '<div class="err">Accès réservé à l\'équipe ALTEORE.</div>';
+    document.getElementById('scan-btn').disabled = true;
+    return;
+  }
+  window._adminUser = user;
+  window._adminReady = true;
+  // Pré-remplissage UID via ?uid= et auto-scan
+  const urlUid = new URLSearchParams(location.search).get('uid') || '';
+  if (urlUid) {
+    document.getElementById('uid-input').value = urlUid;
+    if (window.CalcHelpers) startScan();
+    else window._pendingScan = true;
+  }
+});
+</script>
+
+<!-- ── Bibliothèque de calcul canonique (la même que Pilotage) ── -->
+<script src="calc-helpers.js"></script>
+
+<!-- ── Logique applicative (script classique) ── -->
+<script>
+// Écarts SIGNALÉS par le client (mail ticket TK-1782469052347) = Alteore − compte 6.
+// Sert de référence pour valider l'hypothèse "écart = capital + doublons".
+var ECART_CLIENT = {
+  '2025-11': 30.00, '2025-12': 1217.70, '2026-01': 711.67,
+  '2026-02': 1252.24, '2026-03': 2878.40, '2026-04': 2878.39, '2026-05': 3025.24
+};
+
+var _c6Visible = false;       // colonne compte 6 saisie affichée ?
+var _c6Values  = {};          // { 'YYYY-MM': nombre } saisi à la main
+var _lastRows  = [];          // dernière analyse (pour re-render à la saisie c6)
+
+// ── Helpers numériques (délégués à CalcHelpers, fallback défensif) ──
+function pf(v){
+  if (window.CalcHelpers && CalcHelpers.pf) return CalcHelpers.pf(v);
+  return parseFloat(String(v==null?'':v).replace(',','.')) || 0;
+}
+function pYM(s){
+  if (window.CalcHelpers && CalcHelpers.parseYYYYMM) return CalcHelpers.parseYYYYMM(s);
+  return null;
+}
+function fmt(n){
+  if (n == null || isNaN(n)) return '—';
+  return n.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function esc(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function showErr(html){ document.getElementById('err-zone').innerHTML = '<div class="err">'+html+'</div>'; }
+function setStatus(s){ document.getElementById('status').textContent = s; }
+
+// ── Migration paires legacy → ligne unique (copie sans effet de bord) ──
+function migrateCredits(rows){
+  if (!rows || !rows.length) return rows ? rows.slice() : [];
+  var hasPairs = rows.some(function(r){ return r && r.ligneType === 'interet'; });
+  if (!hasPairs) return rows.slice();
+  var result = [], used = {};
+  rows.forEach(function(r){
+    if (!r || r.ligneType === 'interet') return;
+    var merged = Object.assign({}, r);
+    merged.ligneType = 'principal';
+    var idx = rows.findIndex(function(x,xi){
+      return x && x.ligneType === 'interet' && x.fournisseur === r.fournisseur && !used[xi];
+    });
+    if (idx >= 0){
+      used[idx] = true;
+      var ir = rows[idx];
+      if (!merged.tauxInteret && ir.tauxInteret) merged.tauxInteret = ir.tauxInteret;
+      if (ir.tvaRate) merged.tvaRate = ir.tvaRate;
+      merged.tvaAuto = true;
+    }
+    result.push(merged);
+  });
+  return result;
+}
+
+// ── Capital + intérêts pour un jeu de lignes sur un mois (RÉPLIQUE EXACTE de calcTotals) ──
+function calcCredits(lines, key, cachedDettes){
+  var H = window.CalcHelpers;
+  var principal = 0, interet = 0;
+  var hasMirror = !!(H && H.findDetteForCredit && H.getMonthEcheance && cachedDettes && cachedDettes.length);
+  if (hasMirror){
+    var unmirrored = [];
+    lines.forEach(function(r){
+      if (r && r.ligneType === 'interet') return;
+      if (r && r.dateDebut && r.dateFin && key){
+        var d = pYM(r.dateDebut), f = pYM(r.dateFin);
+        if (d && f && (key < d || key > f)) return;
+      }
+      var dette = H.findDetteForCredit(r, cachedDettes);
+      var ech = (dette && key) ? H.getMonthEcheance(dette, key) : null;
+      if (ech){ principal += ech.capital || 0; interet += ech.interet || 0; }
+      else unmirrored.push(r);
+    });
+    if (unmirrored.length && H.parseCredits){
+      var ci = H.parseCredits(unmirrored, key);
+      principal += ci.principal; interet += ci.interet;
+    }
+  } else if (H && H.parseCredits){
+    var ci2 = H.parseCredits(lines, key);
+    principal = ci2.principal; interet = ci2.interet;
+  }
+  return { principal: principal, interet: interet };
+}
+
+// Capital + intérêts d'UNE ligne isolée (pour l'affichage détaillé)
+function calcOneCredit(line, key, cachedDettes){
+  return calcCredits([line], key, cachedDettes);
+}
+
+// ── Analyse d'un mois complet ──
+function analyzeMonth(md, key, cachedDettes){
+  // Charges fixes (somme HT, pas de filtre date dans calcTotals)
+  var fixesHT = 0;
+  (md.chargesFixe || []).forEach(function(r){ fixesHT += pf(r.montantHT); });
+
+  // Charges variables (exceptionnelles EXCLUES de chargesHT, comme calcTotals)
+  var varHT = 0, varExcep = 0;
+  (md.chargesVar || []).forEach(function(r){
+    var h = pf(r.montantHT);
+    if (r.exceptionnel) varExcep += h; else varHT += h;
+  });
+
+  // Leasing (filtre plage de dates)
+  var leasingHT = 0;
+  (md.leasing || []).forEach(function(r){
+    if (r.dateDebut && r.dateFin && key){
+      var d = pYM(r.dateDebut), f = pYM(r.dateFin);
+      if (d && f && (key < d || key > f)) return;
+    }
+    leasingHT += pf(r.montantHT);
+  });
+
+  // Masse salariale (délégation au helper — même calcul que Pilotage)
+  var masseSalHT = 0, msObj = null, msMode = (md.masseSalariale && md.masseSalariale.mode) || 'manuel';
+  if (window.CalcHelpers && CalcHelpers.calcMasseSalariale){
+    msObj = CalcHelpers.calcMasseSalariale({
+      masseSalariale: md.masseSalariale, _monthKey: key, ca: md.ca, facturesPro: md.facturesPro
+    });
+    masseSalHT = msObj.total || 0;
+  }
+
+  // Crédits — lignes migrées, filtrées plage + non vides
+  var migrated = migrateCredits(md.credits || []);
+  var inRange = migrated.filter(function(r){
+    if (!r || r.ligneType === 'interet') return false;
+    if (!(r.fournisseur && r.fournisseur.trim())) return false;
+    if (!pf(r.montant) && !pf(r.capitalInitial) && !pf(r.mensualite)) return false;
+    if (r.dateDebut && r.dateFin && key){
+      var d = pYM(r.dateDebut), f = pYM(r.dateFin);
+      if (d && f && (key < d || key > f)) return false;
+    }
+    return true;
+  });
+
+  // Détection doublons : regroupement par fournisseur normalisé (= clé du double-comptage réel)
+  var groups = {};
+  inRange.forEach(function(r){
+    var k = (r.fournisseur || '').trim().toLowerCase();
+    (groups[k] = groups[k] || []).push(r);
+  });
+  var dupKeys = Object.keys(groups).filter(function(k){ return groups[k].length > 1; });
+
+  // Jeu dédupliqué : on garde la 1ʳᵉ ligne de chaque groupe
+  var deduped = [], seen = {};
+  inRange.forEach(function(r){
+    var k = (r.fournisseur || '').trim().toLowerCase();
+    if (seen[k]) return;
+    seen[k] = true; deduped.push(r);
+  });
+
+  var cAll = calcCredits(inRange, key, cachedDettes);   // AVEC doublons = ce que voit le client
+  var cDed = calcCredits(deduped, key, cachedDettes);   // SANS doublons = ce qui devrait être
+
+  var chargesHT       = fixesHT + varHT + leasingHT + masseSalHT + cAll.principal + cAll.interet; // carte "Charges totales HT"
+  var chargesHT_dedup = fixesHT + varHT + leasingHT + masseSalHT + cDed.principal + cDed.interet;
+  var chargesHorsCap  = chargesHT_dedup - cDed.principal;   // figure comparable au compte 6
+  var doublonExtra    = chargesHT - chargesHT_dedup;        // surcoût purement dû aux doublons
+  var ecartPredit     = chargesHT - chargesHorsCap;         // = capitalDedup + doublonExtra
+
+  return {
+    key: key, fixesHT: fixesHT, varHT: varHT, varExcep: varExcep, leasingHT: leasingHT,
+    masseSalHT: masseSalHT, msMode: msMode,
+    creditLines: inRange, groups: groups, dupKeys: dupKeys,
+    capital: cAll.principal, interet: cAll.interet,
+    capitalDedup: cDed.principal, interetDedup: cDed.interet,
+    chargesHT: chargesHT, chargesHT_dedup: chargesHT_dedup, chargesHorsCap: chargesHorsCap,
+    doublonExtra: doublonExtra, ecartPredit: ecartPredit
+  };
+}
+
+// ── SCAN PRINCIPAL ──
+async function startScan(){
+  document.getElementById('err-zone').innerHTML = '';
+  var uid = document.getElementById('uid-input').value.trim();
+  if (!uid){ showErr('UID manquant.'); return; }
+  if (!window._adminReady){ showErr('Authentification admin pas encore prête, réessaie dans 1s.'); return; }
+  if (!window.CalcHelpers){ showErr('calc-helpers.js non chargé — les chiffres ne seraient pas fiables. Recharge la page.'); return; }
+
+  setStatus('Chargement…');
+  document.getElementById('out').innerHTML = '<div class="loader"><span class="spin"></span>Lecture Firestore…</div>';
+
+  try {
+    // 1) Dettes (collection canonique → mirror amortissement)
+    var cachedDettes = [];
+    try {
+      var dsnap = await window._getDoc(window._doc(window._db, 'dettes', uid, 'data', 'all'));
+      if (dsnap.exists() && dsnap.data().list) cachedDettes = dsnap.data().list;
+    } catch(e){
+      console.error('[diag] lecture dettes échouée:', e);
+      showErr('Lecture <code>dettes/'+esc(uid)+'/data/all</code> échouée : '+esc(e.message)+'. (Le calcul continue en mode fallback parseCredits.)');
+    }
+
+    // 2) Tous les mois pilotage
+    var msnap = await window._getDocs(window._collection(window._db, 'pilotage', uid, 'months'));
+    var months = [];
+    msnap.forEach(function(d){ months.push({ key: d.id, data: d.data() }); });
+    months.sort(function(a,b){ return a.key < b.key ? -1 : (a.key > b.key ? 1 : 0); });
+
+    if (!months.length){
+      setStatus('');
+      document.getElementById('out').innerHTML = '<div class="info">Aucun mois trouvé dans <code>pilotage/'+esc(uid)+'/months</code>.</div>';
+      return;
+    }
+
+    // 3) Analyse
+    window._cachedDettesDiag = cachedDettes;   // gardé pour les re-render (saisie compte 6)
+    var rows = months.map(function(m){ return analyzeMonth(m.data, m.key, cachedDettes); });
+    _lastRows = rows;
+
+    setStatus(months.length + ' mois · ' + cachedDettes.length + ' dette(s) en collection');
+    render(rows, uid, cachedDettes);
+  } catch(e){
+    console.error('[diag] scan échoué:', e);
+    setStatus('');
+    showErr('Échec du scan : '+esc(e.message)+'. Vérifie l\'UID et que tu es bien connecté en admin.');
+    document.getElementById('out').innerHTML = '';
+  }
+}
+
+// ── RENDU ──
+function render(rows, uid, cachedDettes){
+  // Totaux globaux
+  var totChargesHT = 0, totCapital = 0, totDoublon = 0, totEcartPredit = 0, monthsDup = 0, totLignes = 0;
+  var dupLoansAll = {}; // fournisseur → nb mois touchés + extra €
+  rows.forEach(function(r){
+    totChargesHT  += r.chargesHT;
+    totCapital    += r.capitalDedup;
+    totDoublon    += r.doublonExtra;
+    totEcartPredit+= r.ecartPredit;
+    totLignes     += r.creditLines.length;
+    if (r.dupKeys.length){
+      monthsDup++;
+      r.dupKeys.forEach(function(k){
+        var label = (r.groups[k][0].fournisseur || k);
+        dupLoansAll[k] = dupLoansAll[k] || { label: label, mois: 0 };
+        dupLoansAll[k].mois++;
+      });
+    }
+  });
+
+  var html = '';
+
+  // Cartes résumé
+  html += '<div class="cards">';
+  html += card('Mois analysés', String(rows.length), '');
+  html += card('Charges HT cumulées', fmt(totChargesHT)+' €', '');
+  html += card('Capital remb. (légitime)', fmt(totCapital)+' €', 'warn');
+  html += card('Surcoût doublons', fmt(totDoublon)+' €', totDoublon > 0.5 ? 'bad' : 'ok');
+  html += card('Prêts dupliqués', String(Object.keys(dupLoansAll).length), Object.keys(dupLoansAll).length ? 'bad' : 'ok');
+  html += '</div>';
+
+  // Explication
+  html += '<div class="info">'
+    + '<b>Lecture.</b> « Charges HT » = ce que voit le client (inclut le remboursement du capital + d\'éventuels doublons). '
+    + '« Charges hors capital » = la même chose <u>sans</u> le capital et <u>sans</u> les doublons → c\'est ce qui doit matcher le compte 6 au centime. '
+    + '« Écart prédit » = <code>capital + doublons</code> = ce que l\'écart client devrait valoir si notre hypothèse est juste. '
+    + 'La colonne « Écart client » est tirée du mail Chauvet. Si <b>Écart prédit ≈ Écart client</b> → diagnostic confirmé.'
+    + '</div>';
+
+  // Section doublons (focus)
+  if (Object.keys(dupLoansAll).length){
+    html += '<div class="sec-title">🔴 Prêts en doublon détectés <span class="hint">(même fournisseur présent ≥ 2× dans le même mois)</span></div>';
+    html += '<div class="tbl-scroll"><table><thead><tr>'
+      + '<th>Fournisseur (clé)</th><th>Mois impactés</th></tr></thead><tbody>';
+    Object.keys(dupLoansAll).forEach(function(k){
+      html += '<tr><td>'+esc(dupLoansAll[k].label)+'</td><td>'+dupLoansAll[k].mois+'</td></tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+
+  // Tableau principal mois par mois
+  html += '<div class="sec-title">📊 Décomposition mois par mois</div>';
+  html += '<div class="tbl-scroll"><table><thead><tr>'
+    + '<th>Mois</th><th>Fixes</th><th>Var.</th><th>Var. excep.</th><th>Leasing</th><th>Masse sal.</th>'
+    + '<th>Capital</th><th>Intérêts</th>'
+    + '<th>Charges HT<br><span class="mut">(client)</span></th>'
+    + '<th>Hors capital<br><span class="mut">(≈ compte 6)</span></th>'
+    + (_c6Visible ? '<th>Compte 6<br><span class="mut">(saisi)</span></th><th>Résidu<br><span class="mut">horscap−c6</span></th>' : '')
+    + '<th>Surcoût<br>doublons</th>'
+    + '<th>Écart<br>prédit</th><th>Écart<br>client</th><th>Δ</th>'
+    + '</tr></thead><tbody>';
+
+  rows.forEach(function(r){
+    var ec = ECART_CLIENT[r.key];
+    var delta = (ec != null) ? (r.ecartPredit - ec) : null;
+    var deltaCls = (delta != null && Math.abs(delta) <= 1) ? 'pos' : (delta != null ? 'neg' : 'mut');
+    var dupCls = r.doublonExtra > 0.5 ? 'neg' : 'mut';
+
+    var c6 = _c6Values[r.key];
+    var residu = (c6 != null && !isNaN(c6)) ? (r.chargesHorsCap - c6) : null;
+
+    html += '<tr>';
+    html += '<td class="mois">'+esc(moisLabel(r.key))
+      + (r.dupKeys.length ? ' <span class="badge b-dup">doublon</span>' : '')
+      + (r.msMode && r.msMode !== 'manuel' ? ' <span class="badge b-cap" title="Masse salariale en mode '+esc(r.msMode)+' — sur cet outil le calcul retombe sur le brut statique, à vérifier dans l\'app">MS '+esc(r.msMode)+'</span>' : '')
+      + '</td>';
+    html += '<td>'+fmt(r.fixesHT)+'</td>';
+    html += '<td>'+fmt(r.varHT)+'</td>';
+    html += '<td class="'+(r.varExcep>0?'mut':'')+'">'+fmt(r.varExcep)+'</td>';
+    html += '<td>'+fmt(r.leasingHT)+'</td>';
+    html += '<td>'+fmt(r.masseSalHT)+'</td>';
+    html += '<td class="'+(r.capital>0?'b-cap':'')+'" style="color:var(--orange)">'+fmt(r.capital)+'</td>';
+    html += '<td>'+fmt(r.interet)+'</td>';
+    html += '<td style="font-weight:700">'+fmt(r.chargesHT)+'</td>';
+    html += '<td style="font-weight:700;color:var(--green)">'+fmt(r.chargesHorsCap)+'</td>';
+    if (_c6Visible){
+      html += '<td><input type="text" class="c6" data-key="'+r.key+'" value="'+(c6!=null&&!isNaN(c6)?fmt(c6):'')+'" placeholder="—" oninput="onC6Input(this)"></td>';
+      html += '<td id="residu-'+r.key+'" class="'+(residu!=null?(Math.abs(residu)<=1?'pos':'neg'):'mut')+'">'+(residu!=null?fmt(residu):'—')+'</td>';
+    }
+    html += '<td class="'+dupCls+'">'+fmt(r.doublonExtra)+'</td>';
+    html += '<td style="font-weight:700">'+fmt(r.ecartPredit)+'</td>';
+    html += '<td>'+(ec!=null?fmt(ec):'<span class="mut">—</span>')+'</td>';
+    html += '<td class="'+deltaCls+'">'+(delta!=null?fmt(delta):'—')+'</td>';
+    html += '</tr>';
+  });
+  html += '</tbody></table></div>';
+
+  // Détail des lignes crédit par mois (replié)
+  html += '<div class="sec-title">🔎 Détail des lignes crédit par mois <span class="hint">(pour repérer visuellement les doublons)</span></div>';
+  rows.forEach(function(r){
+    if (!r.creditLines.length) return;
+    var hasDup = r.dupKeys.length > 0;
+    html += '<details'+(hasDup?' open':'')+'><summary>'+esc(moisLabel(r.key))+' — '+r.creditLines.length+' ligne(s)'+(hasDup?' ⚠️ doublon':'')+'</summary>';
+    html += '<div class="ldetail"><div class="tbl-scroll"><table><thead><tr>'
+      + '<th>Fournisseur</th><th>Nom</th><th>Montant/mois</th><th>Capital init.</th><th>Mensualité</th><th>Taux</th>'
+      + '<th>Début</th><th>Fin</th><th>Amort.</th><th>Capital (mois)</th><th>Intérêt (mois)</th><th>Dette liée ?</th><th></th>'
+      + '</tr></thead><tbody>';
+    r.creditLines.forEach(function(c){
+      var k = (c.fournisseur || '').trim().toLowerCase();
+      var isDup = r.groups[k] && r.groups[k].length > 1;
+      var one = calcOneCredit(c, r.key, cachedDettes);
+      var dette = (window.CalcHelpers && CalcHelpers.findDetteForCredit) ? CalcHelpers.findDetteForCredit(c, cachedDettes) : null;
+      html += '<tr style="'+(isDup?'background:rgba(239,68,68,.06)':'')+'">';
+      html += '<td>'+esc(c.fournisseur||'')+'</td>';
+      html += '<td>'+esc(c.nom||'')+'</td>';
+      html += '<td>'+fmt(pf(c.montant))+'</td>';
+      html += '<td>'+(c.capitalInitial?fmt(pf(c.capitalInitial)):'—')+'</td>';
+      html += '<td>'+(c.mensualite?fmt(pf(c.mensualite)):'—')+'</td>';
+      html += '<td>'+(c.tauxInteret?esc(c.tauxInteret)+'%':'—')+'</td>';
+      html += '<td>'+esc(c.dateDebut||'—')+'</td>';
+      html += '<td>'+esc(c.dateFin||'—')+'</td>';
+      html += '<td class="mut">'+esc(c.amort||'constant')+'</td>';
+      html += '<td style="color:var(--orange)">'+fmt(one.principal)+'</td>';
+      html += '<td>'+fmt(one.interet)+'</td>';
+      html += '<td class="mut">'+(dette?('✓ '+esc((dette.nom||'').slice(0,24))):'<span class="mut">— fallback</span>')+'</td>';
+      html += '<td>'+(isDup?'<span class="badge b-dup">DOUBLON</span>':'<span class="badge b-ok">ok</span>')+'</td>';
+      html += '</tr>';
+    });
+    html += '</tbody></table></div></div></details>';
+  });
+
+  document.getElementById('out').innerHTML = html;
+}
+
+function card(lab, val, cls){
+  return '<div class="card '+(cls||'')+'"><div class="lab">'+esc(lab)+'</div><div class="val">'+esc(val)+'</div></div>';
+}
+
+function moisLabel(key){
+  var M = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
+  var p = key.split('-');
+  if (p.length !== 2) return key;
+  var mi = parseInt(p[1],10) - 1;
+  return (M[mi]||p[1]) + ' ' + p[0] + ' (' + key + ')';
+}
+
+// ── Saisie compte 6 ──
+function toggleC6(){
+  _c6Visible = !_c6Visible;
+  if (_lastRows.length) render(_lastRows, document.getElementById('uid-input').value.trim(), window._cachedDettesDiag || []);
+}
+function onC6Input(el){
+  var k = el.getAttribute('data-key');
+  var v = parseFloat(String(el.value).replace(/\s/g,'').replace(',','.'));
+  if (isNaN(v)) delete _c6Values[k]; else _c6Values[k] = v;
+  // Mise à jour ciblée de la cellule résidu (pas de re-render → pas de perte de focus)
+  var row = null;
+  for (var i=0;i<_lastRows.length;i++){ if (_lastRows[i].key === k){ row = _lastRows[i]; break; } }
+  var cell = document.getElementById('residu-'+k);
+  if (row && cell){
+    if (isNaN(v)){ cell.textContent = '—'; cell.className = 'mut'; }
+    else {
+      var residu = row.chargesHorsCap - v;
+      cell.textContent = fmt(residu);
+      cell.className = (Math.abs(residu) <= 1) ? 'pos' : 'neg';
+    }
+  }
+}
+
+// Exposition window (convention du projet)
+window.startScan = startScan;
+window.toggleC6 = toggleC6;
+window.onC6Input = onC6Input;
+
+// Si l'auth a fini avant le chargement de calc-helpers, lancer le scan en attente
+if (window._pendingScan && window.CalcHelpers){ window._pendingScan = false; startScan(); }
+</script>
+
+</body>
+</html>
