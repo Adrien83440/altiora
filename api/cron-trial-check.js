@@ -83,14 +83,43 @@ async function fsQuery(collectionId, field, op, value, token) {
     const name = r.document.name;
     const uid = name.split('/').pop();
     const fields = r.document.fields || {};
-    const data = {};
-    for (const [k, v] of Object.entries(fields)) {
-      data[k] = v.stringValue ?? v.integerValue ?? v.booleanValue ?? v.doubleValue ?? null;
-      // Convert string numbers
-      if (v.integerValue !== undefined) data[k] = parseInt(v.integerValue);
-    }
+    const data = parseFields(fields);
     return { uid, data, _name: name };
   });
+}
+
+// ── Parse un fields Firestore (récursif pour gérer mapValue / arrayValue) ──
+// Utilisé pour lire users_activity (modulesUsed.X, daysActive.YYYY-MM-DD sont
+// des champs imbriqués en mapValue côté REST API).
+function parseFields(fields) {
+  if (!fields) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(fields)) out[k] = parseValue(v);
+  return out;
+}
+
+function parseValue(v) {
+  if (v == null) return null;
+  if (v.stringValue !== undefined)    return v.stringValue;
+  if (v.integerValue !== undefined)   return parseInt(v.integerValue, 10);
+  if (v.doubleValue !== undefined)    return parseFloat(v.doubleValue);
+  if (v.booleanValue !== undefined)   return v.booleanValue;
+  if (v.timestampValue !== undefined) return v.timestampValue;
+  if (v.nullValue !== undefined)      return null;
+  if (v.mapValue !== undefined)       return parseFields(v.mapValue.fields || {});
+  if (v.arrayValue !== undefined)     return (v.arrayValue.values || []).map(parseValue);
+  return null;
+}
+
+// ── Récupère un doc users_activity/{uid} (404 → null, pas d'erreur) ──
+async function fsGetActivity(uid, token) {
+  try {
+    const url = `${FS_BASE}/users_activity/${uid}`;
+    const res = await fetch(url, { headers: authHeaders(token) });
+    if (!res.ok) return null; // doc inexistant = user jamais loggué post-inscription
+    const doc = await res.json();
+    return parseFields(doc.fields || {});
+  } catch (_) { return null; }
 }
 
 // ── Update a document (replaces userDoc.ref.update()) ──
@@ -373,6 +402,131 @@ function emailReviewRequest(name) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+// NOUVEAUX TEMPLATES — Séquence d'activation/conversion enrichie
+// ══════════════════════════════════════════════════════════════════
+
+// J1 — n'a pas encore saisi son CA dans Pilotage
+function emailJ1NoPilotage(name) {
+  return ew(
+    '<div style="background:linear-gradient(135deg,#0f1f5c,#1a3dce);padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">👋</div><h1 style="margin:0;font-size:20px;font-weight:800">Une minute pour démarrer ?</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Votre tableau de bord vous attend.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">On a remarqué que vous n\'avez pas encore saisi votre chiffre d\'affaires. C\'est la première étape pour voir vos KPIs prendre vie — ça prend 2 minutes.</p>' +
+    '<div style="background:#f0f4ff;border-radius:12px;padding:16px;margin:0 0 20px"><p style="margin:0;font-size:13px;color:#0f1f5c;line-height:1.6">💡 Une fois votre CA saisi, votre dashboard calcule automatiquement vos marges, votre seuil de rentabilité et vos charges.</p></div>' +
+    btn('Saisir mon CA →', 'https://alteore.com/pilotage.html') +
+    '<p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">Un souci pour démarrer ? Répondez à cet email, on vous aide.</p></div>'
+  );
+}
+
+// J1 — a déjà saisi son CA : encouragement + suite logique
+function emailJ1HasPilotage(name) {
+  return ew(
+    '<div style="background:linear-gradient(135deg,#059669,#10b981);padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">🎉</div><h1 style="margin:0;font-size:20px;font-weight:800">Bien joué, vous avez démarré !</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Votre tableau de bord commence à prendre forme.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Vous avez saisi vos premières données — bravo ! Pour aller plus loin, jetez un œil à votre <strong>Dashboard</strong> : vous y verrez vos indicateurs clés en un coup d\'œil.</p>' +
+    btn('Voir mon Dashboard →', 'https://alteore.com/dashboard.html') +
+    '<p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">Une question ? Répondez directement à cet email.</p></div>'
+  );
+}
+
+// J3 — inactif depuis l'inscription (aucun daysActive après J0/J1)
+function emailJ3Inactif(name) {
+  return ew(
+    '<div style="background:linear-gradient(135deg,#f59e0b,#fbbf24);padding:28px 32px;color:#1a1f36"><div style="font-size:28px;margin-bottom:8px">🤔</div><h1 style="margin:0;font-size:20px;font-weight:800">On vous a perdu ?</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Votre essai gratuit continue de tourner.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Vous vous êtes inscrit il y a 3 jours mais vous n\'avez pas encore eu l\'occasion d\'explorer Alteore. Pas de souci, on est là pour vous aider à démarrer.</p>' +
+    '<p style="font-size:13px;color:#6b7280;line-height:1.7;margin:0 0 20px">Si quelque chose vous bloque (prise en main, données à importer, question sur une fonctionnalité), répondez simplement à cet email — on répond personnellement.</p>' +
+    btn('Reprendre où j\'en étais →', 'https://alteore.com/dashboard.html') + '</div>'
+  );
+}
+
+// J3 — actif mais toujours pas de CA saisi
+function emailJ3NoPilotage(name) {
+  return ew(
+    '<div style="background:linear-gradient(135deg,#f59e0b,#fbbf24);padding:28px 32px;color:#1a1f36"><div style="font-size:28px;margin-bottom:8px">📊</div><h1 style="margin:0;font-size:20px;font-weight:800">Votre CA n\'est toujours pas renseigné</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">C\'est l\'étape qui débloque tout le reste.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Sans le chiffre d\'affaires, Alteore ne peut pas calculer vos marges, votre seuil de rentabilité ni vos prévisions. C\'est littéralement 2 minutes pour débloquer tout le potentiel de l\'outil.</p>' +
+    btn('Saisir mon CA maintenant →', 'https://alteore.com/pilotage.html') +
+    '<p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">Il vous reste 12 jours d\'essai gratuit.</p></div>'
+  );
+}
+
+// J5 — actif, a utilisé pilotage + au moins un autre module : cross-sell
+function emailJ5CrossSell(name, suggestedModule) {
+  var modules = {
+    marges: { label: 'Marges & coût de revient', url: 'marges.html', desc: 'calculez la rentabilité réelle de chaque produit que vous vendez' },
+    fidelisation: { label: 'Fidélisation', url: 'fidelisation.html', desc: 'mettez en place une carte de fidélité digitale pour vos clients' },
+    rh: { label: 'RH & planning', url: 'rh-planning.html', desc: 'gérez plannings, congés et masse salariale en quelques clics' },
+    cashflow: { label: 'Cashflow & prévisions', url: 'cashflow.html', desc: 'anticipez votre trésorerie des prochains mois' },
+    bilan: { label: 'Bilan IA', url: 'bilan.html', desc: 'faites analyser votre bilan comptable par notre IA en 1 clic' }
+  };
+  var m = modules[suggestedModule] || modules.marges;
+  return ew(
+    '<div style="background:linear-gradient(135deg,#0f1f5c,#1a3dce);padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">🔍</div><h1 style="margin:0;font-size:20px;font-weight:800">Avez-vous découvert ' + m.label + ' ?</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Vous n\'exploitez pas encore tout le potentiel d\'Alteore.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 20px">Vous utilisez déjà bien votre Pilotage — bravo. Saviez-vous que le module <strong>' + m.label + '</strong> vous permet de ' + m.desc + ' ?</p>' +
+    btn('Découvrir ' + m.label + ' →', 'https://alteore.com/' + m.url) +
+    '<p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">Il vous reste 10 jours d\'essai gratuit pour tout tester.</p></div>'
+  );
+}
+
+// J5 — dernier filet : aucun module utilisé depuis l'inscription
+function emailJ5DernierFilet(name) {
+  return ew(
+    '<div style="background:linear-gradient(135deg,#ef4444,#f87171);padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">🆘</div><h1 style="margin:0;font-size:20px;font-weight:800">Besoin d\'un coup de main ?</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Votre essai gratuit avance, on ne veut pas que vous passiez à côté.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Cela fait 5 jours et vous n\'avez pas encore pu prendre en main Alteore. C\'est peut-être le mauvais moment, ou une question bloquante — dites-nous ce qu\'il en est, on est là pour vous aider concrètement.</p>' +
+    '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;margin:0 0 20px"><p style="margin:0;font-size:13px;color:#991b1b;line-height:1.6">Notre centre d\'aide regroupe des tutoriels pas à pas pour chaque module.</p></div>' +
+    btn('Voir les tutoriels →', 'https://alteore.com/tutoriels.html') +
+    '<p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">Ou répondez à cet email, on vous répond personnellement.</p></div>'
+  );
+}
+
+// J10 — actif, pas encore payé : preuve sociale / réassurance
+function emailJ10SocialProof(name) {
+  return ew(
+    '<div style="background:linear-gradient(135deg,#0f1f5c,#1a3dce);padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">⭐</div><h1 style="margin:0;font-size:20px;font-weight:800">Ils ont fait le choix d\'Alteore</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Plus que 5 jours pour décider en toute sérénité.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Vous testez Alteore depuis 10 jours maintenant. Des commerçants comme vous l\'utilisent déjà au quotidien pour piloter leur activité sans tableur ni paperasse.</p>' +
+    '<div style="background:#f0f4ff;border-radius:12px;padding:16px;margin:0 0 20px"><p style="margin:0;font-size:13px;color:#0f1f5c;line-height:1.6">✓ Sans engagement · ✓ Annulation en 1 clic · ✓ Vos données restent les vôtres</p></div>' +
+    btn('Choisir mon plan →', 'https://alteore.com/pricing.html') +
+    '<p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">Une question avant de vous lancer ? Répondez à cet email.</p></div>'
+  );
+}
+
+// Post-expiration J+2 — rappel doux, pas de pression
+function emailPostExpJ2(name) {
+  return ew(
+    '<div style="background:linear-gradient(135deg,#6b7280,#9ca3af);padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">📁</div><h1 style="margin:0;font-size:20px;font-weight:800">Vos données vous attendent</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Rien n\'est perdu.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Votre essai gratuit est terminé, mais toutes vos données (CA, marges, paramètres) sont conservées intactes. Vous pouvez reprendre exactement là où vous en étiez en souscrivant à un plan.</p>' +
+    btn('Réactiver mon compte →', 'https://alteore.com/pricing.html') + '</div>'
+  );
+}
+
+// Post-expiration J+5 — offre de réactivation
+// NOTE : pas de code promo codé en dur pour l'instant (à décider avec Adrien).
+// Si un code promo winback est créé côté Stripe, l'insérer ici dans le bandeau ci-dessous.
+function emailPostExpJ5(name) {
+  return ew(
+    '<div style="background:linear-gradient(135deg,#f59e0b,#fbbf24);padding:28px 32px;color:#1a1f36"><div style="font-size:28px;margin-bottom:8px">💡</div><h1 style="margin:0;font-size:20px;font-weight:800">On vous garde une place</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Vos données seront supprimées dans 10 jours.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Cela fait 5 jours que votre essai s\'est terminé. Vos données sont toujours là, mais elles seront définitivement supprimées dans 10 jours.</p>' +
+    btn('Récupérer mon compte →', 'https://alteore.com/pricing.html') +
+    '<p style="font-size:12px;color:#94a3b8;text-align:center;margin:20px 0 0">Une question, un frein ? Répondez à cet email.</p></div>'
+  );
+}
+
+// Post-expiration J+10 — dernier rappel avant suppression définitive
+function emailPostExpJ10(name) {
+  return ew(
+    '<div style="background:linear-gradient(135deg,#ef4444,#f87171);padding:28px 32px;color:white"><div style="font-size:28px;margin-bottom:8px">⏰</div><h1 style="margin:0;font-size:20px;font-weight:800">Dernier rappel avant suppression</h1><p style="margin:8px 0 0;font-size:14px;opacity:0.85">Vos données seront effacées dans 5 jours.</p></div>' +
+    '<div style="padding:28px 32px"><p style="font-size:14px;color:#374151;line-height:1.7;margin:0 0 16px">Bonjour' + (name ? ' ' + name : '') + ',</p>' +
+    '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:16px;margin:0 0 20px"><p style="margin:0;font-size:13px;color:#991b1b;line-height:1.6;font-weight:600">⚠️ Sans action de votre part, toutes vos données (CA, marges, historique) seront définitivement supprimées dans 5 jours.</p></div>' +
+    btn('Sauvegarder mes données →', 'https://alteore.com/pricing.html') + '</div>'
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
 // HANDLER PRINCIPAL
 // ══════════════════════════════════════════════════════════════════
 
@@ -388,7 +542,12 @@ module.exports = async (req, res) => {
   const token = await getAdminToken();
   if (!token) return res.status(500).json({ error: 'Admin auth failed' });
 
-  const stats = { checked: 0, reminderJ3: 0, reminderJ1: 0, expired: 0, deleted: 0, errors: 0, promoChecked: 0, promoReminder7: 0, promoReminder1: 0, promoExpired: 0 };
+  const stats = {
+    checked: 0, reminderJ3: 0, reminderJ1: 0, expired: 0, deleted: 0, errors: 0,
+    promoChecked: 0, promoReminder7: 0, promoReminder1: 0, promoExpired: 0,
+    j1Activation: 0, j3Behavior: 0, j5: 0, j10: 0,
+    postExpJ2: 0, postExpJ5: 0, postExpJ10: 0
+  };
 
   try {
     // ══════════════════════════════════════════════════════════════
@@ -422,11 +581,85 @@ module.exports = async (req, res) => {
       console.log(`[cron-trial] 👤 ${uid} (${email || '?'}) — J${daysLeft >= 0 ? '-' + daysLeft : '+' + Math.abs(daysLeft)} — plan=${plan}`);
 
       try {
+        // ──────────────────────────────────────────────────────
+        // J1 (daysLeft=14) — activation : a-t-il saisi son CA ?
+        // ──────────────────────────────────────────────────────
+        if (daysLeft === 14 && plan === 'trial' && !data.trialEmailJ1Activation) {
+          const activity = await fsGetActivity(uid, token);
+          const hasPilotage = !!(activity && activity.modulesUsed && activity.modulesUsed.pilotage);
+          if (email) {
+            if (hasPilotage) {
+              await sendEmail(email, '🎉 Bien joué, vous avez démarré ! — Alteore', emailJ1HasPilotage(name));
+            } else {
+              await sendEmail(email, '👋 Une minute pour démarrer ? — Alteore', emailJ1NoPilotage(name));
+            }
+          }
+          await fsUpdate(`users/${uid}`, { trialEmailJ1Activation: true }, token);
+          stats.j1Activation = (stats.j1Activation || 0) + 1;
+        }
+        // ──────────────────────────────────────────────────────
+        // J3 (daysLeft=12) — inactif total OU actif sans CA saisi
+        // ──────────────────────────────────────────────────────
+        else if (daysLeft === 12 && plan === 'trial' && !data.trialEmailJ3Behavior) {
+          const activity = await fsGetActivity(uid, token);
+          const hasAnyActivity = !!(activity && activity.daysActive && Object.keys(activity.daysActive).length > 0);
+          const hasPilotage = !!(activity && activity.modulesUsed && activity.modulesUsed.pilotage);
+          if (email) {
+            if (!hasAnyActivity) {
+              await sendEmail(email, '🤔 On vous a perdu ? — Alteore', emailJ3Inactif(name));
+            } else if (!hasPilotage) {
+              await sendEmail(email, '📊 Votre CA n\'est toujours pas renseigné — Alteore', emailJ3NoPilotage(name));
+            }
+            // actif + CA déjà saisi à J3 → pas d'email, l'utilisateur est en bonne voie
+          }
+          await fsUpdate(`users/${uid}`, { trialEmailJ3Behavior: true }, token);
+          stats.j3Behavior = (stats.j3Behavior || 0) + 1;
+        }
+        // ──────────────────────────────────────────────────────
+        // J5 (daysLeft=10) — cross-sell si actif multi-modules,
+        // dernier filet si aucun module jamais utilisé
+        // ──────────────────────────────────────────────────────
+        else if (daysLeft === 10 && plan === 'trial' && !data.trialEmailJ5) {
+          const activity = await fsGetActivity(uid, token);
+          const modulesUsed = (activity && activity.modulesUsed) || {};
+          const usedModules = Object.keys(modulesUsed);
+          if (email) {
+            if (usedModules.length === 0) {
+              await sendEmail(email, '🆘 Besoin d\'un coup de main ? — Alteore', emailJ5DernierFilet(name));
+            } else if (usedModules.includes('pilotage')) {
+              // Suggère un module pas encore exploré, cohérent avec le plan
+              const candidates = ['marges', 'fidelisation', 'cashflow', 'rh', 'bilan'];
+              const notUsed = candidates.filter(m => !usedModules.includes(m));
+              const suggestion = notUsed[0] || 'marges';
+              await sendEmail(email, '🔍 Avez-vous découvert tout Alteore ? — Alteore', emailJ5CrossSell(name, suggestion));
+            }
+            // actif mais pilotage jamais utilisé à J5 → déjà couvert par la relance J3, on n'insiste pas davantage ici
+          }
+          await fsUpdate(`users/${uid}`, { trialEmailJ5: true }, token);
+          stats.j5 = (stats.j5 || 0) + 1;
+        }
         // J+7 après inscription (= 8 jours avant fin trial) : email satisfaction + Trustpilot
-        if (daysLeft === 8 && plan === 'trial' && !data.reviewEmailSent) {
-          if (email) await sendEmail(email, '💬 Comment se passe votre essai ? — Alteore', emailReviewRequest(name), TRUSTPILOT_SMA);
+        // (uniquement si l'utilisateur a réellement testé le produit — sinon ce n'est pas le bon message)
+        else if (daysLeft === 8 && plan === 'trial' && !data.reviewEmailSent) {
+          const activity = await fsGetActivity(uid, token);
+          const hasPilotage = !!(activity && activity.modulesUsed && activity.modulesUsed.pilotage);
+          if (email) {
+            if (hasPilotage) {
+              await sendEmail(email, '💬 Comment se passe votre essai ? — Alteore', emailReviewRequest(name), TRUSTPILOT_SMA);
+            } else {
+              await sendEmail(email, '📊 Votre CA n\'est toujours pas renseigné — Alteore', emailJ3NoPilotage(name));
+            }
+          }
           await fsUpdate(`users/${uid}`, { reviewEmailSent: true }, token);
           stats.reviewSent = (stats.reviewSent || 0) + 1;
+        }
+        // ──────────────────────────────────────────────────────
+        // J10 (daysLeft=5) — social proof / réassurance avant pricing
+        // ──────────────────────────────────────────────────────
+        else if (daysLeft === 5 && plan === 'trial' && !data.trialEmailJ10) {
+          if (email) await sendEmail(email, '⭐ Ils ont fait le choix d\'Alteore — Alteore', emailJ10SocialProof(name));
+          await fsUpdate(`users/${uid}`, { trialEmailJ10: true }, token);
+          stats.j10 = (stats.j10 || 0) + 1;
         }
         // J-3
         else if (daysLeft === 3 && plan === 'trial' && !data.trialEmailJ3) {
@@ -449,10 +682,27 @@ module.exports = async (req, res) => {
           stats.expired++;
           console.log(`[cron-trial] 🔒 ${uid} → trial_expired`);
         }
-        // J+15 : delete data → COLLECTÉ ICI, exécuté en passe 2
+        // ──────────────────────────────────────────────────────
+        // POST-EXPIRATION (plan = trial_expired) — winback J+2/J+5/J+10
+        // puis suppression à J+15 (inchangé, collecté en passe 2)
+        // ──────────────────────────────────────────────────────
         else if (plan === 'trial_expired') {
           const expiredAt = data.trialExpiredAt || data.trialEnd;
           const daysSinceExpiry = expiredAt ? -daysDiff(expiredAt) : 999;
+
+          if (daysSinceExpiry === 2 && !data.postExpEmailJ2) {
+            if (email) await sendEmail(email, '📁 Vos données vous attendent — Alteore', emailPostExpJ2(name));
+            await fsUpdate(`users/${uid}`, { postExpEmailJ2: true }, token);
+            stats.postExpJ2 = (stats.postExpJ2 || 0) + 1;
+          } else if (daysSinceExpiry === 5 && !data.postExpEmailJ5) {
+            if (email) await sendEmail(email, '💡 On vous garde une place — Alteore', emailPostExpJ5(name));
+            await fsUpdate(`users/${uid}`, { postExpEmailJ5: true }, token);
+            stats.postExpJ5 = (stats.postExpJ5 || 0) + 1;
+          } else if (daysSinceExpiry === 10 && !data.postExpEmailJ10) {
+            if (email) await sendEmail(email, '⏰ Dernier rappel avant suppression — Alteore', emailPostExpJ10(name));
+            await fsUpdate(`users/${uid}`, { postExpEmailJ10: true }, token);
+            stats.postExpJ10 = (stats.postExpJ10 || 0) + 1;
+          }
 
           if (daysSinceExpiry >= 15 && !data.trialDataDeleted) {
             toDelete.push({ uid, email, name, daysSinceExpiry });
