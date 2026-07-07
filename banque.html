@@ -517,17 +517,86 @@ async function initPage() {
   const params = new URLSearchParams(window.location.search);
   const status = params.get('status');
   const reqId = params.get('req');
+  // GoCardless ajoute lui-même ?ref=<requisition_id> à l'URL de retour.
+  // Si c'est un UUID, c'est l'ID de la requisition → plus fiable que sessionStorage
+  // (qui est perdu quand la banque rouvre dans un autre navigateur, surtout sur mobile).
+  const refParam = params.get('ref');
+  const refIsUuid = !!(refParam && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(refParam));
 
-  if (status === 'connected' && reqId) {
+  // ── Retour GoCardless en ERREUR (annulation, refus banque…) ──
+  const gcError = params.get('error');
+  if (gcError) {
+    history.replaceState({}, '', 'banque.html');
+    await handleBankReturnError(gcError, params.get('details') || '');
+    return;
+  }
+
+  if (status === 'connected' || refIsUuid) {
     // Nettoyer l'URL
     history.replaceState({}, '', 'banque.html');
     showToast('🔄 Finalisation de la connexion…');
-    await finalizeBankConnection(reqId);
+    await finalizeBankConnection(refIsUuid ? refParam : reqId);
     return;
   }
 
   // Charger le statut existant
   await loadConnectionStatus();
+}
+
+// ── Retour banque en erreur : message clair + nettoyage de la tentative ──
+async function handleBankReturnError(code, details) {
+  let msg;
+  if (/cancel/i.test(code) || /cancel/i.test(details)) {
+    msg = 'Connexion annulée : vous avez quitté l\'écran de votre banque avant la fin. Reconnectez votre banque en allant jusqu\'au bout de la validation (code SMS, application bancaire…).';
+  } else {
+    msg = 'La connexion bancaire a échoué (' + code + (details ? ' — ' + details : '') + '). Réessayez ; si le problème persiste, contactez le support.';
+  }
+
+  // Nettoyage best-effort de la tentative en attente (rien de bloquant)
+  try {
+    const rootRef = window._doc(window._db, 'bank_connections', window._uid);
+    const rootSnap = await window._getDoc(rootRef);
+    const rootData = rootSnap.exists() ? (rootSnap.data() || {}) : {};
+
+    let pendingBankId = null;
+    try { pendingBankId = sessionStorage.getItem('alteore_connecting_bank_id'); } catch(e){}
+    if (!pendingBankId && rootData.connecting_bank_id) pendingBankId = rootData.connecting_bank_id;
+
+    // Supprimer côté GoCardless la requisition avortée (best-effort)
+    const abortedReqId = rootData.connecting_requisition_id || rootData.pending_requisition_id || null;
+    if (abortedReqId) {
+      try {
+        await fetch('/api/bank-connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uid: window._uid, action: 'disconnect', requisition_id: abortedReqId })
+        });
+      } catch(e){}
+    }
+
+    // Supprimer le sous-doc pending le cas échéant
+    if (pendingBankId) {
+      try { await window._deleteDoc(window._doc(window._db, 'bank_connections', window._uid, 'banks', pendingBankId)); } catch(e){}
+    }
+
+    // Nettoyer les champs de tentative sur le doc racine (merge → linkedTransactions intact)
+    if (rootSnap.exists()) {
+      try {
+        await window._setDoc(rootRef, {
+          pending_requisition_id: null,
+          connecting_bank_id: null,
+          connecting_requisition_id: null,
+          connecting_at: null
+        }, { merge: true });
+      } catch(e){}
+    }
+  } catch(e) { console.warn('[bank-return-error] cleanup partiel :', e.message); }
+
+  try { sessionStorage.removeItem('alteore_connecting_bank_id'); } catch(e){}
+  _connectingBankId = null;
+
+  await loadConnectionStatus();
+  showError(msg);
 }
 
 async function loadConnectionStatus() {
@@ -623,6 +692,9 @@ function renderBankCard(bank) {
     abnormalState = 'expired';
   }
 
+  // Échapper le bankId pour les onclick (déclaré AVANT accountsHtml qui l'utilise)
+  const sid = String(bank.bankId).replace(/'/g,"\\'");
+
   const accountsHtml = (bank.accounts && bank.accounts.length > 0)
     ? bank.accounts.map(function(acc){
         return '<div class="account-card">'
@@ -632,16 +704,15 @@ function renderBankCard(bank) {
           + '<div class="account-tx">' + (acc.transactionsCount || 0) + ' transactions · <span style="color:var(--red)">' + (acc.debitsCount||0) + ' dépenses</span></div>'
           + '</div>';
       }).join('')
-    : (abnormalState === 'pending'
-        ? ''  // pas d'affichage "aucun compte" en mode pending, le bandeau explique déjà
+    : (isPending
+        ? (abnormalState === 'pending'
+            ? ''  // pas d'affichage "aucun compte", le bandeau explique déjà
+            : '<div style="padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;font-size:12px;line-height:1.5">⏳ Connexion en cours de finalisation. Si vous venez de valider sur le site de votre banque, <a href="#" onclick="resumePendingBank(\'' + sid + '\');return false" style="color:#92400e;font-weight:800;text-decoration:underline">finalisez maintenant</a> — sinon <a href="#" onclick="cancelPendingBank(\'' + sid + '\');return false" style="color:#92400e;font-weight:700;text-decoration:underline">annulez cette tentative</a>.</div>')
         : '<div style="padding:8px;color:var(--muted);font-size:11px;font-style:italic">Aucun compte sélectionné — cliquez sur ⚙️ Comptes</div>');
 
   const lastSyncTxt = bank.lastSync
     ? new Date(bank.lastSync).toLocaleDateString('fr-FR') + ' à ' + new Date(bank.lastSync).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})
     : 'jamais';
-
-  // Échapper le bankId pour les onclick
-  const sid = String(bank.bankId).replace(/'/g,"\\'");
 
   // ── Construction du bandeau d'alerte si état anormal ──
   let alertBanner = '';
@@ -653,8 +724,11 @@ function renderBankCard(bank) {
       + '<div style="font-size:24px;flex-shrink:0">⚠️</div>'
       + '<div style="flex:1;min-width:0">'
         + '<div style="font-size:13px;font-weight:800;color:#92400e;margin-bottom:3px">Connexion en attente de finalisation ' + createdDateTxt + '</div>'
-        + '<div style="font-size:12px;color:#92400e;line-height:1.5;margin-bottom:10px">Il semble que la connexion n\'ait pas pu être finalisée sur le site de votre banque. Cela peut arriver si la page a été fermée avant la fin, ou si votre banque a rencontré un problème. <strong>Annulez cette tentative</strong> et reconnectez-vous.</div>'
-        + '<button class="btn btn-primary btn-sm" onclick="cancelPendingBank(\'' + sid + '\')" style="background:linear-gradient(135deg,#d97706,#f59e0b);padding:7px 14px;font-size:12px">🗑 Annuler la tentative et réessayer</button>'
+        + '<div style="font-size:12px;color:#92400e;line-height:1.5;margin-bottom:10px">Il semble que la connexion n\'ait pas pu être finalisée sur le site de votre banque. Cela peut arriver si la page a été fermée avant la fin, ou si votre banque a rencontré un problème. Si vous êtes bien allé au bout de la validation, <strong>tentez de finaliser</strong> ; sinon <strong>annulez cette tentative</strong> et reconnectez-vous.</div>'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+          + '<button class="btn btn-success btn-sm" onclick="resumePendingBank(\'' + sid + '\')" style="padding:7px 14px;font-size:12px">✅ Tenter de finaliser</button>'
+          + '<button class="btn btn-primary btn-sm" onclick="cancelPendingBank(\'' + sid + '\')" style="background:linear-gradient(135deg,#d97706,#f59e0b);padding:7px 14px;font-size:12px">🗑 Annuler la tentative et réessayer</button>'
+        + '</div>'
       + '</div>'
     + '</div>';
   } else if (abnormalState === 'expired') {
@@ -683,8 +757,8 @@ function renderBankCard(bank) {
         + '</div>'
       + '</div>'
       + '<div style="display:flex;gap:6px;flex-wrap:wrap">'
-        + (abnormalState !== 'pending' ? '<button class="btn btn-success btn-sm" onclick="syncOneBank(\'' + sid + '\')" title="Synchroniser cette banque">🔄 Sync</button>' : '')
-        + (abnormalState !== 'pending' ? '<button class="btn btn-outline btn-sm" onclick="manageAccountsForBank(\'' + sid + '\')" title="Modifier les comptes synchronisés">⚙️ Comptes</button>' : '')
+        + (!isPending ? '<button class="btn btn-success btn-sm" onclick="syncOneBank(\'' + sid + '\')" title="Synchroniser cette banque">🔄 Sync</button>' : '')
+        + (!isPending ? '<button class="btn btn-outline btn-sm" onclick="manageAccountsForBank(\'' + sid + '\')" title="Modifier les comptes synchronisés">⚙️ Comptes</button>' : '')
         + '<button class="btn btn-danger btn-sm" onclick="disconnectOneBank(\'' + sid + '\')" title="Déconnecter cette banque">🔌</button>'
       + '</div>'
     + '</div>'
@@ -802,18 +876,42 @@ async function connectSelectedBank() {
         });
         // Stocker dans sessionStorage pour retrouver après redirect
         try { sessionStorage.setItem('alteore_connecting_bank_id', newBankId); } catch(e){}
+        // Pointeur Firestore : survit au retour banque dans un AUTRE navigateur
+        // (mobile ++), là où sessionStorage est perdu.
+        try {
+          await window._setDoc(window._doc(window._db, 'bank_connections', window._uid), {
+            connecting_bank_id: newBankId,
+            connecting_requisition_id: data.requisition_id,
+            connecting_at: new Date().toISOString()
+          }, { merge: true });
+        } catch(e) { console.warn('[connect] pointeur racine non écrit :', e.message); }
       } else {
-        // Mode legacy : doc racine
+        // Mode legacy : doc racine.
+        // IMPORTANT : préserver linkedTransactions[] (mémoire anti-doublons du
+        // rapprochement bancaire) — un setDoc sans merge l'effacerait et les
+        // prochains imports re-proposeraient des dépenses déjà intégrées.
         _connectingBankId = null;
         try { sessionStorage.removeItem('alteore_connecting_bank_id'); } catch(e){}
-        await window._setDoc(window._doc(window._db, 'bank_connections', window._uid), {
+        let preservedLinked = null;
+        try {
+          const prevSnap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
+          if (prevSnap.exists() && Array.isArray(prevSnap.data().linkedTransactions)) {
+            preservedLinked = prevSnap.data().linkedTransactions;
+          }
+        } catch(e) { console.warn('[connect] lecture linkedTransactions impossible :', e.message); }
+        const rootPayload = {
           pending_requisition_id: data.requisition_id,
           agreement_id: data.agreement_id || null,
           institution_id: _selectedBank.id,
           institution_name: _selectedBank.name,
           status: 'pending',
-          createdAt: new Date().toISOString()
-        });
+          createdAt: new Date().toISOString(),
+          connecting_bank_id: null,
+          connecting_requisition_id: data.requisition_id,
+          connecting_at: new Date().toISOString()
+        };
+        if (preservedLinked) rootPayload.linkedTransactions = preservedLinked;
+        await window._setDoc(window._doc(window._db, 'bank_connections', window._uid), rootPayload);
       }
 
       // Redirect vers la banque
@@ -830,22 +928,57 @@ async function connectSelectedBank() {
 
 // ── FINALISATION APRÈS RETOUR BANQUE ──
 async function finalizeBankConnection(reqId) {
-  let realReqId = reqId;
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  let realReqId = (reqId && UUID_RE.test(reqId)) ? reqId : null;
+
   // 1. Retrouver le bankId en cours de connexion (sous-doc) via sessionStorage
   let connectingBankId = null;
   try { connectingBankId = sessionStorage.getItem('alteore_connecting_bank_id'); } catch(e){}
 
-  // 2. Si reqId est le placeholder, le récupérer depuis Firestore
-  if (reqId === 'REQUISITION_ID' || !reqId || reqId.length < 10) {
+  // 2. Si l'URL ne nous a pas donné un vrai requisition_id, remonter l'échelle :
+  //    sessionStorage → pointeur Firestore racine → sous-doc pending le plus récent.
+  //    (Le pointeur couvre le retour banque dans un AUTRE navigateur — mobile ++.)
+  if (!realReqId || !connectingBankId) {
     try {
-      if (connectingBankId) {
+      let rootData = {};
+      try {
+        const rootSnap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
+        if (rootSnap.exists()) rootData = rootSnap.data() || {};
+      } catch(e){}
+
+      if (!connectingBankId && rootData.connecting_bank_id) {
+        connectingBankId = rootData.connecting_bank_id;
+        console.log('[finalize] bankId récupéré via pointeur Firestore :', connectingBankId);
+      }
+
+      if (!realReqId && connectingBankId) {
         // Lire depuis le sous-doc
-        const snap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid, 'banks', connectingBankId));
-        if (snap.exists()) realReqId = snap.data().pending_requisition_id;
-      } else {
-        // Lire depuis le doc racine (legacy)
-        const snap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid));
-        if (snap.exists()) realReqId = snap.data().pending_requisition_id;
+        try {
+          const snap = await window._getDoc(window._doc(window._db, 'bank_connections', window._uid, 'banks', connectingBankId));
+          if (snap.exists()) realReqId = snap.data().pending_requisition_id || null;
+        } catch(e){}
+      }
+      if (!realReqId && rootData.connecting_requisition_id) realReqId = rootData.connecting_requisition_id;
+      if (!realReqId && rootData.pending_requisition_id)   realReqId = rootData.pending_requisition_id;
+
+      // Dernier recours : scanner les sous-docs pour le pending le plus récent
+      if (!realReqId) {
+        try {
+          const colSnap = await window._getDocs(window._collection(window._db, 'bank_connections', window._uid, 'banks'));
+          let bestTs = 0, bestReq = null, bestId = null;
+          colSnap.forEach(function(d){
+            const bd = d.data() || {};
+            if (bd.pending_requisition_id && !bd.requisition_id) {
+              const ts = bd.createdAt ? new Date(bd.createdAt).getTime() : 0;
+              if (ts >= bestTs) { bestTs = ts; bestReq = bd.pending_requisition_id; bestId = d.id; }
+            }
+          });
+          if (bestReq) {
+            realReqId = bestReq;
+            if (!connectingBankId) connectingBankId = bestId;
+            console.log('[finalize] pending le plus récent récupéré :', bestId);
+          }
+        } catch(e){}
       }
     } catch(e) {}
   }
@@ -882,6 +1015,13 @@ async function finalizeBankConnection(reqId) {
 
     if (ov) ov.classList.remove('show');
 
+    // Avertissements par compte remontés par l'API (compte pas prêt, accès refusé…)
+    if (Array.isArray(data.warnings) && data.warnings.length > 0) {
+      showError('⚠️ ' + data.warnings.join(' · '));
+    } else if ((data.totalTransactions === 0 || data.totalTransactions === undefined) && data.info) {
+      showError('⏳ ' + data.info);
+    }
+
     // Mémoriser la banque cible (sous-doc ou legacy) pour confirmAccountSelection
     _connectingBankId = connectingBankId || null;
     _connection = { pending_requisition_id: realReqId, _targetBankId: connectingBankId };
@@ -899,7 +1039,12 @@ async function finalizeBankConnection(reqId) {
       msg = 'Votre banque limite temporairement les connexions. Veuillez patienter 5 à 10 minutes avant de réessayer. Ce n\'est pas un problème Alteore.';
     }
     showError(msg);
-    showNotConnectedZone();
+    // Ne pas casser l'UI si d'autres banques sont déjà connectées
+    if (_userBanks && _userBanks.length > 0) {
+      showConnectedZone();
+    } else {
+      showNotConnectedZone();
+    }
   }
 }
 
@@ -1053,6 +1198,7 @@ async function confirmAccountSelection() {
         window._doc(window._db, 'bank_connections', window._uid, 'banks', targetBankId),
         {
           requisition_id: reqId,
+          pending_requisition_id: null,
           accounts: accountsSummary,
           selectedAccounts: _selectedAccountIds,
           lastSync: new Date().toISOString(),
@@ -1066,6 +1212,7 @@ async function confirmAccountSelection() {
         window._doc(window._db, 'bank_connections', window._uid),
         {
           requisition_id: reqId,
+          pending_requisition_id: null,
           accounts: accountsSummary,
           selectedAccounts: _selectedAccountIds,
           lastSync: new Date().toISOString(),
@@ -1074,6 +1221,15 @@ async function confirmAccountSelection() {
         { merge: true }
       );
     }
+
+    // Nettoyer le pointeur de connexion sur le doc racine (merge → rien d'autre touché)
+    try {
+      await window._setDoc(window._doc(window._db, 'bank_connections', window._uid), {
+        connecting_bank_id: null,
+        connecting_requisition_id: null,
+        connecting_at: null
+      }, { merge: true });
+    } catch(e) { console.warn('[SELECT] nettoyage pointeur :', e.message); }
 
     // Recharger toutes les banques + recompute cashflow global
     await loadAllBanks();
@@ -1248,6 +1404,13 @@ async function fetchAndStagePending(arg1, dateFrom) {
     throw new Error(data.error || 'Sync échouée (HTTP ' + res.status + ')');
   }
 
+  // Avertissements par compte remontés par l'API (compte pas encore prêt,
+  // accès expiré, banque muette…) : les montrer au lieu de les avaler.
+  if (Array.isArray(data.warnings) && data.warnings.length > 0) {
+    console.warn('[SYNC] Warnings API pour', bank ? bank.name : '?', ':', data.warnings);
+    showError('⚠️ ' + (bank ? bank.name + ' — ' : '') + data.warnings.join(' · '));
+  }
+
   if (!data.accounts || data.accounts.length === 0) {
     throw new Error('Aucun compte retourné par l\'API');
   }
@@ -1281,14 +1444,14 @@ async function fetchAndStagePending(arg1, dateFrom) {
     // Sous-collection
     await window._setDoc(
       window._doc(window._db, 'bank_connections', window._uid, 'banks', bank.bankId),
-      { requisition_id: requisitionId, accounts: accountsSummary, lastSync: new Date().toISOString(), status: 'active' },
+      { requisition_id: requisitionId, pending_requisition_id: null, accounts: accountsSummary, lastSync: new Date().toISOString(), status: 'active' },
       { merge: true }
     );
   } else {
     // Legacy : doc racine
     await window._setDoc(
       window._doc(window._db, 'bank_connections', window._uid),
-      { requisition_id: requisitionId, accounts: accountsSummary, lastSync: new Date().toISOString(), status: 'active' },
+      { requisition_id: requisitionId, pending_requisition_id: null, accounts: accountsSummary, lastSync: new Date().toISOString(), status: 'active' },
       { merge: true }
     );
   }
@@ -1299,7 +1462,10 @@ async function fetchAndStagePending(arg1, dateFrom) {
   await loadAllBanks();
   await recomputeCashflowFromAllBanks();
 
-  return allTx.filter(function(t){return t.type === 'debit';}).length;
+  return {
+    debits: allTx.filter(function(t){return t.type === 'debit';}).length,
+    total:  allTx.length
+  };
 }
 
 // syncNow : sync TOUTES les banques connectées séquentiellement.
@@ -1307,6 +1473,14 @@ async function fetchAndStagePending(arg1, dateFrom) {
 async function syncNow() {
   if (!_userBanks || _userBanks.length === 0) {
     showError('Aucune connexion bancaire active. Connectez votre banque d\'abord.');
+    return;
+  }
+
+  // Ne synchroniser QUE les banques finalisées : une banque encore "pending"
+  // (requisition jamais liée) fait systématiquement échouer l'appel API.
+  const activeBanks = _userBanks.filter(function(b){ return !!b.requisition_id; });
+  if (activeBanks.length === 0) {
+    showError('Aucune banque finalisée. Terminez la connexion en attente (bouton « Tenter de finaliser » sur la carte de la banque) ou annulez-la, puis reconnectez-vous.');
     return;
   }
 
@@ -1327,22 +1501,24 @@ async function syncNow() {
 
   const dateFrom = (document.getElementById('sync-date-from')||{}).value || '';
   let totalCount = 0;
+  let totalTx    = 0;
   let firstError = null;
 
-  for (let i = 0; i < _userBanks.length; i++) {
-    const b = _userBanks[i];
-    if (overlayText) overlayText.textContent = 'Synchronisation : ' + b.name + ' (' + (i+1) + '/' + _userBanks.length + ')';
+  for (let i = 0; i < activeBanks.length; i++) {
+    const b = activeBanks[i];
+    if (overlayText) overlayText.textContent = 'Synchronisation : ' + b.name + ' (' + (i+1) + '/' + activeBanks.length + ')';
     if (overlaySub)  overlaySub.textContent  = 'Récupération des transactions GoCardless…';
     try {
-      const count = await fetchAndStagePending(b, dateFrom);
-      totalCount += count;
+      const r = await fetchAndStagePending(b, dateFrom);
+      totalCount += r.debits;
+      totalTx    += r.total;
     } catch(e) {
       console.error('[SYNC] Erreur sur', b.name, ':', e.message);
       if (!firstError) firstError = { bank: b.name, msg: e.message || 'Erreur inconnue' };
     }
   }
 
-  if (firstError && totalCount === 0) {
+  if (firstError && totalTx === 0) {
     if (overlay) overlay.classList.remove('show');
     if (btnTop)  btnTop.disabled  = false;
     if (btnMain) btnMain.disabled = false;
@@ -1354,6 +1530,19 @@ async function syncNow() {
       msg = '⏳ ' + firstError.bank + ' limite temporairement les connexions. Patientez 5-10 min.';
     }
     showError(msg);
+    return;
+  }
+
+  // Sync "réussie" mais AUCUNE transaction remontée (0 crédit et 0 débit) :
+  // ne pas envoyer l'utilisateur vers une page de validation vide.
+  if (totalTx === 0) {
+    if (overlay) overlay.classList.remove('show');
+    if (btnTop)  btnTop.disabled  = false;
+    if (btnMain) btnMain.disabled = false;
+    if (dot)     dot.className    = 'status-dot';
+    if (!document.getElementById('sync-error-banner')) {
+      showError('⏳ Aucune nouvelle transaction reçue. Juste après une connexion, votre banque peut mettre quelques minutes à transmettre les données : réessayez dans 5 à 10 minutes. Le bouton 🔍 Debug (en bas de page) détaille la réponse de la banque compte par compte.');
+    }
     return;
   }
 
@@ -1387,9 +1576,19 @@ async function syncOneBank(bankId) {
 
   try {
     const dateFrom = (document.getElementById('sync-date-from')||{}).value || '';
-    const count = await fetchAndStagePending(bank, dateFrom);
+    const r = await fetchAndStagePending(bank, dateFrom);
 
-    if (overlayText) overlayText.textContent = '✅ ' + count + ' dépense(s) prêtes !';
+    // Aucune transaction reçue (0 crédit et 0 débit) : expliquer plutôt que
+    // rediriger vers une page de validation vide.
+    if (r.total === 0) {
+      if (overlay) overlay.classList.remove('show');
+      if (!document.getElementById('sync-error-banner')) {
+        showError('⏳ ' + bank.name + ' : aucune nouvelle transaction reçue. Juste après une connexion, la banque peut mettre quelques minutes à transmettre les données — réessayez dans 5 à 10 minutes. Le bouton 🔍 Debug (en bas de page) détaille la réponse compte par compte.');
+      }
+      return;
+    }
+
+    if (overlayText) overlayText.textContent = '✅ ' + r.debits + ' dépense(s) prêtes !';
     if (overlaySub)  overlaySub.textContent  = 'Redirection vers la validation…';
     setTimeout(function() {
       if (overlay) overlay.classList.remove('show');
@@ -1605,6 +1804,30 @@ async function cancelPendingBank(bankId) {
   }
 }
 
+// Reprendre la finalisation d'une connexion "pending" : cas typique où le retour
+// banque s'est fait dans un autre navigateur (mobile) et où la page banque.html
+// n'a jamais reçu le paramètre de retour. La requisition est pourtant bien liée
+// côté GoCardless → on relance simplement finalizeBankConnection.
+async function resumePendingBank(bankId) {
+  const bank = getBankById(bankId);
+  if (!bank) { showToast('❌ Banque introuvable', 'error'); return; }
+  const reqId = bank.pending_requisition_id || bank.requisition_id || null;
+  if (!reqId) { showToast('❌ Aucune connexion à finaliser pour cette banque', 'error'); return; }
+
+  // Repositionner le contexte de connexion pour que confirmAccountSelection
+  // écrive au bon endroit (sous-doc ou racine legacy).
+  try {
+    if (bank.isLegacy) {
+      sessionStorage.removeItem('alteore_connecting_bank_id');
+    } else {
+      sessionStorage.setItem('alteore_connecting_bank_id', bank.bankId);
+    }
+  } catch(e){}
+
+  showToast('🔄 Finalisation de la connexion…');
+  await finalizeBankConnection(reqId);
+}
+
 // Lancer le flow "+ Connecter une autre banque" (banques existantes conservées)
 function addAnotherBank() {
   _addingBank = true;
@@ -1794,6 +2017,7 @@ window.syncOneBank = syncOneBank;
 window.manageAccountsForBank = manageAccountsForBank;
 window.disconnectOneBank = disconnectOneBank;
 window.cancelPendingBank = cancelPendingBank;
+window.resumePendingBank = resumePendingBank;
 
 // ── PURGE lignes bank_sync (nettoyage en cas de doublons parasites) ──
 async function purgeBankLines() {
@@ -1852,9 +2076,20 @@ async function runDebug() {
   zone.style.display = 'block';
   content.innerHTML = '<div class="loader"><div class="spin"></div><span>Appel GoCardless en cours…</span></div>';
 
-  const reqId = _connection?.requisition_id || _connection?.pending_requisition_id;
+  let reqId = _connection?.requisition_id || _connection?.pending_requisition_id;
+  // Fallback : en visite normale (hors flow de connexion), _connection n'est pas
+  // défini → prendre la 1re banque qui a un requisition_id.
+  if (!reqId && _userBanks && _userBanks.length > 0) {
+    for (let i = 0; i < _userBanks.length; i++) {
+      const b = _userBanks[i];
+      if (b.requisition_id || b.pending_requisition_id) {
+        reqId = b.requisition_id || b.pending_requisition_id;
+        break;
+      }
+    }
+  }
   if (!reqId) {
-    content.innerHTML = '<div style="color:var(--red);padding:12px">Aucun requisition_id trouvé dans _connection.</div>';
+    content.innerHTML = '<div style="color:var(--red);padding:12px">Aucun requisition_id trouvé (aucune banque connectée).</div>';
     return;
   }
 
@@ -1872,7 +2107,8 @@ async function runDebug() {
       ${(data.accounts || []).map((acc, i) => `
         <div style="margin-bottom:20px;border:1.5px solid var(--border);border-radius:10px;overflow:hidden">
           <div style="background:rgba(248,250,255,0.6);padding:10px 14px;font-size:12px;font-weight:700;border-bottom:1px solid var(--border)">
-            Compte ${i+1} : <code>${acc.accountId}</code>
+            Compte ${i+1} : <code>${acc.accountId}</code><br>
+            <span style="font-weight:600;color:var(--muted)">HTTP — details: <strong>${acc.details_status || '?'}</strong> · balances: <strong>${acc.balances_status || '?'}</strong> · transactions: <strong>${acc.transactions_status || '?'}</strong></span>
           </div>
           <div style="padding:12px 14px">
             <div style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:6px">DETAILS RAW :</div>
