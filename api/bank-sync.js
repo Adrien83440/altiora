@@ -3,6 +3,14 @@
 // Le client (banque.html) écrit dans Firestore via Firebase SDK browser
 //
 // Anti rate-limit : délai 350ms entre chaque appel + retry auto sur 429
+//
+// DURCISSEMENT (juillet 2026) :
+// - Tous les statuts HTTP GoCardless sont vérifiés et loggés (avant : un 403/409
+//   sur /transactions/ était silencieusement interprété comme "0 transactions")
+// - Messages dédiés pour TOUS les statuts de requisition (GC, CR, RJ, SA, GA, UA, EX)
+// - Si un compte remonte 0 transaction ou une erreur, on interroge son statut
+//   GoCardless (READY / DISCOVERED / PROCESSING / ERROR...) pour expliquer pourquoi
+// - La réponse inclut un tableau `warnings` (additif) que banque.html affiche
 
 const GC_BASE = 'https://bankaccountdata.gocardless.com/api/v2';
 
@@ -10,6 +18,20 @@ const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
 // Compteur global pour espacer les appels (350ms entre chaque)
 let lastCallTime = 0;
+
+// Extrait le délai de retry d'une réponse 429 (header Retry-After ou body "try again in N seconds")
+function extractRetryAfter(res, body) {
+  let secs = 0;
+  try {
+    const h = res.headers && res.headers.get ? res.headers.get('retry-after') : null;
+    if (h && !isNaN(parseInt(h, 10))) secs = parseInt(h, 10);
+  } catch (e) {}
+  if (!secs && body && body.detail) {
+    const m = String(body.detail).match(/(\d+)\s*seconds/i);
+    if (m) secs = parseInt(m[1], 10);
+  }
+  return secs;
+}
 
 async function gcFetch(url, headers) {
   // Espacer les appels pour rester sous le rate limit (10 req/s)
@@ -27,12 +49,28 @@ async function gcFetch(url, headers) {
     lastCallTime = Date.now();
     const retry = await fetch(url, { headers });
     if (retry.status === 429) {
-      throw { rateLimited: true, message: 'Rate limit GoCardless persistant' };
+      let body = null;
+      try { body = await retry.json(); } catch (e) {}
+      const retryAfter = extractRetryAfter(retry, body);
+      throw { rateLimited: true, retryAfter, message: 'Rate limit GoCardless persistant' };
     }
     return retry;
   }
 
   return res;
+}
+
+// Appel GoCardless avec parsing JSON + log du statut HTTP.
+// Retourne { httpStatus, ok, data } — ne throw QUE sur rate limit persistant.
+async function gcCall(url, headers, label) {
+  const res = await gcFetch(url, headers);
+  let data = null;
+  try { data = await res.json(); } catch (e) { data = null; }
+  if (!res.ok) {
+    const bodyTxt = data ? JSON.stringify(data).substring(0, 200) : '(pas de body)';
+    console.warn(`[GC] ${label} → HTTP ${res.status} ${bodyTxt}`);
+  }
+  return { httpStatus: res.status, ok: res.ok, data: data || {} };
 }
 
 async function getGCToken() {
@@ -52,6 +90,57 @@ async function getGCToken() {
 function parseAmount(val) {
   if (val == null) return 0;
   return parseFloat(String(val).replace(',', '.')) || 0;
+}
+
+// ── Messages utilisateur selon le statut de la requisition GoCardless ──
+// CR = créée, GC = écran de consentement GoCardless, UA = authentification banque,
+// RJ = rejetée par la banque, SA = sélection des comptes, GA = autorisation finale,
+// LN = liée (OK), EX/EXPIRED = expirée.
+function requisitionStatusMessage(status) {
+  switch (status) {
+    case 'EX':
+    case 'EXPIRED':
+      return 'Connexion expirée. Déconnectez et reconnectez votre banque.';
+    case 'UA':
+      // Le user a commencé le flow mais ne l'a pas terminé sur le site de sa banque
+      // (SMS non saisi, app non validée, onglet fermé avant la fin, etc.).
+      return 'Votre connexion bancaire n\'a pas été finalisée. Recommencez la connexion en allant jusqu\'au bout de la validation sur le site de votre banque (saisie du code SMS, validation dans votre application bancaire, etc.).';
+    case 'GC':
+      // Le user est resté (ou a annulé) sur l'écran de consentement GoCardless,
+      // AVANT même d'arriver sur le site de sa banque.
+      return 'La connexion a été interrompue sur l\'écran de consentement (avant l\'accès au site de votre banque). Annulez cette tentative puis reconnectez votre banque en acceptant le consentement et en allant jusqu\'au bout.';
+    case 'CR':
+      return 'La connexion bancaire n\'a jamais été démarrée. Annulez cette tentative puis relancez la connexion.';
+    case 'RJ':
+      return 'Votre banque a refusé la connexion (identifiants incorrects ou accès refusé). Annulez cette tentative puis réessayez en vérifiant vos identifiants de banque en ligne.';
+    case 'SA':
+      return 'La connexion s\'est arrêtée à l\'étape de sélection des comptes. Annulez cette tentative puis recommencez en sélectionnant au moins un compte.';
+    case 'GA':
+      return 'La connexion s\'est arrêtée à la dernière étape d\'autorisation. Annulez cette tentative puis recommencez en allant jusqu\'au bout.';
+    default:
+      return `Aucun compte trouvé (statut : ${status || 'inconnu'}). Annulez cette tentative puis reconnectez votre banque.`;
+  }
+}
+
+// ── Message utilisateur pour un compte dont les transactions ne remontent pas ──
+// txHttp = statut HTTP de l'appel /transactions/, accStatus = statut GoCardless du compte
+function accountIssueMessage(txHttp, accStatus) {
+  if (accStatus === 'DISCOVERED' || accStatus === 'PROCESSING' || txHttp === 409) {
+    return 'La banque n\'a pas encore transmis les données de ce compte (statut ' + (accStatus || 'en préparation') + '). C\'est normal juste après une connexion : réessayez la synchronisation dans 5 à 10 minutes.';
+  }
+  if (txHttp === 403) {
+    return 'L\'accès aux transactions de ce compte n\'a pas été autorisé lors du consentement bancaire. Déconnectez puis reconnectez la banque en autorisant l\'accès aux opérations.';
+  }
+  if (txHttp === 404 || accStatus === 'EXPIRED') {
+    return 'Ce compte n\'est plus accessible (consentement expiré ou compte retiré). Déconnectez puis reconnectez la banque.';
+  }
+  if (accStatus === 'ERROR' || accStatus === 'SUSPENDED') {
+    return 'La banque signale une erreur sur ce compte (statut ' + accStatus + '). Déconnectez puis reconnectez la banque ; si le problème persiste, contactez le support.';
+  }
+  if (txHttp >= 500) {
+    return 'La banque (ou GoCardless) rencontre un problème technique temporaire. Réessayez dans quelques minutes.';
+  }
+  return null;
 }
 
 // Catégories et types d'opération Qonto (et autres banques) à exclure des libellés.
@@ -170,6 +259,15 @@ function extractLabel(tx) {
   return 'Transaction bancaire';
 }
 
+// Message rate-limit selon la durée du blocage (limite courte vs quota quotidien DSP2)
+function rateLimitMessage(e) {
+  const secs = (e && e.retryAfter) || 0;
+  if (secs > 3600) {
+    return 'La limite quotidienne d\'appels de votre banque est atteinte (réglementation DSP2 : environ 4 synchronisations par jour et par compte). Vos données actuelles sont conservées — réessayez demain.';
+  }
+  return 'Votre banque limite temporairement les connexions. Veuillez patienter quelques minutes avant de réessayer.';
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -192,24 +290,23 @@ export default async function handler(req, res) {
     const gcH = { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' };
 
     // Requisition
-    const rRes = await gcFetch(`${GC_BASE}/requisitions/${requisition_id}/`, gcH);
-    const rData = await rRes.json();
-    console.log('Req status:', rData.status, '| nb accounts:', rData.accounts?.length);
+    const rCall = await gcCall(`${GC_BASE}/requisitions/${requisition_id}/`, gcH, 'requisition');
+    const rData = rCall.data;
+    console.log('Req status:', rData.status, '| nb accounts:', rData.accounts?.length, '| HTTP:', rCall.httpStatus);
+
+    // Requisition introuvable côté GoCardless (supprimée) mais encore référencée dans Firestore
+    if (rCall.httpStatus === 404) {
+      return res.status(400).json({
+        error: 'Cette connexion bancaire n\'existe plus. Déconnectez cette banque puis reconnectez-la.',
+        requisitionStatus: 'DELETED'
+      });
+    }
 
     if (!rData.accounts || rData.accounts.length === 0) {
-      let errMsg;
-      if (rData.status === 'EXPIRED') {
-        errMsg = 'Connexion expirée. Déconnectez et reconnectez votre banque.';
-      } else if (rData.status === 'UA') {
-        // UA = User Action / Undergoing Authentication : le user a commencé le flow
-        // mais ne l'a pas terminé sur le site de sa banque (SMS non saisi, app non validée,
-        // onglet fermé avant la fin, etc.). La requisition existe mais la liste de comptes
-        // n'a jamais été reçue. Solution : recommencer la connexion jusqu'au bout.
-        errMsg = 'Votre connexion bancaire n\'a pas été finalisée. Recommencez la connexion en allant jusqu\'au bout de la validation sur le site de votre banque (saisie du code SMS, validation dans votre application bancaire, etc.).';
-      } else {
-        errMsg = `Aucun compte trouvé (statut: ${rData.status || 'inconnu'})`;
-      }
-      return res.status(400).json({ error: errMsg });
+      return res.status(400).json({
+        error: requisitionStatusMessage(rData.status),
+        requisitionStatus: rData.status || 'unknown'
+      });
     }
 
     // ── Filtrer par comptes sélectionnés si spécifié ──
@@ -221,51 +318,66 @@ export default async function handler(req, res) {
     }
 
     const accounts = [];
+    const warnings = [];
 
     for (const accountId of accountList) {
       try {
         // Détails
-        const detRes = await gcFetch(`${GC_BASE}/accounts/${accountId}/details/`, gcH);
-        const detData = await detRes.json();
-        const acc     = detData.account || detData || {};
+        const detCall = await gcCall(`${GC_BASE}/accounts/${accountId}/details/`, gcH, `details ${accountId}`);
+        const acc     = (detCall.ok && (detCall.data.account || detCall.data)) || {};
         const iban    = acc.iban || acc.bban || acc.resourceId || accountId;
         const name    = acc.name || acc.ownerName || acc.product || 'Compte bancaire';
-        console.log(`[${accountId}] iban=${iban} name=${name}`);
+        console.log(`[${accountId}] details → HTTP ${detCall.httpStatus} | iban=${iban} name=${name}`);
 
         // Solde
         let balanceNum = 0, balanceStr = null;
-        try {
-          const bRes = await gcFetch(`${GC_BASE}/accounts/${accountId}/balances/`, gcH);
-          const bData = await bRes.json();
-          const b     = bData.balances?.find(x => x.balanceType === 'interimAvailable')
-                     || bData.balances?.find(x => x.balanceType === 'closingBooked')
-                     || bData.balances?.[0];
+        const balCall = await gcCall(`${GC_BASE}/accounts/${accountId}/balances/`, gcH, `balances ${accountId}`);
+        if (balCall.ok) {
+          const b = balCall.data.balances?.find(x => x.balanceType === 'interimAvailable')
+                 || balCall.data.balances?.find(x => x.balanceType === 'closingBooked')
+                 || balCall.data.balances?.[0];
           if (b) {
             balanceNum = parseAmount(b.balanceAmount?.amount);
             const curr = b.balanceAmount?.currency || 'EUR';
             balanceStr = balanceNum.toLocaleString('fr-FR', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ' + curr;
             console.log(`[${accountId}] balance: ${balanceStr}`);
           }
-        } catch(e) {
-          if (e && e.rateLimited) throw e;
-          console.warn(`[${accountId}] balance err:`, e.message);
         }
 
         // Transactions
         let rawTxs = [];
-        try {
-          let txUrl = `${GC_BASE}/accounts/${accountId}/transactions/`;
-          if (date_from && /^\d{4}-\d{2}-\d{2}$/.test(date_from)) {
-            txUrl += `?date_from=${date_from}`;
+        let txUrl = `${GC_BASE}/accounts/${accountId}/transactions/`;
+        if (date_from && /^\d{4}-\d{2}-\d{2}$/.test(date_from)) {
+          txUrl += `?date_from=${date_from}`;
+        }
+        const txCall = await gcCall(txUrl, gcH, `transactions ${accountId}`);
+        if (txCall.ok) {
+          rawTxs = [...(txCall.data.transactions?.booked || []), ...(txCall.data.transactions?.pending || [])];
+        }
+        console.log(`[${accountId}] transactions → HTTP ${txCall.httpStatus} | ${rawTxs.length} transactions`);
+        if (rawTxs[0]) console.log('sample:', JSON.stringify(rawTxs[0]).substring(0, 250));
+
+        // ── Diagnostic : transactions en erreur OU vides → interroger le statut du compte ──
+        // (endpoint métadonnées /accounts/{id}/ : hors quotas DSP2, appelé uniquement si besoin)
+        let gcAccountStatus = null;
+        let issueMessage = null;
+        const detailsFailed = !detCall.ok;
+        if (!txCall.ok || rawTxs.length === 0 || detailsFailed) {
+          const metaCall = await gcCall(`${GC_BASE}/accounts/${accountId}/`, gcH, `meta ${accountId}`);
+          gcAccountStatus = (metaCall.ok && metaCall.data.status) || null;
+          console.log(`[${accountId}] statut compte GoCardless: ${gcAccountStatus || 'inconnu'}`);
+
+          if (!txCall.ok || detailsFailed) {
+            issueMessage = accountIssueMessage(txCall.ok ? detCall.httpStatus : txCall.httpStatus, gcAccountStatus);
+          } else if (rawTxs.length === 0 && gcAccountStatus && gcAccountStatus !== 'READY') {
+            // HTTP 200 mais 0 transaction ET compte pas encore prêt → banque pas finie de traiter
+            issueMessage = accountIssueMessage(200, gcAccountStatus);
+          } else if (rawTxs.length === 0 && !date_from) {
+            // Historique complet demandé, compte READY, et pourtant 0 transaction :
+            // soit compte réellement vide, soit la banque ne transmet pas les opérations.
+            issueMessage = 'La banque n\'a transmis aucune transaction pour ce compte. Si ce compte a des mouvements, réessayez dans quelques minutes ; si le problème persiste, contactez le support Alteore.';
           }
-          const txRes = await gcFetch(txUrl, gcH);
-          const txData = await txRes.json();
-          rawTxs = [...(txData.transactions?.booked || []), ...(txData.transactions?.pending || [])];
-          console.log(`[${accountId}] ${rawTxs.length} transactions`);
-          if (rawTxs[0]) console.log('sample:', JSON.stringify(rawTxs[0]).substring(0, 250));
-        } catch(e) {
-          if (e && e.rateLimited) throw e;
-          console.warn(`[${accountId}] tx err:`, e.message);
+          if (issueMessage) warnings.push(`${name} : ${issueMessage}`);
         }
 
         const transactions = [];
@@ -296,26 +408,41 @@ export default async function handler(req, res) {
           balanceNum,
           transactionsCount: transactions.length,
           debitsCount: transactions.filter(t => t.type === 'debit').length,
-          transactions
+          transactions,
+          // Champs additifs de diagnostic (ignorés par l'ancien front, utilisés par le nouveau)
+          gcAccountStatus: gcAccountStatus,
+          issueMessage: issueMessage
         });
 
       } catch(e) {
         if (e && e.rateLimited) {
-          return res.status(429).json({ error: 'Votre banque limite temporairement les connexions. Veuillez patienter quelques minutes avant de réessayer.', rate_limited: true });
+          return res.status(429).json({ error: rateLimitMessage(e), rate_limited: true });
         }
         console.error(`[${accountId}] FATAL:`, e.message);
+        warnings.push(`Compte ${accountId} : erreur technique (${e.message || 'inconnue'})`);
       }
     }
 
-    if (accounts.length === 0) return res.status(500).json({ error: 'Impossible de récupérer les données bancaires.' });
+    if (accounts.length === 0) {
+      return res.status(500).json({
+        error: warnings[0] || 'Impossible de récupérer les données bancaires.',
+        warnings
+      });
+    }
 
     const total = accounts.reduce((s, a) => s + a.transactions.length, 0);
-    console.log('OK — total tx:', total);
-    return res.status(200).json({ success: true, accounts, totalTransactions: total });
+    console.log('OK — total tx:', total, warnings.length ? `| ${warnings.length} warning(s)` : '');
+    return res.status(200).json({
+      success: true,
+      accounts,
+      totalTransactions: total,
+      requisitionStatus: rData.status || null,
+      warnings
+    });
 
   } catch(e) {
     if (e && e.rateLimited) {
-      return res.status(429).json({ error: 'Votre banque limite temporairement les connexions. Veuillez patienter quelques minutes avant de réessayer.', rate_limited: true });
+      return res.status(429).json({ error: rateLimitMessage(e), rate_limited: true });
     }
     console.error('bank-sync FATAL:', e);
     return res.status(500).json({ error: e.message || 'Erreur interne serveur' });

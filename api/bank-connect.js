@@ -31,6 +31,7 @@ export default async function handler(req, res) {
     const token = await getAccessToken();
 
     // 0. Déconnecter — supprimer requisition + agreement côté GoCardless
+    //    Un 404 signifie « déjà supprimé côté GoCardless » : c'est un succès, pas une erreur.
     if (req.body.action === 'disconnect') {
       const { requisition_id, agreement_id } = req.body;
       const results = [];
@@ -42,9 +43,9 @@ export default async function handler(req, res) {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
           });
-          results.push({ requisition: r.status });
-          console.log('[disconnect] requisition', requisition_id, '→', r.status);
-        } catch(e) { results.push({ requisition: e.message }); }
+          results.push({ requisition: r.status, ok: r.ok || r.status === 404 });
+          console.log('[disconnect] requisition', requisition_id, '→', r.status, r.status === 404 ? '(déjà supprimée — OK)' : '');
+        } catch(e) { results.push({ requisition: e.message, ok: false }); }
       }
 
       // Supprimer l'agreement
@@ -54,9 +55,9 @@ export default async function handler(req, res) {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${token}`, 'accept': 'application/json' }
           });
-          results.push({ agreement: r.status });
-          console.log('[disconnect] agreement', agreement_id, '→', r.status);
-        } catch(e) { results.push({ agreement: e.message }); }
+          results.push({ agreement: r.status, ok: r.ok || r.status === 404 });
+          console.log('[disconnect] agreement', agreement_id, '→', r.status, r.status === 404 ? '(déjà supprimé — OK)' : '');
+        } catch(e) { results.push({ agreement: e.message, ok: false }); }
       }
 
       return res.status(200).json({ success: true, results });
