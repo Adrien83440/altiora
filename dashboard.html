@@ -618,6 +618,8 @@
           document.getElementById('uplan').textContent='Plan '+d.plan.charAt(0).toUpperCase()+d.plan.slice(1);
           window._userPlanDirect=d.plan;
         }
+        // ── Wave Perf : flags Léa mémorisés ici → évite une 2e lecture users/{uid} dans loadData ──
+        window._leaFlagsDirect={admin:d.role==='admin',beta:d.betaTester===true,agent:d.agentEnabled===true};
         // Bannière trial
         if(d.plan==='trial' && d.trialEnd) showTrialBanner(d.trialEnd, d.pendingPlan||'pro');
         // Saisonnalité
@@ -1048,6 +1050,9 @@ async function loadData(_tries){
     if (window._isAdmin === true || window._isBetaTester === true
         || window._agentEnabled === true || plan === 'trial' || plan === 'dev') {
       isLea = true;
+    } else if (window._leaFlagsDirect) {
+      // ── Wave Perf : flags déjà lus par le bloc auth de la page → zéro lecture réseau ici ──
+      isLea = window._leaFlagsDirect.admin === true || window._leaFlagsDirect.beta === true || window._leaFlagsDirect.agent === true;
     } else if (window._uid && window._db) {
       // Fallback : lire directement le doc user si les flags window ne sont pas encore là
       try {
@@ -1078,8 +1083,10 @@ async function loadData(_tries){
       if (vHint) vHint.textContent = 'Essaie : "Comment va mon CA ?" · "Mes charges du mois ?" · "Mon objectif est à combien ?" · "Tréso tendue ?"';
     }
   } catch(e) { /* fallback silencieux : icône micro par défaut */ }
-  // Stock + RH en parallèle (indépendants : écrivent _stockData et _rhEmployes)
-  await Promise.all([
+  // ── Wave Perf : Stock + RH partent en arrière-plan et ne bloquent plus les KPIs.
+  // La promesse est attendue APRÈS le premier rendu : la section stock s'injecte
+  // dans #stock-kpi-slot, puis le copilote est lancé avec les métriques complètes.
+  const _bgStockRhP = Promise.all([
     loadStockData(),
     (async function(){
       if (!window._rhEmployes) {
@@ -1090,7 +1097,7 @@ async function loadData(_tries){
         } catch(e) {}
       }
     })()
-  ]);
+  ]).catch(function(){ return null; });
 
   const now=new Date();
   const civilYear=now.getFullYear();
@@ -1634,8 +1641,7 @@ async function loadData(_tries){
 
     
     <!-- KPIs STOCK -->
-    ${_stockData.refs>0?'<div class="section-label">📦 Stock & Inventaire</div><div class="kpi-grid-5"><div class="kpi-card blue"><div class="kpi-icon">📦</div><div class="kpi-label">Valeur du stock</div><div class="kpi-value">'+fmtE(_stockData.value)+'</div><div class="kpi-sub"><span class="neutral">'+_stockData.refs+' référence(s) en catalogue</span></div></div><div class="kpi-card '+(_stockData.variation>=0?'green':'red')+'"><div class="kpi-icon">📊</div><div class="kpi-label">Variation stock</div><div class="kpi-value '+(_stockData.variation>=0?'positive':'negative')+'">'+(_stockData.variation>=0?'+':'')+fmtE(_stockData.variation)+'</div><div class="kpi-sub"><span class="neutral">vs mois précédent'+((_stockData.variation>0)?' → +Résultat':_stockData.variation<0?' → −Résultat':'')+'</span></div></div><div class="kpi-card '+(_stockData.ruptures>0?'red':_stockData.alerts>0?'orange':'green')+'"><div class="kpi-icon">⚠️</div><div class="kpi-label">Alertes stock</div><div class="kpi-value '+(_stockData.ruptures>0?'negative':_stockData.alerts>0?'':'positive')+'">'+(_stockData.alerts+_stockData.ruptures)+'</div><div class="kpi-sub"><span class="neutral">'+_stockData.ruptures+' rupture(s) · '+_stockData.alerts+' seuil(s)</span></div></div><div class="kpi-card purple"><div class="kpi-icon">🔄</div><div class="kpi-label">Rotation</div><div class="kpi-value">'+(_stockData.rotation>0?_stockData.rotation.toFixed(1)+'×':'—')+'</div><div class="kpi-sub"><span class="neutral">'+(_stockData.joursStock>0?_stockData.joursStock+' jours de stock':'—')+'</span></div></div><div class="kpi-card teal"><div class="kpi-icon">💡</div><div class="kpi-label">Impact résultat</div><div class="kpi-value '+(_stockData.variation>=0?'positive':'negative')+'">'+(_stockData.variation>=0?'+':'')+fmtE(_stockData.variation)+'</div><div class="kpi-sub"><span class="neutral">Variation de stock</span></div></div></div><div style="padding:8px 14px;background:var(--blue-ghost);border-radius:8px;font-size:11px;color:var(--blue-main);margin-bottom:16px">💡 <b>Impact comptable</b> : La variation de stock de <b>'+(_stockData.variation>=0?'+':'')+fmtE(_stockData.variation)+'</b> '+ (_stockData.variation>0?'augmente':'diminue')+' votre résultat. <a href="gestion-stock.html" style="color:var(--blue-main);font-weight:700">Gérer le stock →</a></div>'
-    :''}
+    <div id="stock-kpi-slot"></div>
 
     <!-- PRÉVISIONS ANNUELLES + FIDÉLISATION -->
     <div class="section-label">🔮 Prévisions & Vue d'ensemble ${CAN_MAX.includes(plan)?'<a href="scenarios.html" style="font-size:11px;font-weight:600;color:var(--blue-main);text-decoration:none;margin-left:12px;padding:3px 10px;border:1px solid var(--border);border-radius:6px;background:white">🎯 Simuler des scénarios →</a>':''}</div>
@@ -1746,21 +1752,31 @@ async function loadData(_tries){
   _newsP.then(function(n){ news=n; var el=document.getElementById('newsSlot'); if(el) el.innerHTML=buildNews(); });
   _fidP.then(function(f){ fidStats=f; var el=document.getElementById('fidSlot'); if(el) el.innerHTML=buildFidCard(); });
 
-  // COPILOTE IA — collecter les métriques et lancer l'analyse
-  var _copiloteMetrics = {
-    moisEnCours: MONTHS[currentM]+' '+year,
-    caMois: current.caHT, chargesMois: current.chargesHT, resultatMois: current.resultat,
-    cashflowMois: current.cashflow, tvaMois: current.tvaCollectee,
-    caAnnuel: annualCA, chargesAnnuelles: annualCharges, resultatAnnuel: annualTotalResultat,
-    cashflowAnnuel: annualCashflow, txResultat: annualCA>0?(annualTotalResultat/annualCA*100):0,
-    nbMoisData: nbMoisReel, projCA: projCA, projResultat: projResultat,
-    varCA: varCA, varCharges: varCharges,
-    stock: _stockData.loaded ? {valeur:_stockData.value, variation:_stockData.variation, refs:_stockData.refs, alertes:_stockData.alerts, ruptures:_stockData.ruptures, rotation:_stockData.rotation, joursStock:_stockData.joursStock} : null,
-    dettesMens: monthsData.reduce(function(s,d){return s+d.creditsPrincipal+d.creditsInteret},0)/Math.max(nbMoisReel,1),
-    saisonnalite: _ss.active ? {ouverts:_ss.ouverts, inter:_ss.inter, fermes:_ss.fermes, moisEquivCA:_ss.moisEquivCA} : null,
-  };
-  loadCopilote(_copiloteMetrics);
-  window._vocalMetrics = _copiloteMetrics;
+  // ── Wave Perf : quand stock + RH sont prêts (arrière-plan), on injecte la
+  // section stock dans son slot puis on lance le copilote avec les métriques
+  // complètes (un seul appel IA, jamais de double appel stock:null → stock:{...}).
+  _bgStockRhP.then(function(){
+    try{
+      var _slot=document.getElementById('stock-kpi-slot');
+      if(_slot) _slot.outerHTML=renderStockSectionHTML();
+    }catch(e){}
+
+    // COPILOTE IA — collecter les métriques et lancer l'analyse
+    var _copiloteMetrics = {
+      moisEnCours: MONTHS[currentM]+' '+year,
+      caMois: current.caHT, chargesMois: current.chargesHT, resultatMois: current.resultat,
+      cashflowMois: current.cashflow, tvaMois: current.tvaCollectee,
+      caAnnuel: annualCA, chargesAnnuelles: annualCharges, resultatAnnuel: annualTotalResultat,
+      cashflowAnnuel: annualCashflow, txResultat: annualCA>0?(annualTotalResultat/annualCA*100):0,
+      nbMoisData: nbMoisReel, projCA: projCA, projResultat: projResultat,
+      varCA: varCA, varCharges: varCharges,
+      stock: _stockData.loaded ? {valeur:_stockData.value, variation:_stockData.variation, refs:_stockData.refs, alertes:_stockData.alerts, ruptures:_stockData.ruptures, rotation:_stockData.rotation, joursStock:_stockData.joursStock} : null,
+      dettesMens: monthsData.reduce(function(s,d){return s+d.creditsPrincipal+d.creditsInteret},0)/Math.max(nbMoisReel,1),
+      saisonnalite: _ss.active ? {ouverts:_ss.ouverts, inter:_ss.inter, fermes:_ss.fermes, moisEquivCA:_ss.moisEquivCA} : null,
+    };
+    loadCopilote(_copiloteMetrics);
+    window._vocalMetrics = _copiloteMetrics;
+  });
 }
 
 function buildCharts(monthsData,currentIdx,year,hasAnnualData,fiscalMonths){
@@ -1851,14 +1867,29 @@ window.setFiscalStart=setFiscalStart;
 // ══════════════════════════════════════════════════════════
 var _stockData = {loaded:false, products:[], movements:[], value:0, variation:0, alerts:0, ruptures:0, refs:0, rotation:0, joursStock:0, snapshotPrev:null};
 
+// ── Wave Perf : section Stock extraite du template principal.
+// Vide tant que _stockData n'est pas chargé ; injectée dans #stock-kpi-slot par loadData.
+function renderStockSectionHTML(){
+  return (_stockData.refs>0?'<div class="section-label">📦 Stock & Inventaire</div><div class="kpi-grid-5"><div class="kpi-card blue"><div class="kpi-icon">📦</div><div class="kpi-label">Valeur du stock</div><div class="kpi-value">'+fmtE(_stockData.value)+'</div><div class="kpi-sub"><span class="neutral">'+_stockData.refs+' référence(s) en catalogue</span></div></div><div class="kpi-card '+(_stockData.variation>=0?'green':'red')+'"><div class="kpi-icon">📊</div><div class="kpi-label">Variation stock</div><div class="kpi-value '+(_stockData.variation>=0?'positive':'negative')+'">'+(_stockData.variation>=0?'+':'')+fmtE(_stockData.variation)+'</div><div class="kpi-sub"><span class="neutral">vs mois précédent'+((_stockData.variation>0)?' → +Résultat':_stockData.variation<0?' → −Résultat':'')+'</span></div></div><div class="kpi-card '+(_stockData.ruptures>0?'red':_stockData.alerts>0?'orange':'green')+'"><div class="kpi-icon">⚠️</div><div class="kpi-label">Alertes stock</div><div class="kpi-value '+(_stockData.ruptures>0?'negative':_stockData.alerts>0?'':'positive')+'">'+(_stockData.alerts+_stockData.ruptures)+'</div><div class="kpi-sub"><span class="neutral">'+_stockData.ruptures+' rupture(s) · '+_stockData.alerts+' seuil(s)</span></div></div><div class="kpi-card purple"><div class="kpi-icon">🔄</div><div class="kpi-label">Rotation</div><div class="kpi-value">'+(_stockData.rotation>0?_stockData.rotation.toFixed(1)+'×':'—')+'</div><div class="kpi-sub"><span class="neutral">'+(_stockData.joursStock>0?_stockData.joursStock+' jours de stock':'—')+'</span></div></div><div class="kpi-card teal"><div class="kpi-icon">💡</div><div class="kpi-label">Impact résultat</div><div class="kpi-value '+(_stockData.variation>=0?'positive':'negative')+'">'+(_stockData.variation>=0?'+':'')+fmtE(_stockData.variation)+'</div><div class="kpi-sub"><span class="neutral">Variation de stock</span></div></div></div><div style="padding:8px 14px;background:var(--blue-ghost);border-radius:8px;font-size:11px;color:var(--blue-main);margin-bottom:16px">💡 <b>Impact comptable</b> : La variation de stock de <b>'+(_stockData.variation>=0?'+':'')+fmtE(_stockData.variation)+'</b> '+ (_stockData.variation>0?'augmente':'diminue')+' votre résultat. <a href="gestion-stock.html" style="color:var(--blue-main);font-weight:700">Gérer le stock →</a></div>':'');
+}
+
 async function loadStockData(){
   if(!window._uid||!window._getDocs||!window._db||_stockData.loaded) return _stockData;
   try{
-    var pSnap=await window._getDocs(window._collection(window._db,'stock',window._uid,'products'));
+    // ── Wave Perf : les 3 lectures en parallèle (products + movements + snapshot M-1) ──
+    var _pfNow=new Date();
+    var _pfPrevM=_pfNow.getMonth()===0?12:_pfNow.getMonth();
+    var _pfPrevY=_pfNow.getMonth()===0?_pfNow.getFullYear()-1:_pfNow.getFullYear();
+    var _pfPrevKey=_pfPrevY+'-'+String(_pfPrevM).padStart(2,'0');
+    var _pfRes=await Promise.all([
+      window._getDocs(window._collection(window._db,'stock',window._uid,'products')),
+      window._getDocs(window._collection(window._db,'stock',window._uid,'movements')),
+      window._getDoc(window._doc(window._db,'stock',window._uid,'snapshots',_pfPrevKey)).catch(function(){return null;})
+    ]);
+    var pSnap=_pfRes[0], mSnap=_pfRes[1], _pfSnapDoc=_pfRes[2];
     _stockData.products=[];
     pSnap.forEach(function(d){_stockData.products.push(Object.assign({id:d.id},d.data()))});
 
-    var mSnap=await window._getDocs(window._collection(window._db,'stock',window._uid,'movements'));
     _stockData.movements=[];
     mSnap.forEach(function(d){_stockData.movements.push(Object.assign({id:d.id},d.data()))});
 
@@ -1899,16 +1930,11 @@ async function loadStockData(){
     _stockData.ruptures=ruptures;
     _stockData.refs=_stockData.products.length;
 
-    // Load previous month snapshot for variation
-    var now=new Date();
-    var prevM=now.getMonth()===0?12:now.getMonth();
-    var prevY=now.getMonth()===0?now.getFullYear()-1:now.getFullYear();
-    var prevKey=prevY+'-'+String(prevM).padStart(2,'0');
+    // Snapshot mois précédent : déjà lu en parallèle plus haut (Wave Perf)
     try{
-      var snapDoc=await window._getDoc(window._doc(window._db,'stock',window._uid,'snapshots',prevKey));
-      if(snapDoc.exists()){
-        _stockData.snapshotPrev=snapDoc.data();
-        _stockData.variation=totalVal-(snapDoc.data().totalValue||0);
+      if(_pfSnapDoc && _pfSnapDoc.exists()){
+        _stockData.snapshotPrev=_pfSnapDoc.data();
+        _stockData.variation=totalVal-(_pfSnapDoc.data().totalValue||0);
       }
     }catch(e){}
 
@@ -1950,11 +1976,16 @@ async function loadCopilote(metrics) {
   var metricsStr = JSON.stringify(metrics);
   var hash = 0;
   for (var i = 0; i < metricsStr.length; i++) { hash = ((hash << 5) - hash + metricsStr.charCodeAt(i)) | 0; }
-  var hashKey = 'h' + Math.abs(hash).toString(36);
+  // ── Wave Perf : cache par JOUR + hash de données, en localStorage.
+  // Le briefing survit à la fermeture du navigateur → instantané toute la journée,
+  // et un seul appel Claude par jour tant que les chiffres ne changent pas.
+  var _cpNow=new Date();
+  var _cpDay=_cpNow.getFullYear()+'-'+String(_cpNow.getMonth()+1).padStart(2,'0')+'-'+String(_cpNow.getDate()).padStart(2,'0');
+  var hashKey = 'h' + Math.abs(hash).toString(36) + '_' + _cpDay;
 
-  // Check cache (sessionStorage — valide tant que l'onglet est ouvert ET données identiques)
+  // Check cache (localStorage — valide le jour même ET données identiques)
   try {
-    var cached = sessionStorage.getItem('copilote_' + hashKey);
+    var cached = localStorage.getItem('copilote_' + hashKey);
     if (cached) {
       _copiloteCache = JSON.parse(cached);
       renderCopilote(widget, _copiloteCache);
@@ -1977,8 +2008,15 @@ async function loadCopilote(metrics) {
     _copiloteCache = data;
     renderCopilote(widget, data);
 
-    // Cache in sessionStorage (invalidé si données changent ou onglet fermé)
-    try { sessionStorage.setItem('copilote_' + hashKey, JSON.stringify(data)); } catch(e) {}
+    // Cache in localStorage (invalidé si données changent ou jour suivant)
+    try {
+      // Purge : on ne garde que le briefing du jour courant
+      for (var _ci = localStorage.length - 1; _ci >= 0; _ci--) {
+        var _ck = localStorage.key(_ci);
+        if (_ck && _ck.indexOf('copilote_') === 0 && _ck !== 'copilote_' + hashKey) localStorage.removeItem(_ck);
+      }
+      localStorage.setItem('copilote_' + hashKey, JSON.stringify(data));
+    } catch(e) {}
 
   } catch(e) {
     console.error('Copilote error:', e);
@@ -2071,6 +2109,13 @@ function renderCopilote(widget, data) {
 async function refreshCopilote() {
   _copiloteCache = null;
   try { sessionStorage.clear(); } catch(e) {}
+  // Wave Perf : purge du cache localStorage du briefing (sinon ↻ ne rafraîchit rien)
+  try {
+    for (var _ci = localStorage.length - 1; _ci >= 0; _ci--) {
+      var _ck = localStorage.key(_ci);
+      if (_ck && _ck.indexOf('copilote_') === 0) localStorage.removeItem(_ck);
+    }
+  } catch(e) {}
   var widget = document.getElementById('copilote-widget');
   if (widget) widget.querySelector('.copilote-inner').innerHTML = '<div class="copilote-loading"><div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>🧠 Actualisation en cours...</div>';
   window.loadData();
