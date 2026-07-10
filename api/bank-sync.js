@@ -268,6 +268,27 @@ function rateLimitMessage(e) {
   return 'Votre banque limite temporairement les connexions. Veuillez patienter quelques minutes avant de réessayer.';
 }
 
+// Dédoublonner les warnings : quand N comptes remontent exactement le même
+// problème (cas typique : consentement sans l'accès aux opérations → 403 sur
+// TOUS les comptes), on n'affiche le message qu'une fois, préfixé du nombre
+// de comptes, au lieu d'un mur de texte répété N fois.
+function dedupeWarnings(list) {
+  const counts = {};
+  const order = [];
+  for (let i = 0; i < list.length; i++) {
+    const w = list[i];
+    if (counts[w] === undefined) { counts[w] = 0; order.push(w); }
+    counts[w]++;
+  }
+  return order.map(function(w){
+    if (counts[w] === 1) return w;
+    // Retirer le préfixe "Nom du compte : " pour un message groupé propre
+    const idx = w.indexOf(' : ');
+    const core = idx > -1 ? w.substring(idx + 3) : w;
+    return counts[w] + ' comptes — ' + core;
+  });
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://alteore.com');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -423,21 +444,23 @@ export default async function handler(req, res) {
       }
     }
 
+    const warningsOut = dedupeWarnings(warnings);
+
     if (accounts.length === 0) {
       return res.status(500).json({
-        error: warnings[0] || 'Impossible de récupérer les données bancaires.',
-        warnings
+        error: warningsOut[0] || 'Impossible de récupérer les données bancaires.',
+        warnings: warningsOut
       });
     }
 
     const total = accounts.reduce((s, a) => s + a.transactions.length, 0);
-    console.log('OK — total tx:', total, warnings.length ? `| ${warnings.length} warning(s)` : '');
+    console.log('OK — total tx:', total, warningsOut.length ? `| ${warningsOut.length} warning(s)` : '');
     return res.status(200).json({
       success: true,
       accounts,
       totalTransactions: total,
       requisitionStatus: rData.status || null,
-      warnings
+      warnings: warningsOut
     });
 
   } catch(e) {
