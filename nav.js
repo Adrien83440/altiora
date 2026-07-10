@@ -1,4 +1,4 @@
-// ── nav.js — Alteore ── v5 (nav centralisée + module RH Master + dirigeant + chatbot + updates)
+// ── nav.js — Alteore ── v6 (nav par usage : Au quotidien / Mes résultats / Développer + CTA Saisir + mode découverte + encart migration)
 (function () {
 
   // ── Vercel Analytics ──
@@ -86,11 +86,17 @@
     function a(page)  { return PAGE === page ? ' on' : ''; }
     function aNI(arr) { return arr.includes(PAGE) ? ' on' : ''; }
 
-    const kpisPages = ['cout-revient.html', 'marges.html', 'panier-moyen.html', 'dettes.html', 'gestion-stock.html'];
-    const kpisOpen  = kpisPages.includes(PAGE)                                   ? 'style="max-height:500px"' : '';
-    const pilOpen   = ['pilotage.html', 'cashflow.html', 'previsions.html'].includes(PAGE)          ? 'style="max-height:500px"' : '';
-    const fidOpen   = PAGE === 'fidelisation.html'                               ? 'style="max-height:500px"' : '';
-    const rhOpen    = RH_PAGES.includes(PAGE)                                    ? 'style="max-height:4000px"' : '';
+    // ── Groupes ouverts selon la page active (v6 : nav par usage) ──
+    const rentPages  = ['cout-revient.html', 'marges.html', 'panier-moyen.html'];
+    const tresoPages = ['cashflow.html', 'dettes.html'];
+    const bankPages  = ['banque.html', 'bank-validation.html', 'import.html', 'import-releve.html', 'import-facture-achat.html'];
+    const kpisOpen  = rentPages.includes(PAGE)     ? 'style="max-height:500px"'  : '';
+    const pilOpen   = PAGE === 'pilotage.html'     ? 'style="max-height:500px"'  : '';
+    const tresoOpen = tresoPages.includes(PAGE)    ? 'style="max-height:500px"'  : '';
+    const bankOpen  = bankPages.includes(PAGE)     ? 'style="max-height:500px"'  : '';
+    const fidOpen   = PAGE === 'fidelisation.html' ? 'style="max-height:500px"'  : '';
+    const rhOpen    = RH_PAGES.includes(PAGE)      ? 'style="max-height:4000px"' : '';
+    const rot = ' style="transform:rotate(90deg)"';
 
     return `
 <nav id="alteore-nav"${RH_PAGES.includes(PAGE) ? ' class="rh-mode"' : FID_PAGES.includes(PAGE) ? ' class="fid-mode"' : ''}>
@@ -111,163 +117,149 @@
       <div class="logo-t">ALTEORE</div>
     </div>
 
-    <div class="ns">Principal</div>
+    <!-- CTA action n°1 : saisir ses chiffres -->
+    <div class="nav-cta" onclick="location.href='pilotage.html'">✏️ <span>Saisir mes chiffres</span></div>
 
-    <div class="ni dash-ni${a('dashboard.html')}" id="nav-dashboard" onclick="location.href='dashboard.html'">
-      <span>🏠</span><span style="font-weight:700">Tableau de bord</span>
+    <!-- Carte "Bien démarrer" — remplie par initNavExtras() si nouveau compte -->
+    <div class="nav-start" id="nav-start-card" style="display:none" onclick="if(window._navStartLink)location.href=window._navStartLink">
+      <div class="nav-start-top"><span>Bien démarrer</span><b id="nav-start-count">0/5</b></div>
+      <div class="nav-start-bar"><i id="nav-start-fill" style="width:0%"></i></div>
+      <div class="nav-start-hint" id="nav-start-hint"></div>
     </div>
 
-    <div class="ni${a('suivi-ca.html')}" id="nav-suivi" onclick="location.href='suivi-ca.html'">
-      <span>📈</span><span>Suivi CA &amp; Résultats</span>
-    </div>
+    <!-- ═══ ① AU QUOTIDIEN ═══ -->
+    <div class="ns"><span class="step">1</span>Au quotidien</div>
 
-    <!-- KPIs -->
-    <div class="ni${aNI(kpisPages)}" id="nav-kpis" onclick="toggleAlteoreNav('kpis-sub',this)">
-      <span>🎯</span><span style="flex:1">KPIs Clés</span><span class="chev" id="chev-kpis">›</span>
-    </div>
-    <div class="sub" id="kpis-sub" ${kpisOpen}>
-      <div class="si${a('cout-revient.html')}"  id="nav-cout"   onclick="location.href='cout-revient.html'"><span class="dot"></span>Coût de revient</div>
-      <div class="si${a('marges.html')}"         id="nav-marges" onclick="location.href='marges.html'"><span class="dot"></span>Marge brute &amp; nette</div>
-      <div class="si${a('panier-moyen.html')}"   id="nav-panier" onclick="location.href='panier-moyen.html'"><span class="dot"></span>Panier moyen</div>
-      <div class="si${a('dettes.html')}"         id="nav-dettes" onclick="location.href='dettes.html'"><span class="dot"></span>Dettes &amp; Emprunts</div>
-      <div class="si${a('gestion-stock.html')}"  id="nav-stock"  onclick="location.href='gestion-stock.html'"><span class="dot"></span>Gestion des Stocks</div>
-    </div>
-
-    <!-- Pilotage -->
-    <div class="ni${aNI(['pilotage.html','cashflow.html','previsions.html'])}" id="nav-pilotage" onclick="toggleAlteoreNav('pil-sub',this)">
-      <span>🧭</span><span style="flex:1">Pilotage</span><span class="chev" id="chev-pil">›</span>
+    <div class="ni grp" id="nav-pilotage" onclick="toggleAlteoreNav('pil-sub',this)">
+      <span class="chip c-blue">🧭</span><span class="lbl b">Pilotage</span><span class="chev" id="chev-pil"${pilOpen ? rot : ''}>›</span>
     </div>
     <div class="sub" id="pil-sub" ${pilOpen}>
       ${window._pilYears.map(y => `<div data-pil-year="${y}" class="si${PAGE === 'pilotage.html' && ACTIVE_YEAR === y ? ' on' : ''}" onclick="location.href='pilotage.html?year=${y}'"><span class="dot"></span>Pilotage ${y}</div>`).join('\n      ')}
-      <div id="pil-add-year-btn" style="display:flex;align-items:center;gap:8px;padding:7px 20px 7px 44px;color:rgba(255,255,255,.35);font-size:11px;cursor:pointer;transition:.15s" onmouseenter="this.style.color='rgba(255,255,255,.7)'" onmouseleave="this.style.color='rgba(255,255,255,.35)'" onclick="addPilotageYear()"><span style="font-size:14px;line-height:1">＋</span> Ajouter une année</div>
-      <div class="si${a('cashflow.html')}" onclick="location.href='cashflow.html'" style="border-top:1px solid rgba(255,255,255,.06);margin-top:4px;padding-top:8px">
-        <span class="dot" style="background:#0d9488"></span>💧 Cashflow
-      </div>
-      <div class="si${a('previsions.html')}" id="nav-previsions" onclick="location.href='previsions.html'" style="border-top:1px solid rgba(255,255,255,.06);margin-top:4px;padding-top:8px">
-        <span class="dot" style="background:#7c3aed"></span>🔮 Prévisions IA
-        <span style="font-size:9px;font-weight:700;background:rgba(124,58,237,.25);color:#c4b5fd;padding:2px 6px;border-radius:20px;margin-left:auto">Master</span>
-      </div>
+      <div id="pil-add-year-btn" style="display:flex;align-items:center;gap:8px;padding:7px 20px 7px 44px;color:rgba(255,255,255,.35);font-size:11px;cursor:pointer;transition:.15s" onmouseenter="this.style.color='rgba(255,255,255,.7)'" onmouseleave="this.style.color='rgba(255,255,255,.35)'" onclick="addPilotageYear()"><span style="font-size:14px;line-height:1">＋</span> Ajouter une année</div>
     </div>
 
-    <!-- Rapports -->
-    <div class="ns">Rapports</div>
-    <div class="ni${a('rapport-annuel.html')}" id="nav-rapport" onclick="location.href='rapport-annuel.html'">
-      <span>📄</span><span style="flex:1">Situation intermédiaire IA</span>
-      <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.25);color:#6ee7b7;padding:2px 7px;border-radius:20px">Nouveau</span>
+    <div class="ni grp" id="nav-banque" onclick="toggleAlteoreNav('bank-sub',this)">
+      <span class="chip c-teal">🏦</span><span class="lbl b">Banque &amp; imports</span><span class="plan-badge nv">Nouveau</span><span class="chev" id="chev-bank"${bankOpen ? rot : ''}>›</span>
+    </div>
+    <div class="sub" id="bank-sub" ${bankOpen}>
+      <div class="si${a('banque.html') || a('bank-validation.html')}" onclick="location.href='banque.html'">Connexion bancaire</div>
+      <div class="si${a('import.html')}" id="nav-import" onclick="location.href='import.html'">Import de données</div>
+    </div>
+
+    <!-- ═══ ② MES RÉSULTATS ═══ -->
+    <div class="ns"><span class="step">2</span>Mes résultats</div>
+
+    <div class="ni${a('dashboard.html')}" id="nav-dashboard" onclick="location.href='dashboard.html'">
+      <span class="chip c-blue">🏠</span><span class="lbl b">Tableau de bord</span>
+    </div>
+    <div class="ni${a('suivi-ca.html')}" id="nav-suivi" onclick="location.href='suivi-ca.html'">
+      <span class="chip c-indigo">📈</span><span class="lbl">Suivi CA &amp; Résultats</span>
+    </div>
+
+    <div class="ni grp" id="nav-kpis" onclick="toggleAlteoreNav('kpis-sub',this)">
+      <span class="chip c-orange">🧮</span><span class="lbl">Rentabilité</span><span class="chev" id="chev-kpis"${kpisOpen ? rot : ''}>›</span>
+    </div>
+    <div class="sub" id="kpis-sub" ${kpisOpen}>
+      <div class="si${a('cout-revient.html')}"  id="nav-cout"   onclick="location.href='cout-revient.html'">Coût de revient</div>
+      <div class="si${a('marges.html')}"         id="nav-marges" onclick="location.href='marges.html'">Marge brute &amp; nette</div>
+      <div class="si${a('panier-moyen.html')}"   id="nav-panier" onclick="location.href='panier-moyen.html'">Panier moyen</div>
+    </div>
+
+    <div class="ni grp" id="nav-treso" onclick="toggleAlteoreNav('treso-sub',this)">
+      <span class="chip c-teal">💧</span><span class="lbl">Trésorerie</span><span class="chev" id="chev-treso"${tresoOpen ? rot : ''}>›</span>
+    </div>
+    <div class="sub" id="treso-sub" ${tresoOpen}>
+      <div class="si${a('cashflow.html')}" id="nav-cashflow" onclick="location.href='cashflow.html'">Cashflow</div>
+      <div class="si${a('dettes.html')}"   id="nav-dettes"   onclick="location.href='dettes.html'">Dettes &amp; Emprunts</div>
+    </div>
+
+    <!-- ═══ ③ DÉVELOPPER ═══ -->
+    <div class="ns"><span class="step">3</span>Développer</div>
+
+    <div class="ni${a('gestion-stock.html')}" id="nav-stock" onclick="location.href='gestion-stock.html'">
+      <span class="chip c-amber">📦</span><span class="lbl">Gestion des stocks</span>
+    </div>
+
+    <div class="ni grp" id="nav-fid" onclick="toggleAlteoreNav('fid-nav-sub',this)">
+      <span class="chip c-gold">💎</span><span class="lbl b">Fidélisation</span><span class="plan-badge">Max</span><span class="chev fid-chev"${fidOpen ? rot : ''}>›</span>
+    </div>
+    <div class="sub fid" id="fid-nav-sub" ${fidOpen}>
+      <div class="si fid-si" id="fid-si-dashboard" onclick="goFid('dashboard')">Dashboard fidélité</div>
+      <div class="si fid-si" id="fid-si-clients"   onclick="goFid('clients')">Clients</div>
+      <div class="si fid-si" id="fid-si-carte"     onclick="goFid('carte')">Carte fidélité</div>
+      <div class="si fid-si" id="fid-si-points"    onclick="goFid('points')">Points &amp; Récompenses</div>
+      <div class="si fid-si" id="fid-si-coupons"   onclick="goFid('coupons')">Coupons &amp; Offres</div>
+      <div class="si fid-si" id="fid-si-campagnes" onclick="goFid('campagnes')">Campagnes</div>
     </div>
 
     <div class="ni${a('scenarios.html')}" id="nav-scenarios" onclick="location.href='scenarios.html'">
-      <span>🎯</span><span style="flex:1">Scénarios "Et si..."</span>
+      <span class="chip c-blue">🎯</span><span class="lbl">Scénarios "Et si..."</span>
     </div>
-    <!-- IA -->
-    <div class="ns">Intelligence IA</div>
-    <div class="ni lea-ni${a('agent.html') || a('agent-historique.html') || a('agent-upgrade.html')}" id="nav-lea" onclick="location.href='agent.html'">
-      <span class="lea-avatar-mini">👩‍💼</span><span style="flex:1;font-weight:700">Léa</span>
-      <span id="nav-lea-badge" class="lea-badge">Nouveau</span>
-    </div>
-    <div class="ni${a('bilan.html')}" id="nav-bilan" onclick="location.href='bilan.html'">
-      <span>🤖</span><span style="flex:1">Analyse de Bilan</span>
-      <span style="font-size:10px;font-weight:700;background:rgba(79,126,248,.3);color:#a5b4fc;padding:2px 7px;border-radius:20px">IA</span>
+    <div class="ni${a('previsions.html')}" id="nav-previsions" onclick="location.href='previsions.html'">
+      <span class="chip c-violet">🔮</span><span class="lbl">Prévisions IA</span><span class="plan-badge">Master</span>
     </div>
 
-    <!-- Fidélisation -->
-    <div class="ns fid-ns">Fidélisation</div>
-    <div class="ni fid-ni${a('fidelisation.html')}" id="nav-fid" onclick="toggleAlteoreNav('fid-nav-sub',this)">
-      <span>💎</span><span style="flex:1;font-weight:700">Fidélisation</span><span class="chev fid-chev">›</span>
+    <!-- ═══ MON ÉQUIPE ═══ -->
+    <div class="ns">Mon équipe</div>
+    <div class="ni grp" id="nav-rh" onclick="toggleAlteoreNav('rh-nav-sub',this)">
+      <span class="chip c-green">👥</span><span class="lbl b">Module RH</span><span class="plan-badge">Master</span><span class="chev rh-chev"${rhOpen ? rot : ''}>›</span>
     </div>
-    <div class="sub" id="fid-nav-sub" ${fidOpen}>
-      <div class="si fid-si" id="fid-si-dashboard" onclick="goFid('dashboard')"><span class="dot fid-dot"></span>Dashboard fidélité</div>
-      <div class="si fid-si" id="fid-si-clients" onclick="goFid('clients')"><span class="dot fid-dot"></span>Clients</div>
-      <div class="si fid-si" id="fid-si-carte" onclick="goFid('carte')"><span class="dot fid-dot"></span>Carte fidélité</div>
-      <div class="si fid-si" id="fid-si-points" onclick="goFid('points')"><span class="dot fid-dot"></span>Points &amp; Récompenses</div>
-      <div class="si fid-si" id="fid-si-coupons" onclick="goFid('coupons')"><span class="dot fid-dot"></span>Coupons &amp; Offres</div>
-      <div class="si fid-si" id="fid-si-campagnes" onclick="goFid('campagnes')"><span class="dot fid-dot"></span>Campagnes</div>
-    </div>
-
-    <!-- ═══════════════════════════════════ -->
-    <!-- MODULE RH — Plan Master            -->
-    <!-- ═══════════════════════════════════ -->
-    <div class="ns rh-ns">Ressources Humaines</div>
-    <div class="ni rh-ni${aNI(RH_PAGES)}" id="nav-rh" onclick="toggleAlteoreNav('rh-nav-sub',this)">
-      <span>👥</span><span style="flex:1;font-weight:700">Module RH</span>
-      <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.2);color:#6ee7b7;padding:2px 6px;border-radius:20px;margin-right:4px">Master</span>
-      <span class="chev rh-chev">›</span>
-    </div>
-    <div class="sub" id="rh-nav-sub" ${rhOpen}>
+    <div class="sub rh" id="rh-nav-sub" ${rhOpen}>
 
       <div class="rh-sub-group">Accueil</div>
-      <div class="si rh-si${a('rh-dashboard.html')}" onclick="location.href='rh-dashboard.html'">
-        <span class="dot rh-dot"></span>Dashboard RH
-      </div>
+      <div class="si rh-si${a('rh-dashboard.html')}" onclick="location.href='rh-dashboard.html'">Dashboard RH</div>
 
       <div class="rh-sub-group">RH Core</div>
-      <div class="si rh-si${a('rh-employes.html')}"  onclick="location.href='rh-employes.html'"><span class="dot rh-dot"></span>Employés &amp; Fiches</div>
-      <div class="si rh-si${a('rh-planning.html')}"  onclick="location.href='rh-planning.html'"><span class="dot rh-dot"></span>Planning</div>
-      <div class="si rh-si${a('rh-conges.html')}"    onclick="location.href='rh-conges.html'"><span class="dot rh-dot"></span>Congés</div>
-      <div class="si rh-si${a('rh-temps.html')}"     onclick="location.href='rh-temps.html'"><span class="dot rh-dot"></span>Temps de travail</div>
-      <div class="si rh-si${a('rh-pointages.html')}" onclick="location.href='rh-pointages.html'">
-        <span class="dot rh-dot"></span>
-        <span style="flex:1">Pointages</span>
-        <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.2);color:#6ee7b7;padding:1px 5px;border-radius:4px;flex-shrink:0">Nouveau</span>
-      </div>
+      <div class="si rh-si${a('rh-employes.html')}"  onclick="location.href='rh-employes.html'">Employés &amp; Fiches</div>
+      <div class="si rh-si${a('rh-planning.html')}"  onclick="location.href='rh-planning.html'">Planning</div>
+      <div class="si rh-si${a('rh-conges.html')}"    onclick="location.href='rh-conges.html'">Congés</div>
+      <div class="si rh-si${a('rh-temps.html')}"     onclick="location.href='rh-temps.html'">Temps de travail</div>
+      <div class="si rh-si${a('rh-pointages.html')}" onclick="location.href='rh-pointages.html'">Pointages</div>
       <div class="si rh-si${a('rh-emargements.html')}" onclick="location.href='rh-emargements.html'">
-        <span class="dot rh-dot"></span>
         <span style="flex:1">Émargements</span>
-        <span style="font-size:9px;font-weight:700;background:rgba(59,130,246,.2);color:#93c5fd;padding:1px 5px;border-radius:4px;flex-shrink:0">Légal</span>
+        <span class="mini-badge lg">Légal</span>
       </div>
 
       <div class="rh-sub-group">Rémunération</div>
-      <div class="si rh-si${a('rh-paie.html')}" onclick="location.href='rh-paie.html'">
-        <span class="dot rh-dot"></span>
-        <span style="flex:1">Paie &amp; Salaires</span>
-        <span style="font-size:9px;font-weight:700;background:rgba(239,68,68,.15);color:#f87171;padding:1px 5px;border-radius:4px;flex-shrink:0">Indicatif</span>
-      </div>
-      <div class="si rh-si${a('rh-dirigeant.html')}" onclick="location.href='rh-dirigeant.html'">
-        <span class="dot rh-dot"></span>
-        <span style="flex:1">Rémunération dirigeant</span>
-        <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.2);color:#6ee7b7;padding:1px 5px;border-radius:4px;flex-shrink:0">Nouveau</span>
-      </div>
-      <div class="si rh-si${a('rh-objectifs.html')}" onclick="location.href='rh-objectifs.html'">
-        <span class="dot rh-dot"></span>
-        <span style="flex:1">Objectifs &amp; Primes</span>
-        <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.2);color:#6ee7b7;padding:1px 5px;border-radius:4px;flex-shrink:0">Nouveau</span>
-      </div>
+      <div class="si rh-si${a('rh-paie.html')}" onclick="location.href='rh-paie.html'">Paie &amp; Salaires</div>
+      <div class="si rh-si${a('rh-dirigeant.html')}" onclick="location.href='rh-dirigeant.html'">Rémunération dirigeant</div>
+      <div class="si rh-si${a('rh-objectifs.html')}" onclick="location.href='rh-objectifs.html'">Objectifs &amp; Primes</div>
 
       <div class="rh-sub-group">Recrutement</div>
-      <div class="si rh-si${a('rh-recrutement.html')}" onclick="location.href='rh-recrutement.html'"><span class="dot rh-dot"></span>Recrutement</div>
+      <div class="si rh-si${a('rh-recrutement.html')}" onclick="location.href='rh-recrutement.html'">Recrutement</div>
 
       <div class="rh-sub-group">Gestion</div>
-      <div class="si rh-si${a('rh-onboarding.html')}"  onclick="location.href='rh-onboarding.html'"><span class="dot rh-dot"></span>Onboarding / Offboarding</div>
-      <div class="si rh-si${a('rh-entretiens.html')}"  onclick="location.href='rh-entretiens.html'"><span class="dot rh-dot"></span>Entretiens annuels</div>
-      <div class="si rh-si${a('rh-conformite.html')}"  onclick="location.href='rh-conformite.html'"><span class="dot rh-dot"></span>Conformité &amp; Légal</div>
+      <div class="si rh-si${a('rh-onboarding.html')}"  onclick="location.href='rh-onboarding.html'">Onboarding / Offboarding</div>
+      <div class="si rh-si${a('rh-entretiens.html')}"  onclick="location.href='rh-entretiens.html'">Entretiens annuels</div>
+      <div class="si rh-si${a('rh-conformite.html')}"  onclick="location.href='rh-conformite.html'">Conformité &amp; Légal</div>
       <div class="si rh-si${a('rh-urgence.html')}" onclick="location.href='rh-urgence.html'">
-        <span class="dot rh-dot"></span>
         <span style="flex:1">Urgence Contrôle</span>
-        <span style="font-size:9px;font-weight:700;background:rgba(239,68,68,.2);color:#f87171;padding:1px 5px;border-radius:4px;flex-shrink:0">SOS</span>
+        <span class="mini-badge sos">SOS</span>
       </div>
-      <div class="si rh-si${a('rh-contrats.html')}"   onclick="location.href='rh-contrats.html'"><span class="dot rh-dot"></span>Contrats de travail
-        <span style="font-size:9px;font-weight:700;background:rgba(124,58,237,.2);color:#c084fc;padding:1px 5px;border-radius:4px;flex-shrink:0;margin-left:auto">IA</span>
-      </div>
-      <div class="si rh-si${a('rh-modeles.html')}"     onclick="location.href='rh-modeles.html'"><span class="dot rh-dot"></span>Modèles de documents</div>
+      <div class="si rh-si${a('rh-contrats.html')}"   onclick="location.href='rh-contrats.html'">Contrats de travail</div>
+      <div class="si rh-si${a('rh-modeles.html')}"     onclick="location.href='rh-modeles.html'">Modèles de documents</div>
 
     </div><!-- /rh-nav-sub -->
+
+    <!-- ═══ MON ASSISTANT IA ═══ -->
+    <div class="ns">Mon assistant IA</div>
+    <div class="ni lea-ni${a('agent.html') || a('agent-historique.html') || a('agent-upgrade.html')}" id="nav-lea" onclick="location.href='agent.html'">
+      <span class="chip c-violet lea-avatar-mini">👩‍💼</span><span class="lbl b">Léa</span>
+      <span id="nav-lea-badge" class="lea-badge">Nouveau</span>
+    </div>
+    <div class="ni${a('bilan.html')}" id="nav-bilan" onclick="location.href='bilan.html'">
+      <span class="chip c-violet">🤖</span><span class="lbl">Analyse de Bilan</span><span class="plan-badge">Max</span>
+    </div>
+    <div class="ni${a('rapport-annuel.html')}" id="nav-rapport" onclick="location.href='rapport-annuel.html'">
+      <span class="chip c-violet">📄</span><span class="lbl">Situation intermédiaire</span>
+    </div>
 
   </div><!-- /nav-scroll-area -->
 
   <div class="nav-footer">
-    <div class="ni${a('banque.html')}" id="nav-banque" onclick="location.href='banque.html'" style="border-top:1px solid rgba(255,255,255,.08);padding:10px 0 8px;margin:0">
-      <span>🏦</span><span style="flex:1">Connexion bancaire</span>
-      <span style="font-size:9px;font-weight:700;background:rgba(16,185,129,.25);color:#6ee7b7;padding:2px 7px;border-radius:20px">Nouveau</span>
-    </div>
-    <div class="ni" id="nav-import" onclick="location.href='import.html'" style="padding:8px 0;margin:0">
-      <span>📥</span><span>Import de données</span>
-    </div>
-    <div class="ni${a('tutoriels.html')}" id="nav-tutos" onclick="location.href='tutoriels.html'" style="padding:8px 0;margin:0">
-      <span>🎓</span><span>Tutoriels</span>
-    </div>
-    <div class="ni${a('aide.html')}" id="nav-aide" onclick="location.href='aide.html'" style="padding:8px 0;margin:0">
-      <span>❓</span><span>Centre d'aide</span>
-      <span id="nav-aide-badge" style="display:none;background:#dc2626;color:white;font-size:10px;font-weight:800;padding:1px 6px;border-radius:20px;margin-left:4px"></span>
+    <div class="foot-row">
+      <div class="fbtn${a('tutoriels.html')}" id="nav-tutos" onclick="location.href='tutoriels.html'">🎓 Tutoriels</div>
+      <div class="fbtn${a('aide.html')}" id="nav-aide" onclick="location.href='aide.html'">❓ Aide<span id="nav-aide-badge" style="display:none;background:#dc2626;color:white;font-size:10px;font-weight:800;padding:1px 6px;border-radius:20px;margin-left:6px"></span></div>
     </div>
     <!-- Slot admin : rempli dynamiquement si role === 'admin' -->
     <div id="nav-admin-slot"></div>
@@ -279,10 +271,10 @@
       </div>
       <button class="lbtn" onclick="event.stopPropagation();(window.doLogout||window.handleLogout||function(){window._signOut&&window._signOut(window._auth).then(()=>location.href='index.html')})()">⎋</button>
     </div>
-    <div style="display:flex;justify-content:center;gap:14px;padding:10px 0 2px">
-      <a href="mentions-legales.html"  style="font-size:10px;color:rgba(255,255,255,.22);text-decoration:none;transition:color .2s" onmouseover="this.style.color='rgba(255,255,255,.6)'" onmouseout="this.style.color='rgba(255,255,255,.22)'">Mentions</a>
-      <a href="cgv.html"               style="font-size:10px;color:rgba(255,255,255,.22);text-decoration:none;transition:color .2s" onmouseover="this.style.color='rgba(255,255,255,.6)'" onmouseout="this.style.color='rgba(255,255,255,.22)'">CGV</a>
-      <a href="confidentialite.html"   style="font-size:10px;color:rgba(255,255,255,.22);text-decoration:none;transition:color .2s" onmouseover="this.style.color='rgba(255,255,255,.6)'" onmouseout="this.style.color='rgba(255,255,255,.22)'">Confidentialité</a>
+    <div class="legal-row">
+      <a href="mentions-legales.html" class="legal-a">Mentions</a>
+      <a href="cgv.html"              class="legal-a">CGV</a>
+      <a href="confidentialite.html"  class="legal-a">Confidentialité</a>
     </div>
   </div>
 </nav>`;
@@ -295,128 +287,141 @@
 <style id="alteore-nav-css">
 /* ── BASE ── */
 nav#alteore-nav{width:250px;height:100vh;background:linear-gradient(180deg,#0f1f5c,#162366);position:fixed;top:0;left:0;display:flex;flex-direction:column;overflow:hidden;z-index:99;box-sizing:border-box}
-nav#alteore-nav .nav-scroll-area{flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.12) transparent}
+nav#alteore-nav .nav-scroll-area{flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.12) transparent;position:relative;padding-bottom:8px}
+nav#alteore-nav .nav-scroll-area::before{content:'';position:absolute;top:-70px;left:50%;transform:translateX(-50%);width:300px;height:190px;background:radial-gradient(closest-side,rgba(0,212,240,.15),transparent);pointer-events:none}
 nav#alteore-nav .nav-scroll-area::-webkit-scrollbar{width:4px}
 nav#alteore-nav .nav-scroll-area::-webkit-scrollbar-thumb{background:rgba(255,255,255,.15);border-radius:99px}
-nav#alteore-nav .logo{display:flex;align-items:center;gap:10px;padding:22px 18px;border-bottom:1px solid rgba(255,255,255,.08)}
+nav#alteore-nav .logo{display:flex;align-items:center;gap:10px;padding:20px 18px 14px;position:relative}
 nav#alteore-nav .logo-t{font-size:17px;font-weight:800;color:#fff;letter-spacing:1px}
-nav#alteore-nav .ns{font-size:10px;font-weight:700;color:rgba(255,255,255,.28);letter-spacing:1px;text-transform:uppercase;padding:12px 18px 4px}
-nav#alteore-nav .ni{display:flex;align-items:center;gap:9px;padding:9px 18px;color:rgba(255,255,255,.55);font-size:12.5px;font-weight:500;cursor:pointer;border-left:3px solid transparent;transition:.15s}
-nav#alteore-nav .ni:hover{color:#fff;background:rgba(255,255,255,.06)}
-nav#alteore-nav .ni.on{color:#fff;background:rgba(255,255,255,.1);border-left-color:#4f7ef8}
-/* ── MODULES PRINCIPAUX — blanc gras + hover couleur module ── */
-nav#alteore-nav .ni.dash-ni{color:#fff;font-weight:700}
-nav#alteore-nav .ni.dash-ni:hover{background:rgba(96,165,250,.12);border-left-color:rgba(96,165,250,.5)}
-nav#alteore-nav .ni.dash-ni.on{background:rgba(96,165,250,.18);border-left-color:#60a5fa}
-nav#alteore-nav .ni.fid-ni{color:#fff;font-weight:700}
-nav#alteore-nav .ni.fid-ni:hover{background:rgba(251,191,36,.1);border-left-color:rgba(251,191,36,.45)}
-nav#alteore-nav .ni.fid-ni.on{background:rgba(251,191,36,.15);border-left-color:#fbbf24}
-nav#alteore-nav .ni.rh-ni{color:#fff;font-weight:700;border-left-color:transparent}
-nav#alteore-nav .ni.rh-ni:hover{background:rgba(16,185,129,.1);border-left-color:rgba(16,185,129,.45)}
-nav#alteore-nav .ni.rh-ni.on{color:#fff;background:rgba(16,185,129,.15);border-left-color:#10b981}
-nav#alteore-nav .sub{overflow:hidden;max-height:0;transition:max-height .5s ease}
-nav#alteore-nav .si{display:flex;align-items:center;gap:7px;padding:7px 18px 7px 40px;color:rgba(255,255,255,.4);font-size:12px;cursor:pointer;border-left:3px solid transparent;transition:.15s}
-nav#alteore-nav .si:hover{color:rgba(255,255,255,.75);background:rgba(255,255,255,.04)}
-nav#alteore-nav .si.on{color:#fff;background:rgba(79,126,248,.15);border-left-color:rgba(79,126,248,.6)}
-nav#alteore-nav .dot{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.25);display:inline-block;flex-shrink:0}
-nav#alteore-nav .si.on .dot{background:#4f7ef8}
-nav#alteore-nav .chev{font-size:11px;color:rgba(255,255,255,.3);transition:transform .25s;margin-left:auto}
-nav#alteore-nav .nav-footer{flex-shrink:0;padding:12px 18px 8px;border-top:1px solid rgba(255,255,255,.08)}
-nav#alteore-nav .ucard{display:flex;align-items:center;gap:8px;padding:8px;background:rgba(255,255,255,.07);border-radius:8px}
-nav#alteore-nav .uav{width:29px;height:29px;background:linear-gradient(135deg,#4f7ef8,#6366f1);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff}
+
+/* ── CTA "Saisir mes chiffres" ── */
+nav#alteore-nav .nav-cta{display:flex;align-items:center;justify-content:center;gap:8px;margin:2px 12px 8px;padding:11px 12px;border-radius:12px;cursor:pointer;color:#fff;font-size:13px;font-weight:800;letter-spacing:.2px;background:linear-gradient(135deg,#00d4f0 0%,#2456f0 55%,#1a3dce 100%);box-shadow:0 6px 18px rgba(0,180,240,.30),inset 0 1px 0 rgba(255,255,255,.25);transition:transform .15s,box-shadow .15s;user-select:none}
+nav#alteore-nav .nav-cta:hover{transform:translateY(-1px);box-shadow:0 9px 24px rgba(0,180,240,.40),inset 0 1px 0 rgba(255,255,255,.25)}
+nav#alteore-nav .nav-cta:active{transform:translateY(0)}
+
+/* ── Carte "Bien démarrer" (mode découverte) ── */
+nav#alteore-nav .nav-start{margin:0 12px 6px;padding:10px 12px;background:rgba(255,255,255,.06);border:1px solid rgba(0,212,240,.28);border-radius:12px;cursor:pointer;transition:.15s}
+nav#alteore-nav .nav-start:hover{background:rgba(255,255,255,.09)}
+nav#alteore-nav .nav-start-top{display:flex;justify-content:space-between;align-items:center;font-size:11px;font-weight:700;color:#fff;margin-bottom:7px}
+nav#alteore-nav .nav-start-top b{color:#7be9ff;font-size:11.5px}
+nav#alteore-nav .nav-start-bar{height:6px;background:rgba(255,255,255,.12);border-radius:99px;overflow:hidden}
+nav#alteore-nav .nav-start-bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#00d4f0,#4f7ef8);transition:width .5s}
+nav#alteore-nav .nav-start-hint{font-size:10.5px;color:rgba(255,255,255,.55);margin-top:7px;line-height:1.35}
+
+/* ── Sections + pastilles d'étape (mode découverte) ── */
+nav#alteore-nav .ns{display:flex;align-items:center;gap:7px;font-size:10px;font-weight:800;color:rgba(255,255,255,.42);letter-spacing:1.2px;text-transform:uppercase;padding:15px 18px 5px}
+nav#alteore-nav .ns .step{display:none;width:15px;height:15px;flex-shrink:0;border-radius:50%;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;letter-spacing:0;background:linear-gradient(135deg,#00d4f0,#1a3dce);box-shadow:0 0 8px rgba(0,212,240,.35)}
+nav#alteore-nav.decouverte .ns .step{display:inline-flex}
+
+/* ── Items principaux (pastille + libellé, actif en pilule) ── */
+nav#alteore-nav .ni{display:flex;align-items:center;gap:9px;margin:1px 10px;padding:7px 8px;border-radius:10px;color:rgba(255,255,255,.72);font-size:12.5px;font-weight:500;cursor:pointer;transition:background .15s,color .15s;border-left:3px solid transparent}
+nav#alteore-nav .ni:hover{color:#fff;background:rgba(255,255,255,.07)}
+nav#alteore-nav .ni.on{color:#fff;background:rgba(79,126,248,.22);font-weight:600}
+nav#alteore-nav .chip{width:24px;height:24px;flex-shrink:0;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;font-size:12px}
+nav#alteore-nav .c-blue{background:rgba(79,126,248,.20)}
+nav#alteore-nav .c-indigo{background:rgba(99,102,241,.20)}
+nav#alteore-nav .c-teal{background:rgba(20,184,166,.20)}
+nav#alteore-nav .c-orange{background:rgba(251,146,60,.20)}
+nav#alteore-nav .c-amber{background:rgba(245,158,11,.20)}
+nav#alteore-nav .c-gold{background:rgba(251,191,36,.20)}
+nav#alteore-nav .c-green{background:rgba(16,185,129,.20)}
+nav#alteore-nav .c-violet{background:rgba(167,139,250,.22)}
+nav#alteore-nav .lbl{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+nav#alteore-nav .lbl.b{font-weight:700;color:#fff}
+nav#alteore-nav .ni:not(.on):not(:hover) .lbl.b{color:rgba(255,255,255,.88)}
+nav#alteore-nav .chev{font-size:12px;color:rgba(255,255,255,.35);transition:transform .25s;flex-shrink:0}
+
+/* ── Badges de plan (statiques) + compat verrou ── */
+nav#alteore-nav .plan-badge{font-size:9px;font-weight:800;padding:2px 7px;border-radius:20px;flex-shrink:0;background:rgba(255,255,255,.10);color:rgba(255,255,255,.75);border:1px solid rgba(255,255,255,.16)}
+nav#alteore-nav .plan-badge.nv{background:rgba(16,185,129,.22);color:#6ee7b7;border-color:rgba(16,185,129,.25)}
+nav#alteore-nav .ni:has(.nav-lock-badge) .plan-badge{display:none}
+nav#alteore-nav .mini-badge{font-size:8.5px;font-weight:800;padding:1px 6px;border-radius:20px;margin-left:auto;flex-shrink:0}
+nav#alteore-nav .mini-badge.lg{background:rgba(59,130,246,.2);color:#93c5fd}
+nav#alteore-nav .mini-badge.sos{background:rgba(239,68,68,.2);color:#f87171}
+
+/* ── Sous-menus ── */
+nav#alteore-nav .sub{overflow:hidden;max-height:0;transition:max-height .45s ease}
+nav#alteore-nav .sub.open{max-height:4000px}
+nav#alteore-nav .si{display:flex;align-items:center;gap:8px;margin:0 10px;padding:6px 10px 6px 38px;border-radius:8px;font-size:12px;color:rgba(255,255,255,.50);cursor:pointer;position:relative;transition:background .15s,color .15s;border-left:3px solid transparent}
+nav#alteore-nav .si::before{content:'';position:absolute;left:22px;top:50%;transform:translateY(-50%);width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.25)}
+nav#alteore-nav .si:hover{color:#fff;background:rgba(255,255,255,.05)}
+nav#alteore-nav .si.on{color:#fff;background:rgba(79,126,248,.18)}
+nav#alteore-nav .si.on::before{background:#4f7ef8}
+nav#alteore-nav .si .dot{display:none}
+nav#alteore-nav .sub.fid .si.on{background:rgba(251,191,36,.16)}
+nav#alteore-nav .sub.fid .si.on::before{background:#fbbf24}
+nav#alteore-nav .sub.rh .si.on{background:rgba(16,185,129,.17)}
+nav#alteore-nav .sub.rh .si.on::before{background:#10b981}
+nav#alteore-nav .rh-sub-group{font-size:9px;font-weight:800;color:rgba(52,211,153,.5);letter-spacing:1px;text-transform:uppercase;padding:9px 18px 3px 38px;margin-top:2px}
+
+/* ── Footer ── */
+nav#alteore-nav .nav-footer{flex-shrink:0;padding:10px 12px 8px;border-top:1px solid rgba(255,255,255,.09)}
+nav#alteore-nav .foot-row{display:flex;gap:8px;margin-bottom:8px}
+nav#alteore-nav .fbtn{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 6px;background:rgba(255,255,255,.06);border-radius:10px;font-size:11.5px;font-weight:600;color:rgba(255,255,255,.65);cursor:pointer;transition:.15s;white-space:nowrap}
+nav#alteore-nav .fbtn:hover{background:rgba(255,255,255,.11);color:#fff}
+nav#alteore-nav .fbtn.on{background:rgba(79,126,248,.22);color:#fff}
+nav#alteore-nav .ucard{display:flex;align-items:center;gap:8px;padding:8px;background:rgba(255,255,255,.07);border-radius:10px}
+nav#alteore-nav .ucard:hover{background:rgba(255,255,255,.11)}
+nav#alteore-nav .uav{width:29px;height:29px;background:linear-gradient(135deg,#4f7ef8,#6366f1);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex-shrink:0}
 nav#alteore-nav .un{font-size:11.5px;font-weight:600;color:#fff}
 nav#alteore-nav .upl{font-size:10px;color:rgba(255,255,255,.3)}
 nav#alteore-nav .lbtn{margin-left:auto;background:none;border:none;color:rgba(255,255,255,.3);cursor:pointer;font-size:13px}
+nav#alteore-nav .legal-row{display:flex;justify-content:center;gap:14px;padding:9px 0 2px}
+nav#alteore-nav .legal-a{font-size:10px;color:rgba(255,255,255,.22);text-decoration:none;transition:color .2s}
+nav#alteore-nav .legal-a:hover{color:rgba(255,255,255,.6)}
 
-/* ── RH — couleurs vertes ── */
-nav#alteore-nav .rh-ns{color:rgba(52,211,153,.55)}
-nav#alteore-nav .rh-chev{color:rgba(52,211,153,.45)!important}
-nav#alteore-nav .rh-sub-group{font-size:9px;font-weight:700;color:rgba(52,211,153,.4);letter-spacing:1px;text-transform:uppercase;padding:8px 18px 3px 18px;margin-top:4px}
-nav#alteore-nav .rh-si{color:rgba(255,255,255,.4)}
-nav#alteore-nav .rh-si:hover{color:rgba(255,255,255,.82);background:rgba(16,185,129,.07)}
-nav#alteore-nav .rh-si.on{color:#fff;background:rgba(16,185,129,.17);border-left-color:rgba(16,185,129,.75)}
-nav#alteore-nav .rh-dot{background:rgba(52,211,153,.28)}
-nav#alteore-nav .rh-si.on .rh-dot{background:#10b981}
-
-/* ── LÉA — couleurs violettes (placée dans la section Intelligence IA) ── */
-nav#alteore-nav .ni.lea-ni{color:#fff;font-weight:700;position:relative}
-nav#alteore-nav .ni.lea-ni:hover{background:rgba(124,58,237,.14);border-left-color:rgba(167,139,250,.55)}
-nav#alteore-nav .ni.lea-ni.on{background:rgba(124,58,237,.2);border-left-color:#a78bfa}
-nav#alteore-nav .lea-avatar-mini{
-  display:inline-flex;align-items:center;justify-content:center;
-  width:20px;height:20px;
-  background:linear-gradient(135deg,#a78bfa,#7c3aed);
-  border-radius:50%;
-  font-size:12px;
-  box-shadow:0 0 0 1px rgba(255,255,255,.15), 0 0 12px rgba(167,139,250,.3);
-  flex-shrink:0;
-}
-nav#alteore-nav .lea-badge{
-  font-size:9px;font-weight:700;letter-spacing:.3px;
-  padding:2px 7px;border-radius:20px;
-  background:linear-gradient(135deg,rgba(167,139,250,.3),rgba(124,58,237,.3));
-  color:#ddd6fe;
-  border:1px solid rgba(167,139,250,.3);
-}
+/* ── LÉA — badge dynamique (classes posées par applyLeaNavItem) ── */
+nav#alteore-nav .ni.lea-ni{position:relative}
+nav#alteore-nav .ni.lea-ni:hover{background:rgba(124,58,237,.14)}
+nav#alteore-nav .ni.lea-ni.on{background:rgba(124,58,237,.22)}
+nav#alteore-nav .lea-avatar-mini{box-shadow:0 0 0 1px rgba(255,255,255,.12),0 0 12px rgba(167,139,250,.3)}
+nav#alteore-nav .lea-badge{font-size:9px;font-weight:700;letter-spacing:.3px;padding:2px 7px;border-radius:20px;flex-shrink:0;background:linear-gradient(135deg,rgba(167,139,250,.3),rgba(124,58,237,.3));color:#ddd6fe;border:1px solid rgba(167,139,250,.3)}
 nav#alteore-nav .lea-badge.active{background:linear-gradient(135deg,rgba(16,185,129,.3),rgba(5,150,105,.3));color:#6ee7b7;border-color:rgba(16,185,129,.3)}
 nav#alteore-nav .lea-badge.degraded{background:rgba(245,158,11,.2);color:#fbbf24;border-color:rgba(245,158,11,.3)}
 nav#alteore-nav .lea-badge.trial{background:rgba(96,165,250,.2);color:#93c5fd;border-color:rgba(96,165,250,.3)}
 nav#alteore-nav .lea-badge.admin{background:linear-gradient(135deg,rgba(239,68,68,.25),rgba(220,38,38,.25));color:#fca5a5;border-color:rgba(239,68,68,.3)}
 nav#alteore-nav .lea-badge.beta{background:linear-gradient(135deg,rgba(99,102,241,.3),rgba(79,70,229,.3));color:#c7d2fe;border-color:rgba(99,102,241,.35)}
-@keyframes leaPulse{
-  0%,100%{box-shadow:0 0 0 1px rgba(255,255,255,.15), 0 0 12px rgba(167,139,250,.3)}
-  50%{box-shadow:0 0 0 1px rgba(255,255,255,.2), 0 0 18px rgba(167,139,250,.55)}
-}
+@keyframes leaPulse{0%,100%{box-shadow:0 0 0 1px rgba(255,255,255,.12),0 0 12px rgba(167,139,250,.3)}50%{box-shadow:0 0 0 1px rgba(255,255,255,.18),0 0 18px rgba(167,139,250,.55)}}
 nav#alteore-nav .ni.lea-ni .lea-avatar-mini{animation:leaPulse 3s ease-in-out infinite}
 
 /* ── THÈME VERT GLOBAL quand RH ouvert ── */
 nav#alteore-nav.rh-mode{background:linear-gradient(180deg,#052e16 0%,#064e23 50%,#065f2c 100%);transition:background .45s ease}
-nav#alteore-nav.rh-mode .logo{border-bottom-color:rgba(52,211,153,.15)}
 nav#alteore-nav.rh-mode .logo-t{background:linear-gradient(135deg,#34d399,#6ee7b7);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-nav#alteore-nav.rh-mode .ns{color:rgba(52,211,153,.35)}
-nav#alteore-nav.rh-mode .rh-ns{color:rgba(52,211,153,.7)}
-nav#alteore-nav.rh-mode .ni{color:rgba(255,255,255,.5);transition:.15s}
-nav#alteore-nav.rh-mode .ni:hover{background:rgba(52,211,153,.08)}
-nav#alteore-nav.rh-mode .ni.on{background:rgba(52,211,153,.12);border-left-color:#34d399}
-nav#alteore-nav.rh-mode .ni.rh-ni.on{background:rgba(52,211,153,.18);border-left-color:#10b981}
-nav#alteore-nav.rh-mode .si{color:rgba(255,255,255,.38)}
+nav#alteore-nav.rh-mode .nav-scroll-area::before{background:radial-gradient(closest-side,rgba(52,211,153,.14),transparent)}
+nav#alteore-nav.rh-mode .nav-cta{background:linear-gradient(135deg,#10b981 0%,#059669 60%,#047857 100%);box-shadow:0 6px 18px rgba(16,185,129,.3),inset 0 1px 0 rgba(255,255,255,.25)}
+nav#alteore-nav.rh-mode .ns{color:rgba(52,211,153,.45)}
+nav#alteore-nav.rh-mode .ni:hover{background:rgba(52,211,153,.09)}
+nav#alteore-nav.rh-mode .ni.on{background:rgba(52,211,153,.18)}
 nav#alteore-nav.rh-mode .si:hover{background:rgba(52,211,153,.07)}
-nav#alteore-nav.rh-mode .si.on{background:rgba(52,211,153,.15);border-left-color:rgba(52,211,153,.65)}
-nav#alteore-nav.rh-mode .si.on .dot{background:#34d399}
-nav#alteore-nav.rh-mode .rh-sub-group{color:rgba(52,211,153,.55)}
-nav#alteore-nav.rh-mode .rh-si:hover{background:rgba(52,211,153,.1)}
-nav#alteore-nav.rh-mode .rh-si.on{background:rgba(52,211,153,.2);border-left-color:#10b981}
-nav#alteore-nav.rh-mode .nav-footer{border-top-color:rgba(52,211,153,.15);background:linear-gradient(180deg,transparent,#065f2c 18px)}
+nav#alteore-nav.rh-mode .si.on{background:rgba(52,211,153,.17)}
+nav#alteore-nav.rh-mode .si.on::before{background:#34d399}
+nav#alteore-nav.rh-mode .rh-sub-group{color:rgba(52,211,153,.6)}
+nav#alteore-nav.rh-mode .nav-footer{border-top-color:rgba(52,211,153,.15)}
 nav#alteore-nav.rh-mode .ucard{background:rgba(52,211,153,.1)}
 nav#alteore-nav.rh-mode .uav{background:linear-gradient(135deg,#10b981,#34d399)}
-nav#alteore-nav.rh-mode .chev{color:rgba(52,211,153,.35)}
-nav#alteore-nav.rh-mode .rh-chev{color:rgba(52,211,153,.7)!important}
+nav#alteore-nav.rh-mode .chev{color:rgba(52,211,153,.4)}
 nav#alteore-nav.rh-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgba(52,211,153,.3)}
 
-/* ── THÈME DORÉ quand FIDÉLISATION ouvert ── */
+/* ── THÈME DORÉ quand FIDÉLISATION ouverte ── */
 nav#alteore-nav.fid-mode{background:linear-gradient(180deg,#451a03 0%,#78350f 50%,#92400e 100%);transition:background .45s ease}
-nav#alteore-nav.fid-mode .logo{border-bottom-color:rgba(251,191,36,.15)}
 nav#alteore-nav.fid-mode .logo-t{background:linear-gradient(135deg,#fbbf24,#fde68a);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-nav#alteore-nav.fid-mode .ns{color:rgba(251,191,36,.3)}
-nav#alteore-nav.fid-mode .fid-ns{color:rgba(251,191,36,.65)}
-nav#alteore-nav.fid-mode .ni{color:rgba(255,255,255,.5);transition:.15s}
-nav#alteore-nav.fid-mode .ni:hover{background:rgba(251,191,36,.08)}
-nav#alteore-nav.fid-mode .ni.on{background:rgba(251,191,36,.1);border-left-color:#fbbf24}
-nav#alteore-nav.fid-mode .ni.fid-ni.on{background:rgba(251,191,36,.16);border-left-color:#f59e0b}
-nav#alteore-nav.fid-mode .si{color:rgba(255,255,255,.38)}
+nav#alteore-nav.fid-mode .nav-scroll-area::before{background:radial-gradient(closest-side,rgba(251,191,36,.14),transparent)}
+nav#alteore-nav.fid-mode .nav-cta{background:linear-gradient(135deg,#fbbf24 0%,#f59e0b 60%,#d97706 100%);box-shadow:0 6px 18px rgba(245,158,11,.3),inset 0 1px 0 rgba(255,255,255,.3)}
+nav#alteore-nav.fid-mode .ns{color:rgba(251,191,36,.42)}
+nav#alteore-nav.fid-mode .ni:hover{background:rgba(251,191,36,.09)}
+nav#alteore-nav.fid-mode .ni.on{background:rgba(251,191,36,.16)}
 nav#alteore-nav.fid-mode .si:hover{background:rgba(251,191,36,.07)}
-nav#alteore-nav.fid-mode .si.on{background:rgba(251,191,36,.13);border-left-color:rgba(251,191,36,.6)}
-nav#alteore-nav.fid-mode .si.on .dot{background:#fbbf24}
-nav#alteore-nav.fid-mode .fid-si:hover{background:rgba(251,191,36,.1)}
-nav#alteore-nav.fid-mode .fid-si.on{background:rgba(251,191,36,.18);border-left-color:#f59e0b}
-nav#alteore-nav.fid-mode .fid-si.on .fid-dot{background:#f59e0b}
-nav#alteore-nav.fid-mode .fid-dot{background:rgba(251,191,36,.28)}
-nav#alteore-nav.fid-mode .nav-footer{border-top-color:rgba(251,191,36,.12);background:linear-gradient(180deg,transparent,#92400e 18px)}
+nav#alteore-nav.fid-mode .si.on{background:rgba(251,191,36,.14)}
+nav#alteore-nav.fid-mode .si.on::before{background:#fbbf24}
+nav#alteore-nav.fid-mode .nav-footer{border-top-color:rgba(251,191,36,.12)}
 nav#alteore-nav.fid-mode .ucard{background:rgba(251,191,36,.08)}
 nav#alteore-nav.fid-mode .uav{background:linear-gradient(135deg,#f59e0b,#fbbf24)}
-nav#alteore-nav.fid-mode .chev{color:rgba(251,191,36,.3)}
-nav#alteore-nav.fid-mode .fid-chev{color:rgba(251,191,36,.65)!important}
+nav#alteore-nav.fid-mode .chev{color:rgba(251,191,36,.4)}
 nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rgba(251,191,36,.25)}
+
+/* ── A11Y ── */
+nav#alteore-nav .nav-cta:focus-visible,nav#alteore-nav .ni:focus-visible,nav#alteore-nav .si:focus-visible{outline:2px solid #7be9ff;outline-offset:2px}
+@media (prefers-reduced-motion:reduce){nav#alteore-nav *,nav#alteore-nav *::before{transition:none!important;animation:none!important}}
 
 /* ── HAMBURGER MOBILE ── */
 .alteore-hamburger{display:none;position:fixed;top:14px;left:14px;z-index:1001;width:44px;height:44px;background:#0f1f5c;border:none;border-radius:12px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;box-shadow:0 4px 16px rgba(15,31,92,.45);-webkit-tap-highlight-color:transparent}
@@ -728,7 +733,7 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
     if (mainEl) mainEl.style.visibility = 'visible';
   }
 
-  // Met à jour l'item "Léa" de la sidebar (placé dans la section "Intelligence IA") :
+  // Met à jour l'item "Léa" de la sidebar (section "Mon assistant IA") :
   //  - Cache l'item si le plan ne permet pas l'accès (free, trial_expired, past_due, etc.)
   //  - Sinon affiche un badge adapté au statut
   //  - Ordre de priorité : Admin > Beta > Actif > Inclus (trial) > Veille (dégradé) > Nouveau
@@ -925,6 +930,7 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
       if (!checkPageAccess(plan)) { applyNavPlan(plan); return; }
       applyNavPlan(plan);
       handleProfilParams();
+      initNavExtras(snap).catch(function(){});
 
       // ── BADGE TICKETS NON LUS — best-effort, silencieux ──
       // Vérifie si le client a des réponses non lues sur ses tickets.
@@ -1141,6 +1147,87 @@ nav#alteore-nav.fid-mode .nav-scroll-area::-webkit-scrollbar-thumb{background:rg
     s.defer = true;
     document.body.appendChild(s);
   })();
+
+  // ════════════════════════════════════════════════
+  // NAV v6 — MODE DÉCOUVERTE + ENCART "NAVIGATION A ÉVOLUÉ"
+  //
+  // 100% additif, fire-and-forget, ne bloque jamais la nav.
+  //  • Compte ≤ 7 jours : pastilles d'étapes ①②③ + carte "Bien démarrer"
+  //    (mêmes règles et mêmes données que la checklist onboarding.js :
+  //     tuto_progress/{uid}.step_*, checklistDismissed, tutoDisabled,
+  //     users/{uid}.createdAt, localStorage alteoreTuto*)
+  //  • Compte > 7 jours : encart unique "La navigation a évolué"
+  //    (localStorage alteoreNavV6Seen)
+  // ════════════════════════════════════════════════
+  var NAV_STEPS = [
+    { id: 'profil',    label: 'compléter votre profil',        link: 'profil.html' },
+    { id: 'ca',        label: 'saisir votre CA du mois',       link: 'pilotage.html' },
+    { id: 'charges',   label: 'ajouter vos charges',           link: 'pilotage.html' },
+    { id: 'produit',   label: 'créer votre premier produit',   link: 'cout-revient.html' },
+    { id: 'dashboard', label: 'explorer votre tableau de bord', link: 'dashboard.html' }
+  ];
+
+  async function initNavExtras(snap) {
+    try {
+      if (!snap || !snap.exists()) return;
+      var created = snap.data().createdAt;
+      if (!created) return;
+      var cd = created.toDate ? created.toDate() : new Date(created);
+      if (isNaN(cd.getTime())) return;
+      var ageDays = (Date.now() - cd.getTime()) / 864e5;
+
+      if (ageDays <= 7) {
+        // ── Nouveau compte → mode découverte ──
+        try {
+          if (localStorage.getItem('alteoreTutoDisabled') === '1') return;
+          if (localStorage.getItem('alteoreTutoChecklistDismissed') === '1') return;
+        } catch (e) {}
+        var ps = null;
+        try {
+          ps = await window._getDoc(window._doc(window._db, 'tuto_progress', window._uid));
+        } catch (e) { ps = null; }
+        var prog = (ps && ps.exists()) ? ps.data() : {};
+        if (prog.tutoDisabled || prog.checklistDismissed) return;
+
+        var doneCount = 0, next = null;
+        NAV_STEPS.forEach(function (s) {
+          if (prog['step_' + s.id]) doneCount++;
+          else if (!next) next = s;
+        });
+        if (doneCount >= NAV_STEPS.length) return; // tout est fait → nav sobre
+
+        var nav = document.getElementById('alteore-nav');
+        if (nav) nav.classList.add('decouverte');
+        var cnt  = document.getElementById('nav-start-count');
+        var fill = document.getElementById('nav-start-fill');
+        var hint = document.getElementById('nav-start-hint');
+        var card = document.getElementById('nav-start-card');
+        if (cnt)  cnt.textContent = doneCount + '/' + NAV_STEPS.length;
+        if (fill) fill.style.width = Math.round(doneCount / NAV_STEPS.length * 100) + '%';
+        if (hint && next) hint.textContent = 'Prochaine étape : ' + next.label;
+        window._navStartLink = next ? next.link : 'dashboard.html';
+        if (card) card.style.display = '';
+      } else {
+        // ── Compte existant → encart migration (une seule fois) ──
+        injectNavChangeNotice();
+      }
+    } catch (e) { /* silencieux — ne jamais casser la nav */ }
+  }
+
+  function injectNavChangeNotice() {
+    try {
+      if (localStorage.getItem('alteoreNavV6Seen') === '1') return;
+    } catch (e) { return; }
+    if (document.getElementById('nav-change-notice')) return;
+    var n = document.createElement('div');
+    n.id = 'nav-change-notice';
+    n.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:24px;z-index:9000;display:flex;align-items:center;gap:12px;max-width:540px;width:calc(100% - 32px);background:#0f1f5c;color:#fff;padding:13px 16px;border-radius:14px;box-shadow:0 14px 40px rgba(15,31,92,.4);font-size:12.5px;line-height:1.45;font-family:inherit';
+    n.innerHTML = '<span style="font-size:18px;flex-shrink:0">✨</span>' +
+      '<span style="flex:1;min-width:0"><strong>La navigation a évolué.</strong> Vos outils sont désormais rangés par usage : Au quotidien, Mes résultats, Développer. Rien n\'a été supprimé.</span>' +
+      '<a href="aide.html" onclick="try{localStorage.setItem(\'alteoreNavV6Seen\',\'1\')}catch(e){}" style="color:#7be9ff;font-weight:700;text-decoration:none;white-space:nowrap;flex-shrink:0">Voir le guide</a>' +
+      '<button onclick="try{localStorage.setItem(\'alteoreNavV6Seen\',\'1\')}catch(e){};this.parentNode.remove()" style="background:none;border:none;color:rgba(255,255,255,.55);font-size:15px;cursor:pointer;padding:2px 4px;flex-shrink:0" title="Fermer">✕</button>';
+    document.body.appendChild(n);
+  }
 
   // ════════════════════════════════════════════════
   // AJOUTER UNE ANNÉE PILOTAGE
