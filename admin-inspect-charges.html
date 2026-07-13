@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inspection charges (forensic) — ALTEORE Admin</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1d212c; --line:#2a2f3c;
+    --txt:#e7e9ee; --mut:#8b93a5; --accent:#6366f1; --orange:#f59e0b;
+    --green:#10b981; --red:#ef4444; --blue:#3b82f6; --purple:#a855f7;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--bg);color:var(--txt);font-size:13px;line-height:1.45}
+  header{padding:16px 22px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;font-weight:700}
+  header .sub{font-size:11px;color:var(--mut)}
+  .wrap{padding:18px 22px;max-width:1500px;margin:0 auto}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  input[type=text]{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    padding:8px 11px;border-radius:8px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
+  input.uid{width:330px}
+  input.seuil{width:110px;text-align:right}
+  button{background:var(--accent);color:#fff;border:0;padding:9px 16px;border-radius:8px;
+    font-size:13px;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
+  button.danger{background:var(--red)}
+  .err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#fca5a5;
+    padding:11px 14px;border-radius:8px;margin:10px 0}
+  .info{background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.3);color:#c7d2fe;
+    padding:11px 14px;border-radius:8px;margin:10px 0;font-size:12px}
+  .ok-msg{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.4);color:#6ee7b7;
+    padding:11px 14px;border-radius:8px;margin:10px 0}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:10px;margin:16px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .card .lab{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--mut);margin-bottom:5px}
+  .card .val{font-size:19px;font-weight:700;font-family:ui-monospace,Menlo,monospace}
+  .card.bad .val{color:var(--red)}
+  .card.ok .val{color:var(--green)}
+  table{width:100%;border-collapse:collapse;font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:8px}
+  th,td{padding:7px 9px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+  th{position:sticky;top:0;background:var(--panel2);color:var(--mut);font-weight:600;
+    font-size:11px;text-transform:uppercase;letter-spacing:.3px;z-index:2;cursor:pointer;user-select:none}
+  td.num,th.num{text-align:right}
+  tr:hover td{background:rgba(255,255,255,.02)}
+  tr.suspect td{background:rgba(239,68,68,.07)}
+  tr.suspect td.mnt{color:var(--red);font-weight:700}
+  .badge{display:inline-block;padding:1px 7px;border-radius:20px;font-size:10px;font-weight:700;font-family:sans-serif;white-space:nowrap}
+  .b-bank{background:rgba(59,130,246,.16);color:#93c5fd}
+  .b-pdf{background:rgba(168,85,247,.16);color:#d8b4fe}
+  .b-xls{background:rgba(245,158,11,.16);color:#fcd34d}
+  .b-rep{background:rgba(16,185,129,.16);color:#6ee7b7}
+  .b-split{background:rgba(14,165,233,.16);color:#7dd3fc}
+  .b-man{background:rgba(139,147,165,.16);color:#c3c9d4}
+  .b-sec-cf{background:rgba(99,102,241,.16);color:#c7d2fe}
+  .b-sec-cv{background:rgba(245,158,11,.14);color:#fcd34d}
+  .b-sec-leas{background:rgba(20,184,166,.16);color:#5eead4}
+  .tbl-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);max-height:70vh;overflow-y:auto}
+  .loader{padding:30px;text-align:center;color:var(--mut)}
+  .spin{width:22px;height:22px;border:3px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;animation:s .7s linear infinite;display:inline-block;vertical-align:middle;margin-right:8px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:11px}
+  .meta-raw{font-size:10px;color:var(--mut);max-width:340px;overflow:hidden;text-overflow:ellipsis}
+  details.raw{display:inline}
+  details.raw summary{cursor:pointer;color:var(--accent);font-size:11px;list-style:none}
+  details.raw pre{white-space:pre-wrap;word-break:break-all;background:var(--panel2);padding:8px;border-radius:6px;max-width:520px;font-size:10px}
+  .footbar{position:sticky;bottom:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:12px 16px;margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  .sec-title{font-size:13px;font-weight:700;margin:22px 0 6px}
+  label.chk{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--mut);cursor:pointer}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🔎 Inspection charges — origine des lignes</h1>
+  <span class="sub">Scanne tous les mois pilotage d'un client · identifie l'origine de chaque ligne (banque / PDF IA / Excel / report / manuel) · suppression sélective avec sauvegarde</span>
+</header>
+
+<div class="wrap">
+  <div class="row">
+    <input type="text" id="uid-input" class="uid" placeholder="UID client (ex: dXBh...)" autocomplete="off">
+    <span style="font-size:12px;color:var(--mut)">Seuil suspect (€ HT) :</span>
+    <input type="text" id="seuil-input" class="seuil" value="3000" inputmode="decimal">
+    <button id="scan-btn" onclick="startScan()">Analyser</button>
+    <button class="ghost" id="backup-btn" onclick="downloadBackup()" disabled>⬇️ Sauvegarde JSON (obligatoire avant suppression)</button>
+    <span class="sub" id="status"></span>
+  </div>
+  <div id="err-zone"></div>
+  <div id="out"></div>
+</div>
+
+<!-- ── Firebase (module ES6) ── -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, getDocs, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+  authDomain:"altiora-70599.firebaseapp.com", projectId:"altiora-70599",
+  storageBucket:"altiora-70599.firebasestorage.app",
+  messagingSenderId:"120905555746", appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+});
+const auth = getAuth(app);
+const db   = getFirestore(app);
+
+window._db = db;
+window._collection = collection; window._getDocs = getDocs;
+window._doc = doc; window._getDoc = getDoc; window._setDoc = setDoc;
+
+const ADMIN_EMAILS = ['contact@adrienemily.com','api@altiora.app'];
+
+onAuthStateChanged(auth, async function(user) {
+  if (!user) { window.location.href = 'index.html'; return; }
+  let isAdmin = ADMIN_EMAILS.includes((user.email||'').toLowerCase());
+  if (!isAdmin) {
+    try {
+      const us = await getDoc(doc(db,'users',user.uid));
+      if (us.exists() && us.data().role === 'admin') isAdmin = true;
+    } catch(e) {}
+  }
+  if (!isAdmin) {
+    document.getElementById('err-zone').innerHTML =
+      '<div class="err">Accès réservé à l\'équipe ALTEORE.</div>';
+    document.getElementById('scan-btn').disabled = true;
+    return;
+  }
+  window._adminReady = true;
+  // Pré-remplissage UID via ?uid= et auto-scan
+  const urlUid = new URLSearchParams(location.search).get('uid') || '';
+  if (urlUid) {
+    document.getElementById('uid-input').value = urlUid;
+    window.startScan();
+  }
+});
+</script>
+
+<!-- ── Logique applicative (script classique) ── -->
+<script>
+var _rows = [];          // lignes analysées à plat
+var _monthsRaw = {};     // { 'YYYY-MM': docData } bruts (pour backup + suppression)
+var _scanUid = null;
+var _backupDone = false;
+var _sortCol = 'montant';
+var _sortDir = 'desc';
+
+var SECTIONS = [
+  { key:'chargesFixe', label:'Charge fixe',     cls:'b-sec-cf'  },
+  { key:'chargesVar',  label:'Charge variable', cls:'b-sec-cv'  },
+  { key:'leasing',     label:'Leasing',         cls:'b-sec-leas'}
+];
+
+function pf(v){ return parseFloat(String(v==null?'':v).replace(',','.')) || 0; }
+function fmt(n){
+  if (n == null || isNaN(n)) return '—';
+  return n.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+function esc(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function showErr(html){ document.getElementById('err-zone').innerHTML = html ? '<div class="err">'+html+'</div>' : ''; }
+function showOk(html){ document.getElementById('err-zone').innerHTML = html ? '<div class="ok-msg">'+html+'</div>' : ''; }
+function setStatus(s){ document.getElementById('status').textContent = s; }
+
+// ── Détermination de l'origine d'une ligne à partir de ses marqueurs ──
+// Ordre de priorité : marqueurs explicites d'abord, "sans marqueur" en dernier.
+function detectOrigin(r) {
+  if (r.source === 'bank_sync') {
+    return { code:'bank', label:'🏦 Banque (validation import)', cls:'b-bank',
+      detail:'bankTxId: ' + (r.bankTxId || '?') + (r.importedAt ? ' · le ' + String(r.importedAt).slice(0,10) : '') };
+  }
+  if (r.source === 'pdf_import' || (r.bankTxId && String(r.bankTxId).indexOf('pdf_') === 0)) {
+    return { code:'pdf', label:'📄 Relevé PDF (extraction IA)', cls:'b-pdf',
+      detail:'bankTxId: ' + (r.bankTxId || '?') + (r.importedAt ? ' · le ' + String(r.importedAt).slice(0,10) : '') };
+  }
+  if (r._imported === true) {
+    return { code:'xls', label:'🗂️ Import Excel (tableau complet)', cls:'b-xls', detail:'marqueur _imported' };
+  }
+  if (r.reported && r.reported.fromMonth) {
+    return { code:'rep', label:'⏭️ Report depuis ' + r.reported.fromMonth, cls:'b-rep',
+      detail:'reporté le ' + (r.reported.date || '?') };
+  }
+  if (r.splitGroupId) {
+    return { code:'split', label:'✂️ Ventilation TVA', cls:'b-split', detail:'groupe ' + r.splitGroupId };
+  }
+  return { code:'man', label:'✍️ Sans marqueur (manuel / Léa / import mappé)', cls:'b-man', detail:'' };
+}
+
+// ── SCAN ──
+async function startScan() {
+  showErr('');
+  var uid = document.getElementById('uid-input').value.trim();
+  if (!uid) { showErr('UID manquant.'); return; }
+  if (!window._adminReady) { showErr('Authentification admin pas encore prête, réessaie dans 1s.'); return; }
+
+  setStatus('Chargement…');
+  document.getElementById('out').innerHTML = '<div class="loader"><span class="spin"></span>Lecture de tous les mois pilotage…</div>';
+  _rows = []; _monthsRaw = {}; _scanUid = uid; _backupDone = false;
+  document.getElementById('backup-btn').disabled = true;
+
+  try {
+    var msnap = await window._getDocs(window._collection(window._db, 'pilotage', uid, 'months'));
+    var months = [];
+    msnap.forEach(function(d){ months.push({ key: d.id, data: d.data() }); });
+    months.sort(function(a,b){ return a.key < b.key ? -1 : 1; });
+
+    if (!months.length) {
+      setStatus('');
+      document.getElementById('out').innerHTML = '<div class="info">Aucun mois trouvé dans <code>pilotage/'+esc(uid)+'/months</code>.</div>';
+      return;
+    }
+
+    months.forEach(function(m) {
+      _monthsRaw[m.key] = m.data;
+      SECTIONS.forEach(function(sec) {
+        var arr = m.data[sec.key];
+        if (!Array.isArray(arr)) return;
+        arr.forEach(function(r, idx) {
+          if (!r || typeof r !== 'object') return;
+          var ht = pf(r.montantHT);
+          var named = (r.fournisseur||'').trim() || (r.type||'').trim();
+          if (ht === 0 && !named) return; // placeholder vide
+          var rate = parseFloat(r.tvaRate) || 0;
+          _rows.push({
+            mois: m.key, section: sec.key, secLabel: sec.label, secCls: sec.cls, idx: idx,
+            fournisseur: r.fournisseur || '', type: r.type || '',
+            montant: ht, ttc: Math.round(ht*(1+rate/100)*100)/100, tva: rate,
+            pointe: r.pointe || 'Non', origin: detectOrigin(r), raw: r
+          });
+        });
+      });
+    });
+
+    document.getElementById('backup-btn').disabled = false;
+    setStatus(months.length + ' mois · ' + _rows.length + ' lignes de charges');
+    render();
+  } catch(e) {
+    console.error('[inspect] scan échoué:', e);
+    setStatus('');
+    showErr('Échec du scan : '+esc(e.message)+'. Vérifie l\'UID et que tu es bien connecté en admin.');
+    document.getElementById('out').innerHTML = '';
+  }
+}
+
+function getSeuil() {
+  var v = pf(document.getElementById('seuil-input').value);
+  return v > 0 ? v : 3000;
+}
+
+function sortRows(list) {
+  var col = _sortCol, dir = _sortDir === 'asc' ? 1 : -1;
+  return list.slice().sort(function(a,b){
+    var va, vb;
+    if (col === 'montant') { va = a.montant; vb = b.montant; }
+    else if (col === 'mois') { va = a.mois + '-' + String(a.idx).padStart(4,'0'); vb = b.mois + '-' + String(b.idx).padStart(4,'0'); }
+    else if (col === 'origine') { va = a.origin.code; vb = b.origin.code; }
+    else { va = (a[col]||'').toString().toLowerCase(); vb = (b[col]||'').toString().toLowerCase(); }
+    if (va < vb) return -1*dir;
+    if (va > vb) return 1*dir;
+    return 0;
+  });
+}
+
+function setSort(col) {
+  if (_sortCol === col) { _sortDir = _sortDir === 'asc' ? 'desc' : 'asc'; }
+  else { _sortCol = col; _sortDir = col === 'montant' ? 'desc' : 'asc'; }
+  render();
+}
+
+// ── RENDU ──
+function render() {
+  var seuil = getSeuil();
+  var suspects = _rows.filter(function(r){ return r.montant >= seuil; });
+  var totalSuspect = suspects.reduce(function(s,r){ return s + r.montant; }, 0);
+
+  // Répartition par origine (sur les suspects — c'est ça qui désigne le flux fautif)
+  var byOrigin = {};
+  suspects.forEach(function(r){
+    var k = r.origin.label;
+    if (!byOrigin[k]) byOrigin[k] = { n:0, tot:0 };
+    byOrigin[k].n++; byOrigin[k].tot += r.montant;
+  });
+  var originCards = Object.keys(byOrigin).map(function(k){
+    return '<div class="card bad"><div class="lab">'+esc(k)+'</div>'
+      + '<div class="val">'+byOrigin[k].n+' lignes</div>'
+      + '<div style="font-size:11px;color:var(--mut);margin-top:3px">'+fmt(byOrigin[k].tot)+' € HT</div></div>';
+  }).join('');
+
+  var sorted = sortRows(_rows);
+
+  var arrow = function(col){
+    if (_sortCol !== col) return ' ⇅';
+    return _sortDir === 'asc' ? ' ▲' : ' ▼';
+  };
+
+  var trs = sorted.map(function(r, i) {
+    var isSuspect = r.montant >= seuil;
+    var rid = r.mois + '|' + r.section + '|' + r.idx;
+    return '<tr class="'+(isSuspect?'suspect':'')+'">'
+      + '<td><input type="checkbox" class="del-chk" data-rid="'+esc(rid)+'" onchange="refreshDelBtn()"'+(isSuspect?'':'')+'></td>'
+      + '<td>'+esc(r.mois)+'</td>'
+      + '<td><span class="badge '+r.secCls+'">'+esc(r.secLabel)+'</span></td>'
+      + '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis" title="'+esc(r.fournisseur)+'">'+(esc(r.fournisseur)||'<span style="color:var(--mut)">—</span>')+'</td>'
+      + '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">'+esc(r.type)+'</td>'
+      + '<td class="num mnt">'+(isSuspect?'⚠ ':'')+fmt(r.montant)+'</td>'
+      + '<td class="num">'+fmt(r.ttc)+'</td>'
+      + '<td class="num">'+r.tva+'%</td>'
+      + '<td>'+esc(r.pointe)+'</td>'
+      + '<td><span class="badge '+r.origin.cls+'">'+esc(r.origin.label)+'</span>'
+      + (r.origin.detail ? '<div class="meta-raw">'+esc(r.origin.detail)+'</div>' : '')
+      + '</td>'
+      + '<td><details class="raw"><summary>json</summary><pre>'+esc(JSON.stringify(r.raw, null, 1))+'</pre></details></td>'
+      + '</tr>';
+  }).join('');
+
+  document.getElementById('out').innerHTML =
+    '<div class="cards">'
+    + '<div class="card"><div class="lab">Lignes de charges (tous mois)</div><div class="val">'+_rows.length+'</div></div>'
+    + '<div class="card '+(suspects.length?'bad':'ok')+'"><div class="lab">Lignes ≥ '+fmt(seuil)+' € HT</div><div class="val">'+suspects.length+'</div></div>'
+    + '<div class="card '+(suspects.length?'bad':'ok')+'"><div class="lab">Total HT des lignes suspectes</div><div class="val">'+fmt(totalSuspect)+' €</div></div>'
+    + '</div>'
+    + (suspects.length ? '<div class="sec-title">🎯 Origine des lignes suspectes</div><div class="cards">'+originCards+'</div>' : '<div class="info">Aucune ligne au-dessus du seuil — ajuste le seuil si besoin.</div>')
+    + '<div class="sec-title">📋 Toutes les lignes <span style="font-weight:400;color:var(--mut);font-size:11px">(clic sur un en-tête = tri · coche des lignes puis supprime en bas)</span></div>'
+    + '<div class="row" style="margin:6px 0 8px">'
+    + '<button class="ghost" onclick="checkSuspects()">☑️ Cocher toutes les lignes ≥ seuil</button>'
+    + '<button class="ghost" onclick="uncheckAll()">◻️ Tout décocher</button>'
+    + '</div>'
+    + '<div class="tbl-scroll"><table>'
+    + '<thead><tr>'
+    + '<th></th>'
+    + '<th onclick="setSort(\'mois\')">Mois'+arrow('mois')+'</th>'
+    + '<th onclick="setSort(\'section\')">Section'+arrow('section')+'</th>'
+    + '<th onclick="setSort(\'fournisseur\')">Fournisseur'+arrow('fournisseur')+'</th>'
+    + '<th onclick="setSort(\'type\')">Type'+arrow('type')+'</th>'
+    + '<th class="num" onclick="setSort(\'montant\')">Montant HT'+arrow('montant')+'</th>'
+    + '<th class="num">TTC</th><th class="num">TVA</th><th>Pointé</th>'
+    + '<th onclick="setSort(\'origine\')">Origine'+arrow('origine')+'</th>'
+    + '<th>Brut</th>'
+    + '</tr></thead>'
+    + '<tbody>'+trs+'</tbody>'
+    + '</table></div>'
+    + '<div class="footbar">'
+    + '<span id="del-count" style="font-size:12px;color:var(--mut)">0 ligne sélectionnée</span>'
+    + '<label class="chk"><input type="checkbox" id="confirm-del" onchange="refreshDelBtn()"> Je confirme la suppression définitive des lignes cochées (sauvegarde JSON téléchargée)</label>'
+    + '<button class="danger" id="del-btn" onclick="deleteSelected()" disabled>🗑 Supprimer la sélection</button>'
+    + '</div>';
+}
+
+function checkSuspects() {
+  var seuil = getSeuil();
+  var map = {};
+  _rows.forEach(function(r){ map[r.mois+'|'+r.section+'|'+r.idx] = r; });
+  document.querySelectorAll('.del-chk').forEach(function(c){
+    var r = map[c.dataset.rid];
+    c.checked = !!(r && r.montant >= seuil);
+  });
+  refreshDelBtn();
+}
+function uncheckAll() {
+  document.querySelectorAll('.del-chk').forEach(function(c){ c.checked = false; });
+  refreshDelBtn();
+}
+function refreshDelBtn() {
+  var n = document.querySelectorAll('.del-chk:checked').length;
+  var el = document.getElementById('del-count');
+  if (el) el.textContent = n + ' ligne' + (n>1?'s':'') + ' sélectionnée' + (n>1?'s':'');
+  var ok = n > 0 && document.getElementById('confirm-del').checked && _backupDone;
+  var btn = document.getElementById('del-btn');
+  if (btn) {
+    btn.disabled = !ok;
+    btn.title = _backupDone ? '' : 'Télécharge d\'abord la sauvegarde JSON (bouton en haut)';
+  }
+}
+
+// ── BACKUP JSON ──
+function downloadBackup() {
+  if (!_scanUid) return;
+  var payload = {
+    exportedAt: new Date().toISOString(),
+    uid: _scanUid,
+    note: 'Sauvegarde complète des documents pilotage/{uid}/months avant nettoyage (admin-inspect-charges)',
+    months: _monthsRaw
+  };
+  var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'backup-pilotage-' + _scanUid.slice(0,8) + '-' + new Date().toISOString().slice(0,10) + '.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  _backupDone = true;
+  refreshDelBtn();
+  showOk('Sauvegarde téléchargée. La suppression sélective est maintenant déverrouillée.');
+}
+
+// ── SUPPRESSION SÉLECTIVE ──
+async function deleteSelected() {
+  if (!_scanUid || !_backupDone) return;
+  var checked = Array.prototype.slice.call(document.querySelectorAll('.del-chk:checked'));
+  if (!checked.length) return;
+
+  // Regrouper par mois puis par section, indices triés décroissants (splice sans décalage)
+  var byMonth = {};
+  checked.forEach(function(c){
+    var parts = c.dataset.rid.split('|');
+    var mois = parts[0], sec = parts[1], idx = parseInt(parts[2]);
+    if (isNaN(idx)) return;
+    if (!byMonth[mois]) byMonth[mois] = {};
+    if (!byMonth[mois][sec]) byMonth[mois][sec] = [];
+    byMonth[mois][sec].push(idx);
+  });
+
+  var btn = document.getElementById('del-btn');
+  btn.disabled = true; btn.textContent = '⏳ Suppression…';
+
+  var nDeleted = 0, nMonths = 0, errors = 0;
+  var moisKeys = Object.keys(byMonth);
+  for (var i = 0; i < moisKeys.length; i++) {
+    var mois = moisKeys[i];
+    try {
+      // Relire le doc frais (évite d'écraser une modif intervenue depuis le scan)
+      var ref = window._doc(window._db, 'pilotage', _scanUid, 'months', mois);
+      var snap = await window._getDoc(ref);
+      if (!snap.exists()) continue;
+      var data = snap.data();
+
+      Object.keys(byMonth[mois]).forEach(function(sec){
+        var arr = data[sec];
+        if (!Array.isArray(arr)) return;
+        var idxs = byMonth[mois][sec].slice().sort(function(a,b){ return b-a; });
+        idxs.forEach(function(ix){
+          if (ix >= 0 && ix < arr.length) { arr.splice(ix, 1); nDeleted++; }
+        });
+        if (arr.length === 0) {
+          arr.push({fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non'});
+        }
+        data[sec] = arr;
+      });
+
+      await window._setDoc(ref, data);
+      _monthsRaw[mois] = data;
+      nMonths++;
+    } catch(e) {
+      console.error('[inspect] suppression', mois, e);
+      errors++;
+    }
+  }
+
+  btn.textContent = '🗑 Supprimer la sélection';
+  showOk('✅ ' + nDeleted + ' ligne(s) supprimée(s) sur ' + nMonths + ' mois.' + (errors ? ' ⚠ ' + errors + ' mois en erreur (voir console).' : '') + ' Re-scan en cours…');
+  await startScan();
+}
+
+window.startScan = startScan;
+window.setSort = setSort;
+window.checkSuspects = checkSuspects;
+window.uncheckAll = uncheckAll;
+window.refreshDelBtn = refreshDelBtn;
+window.downloadBackup = downloadBackup;
+window.deleteSelected = deleteSelected;
+</script>
+</body>
+</html>
