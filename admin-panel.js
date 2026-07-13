@@ -55,8 +55,17 @@
         { icon: '💰', title: 'Debug dettes', desc: 'Lire et nettoyer dettes/{uid}/data/all — doublons détectés automatiquement', href: '/admin-purge-dettes.html' },
         { icon: '📋', title: 'Debug crédits pilotage', desc: 'Lire et nettoyer les crédits dans pilotage/months — doublons intra-mois', href: '/admin-purge-credits.html' },
         { icon: '🔎', title: 'Diag écart charges', desc: 'Réconciliation Alteore vs compte 6 — décompose les charges et trouve la différence via IA', href: '/admin-diag-charges.html' },
+        { icon: '👻', title: 'Inspection charges (origine)', desc: 'Origine de chaque ligne de charges (banque / PDF IA / Excel / manuel) + suppression sélective des lignes fantômes', href: '/admin-inspect-charges.html' },
         { icon: '♻️', title: 'Reset charges ciblé', desc: 'Vider charges fixes/variables sur une plage de mois (par UID) — sauvegarde + écriture atomique', href: '/admin-reset-charges.html' },
-        { icon: '🕵️', title: 'Inspection charges (forensic)', desc: 'Origine de chaque ligne (banque / PDF / Excel / manuel), fantômes 👻 et lignes CA hors-mois 📅 — suppression sélective avec sauvegarde JSON', href: '/admin-inspect-charges.html' },
+      ],
+    },
+    {
+      category: '💾 Sauvegardes & restauration',
+      color: '#0d9488',
+      items: [
+        { icon: '📡', title: 'Sauvegardes — statut & export local', desc: 'Statut de la sauvegarde auto R2 (quotidienne, chiffrée) + export complet ou par client sur ton Mac', href: '/admin-backup.html' },
+        { icon: '♻️', title: 'Restauration', desc: 'Recharger un client (ou tout) depuis un fichier de sauvegarde .json / .json.gz / .json.gz.enc — prévisualisation avant écriture', href: '/admin-restore.html' },
+        { icon: '☁️', title: 'Bucket R2 Cloudflare', desc: 'Parcourir/télécharger les snapshots chiffrés (daily/ et monthly/)', href: 'https://dash.cloudflare.com', external: true },
       ],
     },
     {
@@ -614,6 +623,7 @@
       { icon: '🩺', title: 'Diagnostics',         href: '/admin-debug-view.html' },
       { icon: '🏥', title: 'Diagnostic général',  href: '/diagnostic.html' },
       { icon: '🔧', title: 'Correction crédits',  href: '/fix-credits.html' },
+      { icon: '💾', title: 'Sauvegardes',          href: '/admin-backup.html' },
       { icon: '🛠️', title: 'Tous les outils',     href: '#', action: 'open-panel' },
     ];
 
