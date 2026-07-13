@@ -59,6 +59,7 @@
   .b-sec-cf{background:rgba(99,102,241,.16);color:#c7d2fe}
   .b-sec-cv{background:rgba(245,158,11,.14);color:#fcd34d}
   .b-sec-leas{background:rgba(20,184,166,.16);color:#5eead4}
+  .b-sec-ca{background:rgba(236,72,153,.16);color:#f9a8d4}
   .tbl-scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);max-height:70vh;overflow-y:auto}
   .loader{padding:30px;text-align:center;color:var(--mut)}
   .spin{width:22px;height:22px;border:3px solid var(--line);border-top-color:var(--accent);
@@ -79,7 +80,7 @@
 
 <header>
   <h1>🔎 Inspection charges — origine des lignes</h1>
-  <span class="sub">Scanne tous les mois pilotage d'un client · identifie l'origine de chaque ligne (banque / PDF IA / Excel / report / manuel) · suppression sélective avec sauvegarde</span>
+  <span class="sub">Scanne tous les mois pilotage d'un client · identifie l'origine de chaque ligne (banque / PDF IA / Excel / report / manuel) · détecte les lignes CA hors-mois (bug import) · suppression sélective avec sauvegarde</span>
 </header>
 
 <div class="wrap">
@@ -157,6 +158,57 @@ var SECTIONS = [
 ];
 
 function pf(v){ return parseFloat(String(v==null?'':v).replace(',','.')) || 0; }
+
+// ── Helpers CA ──
+// Parse une date de ligne CA : format natif pilotage 'J/M/AAAA' ou ISO 'AAAA-MM-JJ'
+// (l'ISO est la signature du bug d'import tableur — incident juillet 2026).
+function caDateInfo(s) {
+  s = String(s==null?'':s).trim();
+  var m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return { d:+m[1], mo:+m[2], y:+m[3], iso:false };
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return { y:+m[1], mo:+m[2], d:+m[3], iso:true };
+  return null;
+}
+function caRowTotal(r) {
+  var t = 0;
+  ['ht055','ht10','ht20','ht0','ht21','ht85','montantHT'].forEach(function(k){ t += pf(r && r[k]); });
+  return t;
+}
+// Reconstruit la grille CA native d'un mois (1 ligne par jour, format 'J/M/AAAA'
+// comme defaultData de pilotage.html) en préservant les lignes du mois et leurs
+// valeurs. Les lignes hors-mois ne sont JAMAIS réinjectées. Nécessaire car
+// pilotage.html ignore toute grille dont la longueur ≠ nombre de jours du mois.
+function rebuildCaGrid(moisKey, arr) {
+  var y = parseInt(moisKey.slice(0,4), 10), mo = parseInt(moisKey.slice(5,7), 10);
+  if (!y || !mo) return arr;
+  var days = new Date(y, mo, 0).getDate(); // mo 1-12 → dernier jour du mois (local, pas de toISOString)
+  var byDay = {};
+  (arr || []).forEach(function(r){
+    if (!r || typeof r !== 'object') return;
+    var info = caDateInfo(r.date);
+    if (!info || info.y !== y || info.mo !== mo) return;
+    var d = info.d;
+    if (d < 1 || d > days) return;
+    // En cas de doublon de jour : priorité à la ligne qui porte des valeurs
+    if (!byDay[d] || (caRowTotal(byDay[d]) === 0 && caRowTotal(r) > 0)) byDay[d] = r;
+  });
+  var out = [];
+  for (var d = 1; d <= days; d++) {
+    if (byDay[d]) {
+      var row = {};
+      Object.keys(byDay[d]).forEach(function(k){ row[k] = byDay[d][k]; });
+      row.date = d + '/' + mo + '/' + y; // normalise au format natif pilotage
+      if (row.ht055 === undefined) row.ht055 = '';
+      if (row.ht10  === undefined) row.ht10  = '';
+      if (row.ht20  === undefined) row.ht20  = '';
+      out.push(row);
+    } else {
+      out.push({ date: d + '/' + mo + '/' + y, ht055:'', ht10:'', ht20:'' });
+    }
+  }
+  return out;
+}
 function fmt(n){
   if (n == null || isNaN(n)) return '—';
   return n.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -235,10 +287,37 @@ async function startScan() {
           });
         });
       });
+
+      // ── Analyse CA : lignes dont la date n'appartient pas au mois du document ──
+      // (signature du bug d'import tableur : cellules "septembre 2025" → doc 2026-09
+      //  + date ISO décalée. Ces lignes faussent dashboard/N-1/bilan/Léa alors que
+      //  pilotage.html ne les affiche même pas — longueur de grille invalide.)
+      var docY = parseInt(m.key.slice(0,4), 10), docM = parseInt(m.key.slice(5,7), 10);
+      var caArr = m.data.ca;
+      if (Array.isArray(caArr) && docY && docM) {
+        caArr.forEach(function(r, idx) {
+          if (!r || typeof r !== 'object') return;
+          var info = caDateInfo(r.date);
+          var total = caRowTotal(r);
+          var horsMois = info ? (info.y !== docY || info.mo !== docM) : (total > 0);
+          if (!horsMois) return;
+          _rows.push({
+            mois: m.key, section: 'ca', secLabel: 'CA', secCls: 'b-sec-ca', idx: idx,
+            fournisseur: String(r.date || '(sans date)'),
+            type: info ? 'hors mois (' + info.y + '-' + String(info.mo).padStart(2,'0') + ')' : 'date invalide',
+            montant: total, ttc: null, tva: null, pointe: null,
+            origin: (info && info.iso)
+              ? { code:'xls', label:'🗂️ Import tableur (bug mois/année)', cls:'b-xls', detail:'date ISO ' + esc(String(r.date)) + ' dans le doc ' + m.key }
+              : { code:'man', label:'❓ Hors mois (origine inconnue)', cls:'b-man', detail:'' },
+            raw: r
+          });
+        });
+      }
     });
 
     document.getElementById('backup-btn').disabled = false;
-    setStatus(months.length + ' mois · ' + _rows.length + ' lignes de charges');
+    var nCa = _rows.filter(function(r){ return r.section === 'ca'; }).length;
+    setStatus(months.length + ' mois · ' + (_rows.length - nCa) + ' lignes de charges' + (nCa ? ' · ' + nCa + ' lignes CA hors-mois' : ''));
     render();
   } catch(e) {
     console.error('[inspect] scan échoué:', e);
@@ -300,6 +379,7 @@ function render() {
   };
 
   var trs = sorted.map(function(r, i) {
+    var isCa = r.section === 'ca';
     var isSuspect = r.montant >= seuil;
     var rid = r.mois + '|' + r.section + '|' + r.idx;
     return '<tr class="'+(isSuspect?'suspect':'')+'">'
@@ -309,9 +389,9 @@ function render() {
       + '<td style="max-width:220px;overflow:hidden;text-overflow:ellipsis" title="'+esc(r.fournisseur)+'">'+(esc(r.fournisseur)||'<span style="color:var(--mut)">—</span>')+'</td>'
       + '<td style="max-width:140px;overflow:hidden;text-overflow:ellipsis">'+esc(r.type)+'</td>'
       + '<td class="num mnt">'+(isSuspect?'⚠ ':'')+fmt(r.montant)+'</td>'
-      + '<td class="num">'+fmt(r.ttc)+'</td>'
-      + '<td class="num">'+r.tva+'%</td>'
-      + '<td>'+esc(r.pointe)+'</td>'
+      + '<td class="num">'+(isCa ? '—' : fmt(r.ttc))+'</td>'
+      + '<td class="num">'+(isCa ? '—' : r.tva+'%')+'</td>'
+      + '<td>'+(isCa ? '—' : esc(r.pointe))+'</td>'
       + '<td><span class="badge '+r.origin.cls+'">'+esc(r.origin.label)+'</span>'
       + (r.origin.detail ? '<div class="meta-raw">'+esc(r.origin.detail)+'</div>' : '')
       + '</td>'
@@ -319,17 +399,25 @@ function render() {
       + '</tr>';
   }).join('');
 
+  var caRows = _rows.filter(function(r){ return r.section === 'ca'; });
+  var caFilled = caRows.filter(function(r){ return r.montant > 0; });
+  var caTot = caFilled.reduce(function(s,r){ return s + r.montant; }, 0);
+
   document.getElementById('out').innerHTML =
     '<div class="cards">'
     + '<div class="card"><div class="lab">Lignes de charges (tous mois)</div><div class="val">'+_rows.length+'</div></div>'
     + '<div class="card '+(suspects.length?'bad':'ok')+'"><div class="lab">Lignes ≥ '+fmt(seuil)+' € HT</div><div class="val">'+suspects.length+'</div></div>'
     + '<div class="card '+(suspects.length?'bad':'ok')+'"><div class="lab">Total HT des lignes suspectes</div><div class="val">'+fmt(totalSuspect)+' €</div></div>'
+    + '<div class="card '+(caRows.length?'bad':'ok')+'"><div class="lab">Lignes CA hors-mois</div><div class="val">'+caRows.length+'</div>'
+    + (caRows.length ? '<div style="font-size:11px;color:var(--mut);margin-top:3px">dont '+caFilled.length+' avec montant ('+fmt(caTot)+' € HT)</div>' : '')
+    + '</div>'
     + '</div>'
     + (suspects.length ? '<div class="sec-title">🎯 Origine des lignes suspectes</div><div class="cards">'+originCards+'</div>' : '<div class="info">Aucune ligne au-dessus du seuil — ajuste le seuil si besoin.</div>')
     + '<div class="sec-title">📋 Toutes les lignes <span style="font-weight:400;color:var(--mut);font-size:11px">(clic sur un en-tête = tri · coche des lignes puis supprime en bas)</span></div>'
     + '<div class="row" style="margin:6px 0 8px">'
     + '<button class="ghost" onclick="checkSuspects()">☑️ Cocher toutes les lignes ≥ seuil</button>'
     + '<button class="ghost" onclick="checkGhosts()">👻 Cocher les lignes SANS libellé (fournisseur et type vides)</button>'
+    + '<button class="ghost" onclick="checkCaRows()">📅 Cocher les lignes CA hors-mois</button>'
     + '<button class="ghost" onclick="uncheckAll()">◻️ Tout décocher</button>'
     + '</div>'
     + '<div class="tbl-scroll"><table>'
@@ -366,18 +454,37 @@ function checkSuspects() {
 
 // Lignes "fantômes" : montant > 0 mais AUCUN libellé (ni fournisseur ni type).
 // Signature typique d'un bloc récap/totaux aspiré par un import (incident juillet 2026).
+// Exclut les lignes CA (elles ont leur propre bouton 📅 — sinon elles matcheraient
+// faussement : fournisseur/type y servent à afficher date/raison).
 function checkGhosts() {
   var map = {};
   _rows.forEach(function(r){ map[r.mois+'|'+r.section+'|'+r.idx] = r; });
   var n = 0;
   document.querySelectorAll('.del-chk').forEach(function(c){
     var r = map[c.dataset.rid];
-    var isGhost = !!(r && r.montant > 0 && !(r.fournisseur||'').trim() && !(r.type||'').trim());
+    var isGhost = !!(r && r.section !== 'ca' && r.montant > 0 && !((r.raw && r.raw.fournisseur)||'').trim() && !((r.raw && r.raw.type)||'').trim());
     c.checked = isGhost;
     if (isGhost) n++;
   });
   refreshDelBtn();
   showOk(n + ' ligne(s) fantôme(s) cochée(s) — vérifie la liste puis télécharge la sauvegarde avant suppression.');
+}
+
+// Lignes CA hors-mois : la date de la ligne n'appartient pas au mois du document.
+// 100 % des lignes CA listées par le scan sont dans ce cas (les lignes CA normales
+// ne sont jamais remontées) — le bouton les coche donc toutes.
+function checkCaRows() {
+  var map = {};
+  _rows.forEach(function(r){ map[r.mois+'|'+r.section+'|'+r.idx] = r; });
+  var n = 0;
+  document.querySelectorAll('.del-chk').forEach(function(c){
+    var r = map[c.dataset.rid];
+    var isCa = !!(r && r.section === 'ca');
+    c.checked = isCa;
+    if (isCa) n++;
+  });
+  refreshDelBtn();
+  showOk(n + ' ligne(s) CA hors-mois cochée(s) — après suppression, la grille CA des mois touchés est reconstruite au format natif (les lignes du mois et leurs montants sont préservés).');
 }
 function uncheckAll() {
   document.querySelectorAll('.del-chk').forEach(function(c){ c.checked = false; });
@@ -450,14 +557,29 @@ async function deleteSelected() {
       Object.keys(byMonth[mois]).forEach(function(sec){
         var arr = data[sec];
         if (!Array.isArray(arr)) return;
+        // Garde-fou : si le doc a changé depuis le scan (taille de section différente),
+        // les indices ne sont plus fiables → on saute ce mois, à re-scanner.
+        var scanned = _monthsRaw[mois] && _monthsRaw[mois][sec];
+        if (Array.isArray(scanned) && scanned.length !== arr.length) {
+          console.warn('[inspect] '+mois+'/'+sec+' modifié depuis le scan ('+scanned.length+' → '+arr.length+' lignes) — mois sauté, relance Analyser.');
+          errors++;
+          return;
+        }
         var idxs = byMonth[mois][sec].slice().sort(function(a,b){ return b-a; });
         idxs.forEach(function(ix){
           if (ix >= 0 && ix < arr.length) { arr.splice(ix, 1); nDeleted++; }
         });
-        if (arr.length === 0) {
-          arr.push({fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non'});
+        if (sec === 'ca') {
+          // Reconstruit la grille du mois au format natif pilotage (1 ligne/jour,
+          // 'J/M/AAAA') en préservant les lignes du mois — sans elle, pilotage
+          // ignore la grille (longueur invalide) et les cumuls restent faux.
+          data.ca = rebuildCaGrid(mois, arr);
+        } else {
+          if (arr.length === 0) {
+            arr.push({fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non'});
+          }
+          data[sec] = arr;
         }
-        data[sec] = arr;
       });
 
       await window._setDoc(ref, data);
@@ -478,6 +600,7 @@ window.startScan = startScan;
 window.setSort = setSort;
 window.checkSuspects = checkSuspects;
 window.checkGhosts = checkGhosts;
+window.checkCaRows = checkCaRows;
 window.uncheckAll = uncheckAll;
 window.refreshDelBtn = refreshDelBtn;
 window.downloadBackup = downloadBackup;
