@@ -1201,6 +1201,18 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
   const localPf = v => parseFloat(String(v || 0).replace(',', '.')) || 0;
   const get = (r, key) => mapping[key] ? String(r[mapping[key]] || '') : '';
   const getN = (r, key) => localPf(mapping[key] ? r[mapping[key]] : 0);
+  // ── Garde-fou charges (fix bug "montants sortis de nulle part", juillet 2026) ──
+  // Une ligne de charge SANS libellé fournisseur n'est jamais importée : c'est la
+  // signature d'un bloc récap / totaux / cellules parasites dans le fichier source.
+  // On exclut aussi les libellés d'agrégats stricts (TOTAL, CUMUL, SOLDE…) via
+  // isAggLabel (défini plus bas, hoisté) — "TOTAL ENERGIES" reste importable.
+  const isChargeRowValid = (fournisseur, montant) => {
+    const f = (fournisseur || '').trim();
+    if (!f) return false;              // pas de libellé → pas une charge
+    if (isAggLabel(f)) return false;   // ligne de synthèse → exclue
+    return montant > 0;
+  };
+  const importStamp = new Date().toISOString();
   // Convertir coefficient TVA (1.2, 1.1, 1.055) en taux (20, 10, 5.5)
   const toTvaRate = (n) => { if (n > 1 && n < 2) { if (n >= 1.2) return 20; if (n >= 1.1) return 10; return 5.5; } return n; };
   const getTvaRate = (r, key) => { const raw = getN(r, key); return raw > 0 ? toTvaRate(raw) : 20; };
@@ -1256,8 +1268,11 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
         tvaRate:     getTvaRate(r, 'tvaRate'),
         deductible:  get(r, 'deductible') || 'Oui',
         pointe:      'Non',
+        source:      'excel_import',
+        importedAt:  importStamp,
       }))
-      .filter(r => r.fournisseur || parseFloat(r.montantHT) > 0);
+      .filter(r => isChargeRowValid(r.fournisseur, parseFloat(r.montantHT) || 0));
+    if (!newCharges.length) throw new Error('Aucune ligne valide : chaque charge doit avoir un fournisseur (les lignes vides, totaux et cumuls sont exclus).');
     const merged = [...(existing.chargesFixe || []), ...newCharges];
     await window._setDoc(ref, { ...existing, chargesFixe: merged }, { merge: true });
   }
@@ -1277,8 +1292,11 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
         deductible:  get(r, 'deductible') || 'Oui',
         pointe:      'Non',
         exceptionnel: false,
+        source:      'excel_import',
+        importedAt:  importStamp,
       }))
-      .filter(r => r.fournisseur || parseFloat(r.montantHT) > 0);
+      .filter(r => isChargeRowValid(r.fournisseur, parseFloat(r.montantHT) || 0));
+    if (!newCharges.length) throw new Error('Aucune ligne valide : chaque charge doit avoir un fournisseur (les lignes vides, totaux et cumuls sont exclus).');
     const merged = [...(existing.chargesVar || []), ...newCharges];
     await window._setDoc(ref, { ...existing, chargesVar: merged }, { merge: true });
   }
@@ -1330,8 +1348,11 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
         type: '',
         montantHT: String(getN(r, 'montantHT')),
         tvaRate: getTvaRate(r, 'tvaRate'),
-        deductible: 'Oui', pointe: 'Non'
+        deductible: 'Oui', pointe: 'Non',
+        source: 'excel_import',
+        importedAt: importStamp
       };
+      if (!isChargeRowValid(entry.fournisseur, parseFloat(entry.montantHT) || 0)) return;
       if (isVar) chargesVar.push(entry); else chargesFixe.push(entry);
     });
     await window._setDoc(ref, { ...existing, chargesFixe, chargesVar }, { merge: true });
@@ -1744,6 +1765,19 @@ function updateSheetCount() {
 
 let _pilotagePreviewData = null;
 
+// Libellés d'agrégats à exclure (récap, totaux, soldes…) — fix "montants sortis de nulle part" (juillet 2026)
+// Règle stricte : on n'exclut que si le libellé est composé ENTIÈREMENT de vocabulaire
+// d'agrégat (mot-clé + qualificatifs). "TOTAL" ou "Total charges HT" → exclu ;
+// "TOTAL ENERGIES", "Solderie du Sud" → gardés (un mot hors vocabulaire casse le match).
+const PILOTAGE_AGG_KEYWORD = "(sous[-\\s]?tota(l|ux)|tota(l|ux)|cumul(s)?|solde(s)?|tr[ée]sorerie|r[ée]sultat(s)?|r[ée]cap(itulatif)?|synth[èe]se|report(s)?|reste)";
+const PILOTAGE_AGG_QUALIF  = "(g[ée]n[ée]ral(e|es|aux)?|annuel(le|les)?|mensuel(le|les)?|global(e|es|aux)?|charges?|fixes?|variables?|ca|ht|ttc|tva|net(te)?|brut(e)?|n|n-1|20\\d{2}|fin|d[eu]|des|la|le|mois|ann[ée]e|exercice|p[ée]riode|chiffre|affaires|d'affaires)";
+const PILOTAGE_AGG_RE = new RegExp("^" + PILOTAGE_AGG_KEYWORD + "([\\s:.,()]+" + PILOTAGE_AGG_QUALIF + ")*[\\s:.,()]*$", "i");
+function isAggLabel(s) {
+  const v = String(s || '').trim();
+  if (!v) return true;
+  return PILOTAGE_AGG_RE.test(v);
+}
+
 function parsePilotageSheet(sheetName) {
   if(!_wb) return null;
   const ws = _wb.Sheets[sheetName];
@@ -1791,7 +1825,7 @@ function parsePilotageSheet(sheetName) {
     // Col 1=FOURNISSEUR, 2=TYPE, 3=MONTANT HT, 4=TVA, 6=DEDUCTIBLE
     const cfFourn = String(r[1]||'').trim();
     const cfMt = parseFloat(String(r[3]||'').replace(',','.'));
-    if(cfFourn && !isNaN(cfMt) && cfMt > 0 && cfFourn.toUpperCase() !== 'FOURNISSEUR' && !cfFourn.toUpperCase().includes('TOTAL')) {
+    if(cfFourn && !isNaN(cfMt) && cfMt > 0 && cfFourn.toUpperCase() !== 'FOURNISSEUR' && !isAggLabel(cfFourn)) {
       const tvaBrut = parseFloat(String(r[4]||'0').replace(',','.')) || 0;
       // Convertir TVA: 1.2→20, 1.1→10, 1.055→5.5, 0→0
       const tvaRate = tvaBrut >= 1.2 ? 20 : tvaBrut >= 1.1 ? 10 : tvaBrut > 1 ? 5.5 : 0;
@@ -1809,7 +1843,7 @@ function parsePilotageSheet(sheetName) {
     // Col 8=FOURNISSEUR, 9=TYPE, 10=MONTANT HT, 11=TVA
     const cvFourn = String(r[8]||'').trim();
     const cvMt = parseFloat(String(r[10]||'').replace(',','.'));
-    if(cvFourn && !isNaN(cvMt) && cvMt > 0 && cvFourn.toUpperCase() !== 'FOURNISSEUR' && !cvFourn.toUpperCase().includes('TOTAL')) {
+    if(cvFourn && !isNaN(cvMt) && cvMt > 0 && cvFourn.toUpperCase() !== 'FOURNISSEUR' && !isAggLabel(cvFourn)) {
       const tvaBrut = parseFloat(String(r[11]||'0').replace(',','.')) || 0;
       const tvaRate = tvaBrut >= 1.2 ? 20 : tvaBrut >= 1.1 ? 10 : tvaBrut > 1 ? 5.5 : 0;
       chargesVar.push({
@@ -1827,7 +1861,7 @@ function parsePilotageSheet(sheetName) {
     // Col 16=TYPE/NOM, 17=MONTANT
     const crType = String(r[16]||'').trim();
     const crMt = parseFloat(String(r[17]||'').replace(',','.'));
-    if(crType && !isNaN(crMt) && crMt > 0 && !crType.toUpperCase().includes('TOTAL') && crType.toUpperCase() !== 'TYPE') {
+    if(crType && !isNaN(crMt) && crMt > 0 && !isAggLabel(crType) && crType.toUpperCase() !== 'TYPE') {
       credits.push({
         fournisseur: String(r[15]||crType).trim(),
         type: crType,
@@ -2173,14 +2207,24 @@ async function importCA(forcedMonth){
 async function importCharges(forcedMonth){
   if(!window._uid||!window._setDoc) throw new Error('Non connecté');
   const byMonth={};
+  const stamp=new Date().toISOString();
+  let skipped=0;
   _rows.forEach(r=>{
     const dateVal=_mapping['date']?r[_mapping['date']]:'';
     const ym=parseDateToYYYYMM(dateVal)||forcedMonth||`${new Date().getFullYear()}-${String(new Date().getMonth()+1).padStart(2,'0')}`;
     if(!byMonth[ym])byMonth[ym]={fixe:[],var:[]};
     const typeRaw=String(_mapping['type']?r[_mapping['type']]:'fixe').toLowerCase();
-    const entry={fournisseur:_mapping['fournisseur']?String(r[_mapping['fournisseur']]||''):'',type:'',montantHT:String(pf(_mapping['montantHT']?r[_mapping['montantHT']]:0)),tvaRate:pf(_mapping['tvaRate']?r[_mapping['tvaRate']]:20)||20,deductible:'Oui',pointe:'Non'};
+    const entry={fournisseur:_mapping['fournisseur']?String(r[_mapping['fournisseur']]||''):'',type:'',montantHT:String(pf(_mapping['montantHT']?r[_mapping['montantHT']]:0)),tvaRate:pf(_mapping['tvaRate']?r[_mapping['tvaRate']]:20)||20,deductible:'Oui',pointe:'Non',source:'excel_import',importedAt:stamp};
+    // Garde-fou (fix "montants sortis de nulle part", juillet 2026) : pas de libellé
+    // fournisseur = ligne récap/total/cellule parasite → jamais importée comme charge.
+    const fClean=(entry.fournisseur||'').trim();
+    const mt=pf(entry.montantHT);
+    if(!fClean || isAggLabel(fClean) || !(mt>0)){skipped++;return;}
     if(typeRaw.includes('var'))byMonth[ym].var.push(entry); else byMonth[ym].fixe.push(entry);
   });
+  const kept=Object.values(byMonth).reduce((s,c)=>s+c.fixe.length+c.var.length,0);
+  if(!kept) throw new Error('Aucune ligne valide : chaque charge doit avoir un fournisseur (les lignes vides, totaux et cumuls sont exclus).');
+  if(skipped) showToast(`⚠️ ${skipped} ligne(s) sans fournisseur ou de type total/cumul exclue(s)`,'err');
   for(const [ym,charges] of Object.entries(byMonth)){
     const ref=window._doc(window._db,'pilotage',window._uid,'months',ym);
     const snap=await window._getDoc(ref);
