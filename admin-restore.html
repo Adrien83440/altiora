@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restauration — ALTEORE Admin</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1d212c; --line:#2a2f3c;
+    --txt:#e7e9ee; --mut:#8b93a5; --accent:#6366f1; --orange:#f59e0b;
+    --green:#10b981; --red:#ef4444; --blue:#3b82f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--bg);color:var(--txt);font-size:13px;line-height:1.45}
+  header{padding:16px 22px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;font-weight:700}
+  header .sub{font-size:11px;color:var(--mut)}
+  .wrap{padding:18px 22px;max-width:1100px;margin:0 auto}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:14px}
+  .card h2{font-size:14px;margin:0 0 10px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  input[type=text],input[type=file],select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    padding:8px 11px;border-radius:8px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
+  button{background:var(--accent);color:#fff;border:0;padding:9px 16px;border-radius:8px;
+    font-size:13px;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.danger{background:var(--red)}
+  .err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#fca5a5;
+    padding:11px 14px;border-radius:8px;margin:10px 0}
+  .ok-msg{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.4);color:#6ee7b7;
+    padding:11px 14px;border-radius:8px;margin:10px 0}
+  .warn{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35);color:#fcd34d;
+    padding:11px 14px;border-radius:8px;margin:10px 0;font-size:12px;line-height:1.6}
+  .progress-wrap{background:var(--panel2);border-radius:8px;height:10px;overflow:hidden;margin:8px 0}
+  .progress-bar{height:100%;background:linear-gradient(90deg,var(--green),#34d399);width:0%;transition:width .2s}
+  table{width:100%;border-collapse:collapse;font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:8px}
+  th,td{padding:6px 9px;border-bottom:1px solid var(--line);text-align:left}
+  th{color:var(--mut);font-weight:600;font-size:11px;text-transform:uppercase}
+  td.num{text-align:right}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:11px}
+  label.chk{display:flex;gap:7px;align-items:center;font-size:12px;color:var(--mut);cursor:pointer}
+  .stat-line{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--mut);margin:4px 0}
+  .tbl-scroll{max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:8px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>♻️ Restauration de sauvegarde</h1>
+  <span class="sub">Recharge dans Firestore un fichier produit par le cron R2 (.json.gz.enc) ou par admin-backup.html (.json / .json.gz)</span>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <h2>1 · Charger le fichier de sauvegarde</h2>
+    <div class="row">
+      <input type="file" id="file-input" accept=".json,.gz,.enc" onchange="onFilePicked()">
+    </div>
+    <div class="row" id="key-row" style="display:none">
+      <span style="font-size:12px;color:var(--mut)">Fichier chiffré — clé AES (64 caractères hex, <code>BACKUP_ENC_KEY</code>) :</span>
+      <input type="text" id="key-input" style="width:560px" placeholder="ex: 9f3a…" autocomplete="off">
+      <button onclick="loadFile()">🔓 Déchiffrer et charger</button>
+    </div>
+    <div class="stat-line" id="st-load"></div>
+  </div>
+
+  <div class="card" id="card-preview" style="display:none">
+    <h2>2 · Vérifier le contenu</h2>
+    <div id="preview-meta" class="stat-line"></div>
+    <div class="tbl-scroll"><table id="preview-table"></table></div>
+    <div class="row" style="margin-top:12px">
+      <span style="font-size:12px;color:var(--mut)">Cible :</span>
+      <select id="target-select" onchange="refreshPlan()"></select>
+      <span style="font-size:12px;color:var(--mut)">Mode :</span>
+      <select id="mode-select" onchange="refreshPlan()">
+        <option value="missing" selected>🟢 Compléter — ne crée que les documents absents (sans risque)</option>
+        <option value="replace">🔴 Remplacer — écrase les documents existants avec la sauvegarde</option>
+      </select>
+    </div>
+    <div class="warn" id="plan-warn"></div>
+  </div>
+
+  <div class="card" id="card-exec" style="display:none">
+    <h2>3 · Exécuter</h2>
+    <div class="row">
+      <span style="font-size:12px;color:var(--mut)">Tape <strong>RESTAURER</strong> pour déverrouiller :</span>
+      <input type="text" id="confirm-input" style="width:160px" oninput="refreshExecBtn()" autocomplete="off">
+      <button class="danger" id="btn-exec" onclick="executeRestore()" disabled>♻️ Lancer la restauration</button>
+    </div>
+    <div class="progress-wrap"><div class="progress-bar" id="pb"></div></div>
+    <div class="stat-line" id="st-exec"></div>
+    <div id="report"></div>
+  </div>
+
+  <div id="err-zone"></div>
+</div>
+
+<!-- ── Firebase (module ES6) ── -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+  authDomain:"altiora-70599.firebaseapp.com", projectId:"altiora-70599",
+  storageBucket:"altiora-70599.firebasestorage.app",
+  messagingSenderId:"120905555746", appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+});
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const ADMIN_EMAILS = ['contact@adrienemily.com','api@altiora.app'];
+
+onAuthStateChanged(auth, async function(user) {
+  if (!user) { window.location.href = 'index.html'; return; }
+  let isAdmin = ADMIN_EMAILS.includes((user.email||'').toLowerCase());
+  if (!isAdmin) {
+    try {
+      const us = await getDoc(doc(db,'users',user.uid));
+      if (us.exists() && us.data().role === 'admin') isAdmin = true;
+    } catch(e) {}
+  }
+  if (!isAdmin) {
+    document.getElementById('err-zone').innerHTML = '<div class="err">Accès réservé à l\'équipe ALTEORE.</div>';
+    return;
+  }
+  window._idToken = await user.getIdToken();
+  setInterval(function(){ user.getIdToken(true).then(function(t){ window._idToken = t; }); }, 50*60*1000);
+  window._adminReady = true;
+});
+</script>
+
+<!-- ── Logique applicative (script classique) ── -->
+<script>
+var FS_BASE = 'https://firestore.googleapis.com/v1/projects/altiora-70599/databases/(default)/documents';
+
+// Collections qu'on ne restaure JAMAIS (opérationnel / cache)
+var RESTORE_BLOCKLIST = ['backups_log', 'urssaf_cache'];
+// Chemin valide : segments alternés collection/doc, caractères raisonnables
+var PATH_RE = /^[A-Za-z0-9_-]+(\/[^/]+)+$/;
+
+var _backup = null;      // contenu parsé du fichier
+var _pickedFile = null;
+
+function showErr(html){ document.getElementById('err-zone').innerHTML = html ? '<div class="err">'+html+'</div>' : ''; }
+function showOk(html){ document.getElementById('err-zone').innerHTML = html ? '<div class="ok-msg">'+html+'</div>' : ''; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function hdrs(){ return { 'Authorization': 'Bearer ' + window._idToken, 'Content-Type': 'application/json' }; }
+function fsUrl(path){ return FS_BASE + '/' + path.split('/').map(encodeURIComponent).join('/'); }
+
+function onFilePicked() {
+  var f = document.getElementById('file-input').files[0];
+  _pickedFile = f || null;
+  _backup = null;
+  document.getElementById('card-preview').style.display = 'none';
+  document.getElementById('card-exec').style.display = 'none';
+  document.getElementById('st-load').textContent = '';
+  if (!f) return;
+  var isEnc = /\.enc$/i.test(f.name);
+  document.getElementById('key-row').style.display = isEnc ? 'flex' : 'none';
+  if (!isEnc) loadFile();
+}
+
+async function loadFile() {
+  showErr('');
+  var f = _pickedFile;
+  if (!f) { showErr('Choisis un fichier.'); return; }
+  var st = document.getElementById('st-load');
+  st.textContent = 'Lecture…';
+  try {
+    var buf = new Uint8Array(await f.arrayBuffer());
+
+    // 1. Déchiffrement si .enc — format [IV 12][ciphertext][TAG 16] (AES-256-GCM)
+    if (/\.enc$/i.test(f.name)) {
+      var hex = (document.getElementById('key-input').value || '').trim();
+      if (!/^[0-9a-fA-F]{64}$/.test(hex)) { showErr('Clé AES invalide : 64 caractères hexadécimaux attendus.'); st.textContent=''; return; }
+      var keyBytes = new Uint8Array(hex.match(/.{2}/g).map(function(h){ return parseInt(h, 16); }));
+      var wk = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
+      try {
+        var dec = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: buf.subarray(0, 12) }, wk, buf.subarray(12));
+        buf = new Uint8Array(dec);
+      } catch (e) {
+        showErr('Déchiffrement impossible — mauvaise clé ou fichier corrompu.'); st.textContent=''; return;
+      }
+    }
+
+    // 2. Décompression si gzip (magic 1f 8b)
+    if (buf[0] === 0x1f && buf[1] === 0x8b) {
+      if (typeof DecompressionStream === 'undefined') { showErr('Navigateur trop ancien (DecompressionStream manquant).'); return; }
+      var ds = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
+      buf = new Uint8Array(await new Response(ds).arrayBuffer());
+    }
+
+    // 3. Parse + validation format
+    var obj = JSON.parse(new TextDecoder().decode(buf));
+    if (obj.format !== 'alteore-backup-v1') { showErr('Format inconnu — attendu <code>alteore-backup-v1</code>.'); st.textContent=''; return; }
+    _backup = obj;
+    st.textContent = '✅ Fichier chargé (' + (f.size/1048576).toFixed(1) + ' Mo sur disque)';
+    buildPreview();
+  } catch (e) {
+    showErr('Lecture impossible : ' + esc(e.message));
+    st.textContent = '';
+  }
+}
+
+// ── Docs à restaurer selon la cible choisie → { path: fields } ──
+function collectDocs(target) {
+  var out = {};
+  function add(docs) {
+    if (!docs) return;
+    Object.keys(docs).forEach(function(p){
+      if (!PATH_RE.test(p)) return;
+      if (p.split('/').length % 2 !== 0) return;           // un doc = nb pair de segments
+      if (RESTORE_BLOCKLIST.indexOf(p.split('/')[0]) >= 0) return;
+      out[p] = docs[p];
+    });
+  }
+  if (_backup.scope === 'user' || _backup.scope === 'global') {
+    add(_backup.docs);
+  } else if (_backup.scope === 'full') {
+    if (target === '__all__') {
+      add(_backup.global && _backup.global.docs);
+      Object.keys(_backup.users || {}).forEach(function(uid){ add(_backup.users[uid].docs); });
+    } else {
+      add((_backup.users[target] || {}).docs);
+    }
+  }
+  return out;
+}
+
+function decodeStr(f){ return f && f.stringValue !== undefined ? f.stringValue : ''; }
+
+function buildPreview() {
+  var meta = document.getElementById('preview-meta');
+  var sel = document.getElementById('target-select');
+  var scope = _backup.scope;
+  var desc = scope === 'user' ? ('client unique <strong>' + esc(_backup.uid || '?') + '</strong>')
+           : scope === 'global' ? 'collections transverses (fichier global du cron)'
+           : 'sauvegarde complète (' + Object.keys(_backup.users || {}).length + ' clients + global)';
+  meta.innerHTML = 'Sauvegarde du <strong>' + esc(_backup.date || '?') + '</strong> — portée : ' + desc + ' — ' + (_backup.docsCount || '?') + ' documents annoncés.';
+
+  // Cibles possibles
+  var opts = '';
+  if (scope === 'full') {
+    opts += '<option value="__all__">🌍 TOUT restaurer (tous les clients + global)</option>';
+    Object.keys(_backup.users || {}).sort().forEach(function(uid){
+      var userDoc = (_backup.users[uid].docs || {})['users/' + uid];
+      var email = userDoc ? decodeStr(userDoc.email) : '';
+      opts += '<option value="' + esc(uid) + '">👤 ' + esc(uid.slice(0, 12)) + '… ' + (email ? '(' + esc(email) + ')' : '') + '</option>';
+    });
+  } else {
+    opts += '<option value="__all__">Tout le contenu du fichier</option>';
+  }
+  sel.innerHTML = opts;
+
+  document.getElementById('card-preview').style.display = 'block';
+  document.getElementById('card-exec').style.display = 'block';
+  refreshPlan();
+}
+
+function refreshPlan() {
+  var target = document.getElementById('target-select').value;
+  var mode = document.getElementById('mode-select').value;
+  var docs = collectDocs(target);
+  var byCol = {};
+  Object.keys(docs).forEach(function(p){
+    var col = p.split('/')[0];
+    byCol[col] = (byCol[col] || 0) + 1;
+  });
+  var rows = Object.keys(byCol).sort().map(function(c){
+    return '<tr><td>' + esc(c) + '</td><td class="num">' + byCol[c] + '</td></tr>';
+  }).join('');
+  document.getElementById('preview-table').innerHTML =
+    '<thead><tr><th>Collection</th><th style="text-align:right">Documents à restaurer</th></tr></thead><tbody>' + rows + '</tbody>';
+
+  var n = Object.keys(docs).length;
+  var warn = document.getElementById('plan-warn');
+  if (mode === 'replace') {
+    warn.innerHTML = '⚠️ <strong>Mode REMPLACER</strong> : les ' + n + ' documents ci-dessus seront réécrits à l\'état de la sauvegarde du <strong>' + esc(_backup.date || '?') + '</strong>. Toute saisie faite APRÈS cette date sur ces documents sera perdue. Fais un export local (admin-backup.html) AVANT, pour pouvoir revenir en arrière.';
+  } else {
+    warn.innerHTML = '🟢 <strong>Mode COMPLÉTER</strong> : seuls les documents qui n\'existent plus dans Firestore seront recréés (' + n + ' candidats). Les documents existants ne sont jamais touchés.';
+  }
+  window._restorePlan = { docs: docs, mode: mode };
+  refreshExecBtn();
+}
+
+function refreshExecBtn() {
+  var ok = window._adminReady && window._restorePlan
+    && Object.keys(window._restorePlan.docs).length > 0
+    && document.getElementById('confirm-input').value.trim() === 'RESTAURER';
+  document.getElementById('btn-exec').disabled = !ok;
+}
+
+async function executeRestore() {
+  var plan = window._restorePlan;
+  if (!plan) return;
+  var entries = Object.entries(plan.docs);
+  var mode = plan.mode;
+  var btn = document.getElementById('btn-exec');
+  var pb = document.getElementById('pb');
+  var st = document.getElementById('st-exec');
+  btn.disabled = true;
+  document.getElementById('confirm-input').value = '';
+
+  var created = 0, replaced = 0, skipped = 0, failed = [];
+  var BATCH = 8;
+  for (var i = 0; i < entries.length; i += BATCH) {
+    var slice = entries.slice(i, i + BATCH);
+    await Promise.all(slice.map(async function(pair) {
+      var path = pair[0], fields = pair[1];
+      try {
+        var url = fsUrl(path);
+        if (mode === 'missing') {
+          // Précondition : n'écrire QUE si le doc n'existe pas (409 sinon)
+          var res = await fetch(url + '?currentDocument.exists=false', {
+            method: 'PATCH', headers: hdrs(), body: JSON.stringify({ fields: fields })
+          });
+          if (res.status === 409) { skipped++; return; }
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          created++;
+        } else {
+          // Remplacement complet (PATCH sans updateMask = document entier)
+          var res2 = await fetch(url, { method: 'PATCH', headers: hdrs(), body: JSON.stringify({ fields: fields }) });
+          if (!res2.ok) throw new Error('HTTP ' + res2.status);
+          replaced++;
+        }
+      } catch (e) {
+        if (failed.length < 100) failed.push(path + ' → ' + e.message);
+      }
+    }));
+    var done = Math.min(i + BATCH, entries.length);
+    pb.style.width = Math.round(done / entries.length * 100) + '%';
+    st.textContent = done + '/' + entries.length + ' documents traités — ' +
+      (mode === 'missing' ? (created + ' recréés, ' + skipped + ' déjà présents') : (replaced + ' réécrits')) +
+      (failed.length ? ', ' + failed.length + ' erreurs' : '');
+  }
+
+  pb.style.width = '100%';
+  var report = document.getElementById('report');
+  if (failed.length) {
+    report.innerHTML = '<div class="warn">⚠ ' + failed.length + ' document(s) en erreur :<br>' +
+      failed.slice(0, 30).map(esc).join('<br>') + (failed.length > 30 ? '<br>…' : '') + '</div>';
+  } else {
+    report.innerHTML = '';
+  }
+  showOk('✅ Restauration terminée — ' +
+    (mode === 'missing' ? created + ' documents recréés, ' + skipped + ' laissés intacts (déjà présents)' : replaced + ' documents réécrits') +
+    (failed.length ? ', ' + failed.length + ' erreurs (détail ci-dessous)' : '') + '.');
+  btn.disabled = false;
+}
+
+window.onFilePicked = onFilePicked;
+window.loadFile = loadFile;
+window.refreshPlan = refreshPlan;
+window.refreshExecBtn = refreshExecBtn;
+window.executeRestore = executeRestore;
+</script>
+</body>
+</html>

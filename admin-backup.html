@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sauvegarde locale — ALTEORE Admin</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1d212c; --line:#2a2f3c;
+    --txt:#e7e9ee; --mut:#8b93a5; --accent:#6366f1; --orange:#f59e0b;
+    --green:#10b981; --red:#ef4444; --blue:#3b82f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--bg);color:var(--txt);font-size:13px;line-height:1.45}
+  header{padding:16px 22px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;font-weight:700}
+  header .sub{font-size:11px;color:var(--mut)}
+  .wrap{padding:18px 22px;max-width:1000px;margin:0 auto}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin-bottom:14px}
+  .card h2{font-size:14px;margin:0 0 10px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  input[type=text]{background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    padding:8px 11px;border-radius:8px;font-size:13px;font-family:ui-monospace,Menlo,monospace}
+  input.uid{width:330px}
+  button{background:var(--accent);color:#fff;border:0;padding:9px 16px;border-radius:8px;
+    font-size:13px;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
+  .err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#fca5a5;
+    padding:11px 14px;border-radius:8px;margin:10px 0}
+  .ok-msg{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.4);color:#6ee7b7;
+    padding:11px 14px;border-radius:8px;margin:10px 0}
+  .info{background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.3);color:#c7d2fe;
+    padding:11px 14px;border-radius:8px;margin:10px 0;font-size:12px}
+  .progress-wrap{background:var(--panel2);border-radius:8px;height:10px;overflow:hidden;margin:8px 0}
+  .progress-bar{height:100%;background:linear-gradient(90deg,var(--accent),#8b5cf6);width:0%;transition:width .3s}
+  .stat-line{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--mut);margin:4px 0}
+  label.chk{display:flex;gap:7px;align-items:center;font-size:12px;color:var(--mut);cursor:pointer}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:11px}
+  .auto-status{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+  .auto-status .ok{color:var(--green)} .auto-status .ko{color:var(--red)} .auto-status .warn{color:var(--orange)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>⬇️ Sauvegarde locale (copie n°3)</h1>
+  <span class="sub">Exporte les données Firestore en JSON sur ton ordinateur · format identique aux sauvegardes auto (restaurable via admin-restore.html)</span>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <h2>📡 Sauvegarde automatique (Cloudflare R2)</h2>
+    <div class="auto-status" id="auto-status">Vérification…</div>
+  </div>
+
+  <div class="card">
+    <h2>🗄 Export complet (tous les clients)</h2>
+    <div class="info">Exporte toutes les collections clients + collections transverses en UN fichier
+      <code>.json.gz</code>. À conserver hors ligne (disque externe, NAS…). Recommandé : 1×/semaine
+      et avant toute opération risquée.</div>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="gz-full" checked> Compresser (.json.gz — recommandé)</label>
+      <button id="btn-full" onclick="exportFull()">⬇️ Exporter tout</button>
+    </div>
+    <div class="progress-wrap" id="pw-full" style="display:none"><div class="progress-bar" id="pb-full"></div></div>
+    <div class="stat-line" id="st-full"></div>
+  </div>
+
+  <div class="card">
+    <h2>👤 Export d'un seul client</h2>
+    <div class="row">
+      <input type="text" id="uid-input" class="uid" placeholder="UID client (ex: 0V8VF5bJ...)" autocomplete="off">
+      <label class="chk"><input type="checkbox" id="gz-one" checked> Compresser</label>
+      <button id="btn-one" onclick="exportOne()">⬇️ Exporter ce client</button>
+    </div>
+    <div class="stat-line" id="st-one"></div>
+  </div>
+
+  <div id="err-zone"></div>
+</div>
+
+<!-- ── Firebase (module ES6) ── -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+  authDomain:"altiora-70599.firebaseapp.com", projectId:"altiora-70599",
+  storageBucket:"altiora-70599.firebasestorage.app",
+  messagingSenderId:"120905555746", appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+});
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const ADMIN_EMAILS = ['contact@adrienemily.com','api@altiora.app'];
+
+onAuthStateChanged(auth, async function(user) {
+  if (!user) { window.location.href = 'index.html'; return; }
+  let isAdmin = ADMIN_EMAILS.includes((user.email||'').toLowerCase());
+  if (!isAdmin) {
+    try {
+      const us = await getDoc(doc(db,'users',user.uid));
+      if (us.exists() && us.data().role === 'admin') isAdmin = true;
+    } catch(e) {}
+  }
+  if (!isAdmin) {
+    document.getElementById('err-zone').innerHTML = '<div class="err">Accès réservé à l\'équipe ALTEORE.</div>';
+    document.getElementById('btn-full').disabled = true;
+    document.getElementById('btn-one').disabled = true;
+    return;
+  }
+  window._idToken = await user.getIdToken();
+  setInterval(function(){ user.getIdToken(true).then(function(t){ window._idToken = t; }); }, 50*60*1000);
+  window._adminReady = true;
+  window.checkAutoStatus();
+});
+</script>
+
+<!-- ── Logique applicative (script classique) ── -->
+<script>
+var FS_BASE = 'https://firestore.googleapis.com/v1/projects/altiora-70599/databases/(default)/documents';
+var FS_PREFIX = 'projects/altiora-70599/databases/(default)/documents/';
+
+// ══════════════════════════════════════════════════════════════════
+// MANIFESTE DES COLLECTIONS
+// ⚠️ À GARDER SYNCHRONISÉ avec api/cron-backup.js (source de vérité),
+//    firestore.rules et admin-restore.html.
+// ══════════════════════════════════════════════════════════════════
+var USER_SUBCOLS = {
+  pilotage:              ['months', 'cartes_cadeaux'],
+  marges:                ['produits', 'params'],
+  produits:              ['items', 'meta'],
+  panier:                ['data'],
+  dettes:                ['data'],
+  bilans:                ['years'],
+  copilote:              ['briefings'],
+  cashflow:              ['config'],
+  stock:                 ['config', 'data', 'families', 'import_batches', 'movements', 'products', 'snapshots'],
+  fidelite:              ['clients', 'config', 'copilot'],
+  fidelite_tablet:       ['clients'],
+  sms_credits:           ['history'],
+  rh:                    ['employes', 'objectifs', 'paie', 'temps', 'config', 'conformite', 'contrats',
+                          'doc_history', 'entretiens_annuels', 'pointages', 'recompenses', 'ccn_cache', 'params'],
+  rh_conges:             ['demandes'],
+  rh_conges_public:      ['demandes'],
+  rh_onboarding:         ['dossiers'],
+  rh_recrutement:        ['offres', 'candidats', 'entretiens', 'config'],
+  rh_docs_gen:           ['items'],
+  rh_emargements:        ['fiches', 'daily', 'planning_acks', 'audit'],
+  rh_emargements_public: ['signatures'],
+  rh_pointages_public:   ['events'],
+  rh_objectifs_public:   ['items'],
+  fiches:                ['items'],
+  profil:                ['data'],
+  tickets:               ['list'],
+  previsions:            ['config', 'predictions', 'historique'],
+  agent:                 ['notes', 'memory', 'memory-facts', 'profile', 'usage', 'briefings', 'conversations'],
+  bank_connections:      ['banks'],
+  client_access:         ['grants'],
+  conseillers:           ['clients']
+};
+var USER_SIMPLE = [
+  'users', 'users_activity', 'catalogues', 'suppliers', 'fournisseurs',
+  'bank_pending', 'bank_rules', 'fidelite_public_cfg', 'rh_params', 'tuto_progress'
+];
+var USER_QUERIES = [
+  { col: 'fidelite_public',           field: 'merchantUid' },
+  { col: 'rh_employes_public',        field: 'ownerUid' },
+  { col: 'rh_employes_public_profil', field: 'ownerUid' }
+];
+var GLOBAL_COLS = [
+  'users', 'users_activity', 'catalogues', 'suppliers', 'fournisseurs',
+  'bank_pending', 'bank_rules', 'fidelite_public_cfg', 'rh_params', 'tuto_progress',
+  'fidelite_public', 'rh_employes_public', 'rh_employes_public_profil', 'rh_auth_salaries',
+  'retention_logs', 'debug_reports', 'updates', 'tuto_videos',
+  'blog_drafts', 'blog_published', 'blog_topics', 'conseil_invitations', 'conseillers'
+];
+var PLAN_WEEKS_BACK = 26, PLAN_WEEKS_FWD = 9;
+var REQ_BATCH = 12, USER_CONCURRENCY = 3;
+
+function showErr(html){ document.getElementById('err-zone').innerHTML = html ? '<div class="err">'+html+'</div>' : ''; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function hdrs(){ return { 'Authorization': 'Bearer ' + window._idToken, 'Content-Type': 'application/json' }; }
+
+async function fsGetRaw(path) {
+  var res = await fetch(FS_BASE + '/' + path, { headers: hdrs() });
+  if (!res.ok) return null;
+  var data = await res.json();
+  return data.fields || {};
+}
+
+async function fsListRaw(path) {
+  var out = [], pageToken = '';
+  for (var guard = 0; guard < 200; guard++) {
+    var url = FS_BASE + '/' + path + '?pageSize=300' + (pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : '');
+    var res = await fetch(url, { headers: hdrs() });
+    if (!res.ok) return out;
+    var data = await res.json();
+    (data.documents || []).forEach(function(d){ out.push({ path: d.name.replace(FS_PREFIX, ''), fields: d.fields || {} }); });
+    if (!data.nextPageToken) break;
+    pageToken = data.nextPageToken;
+  }
+  return out;
+}
+
+async function fsQueryRaw(collectionId, field, value) {
+  var body = { structuredQuery: { from: [{ collectionId: collectionId }],
+    where: { fieldFilter: { field: { fieldPath: field }, op: 'EQUAL', value: { stringValue: value } } } } };
+  var res = await fetch(FS_BASE + ':runQuery', { method: 'POST', headers: hdrs(), body: JSON.stringify(body) });
+  if (!res.ok) return [];
+  var rows = await res.json();
+  var out = [];
+  (rows || []).forEach(function(r){
+    if (r.document && r.document.name) out.push({ path: r.document.name.replace(FS_PREFIX, ''), fields: r.document.fields || {} });
+  });
+  return out;
+}
+
+async function runBatched(jobs, batchSize) {
+  for (var i = 0; i < jobs.length; i += batchSize) {
+    await Promise.all(jobs.slice(i, i + batchSize).map(function(fn){ return fn().catch(function(){ return null; }); }));
+  }
+}
+
+function planWeekNames() {
+  var names = [];
+  var d = new Date(); d.setUTCHours(12,0,0,0);
+  var day = d.getUTCDay();
+  d.setUTCDate(d.getUTCDate() + (day === 0 ? -6 : 1 - day));
+  d.setUTCDate(d.getUTCDate() - PLAN_WEEKS_BACK * 7);
+  for (var i = 0; i < PLAN_WEEKS_BACK + PLAN_WEEKS_FWD + 1; i++) {
+    names.push('plan_' + d.getUTCFullYear() + String(d.getUTCMonth()+1).padStart(2,'0') + String(d.getUTCDate()).padStart(2,'0'));
+    d.setUTCDate(d.getUTCDate() + 7);
+  }
+  return names;
+}
+
+// Export d'un client → { path: fields } (même logique que api/cron-backup.js)
+async function exportUserDocs(uid, planNames) {
+  var docs = {};
+  var jobs = [];
+  USER_SIMPLE.concat(Object.keys(USER_SUBCOLS)).forEach(function(c){
+    var p = c + '/' + uid;
+    jobs.push(async function(){
+      var f = await fsGetRaw(p);
+      if (f && Object.keys(f).length) docs[p] = f;
+    });
+  });
+  Object.keys(USER_SUBCOLS).forEach(function(col){
+    USER_SUBCOLS[col].forEach(function(sub){
+      jobs.push(async function(){
+        var rows = await fsListRaw(col + '/' + uid + '/' + sub);
+        rows.forEach(function(r){ docs[r.path] = r.fields; });
+      });
+    });
+  });
+  USER_QUERIES.forEach(function(q){
+    jobs.push(async function(){
+      var rows = await fsQueryRaw(q.col, q.field, uid);
+      rows.forEach(function(r){ docs[r.path] = r.fields; });
+    });
+  });
+  await runBatched(jobs, REQ_BATCH);
+
+  // Plannings RH dynamiques si employés présents
+  var hasRH = Object.keys(docs).some(function(p){ return p.indexOf('rh/' + uid + '/employes/') === 0; });
+  if (hasRH) {
+    var planJobs = [];
+    planNames.forEach(function(wk){
+      ['rh','rh_planning_public'].forEach(function(col){
+        planJobs.push(async function(){
+          var rows = await fsListRaw(col + '/' + uid + '/' + wk);
+          rows.forEach(function(r){ docs[r.path] = r.fields; });
+        });
+      });
+    });
+    await runBatched(planJobs, REQ_BATCH);
+  }
+
+  // Messages Léa (3e niveau)
+  var convIds = Object.keys(docs).filter(function(p){ return p.indexOf('agent/' + uid + '/conversations/') === 0; })
+    .map(function(p){ return p.split('/')[3]; });
+  if (convIds.length) {
+    await runBatched(convIds.map(function(cid){
+      return async function(){
+        var rows = await fsListRaw('agent/' + uid + '/conversations/' + cid + '/messages');
+        rows.forEach(function(r){ docs[r.path] = r.fields; });
+      };
+    }), REQ_BATCH);
+  }
+  return docs;
+}
+
+async function exportGlobalDocs() {
+  var docs = {};
+  await runBatched(GLOBAL_COLS.map(function(col){
+    return async function(){
+      var rows = await fsListRaw(col);
+      rows.forEach(function(r){ docs[r.path] = r.fields; });
+    };
+  }), 5);
+  var refs = await fsListRaw('referrals');
+  refs.forEach(function(r){ docs[r.path] = r.fields; });
+  await runBatched(refs.map(function(r){
+    return async function(){
+      var code = r.path.split('/')[1];
+      var uses = await fsListRaw('referrals/' + code + '/uses');
+      uses.forEach(function(u){ docs[u.path] = u.fields; });
+    };
+  }), REQ_BATCH);
+  var cons = Object.keys(docs).filter(function(p){ return /^conseillers\/[^/]+$/.test(p); });
+  await runBatched(cons.map(function(p){
+    return async function(){
+      var rows = await fsListRaw('conseillers/' + p.split('/')[1] + '/clients');
+      rows.forEach(function(r){ docs[r.path] = r.fields; });
+    };
+  }), REQ_BATCH);
+  return docs;
+}
+
+// ── Téléchargement (gzip optionnel via CompressionStream) ──
+async function downloadJson(obj, baseName, gzip) {
+  var jsonStr = JSON.stringify(obj);
+  var blob;
+  var name = baseName;
+  if (gzip && typeof CompressionStream !== 'undefined') {
+    var stream = new Blob([jsonStr]).stream().pipeThrough(new CompressionStream('gzip'));
+    blob = await new Response(stream).blob();
+    name += '.json.gz';
+  } else {
+    blob = new Blob([jsonStr], { type: 'application/json' });
+    name += '.json';
+  }
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  return { bytes: blob.size, name: name };
+}
+
+function fmtMo(b){ return (b/1048576).toFixed(1) + ' Mo'; }
+
+// ── EXPORT COMPLET ──
+async function exportFull() {
+  if (!window._adminReady) { showErr('Authentification pas encore prête, réessaie dans 1s.'); return; }
+  showErr('');
+  var btn = document.getElementById('btn-full');
+  var st = document.getElementById('st-full');
+  var pw = document.getElementById('pw-full'), pb = document.getElementById('pb-full');
+  btn.disabled = true; pw.style.display = 'block'; pb.style.width = '2%';
+  try {
+    st.textContent = 'Collections transverses…';
+    var globalDocs = await exportGlobalDocs();
+    pb.style.width = '10%';
+
+    var uids = Object.keys(globalDocs).filter(function(p){ return /^users\/[^/]+$/.test(p); })
+      .map(function(p){ return p.split('/')[1]; }).sort();
+    var planNames = planWeekNames();
+    var users = {};
+    var totalDocs = Object.keys(globalDocs).length;
+
+    for (var i = 0; i < uids.length; i += USER_CONCURRENCY) {
+      var batch = uids.slice(i, i + USER_CONCURRENCY);
+      var results = await Promise.all(batch.map(function(uid){ return exportUserDocs(uid, planNames).catch(function(){ return {}; }); }));
+      batch.forEach(function(uid, j){
+        users[uid] = { docs: results[j] };
+        totalDocs += Object.keys(results[j]).length;
+      });
+      pb.style.width = (10 + 88 * Math.min(1, (i + batch.length) / uids.length)) + '%';
+      st.textContent = 'Clients : ' + Math.min(i + batch.length, uids.length) + '/' + uids.length + ' — ' + totalDocs + ' documents';
+    }
+
+    var payload = {
+      format: 'alteore-backup-v1', scope: 'full',
+      date: new Date().toISOString().slice(0,10), exportedAt: new Date().toISOString(),
+      docsCount: totalDocs, usersCount: uids.length,
+      global: { docs: globalDocs }, users: users
+    };
+    var gz = document.getElementById('gz-full').checked;
+    var out = await downloadJson(payload, 'alteore-backup-complet-' + payload.date, gz);
+    pb.style.width = '100%';
+    st.innerHTML = '✅ <strong>' + esc(out.name) + '</strong> — ' + uids.length + ' clients, ' + totalDocs + ' documents, ' + fmtMo(out.bytes) + '. Range-le hors ligne (disque externe / NAS).';
+  } catch (e) {
+    showErr('Échec export : ' + esc(e.message));
+    st.textContent = '';
+  }
+  btn.disabled = false;
+}
+
+// ── EXPORT D'UN CLIENT ──
+async function exportOne() {
+  if (!window._adminReady) { showErr('Authentification pas encore prête, réessaie dans 1s.'); return; }
+  showErr('');
+  var uid = document.getElementById('uid-input').value.trim();
+  if (!uid) { showErr('UID manquant.'); return; }
+  var btn = document.getElementById('btn-one');
+  var st = document.getElementById('st-one');
+  btn.disabled = true;
+  st.textContent = 'Export en cours…';
+  try {
+    var docs = await exportUserDocs(uid, planWeekNames());
+    var n = Object.keys(docs).length;
+    if (!n) { showErr('Aucune donnée trouvée pour cet UID.'); st.textContent=''; btn.disabled=false; return; }
+    var payload = {
+      format: 'alteore-backup-v1', scope: 'user', uid: uid,
+      date: new Date().toISOString().slice(0,10), exportedAt: new Date().toISOString(),
+      docsCount: n, docs: docs
+    };
+    var gz = document.getElementById('gz-one').checked;
+    var out = await downloadJson(payload, 'alteore-backup-' + uid.slice(0,8) + '-' + payload.date, gz);
+    st.innerHTML = '✅ <strong>' + esc(out.name) + '</strong> — ' + n + ' documents, ' + fmtMo(out.bytes);
+  } catch (e) {
+    showErr('Échec export : ' + esc(e.message));
+    st.textContent = '';
+  }
+  btn.disabled = false;
+}
+
+// ── STATUT SAUVEGARDE AUTO (backups_log) ──
+async function checkAutoStatus() {
+  var el = document.getElementById('auto-status');
+  try {
+    var found = null, day = null;
+    for (var i = 0; i < 4; i++) {
+      var d = new Date(Date.now() - i * 86400000);
+      day = d.toISOString().slice(0, 10);
+      var f = await fsGetRaw('backups_log/' + day);
+      if (f && Object.keys(f).length) { found = f; break; }
+    }
+    if (!found) {
+      el.innerHTML = '<span class="warn">⚠ Aucune sauvegarde automatique trouvée sur les 4 derniers jours.</span> Vérifie la config R2 (voir docs/BACKUPS.md) ou lance <code>/api/cron-backup?key=CRON_SECRET</code>.';
+      return;
+    }
+    function dv(f){ if(!f) return ''; return f.stringValue !== undefined ? f.stringValue : (f.integerValue !== undefined ? f.integerValue : (f.doubleValue !== undefined ? f.doubleValue : '')); }
+    var status = dv(found.status), users = dv(found.usersDone), docsN = dv(found.docsTotal);
+    var mo = found.bytesTotal ? (parseInt(dv(found.bytesTotal)) / 1048576).toFixed(1) : '?';
+    if (status === 'done') {
+      el.innerHTML = '<span class="ok">✅ Dernière sauvegarde auto : ' + esc(day) + '</span> — ' + esc(users) + ' clients, ' + esc(docsN) + ' documents, ' + mo + ' Mo chiffrés sur R2.';
+    } else if (status === 'partial' || status === 'running') {
+      el.innerHTML = '<span class="warn">⏳ Sauvegarde du ' + esc(day) + ' en cours (' + esc(users) + ' clients traités)…</span> La passe suivante reprendra automatiquement.';
+    } else {
+      el.innerHTML = '<span class="ko">❌ Sauvegarde du ' + esc(day) + ' en erreur :</span> ' + esc(dv(found.error) || 'inconnue');
+    }
+  } catch (e) {
+    el.innerHTML = '<span class="warn">⚠ Statut indisponible (' + esc(e.message) + ')</span>';
+  }
+}
+
+window.exportFull = exportFull;
+window.exportOne = exportOne;
+window.checkAutoStatus = checkAutoStatus;
+</script>
+</body>
+</html>

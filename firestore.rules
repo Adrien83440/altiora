@@ -1,20 +1,15 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-
     // ═══════════════════════════════════════════════════════════════
     // HELPERS
     // ═══════════════════════════════════════════════════════════════
-
     function isAuth() {
       return request.auth != null;
     }
-
     function isOwner(uid) {
       return isAuth() && request.auth.uid == uid;
     }
-
     // ─── Admin (serveur + équipe Alteore) ──────────────────────────
     function isAdmin() {
       return isAuth() && (
@@ -26,27 +21,21 @@ service cloud.firestore {
         )
       );
     }
-
     function getUserPlan(uid) {
       return get(/databases/$(database)/documents/users/$(uid)).data.plan;
     }
-
     function hasPaidPlan(uid) {
       return getUserPlan(uid) in ['pro', 'max', 'master', 'trial'];
     }
-
     function hasFidelitePlan(uid) {
       return getUserPlan(uid) in ['max', 'master', 'trial'];
     }
-
     function hasRhPlan(uid) {
       return getUserPlan(uid) in ['master', 'trial'];
     }
-
     function hasBilanPlan(uid) {
       return getUserPlan(uid) in ['max', 'master', 'trial'];
     }
-
     // ─── Conseiller avec accès actif au compte client ──────────────
     // Utilisé pour autoriser un comptable/coach à LIRE (jamais écrire)
     // les données financières d'un client qui l'a invité.
@@ -66,8 +55,6 @@ service cloud.firestore {
           || get(/databases/$(database)/documents/client_access/$(clientUid)/grants/$(request.auth.uid)).data.expiresAt > request.time
         );
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // USERS
     //
@@ -87,16 +74,12 @@ service cloud.firestore {
             && !('trialEnd'             in request.resource.data.diff(resource.data).affectedKeys()));
       allow delete: if isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // USERS_ACTIVITY — Tracking connexions / activité / modules
     // ═══════════════════════════════════════════════════════════════
     match /users_activity/{uid} {
       allow read, write: if isOwner(uid) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // PROFIL ENTREPRISE
     // Lecture étendue au conseiller (contexte entreprise utile)
@@ -105,8 +88,6 @@ service cloud.firestore {
       allow read:  if isOwner(uid) || isAdmin() || isConseillerWithGrant(uid);
       allow write: if isOwner(uid) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // PILOTAGE
     // Split read/write : lecture étendue au conseiller, écriture inchangée
@@ -126,8 +107,6 @@ service cloud.firestore {
         allow write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // MARGES
     // ═══════════════════════════════════════════════════════════════
@@ -143,8 +122,6 @@ service cloud.firestore {
         allow write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // PRODUITS / COUT DE REVIENT
     //
@@ -164,8 +141,6 @@ service cloud.firestore {
         allow write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // FICHES FOURNISSEURS — Coût de revient (fournisseurs + articles)
     //
@@ -181,8 +156,6 @@ service cloud.firestore {
         allow write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // PANIER MOYEN
     // ═══════════════════════════════════════════════════════════════
@@ -194,8 +167,6 @@ service cloud.firestore {
         allow write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // DETTES
     // ═══════════════════════════════════════════════════════════════
@@ -207,8 +178,6 @@ service cloud.firestore {
         allow write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // CASHFLOW
     // ═══════════════════════════════════════════════════════════════
@@ -216,8 +185,6 @@ service cloud.firestore {
       allow read:  if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin() || isConseillerWithGrant(uid);
       allow write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // PREVISIONS — Module de prévisions hebdo/mensuelles (plan master)
     //
@@ -236,8 +203,6 @@ service cloud.firestore {
       allow read:  if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin() || isConseillerWithGrant(uid);
       allow write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // CATALOGUES — Listes d'autocomplete pour pilotage
     // (fournisseurs, clients, descriptions, types de charges)
@@ -249,8 +214,6 @@ service cloud.firestore {
       allow read:  if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin() || isConseillerWithGrant(uid);
       allow write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // SUPPLIERS — LEGACY (ancien stockage fournisseurs pilotage)
     //
@@ -263,16 +226,12 @@ service cloud.firestore {
       allow read:  if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       allow write: if isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // COPILOTE IA — LEGACY
     // ═══════════════════════════════════════════════════════════════
     match /copilote/{uid}/{allPaths=**} {
       allow read, write: if (isOwner(uid) && hasFidelitePlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // AGENT IA — Léa
     // (PAS d'accès conseiller — Léa est exclue du périmètre conseil)
@@ -281,8 +240,6 @@ service cloud.firestore {
       allow read:  if isOwner(uid) || isAdmin();
       allow write: if isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // BILANS IA
     // Le conseiller peut lire les bilans (utile pour comptable surtout)
@@ -291,8 +248,6 @@ service cloud.firestore {
       allow read:  if (isOwner(uid) && hasBilanPlan(uid)) || isAdmin() || isConseillerWithGrant(uid);
       allow write: if (isOwner(uid) && hasBilanPlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // CONNEXIONS BANCAIRES (GoCardless)
     // ═══════════════════════════════════════════════════════════════
@@ -302,16 +257,12 @@ service cloud.firestore {
         allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // TRANSACTIONS BANCAIRES EN ATTENTE
     // ═══════════════════════════════════════════════════════════════
     match /bank_pending/{uid} {
       allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // BANK_RULES — Règles de catégorisation auto des transactions
     //
@@ -322,16 +273,12 @@ service cloud.firestore {
     match /bank_rules/{uid} {
       allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // STOCK
     // ═══════════════════════════════════════════════════════════════
     match /stock/{uid}/{allPaths=**} {
       allow read, write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // FIDELISATION
     // ═══════════════════════════════════════════════════════════════
@@ -341,7 +288,6 @@ service cloud.firestore {
         allow read, write: if (isOwner(uid) && hasFidelitePlan(uid)) || isAdmin();
       }
     }
-
     match /fidelite_public/{clientId} {
       allow read: if true;
       allow create: if (isAuth() && hasFidelitePlan(request.auth.uid)) || isAdmin();
@@ -354,13 +300,10 @@ service cloud.firestore {
             && hasFidelitePlan(request.auth.uid)
             && resource.data.merchantUid == request.auth.uid);
     }
-
     match /fidelite_public_cfg/{uid} {
       allow read: if true;
       allow write: if (isOwner(uid) && hasFidelitePlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // FIDELITE_TABLET — Tablette commerçant (page non authentifiée)
     //
@@ -374,8 +317,6 @@ service cloud.firestore {
         allow read, write: if true;
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // SMS CREDITS
     // ═══════════════════════════════════════════════════════════════
@@ -387,16 +328,12 @@ service cloud.firestore {
         allow write: if isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH
     // ═══════════════════════════════════════════════════════════════
     match /rh/{uid}/{allPaths=**} {
       allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — ESPACE SALARIE PUBLIC
     // ═══════════════════════════════════════════════════════════════
@@ -406,23 +343,18 @@ service cloud.firestore {
       allow update: if (isAuth() && hasRhPlan(request.auth.uid)) || isAdmin();
       allow delete: if (isAuth() && hasRhPlan(request.auth.uid)) || isAdmin();
     }
-
     match /rh_employes_public_profil/{publicId} {
       allow read:   if true;
       allow create: if (isAuth() && hasRhPlan(request.auth.uid)) || isAdmin();
       allow update: if (isAuth() && hasRhPlan(request.auth.uid)) || isAdmin();
       allow delete: if (isAuth() && hasRhPlan(request.auth.uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — AUTHENTIFICATION SALARIES (PIN, lockouts, reset codes)
     // ═══════════════════════════════════════════════════════════════
     match /rh_auth_salaries/{publicId} {
       allow read, write: if isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — PLANNING PUBLIC
     // ═══════════════════════════════════════════════════════════════
@@ -430,16 +362,12 @@ service cloud.firestore {
       allow read:  if true;
       allow write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — PARAMETRES GENERAUX
     // ═══════════════════════════════════════════════════════════════
     match /rh_params/{uid} {
       allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — CONGES (admin)
     // ═══════════════════════════════════════════════════════════════
@@ -449,8 +377,6 @@ service cloud.firestore {
         allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — CONGES PUBLIC (espace salarié, pas d'auth Firebase)
     //
@@ -465,8 +391,6 @@ service cloud.firestore {
         allow read, write: if true;
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — ONBOARDING
     // ═══════════════════════════════════════════════════════════════
@@ -476,8 +400,6 @@ service cloud.firestore {
         allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — RECRUTEMENT
     // ═══════════════════════════════════════════════════════════════
@@ -493,8 +415,6 @@ service cloud.firestore {
         allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — DOCUMENTS GENERES
     // ═══════════════════════════════════════════════════════════════
@@ -504,8 +424,6 @@ service cloud.firestore {
         allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — EMARGEMENTS (admin)
     //
@@ -516,8 +434,6 @@ service cloud.firestore {
     match /rh_emargements/{uid}/{allPaths=**} {
       allow read, write: if (isOwner(uid) && hasRhPlan(uid)) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — EMARGEMENTS PUBLIC (espace salarié, pas d'auth Firebase)
     //
@@ -531,8 +447,6 @@ service cloud.firestore {
         allow read, write: if true;
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — OBJECTIFS PUBLIC (espace salarié)
     //
@@ -546,8 +460,6 @@ service cloud.firestore {
         allow read, write: if true;
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RH — POINTAGES PUBLIC (espace salarié)
     //
@@ -561,8 +473,6 @@ service cloud.firestore {
         allow read, write: if true;
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // PARRAINAGE
     // ═══════════════════════════════════════════════════════════════
@@ -576,23 +486,18 @@ service cloud.firestore {
             && resource.data.ownerUid == request.auth.uid
             && !('ownerUid' in request.resource.data.diff(resource.data).affectedKeys()));
       allow delete: if isAdmin();
-
       match /uses/{filleulUid} {
         allow read: if isAdmin()
           || (isAuth() && get(/databases/$(database)/documents/referrals/$(code)).data.ownerUid == request.auth.uid);
         allow write: if isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // LOGS DE RETENTION / RESILIATION
     // ═══════════════════════════════════════════════════════════════
     match /retention_logs/{docId} {
       allow read, write: if isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // RAPPORTS DE DIAGNOSTIC
     // ═══════════════════════════════════════════════════════════════
@@ -603,16 +508,12 @@ service cloud.firestore {
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // PROGRESSION TUTORIEL
     // ═══════════════════════════════════════════════════════════════
     match /tuto_progress/{uid} {
       allow read, write: if isOwner(uid) || isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // TICKETS SUPPORT
     // ═══════════════════════════════════════════════════════════════
@@ -626,8 +527,6 @@ service cloud.firestore {
         allow delete: if isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // UPDATES — Nouveautés / changelog in-app
     // ═══════════════════════════════════════════════════════════════
@@ -635,8 +534,6 @@ service cloud.firestore {
       allow read:  if isAdmin() || (isAuth() && resource.data.published == true);
       allow write: if isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // TUTORIELS VIDÉO — Vidéos d'aide gérées via admin-tutos.html
     //
@@ -648,24 +545,18 @@ service cloud.firestore {
       allow read:  if isAuth();
       allow write: if isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // BLOG — Drafts, Published, Topics
     // ═══════════════════════════════════════════════════════════════
     match /blog_drafts/{slug} {
       allow read, write: if isAdmin();
     }
-
     match /blog_published/{slug} {
       allow read, write: if isAdmin();
     }
-
     match /blog_topics/{topicId} {
       allow read, write: if isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // ALTEORE CONSEIL — Profil des conseillers (comptables / coachs)
     //
@@ -687,8 +578,6 @@ service cloud.firestore {
         allow write: if isAdmin();
       }
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // ALTEORE CONSEIL — Permissions d'accès (source de vérité)
     //
@@ -711,8 +600,6 @@ service cloud.firestore {
       allow read:  if isOwner(clientUid) || isOwner(conseillerUid) || isAdmin();
       allow write: if isAdmin();
     }
-
-
     // ═══════════════════════════════════════════════════════════════
     // ALTEORE CONSEIL — Invitations en attente
     //
@@ -727,14 +614,44 @@ service cloud.firestore {
       allow read:  if true;
       allow write: if isAdmin();
     }
-
-
+    // ═══════════════════════════════════════════════════════════════
+    // URSSAF_CACHE — Cache partagé des taux de charges (serveur uniquement)
+    //
+    // Lu/écrit EXCLUSIVEMENT par api/urssaf-cost.js via le token admin
+    // (api@altiora.app, pattern signInWithPassword → Bearer). Le client
+    // n'y accède jamais → isAdmin() suffit, pas de scope par {uid}.
+    //
+    // ⚠️ Sans ce bloc, le token admin tombe dans le « REFUS PAR DEFAUT »
+    // ci-dessous (le token admin est soumis aux rules comme tout user) :
+    // → 403 sur chaque get/set du cache → cache mort → 100% des appels
+    // tapent l'API mon-entreprise.urssaf.fr → 429 Too Many Requests → 502.
+    //
+    // Le wildcard récursif {document=**} couvre le doc parent
+    // `barometre_{année}` ET la sous-collection `entries/{clé}`.
+    // Path : urssaf_cache/barometre_{année}/entries/{clé}
+    // ═══════════════════════════════════════════════════════════════
+    match /urssaf_cache/{document=**} {
+      allow read, write: if isAdmin();
+    }
+    // ═══════════════════════════════════════════════════════════════
+    // BACKUPS_LOG — État et journal des sauvegardes externes (cron-backup)
+    //
+    // Écrit par api/cron-backup.js via le token admin (api@altiora.app) :
+    // un doc par jour {status, stage, uCursor, usersDone, docsTotal, ...}
+    // qui permet la reprise multi-passes du cron de sauvegarde et
+    // l'affichage « dernière sauvegarde OK » dans admin-backup.html.
+    //
+    // ⚠️ Sans ce bloc, le token admin tombe dans le REFUS PAR DEFAUT
+    // → le cron ne peut pas persister son état → pas de reprise.
+    // ═══════════════════════════════════════════════════════════════
+    match /backups_log/{docId} {
+      allow read, write: if isAdmin();
+    }
     // ═══════════════════════════════════════════════════════════════
     // REFUS PAR DEFAUT
     // ═══════════════════════════════════════════════════════════════
     match /{document=**} {
       allow read, write: if false;
     }
-
   }
 }
