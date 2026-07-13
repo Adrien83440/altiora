@@ -56,6 +56,7 @@
         { icon: '📋', title: 'Debug crédits pilotage', desc: 'Lire et nettoyer les crédits dans pilotage/months — doublons intra-mois', href: '/admin-purge-credits.html' },
         { icon: '🔎', title: 'Diag écart charges', desc: 'Réconciliation Alteore vs compte 6 — décompose les charges et trouve la différence via IA', href: '/admin-diag-charges.html' },
         { icon: '♻️', title: 'Reset charges ciblé', desc: 'Vider charges fixes/variables sur une plage de mois (par UID) — sauvegarde + écriture atomique', href: '/admin-reset-charges.html' },
+        { icon: '🕵️', title: 'Inspection charges (forensic)', desc: 'Origine de chaque ligne (banque / PDF / Excel / manuel), fantômes 👻 et lignes CA hors-mois 📅 — suppression sélective avec sauvegarde JSON', href: '/admin-inspect-charges.html' },
       ],
     },
     {
