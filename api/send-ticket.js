@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { ticketId, nom, prenom, telephone, email, sujet, description, page, uid, plan, lien, attachment, attachmentName } = req.body;
+    const { ticketId, nom, prenom, telephone, email, sujet, description, page, uid, plan, lien, attachment, attachmentName, source } = req.body;
     if (!nom || !prenom || !email || !sujet || !description) {
       return res.status(400).json({ error: 'Champs obligatoires manquants' });
     }
@@ -46,7 +46,13 @@ export default async function handler(req, res) {
       }
     }
 
-    // 1. Sauvegarder dans Firestore
+    // 1. Sauvegarder dans Firestore (collection TOP-LEVEL tickets/{id} —
+    //    c'est elle que lisent admin-tickets.html, get-my-tickets.js et
+    //    send-ticket-reply.js ; c'est donc la seule source du panel admin).
+    //    🔧 Correctif 14/07/2026 : ni l'auth ni la réponse du PATCH n'étaient
+    //    vérifiées → un échec Firestore était invisible : les emails partaient
+    //    quand même et le ticket n'apparaissait jamais dans le panel.
+    let firestoreSaved = false;
     try {
       const projectId = process.env.FIREBASE_PROJECT_ID || 'altiora-70599';
       const authRes = await fetch(
@@ -55,8 +61,10 @@ export default async function handler(req, res) {
           body: JSON.stringify({ email: process.env.FIREBASE_API_EMAIL, password: process.env.FIREBASE_API_PASSWORD, returnSecureToken: true }) }
       );
       const authData = await authRes.json();
-      if (authData.idToken) {
-        await fetch(
+      if (!authData.idToken) {
+        console.error('[send-ticket] ❌ Auth Firebase KO:', JSON.stringify(authData.error || authData).slice(0, 300));
+      } else {
+        const fsRes = await fetch(
           `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/tickets/${id}`,
           { method: 'PATCH', headers: { Authorization: 'Bearer ' + authData.idToken, 'Content-Type': 'application/json' },
             body: JSON.stringify({ fields: {
@@ -64,11 +72,19 @@ export default async function handler(req, res) {
               telephone: { stringValue: telephone || '' }, email: { stringValue: email }, sujet: { stringValue: sujet },
               description: { stringValue: description }, page: { stringValue: page || '' }, uid: { stringValue: uid || '' },
               plan: { stringValue: userPlan },
+              source: { stringValue: source || '' },
               status: { stringValue: 'open' }, createdAt: { stringValue: new Date().toISOString() }
             } }) }
         );
+        if (fsRes.ok) {
+          firestoreSaved = true;
+          console.log('[send-ticket] ✅ Ticket sauvegardé dans Firestore:', id);
+        } else {
+          const fsErr = await fsRes.text().catch(() => '');
+          console.error('[send-ticket] ❌ Firestore KO:', fsRes.status, fsErr.slice(0, 500));
+        }
       }
-    } catch (e) { console.warn('Firestore save failed:', e.message); }
+    } catch (e) { console.error('[send-ticket] ❌ Firestore exception:', e.message); }
 
     // 2. Envoyer emails via Resend
     const RESEND_API_KEY = process.env.RESEND_API_KEY;
@@ -199,7 +215,7 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ success: true, ticketId: id, emailSent, confirmSent, emailError });
+    return res.status(200).json({ success: true, ticketId: id, emailSent, confirmSent, emailError, firestoreSaved });
   } catch (error) {
     console.error('send-ticket error:', error);
     return res.status(500).json({ error: 'Erreur serveur' });
