@@ -61,17 +61,31 @@ service cloud.firestore {
     // Lecture : owner, admin, OU conseiller avec grant
     //   (le conseiller a besoin de lire users/{clientUid} pour que
     //    nav.js récupère le plan et configure correctement l'UI)
-    // Écriture : INCHANGÉ (owner pour champs non-sensibles, admin pour le reste)
+    // Écriture : owner pour champs non-sensibles, admin pour le reste.
+    //
+    // 🔒 Correctif C1/C2 (audit 13/07/2026) :
+    //  - create : le user ne peut se créer qu'avec plan ∈ {free, trial}
+    //    et ne peut PAS poser role / agentEnabled / betaTester
+    //    (sinon : auto-attribution d'un plan payant + Léa gratuite).
+    //  - update : role / agentEnabled / betaTester ajoutés aux champs
+    //    interdits (sinon : élévation admin en 1 ligne de console →
+    //    isAdmin() devient vrai → accès total à TOUS les comptes).
     // ═══════════════════════════════════════════════════════════════
     match /users/{uid} {
       allow read:   if isOwner(uid) || isAdmin() || isConseillerWithGrant(uid);
-      allow create: if isOwner(uid) || isAdmin();
+      allow create: if isAdmin()
+        || (isOwner(uid)
+            && request.resource.data.get('plan', 'free') in ['free', 'trial']
+            && !request.resource.data.keys().hasAny(['role', 'agentEnabled', 'betaTester']));
       allow update: if isAdmin()
         || (isOwner(uid)
             && !('plan'                 in request.resource.data.diff(resource.data).affectedKeys())
             && !('stripeCustomerId'     in request.resource.data.diff(resource.data).affectedKeys())
             && !('stripeSubscriptionId' in request.resource.data.diff(resource.data).affectedKeys())
-            && !('trialEnd'             in request.resource.data.diff(resource.data).affectedKeys()));
+            && !('trialEnd'             in request.resource.data.diff(resource.data).affectedKeys())
+            && !('role'                 in request.resource.data.diff(resource.data).affectedKeys())
+            && !('agentEnabled'         in request.resource.data.diff(resource.data).affectedKeys())
+            && !('betaTester'           in request.resource.data.diff(resource.data).affectedKeys()));
       allow delete: if isAdmin();
     }
     // ═══════════════════════════════════════════════════════════════
@@ -225,6 +239,23 @@ service cloud.firestore {
     match /suppliers/{uid} {
       allow read:  if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
       allow write: if isAdmin();
+    }
+    // ═══════════════════════════════════════════════════════════════
+    // FOURNISSEURS — Fiches fournisseurs du Pilotage (doc unique {list})
+    //
+    // Utilisé par pilotage.html (onglet « Fiches » du catalogue
+    // fournisseurs, loadFiches/saveFiches) et suivi-ca.html (lecture).
+    // Collection distincte de `fiches` (coût de revient) et de
+    // `catalogues` (autocomplete).
+    // Path : fournisseurs/{uid} → { list: [...] }
+    //
+    // ⚠️ Sans ce bloc, la collection tombait dans le REFUS PAR DEFAUT :
+    // la sauvegarde de fiche fournisseur échouait silencieusement en
+    // prod (catch → console.warn / toast « Erreur sauvegarde fiche »).
+    // ═══════════════════════════════════════════════════════════════
+    match /fournisseurs/{uid} {
+      allow read:  if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin() || isConseillerWithGrant(uid);
+      allow write: if (isOwner(uid) && hasPaidPlan(uid)) || isAdmin();
     }
     // ═══════════════════════════════════════════════════════════════
     // COPILOTE IA — LEGACY
