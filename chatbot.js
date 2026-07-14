@@ -360,24 +360,42 @@ async function submitTicket(){
   var userName='';try{userName=document.getElementById('uname')?.textContent||'';}catch(e){}
   var userEmail=em||'';try{if(!userEmail&&window._auth?.currentUser?.email)userEmail=window._auth.currentUser.email;}catch(e){}
 
-  // 1. Sauvegarder dans Firestore
-  try{if(window._uid&&window._db&&window._setDoc&&window._doc){await window._setDoc(window._doc(window._db,'tickets',window._uid,'list',ticketId),{ticketId:ticketId,type:tp,description:ds,email:userEmail,page:location.pathname,userAgent:navigator.userAgent,createdAt:new Date().toISOString(),status:'open'});}}catch(e){console.warn('Firestore ticket:',e);}
-
-  // 2. Envoyer email via /api/send-ticket
+  // 1. Envoyer via /api/send-ticket — le serveur persiste le ticket dans la
+  //    collection TOP-LEVEL tickets/{id} (celle que lit admin-tickets.html)
+  //    avec le token admin, puis envoie les emails.
+  //    🔧 Correctif 14/07/2026 :
+  //    - suppression de l'écriture cliente vers tickets/{uid}/list/{id} :
+  //      chemin mort, lu par AUCUNE page (le panel admin, get-my-tickets.js,
+  //      send-ticket-reply.js et le badge nav lisent tous la top-level) ;
+  //    - source:'chatbot' ajouté pour tracer l'origine dans le panel ;
+  //    - la réponse de l'API est maintenant vérifiée : en cas d'échec on
+  //      l'annonce au lieu d'afficher un faux « ✅ envoyé ».
+  var apiOk=false;
   try{
     var parts=(userName||'Utilisateur').split(' ');
     var prenom=parts[0]||'Utilisateur';
     var nom=parts.slice(1).join(' ')||'—';
-    await fetch('/api/send-ticket',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    var r=await fetch('/api/send-ticket',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
       ticketId:ticketId,nom:nom,prenom:prenom,telephone:'',email:userEmail||'chatbot@alteore.com',
       sujet:'[Chatbot] '+({bug:'Bug technique',question:'Question',suggestion:'Suggestion',billing:'Facturation',other:'Autre'}[tp]||tp),
       description:ds,page:location.pathname,uid:window._uid||'',
-      plan:window._userPlan||'unknown'
+      plan:window._userPlan||'unknown',
+      source:'chatbot'
     })});
+    apiOk=r.ok;
+    try{
+      var rd=await r.json();
+      if(apiOk&&rd&&rd.firestoreSaved!==true)console.warn('[chatbot] Ticket : emails OK mais NON persisté dans Firestore (voir logs Vercel [send-ticket]) :',rd);
+    }catch(e2){}
   }catch(e){console.warn('Email ticket:',e);}
 
-  var f=document.getElementById('cb-tkf');if(f)f.remove();
-  botMsg('✅ **Ticket #'+ticketId+' envoyé !** Vous recevrez une confirmation par email à '+(userEmail||'votre adresse')+'.\n\nNotre équipe vous répondra rapidement. Vous pouvez aussi nous écrire à **support@alteore.com**.\n\nAutre chose ?');
+  if(apiOk){
+    var f=document.getElementById('cb-tkf');if(f)f.remove();
+    botMsg('✅ **Ticket #'+ticketId+' envoyé !** Vous recevrez une confirmation par email à '+(userEmail||'votre adresse')+'.\n\nNotre équipe vous répondra rapidement. Vous pouvez aussi nous écrire à **support@alteore.com**.\n\nAutre chose ?');
+  }else{
+    if(btn){btn.disabled=false;btn.textContent='📨 Envoyer le ticket';}
+    botMsg('⚠️ **L\'envoi du ticket a échoué.** Vous pouvez réessayer avec le bouton du formulaire ci-dessus, ou nous écrire directement à **support@alteore.com** en décrivant votre problème.');
+  }
 }
 
 async function callAPI(userMessage){
