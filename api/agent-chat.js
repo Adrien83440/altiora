@@ -558,11 +558,11 @@ const TOOLS = [
       properties: {
         montant_ht: { type: 'number', description: "Montant HT en euros (positif)." },
         type_charge: { type: 'string', description: "'fixe' (loyer, assurance, abonnement…) ou 'variable' (carburant, fournitures, matière première…). Si doute, 'variable'." },
-        fournisseur: { type: 'string', description: "Nom du fournisseur ou libellé de la charge (ex: 'EDF', 'Essence', 'Loyer')." },
+        fournisseur: { type: 'string', description: "OBLIGATOIRE — Nom du fournisseur ou libellé de la charge (ex: 'EDF', 'Essence', 'Loyer'). Si l'utilisateur ne l'a pas précisé, lui DEMANDER avant d'appeler cet outil : une charge sans fournisseur est invisible dans plusieurs écrans et ne se propage pas." },
         taux_tva: { type: 'string', description: "Taux TVA : '20' (défaut), '10', '5.5', '2.1', '8.5'." },
         date: { type: 'string', description: "Date JJ/MM/AAAA. Si non précisée, date du jour." },
       },
-      required: ['montant_ht', 'type_charge'],
+      required: ['montant_ht', 'type_charge', 'fournisseur'],
     },
   },
   {
@@ -2018,6 +2018,13 @@ async function tool_ajouter_charge(uid, input) {
   if (typeCharge !== 'fixe' && typeCharge !== 'variable') {
     return { error: "type_charge doit être 'fixe' ou 'variable'.", success: false };
   }
+  // Wave RI : le fournisseur est obligatoire (une charge sans fournisseur est un
+  // "fantôme" — invisible dans plusieurs écrans, exclue de la propagation).
+  const fournisseur = (input.fournisseur || '').trim();
+  if (!fournisseur) {
+    return { error: "Le fournisseur (ou libellé) est obligatoire — demande-le à l'utilisateur avant d'ajouter la charge.", success: false };
+  }
+
   const dateIso = parseDateFrToIso(input.date);
   if (!dateIso) return { error: "Date invalide. Format JJ/MM/AAAA.", success: false };
   const monthKey = monthKeyFromDate(dateIso);
@@ -2028,6 +2035,12 @@ async function tool_ajouter_charge(uid, input) {
   const fieldName = typeCharge === 'fixe' ? 'chargesFixe' : 'chargesVar';
   const current = Array.isArray(existing[fieldName]) ? existing[fieldName] : [];
 
+  // Wave RI : détection de doublon (même fournisseur + même HT dans le mois) —
+  // n'empêche pas l'ajout (deux achats identiques sont possibles) mais Léa doit le signaler.
+  const _nf = (x) => String(x == null ? '' : x).replace(/\s+/g, ' ').trim().toUpperCase();
+  const doublonPossible = current.some(r => r && _nf(r.fournisseur) === _nf(fournisseur)
+    && Math.abs((parseFloat(String(r.montantHT || '').replace(',', '.')) || 0) - montantHt) < 0.005);
+
   // Taux TVA (en nombre, format existant)
   const tvaNum = (function() {
     if (!input.taux_tva) return 20;
@@ -2036,13 +2049,18 @@ async function tool_ajouter_charge(uid, input) {
     return [20, 10, 5.5, 2.1, 8.5, 0].includes(n) ? n : 20;
   })();
 
+  const dateFr = dateIso.split('-').reverse().join('/'); // JJ/MM/AAAA, comme les lignes bancaires
+
   const newLine = {
-    fournisseur: (input.fournisseur || '').slice(0, 100),
+    fournisseur: fournisseur.slice(0, 100),
     type: '',  // catégorie libre, vide par défaut, l'user peut compléter dans pilotage
+    date: dateFr,
     montantHT: String(montantHt),
     tvaRate: tvaNum,
     deductible: 'Oui',
     pointe: 'Non',
+    source: 'lea_agent',
+    importedAt: new Date().toISOString(),
   };
 
   current.push(newLine);
@@ -2055,11 +2073,13 @@ async function tool_ajouter_charge(uid, input) {
     ajouté: {
       montant_ht: montantHt,
       type: typeCharge,
-      fournisseur: input.fournisseur || null,
+      fournisseur: fournisseur,
       date: dateIso,
       mois: monthKey,
     },
-    message: `Charge ${typeCharge} de ${montantHt}€ HT ajoutée au ${dateIso}${input.fournisseur ? ' (' + input.fournisseur + ')' : ''}.`,
+    doublon_possible: doublonPossible,
+    message: 'Charge ' + typeCharge + ' de ' + montantHt + '€ HT ajoutée au ' + dateIso + ' (' + fournisseur + ').'
+      + (doublonPossible ? ' ⚠️ ATTENTION : une charge identique (' + fournisseur + ', ' + montantHt + '€ HT) existait déjà dans ' + monthKey + " — signale-le à l'utilisateur pour qu'il vérifie qu'il ne s'agit pas d'un doublon." : ''),
   };
 }
 
