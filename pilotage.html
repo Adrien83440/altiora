@@ -674,6 +674,22 @@ tr.v2-flash td{animation:v2rowflash 1.2s ease}
       <button type="button" class="ftv2" data-f="fin" onclick="v2PickFam(this)"><span class="fdot" style="background:#8b5cf6"></span>Financement <span class="fcnt" x-text="fmtE(t.creditsPrincipal + t.creditsInteret + (t.leasingHT||0))"></span></button>
       <button type="button" class="ftv2" data-f="syn" onclick="v2PickFam(this)"><span class="fdot" style="background:#64748b"></span>Synthèse</button>
     </div>
+    <!-- V2.2 : Recherche (vague 2 — demande cliente 15/07/2026) : filtre les lignes du mois
+         par fournisseur / type / libellé / montant, sans jamais re-rendre les tbodies. -->
+    <div id="pilotSearchBar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0 14px">
+      <div style="position:relative;flex:1;min-width:230px;max-width:430px">
+        <input id="pilotSearchInput" type="text" inputmode="search" autocomplete="off"
+               placeholder="🔍 Rechercher : fournisseur, type, montant…"
+               oninput="pilotSearchApply()"
+               style="width:100%;padding:9px 34px 9px 12px;border:1px solid var(--border);border-radius:10px;font-size:13px;background:#fff;box-sizing:border-box"/>
+        <button type="button" id="pilotSearchClearBtn" onclick="pilotSearchClear()" title="Effacer la recherche"
+                style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:transparent;cursor:pointer;font-size:14px;color:var(--muted);padding:4px">✕</button>
+      </div>
+      <button type="button" class="btn btn-outline btn-sm" id="pilotSearchYearBtn" onclick="pilotSearchYear()"
+              title="Chercher dans les 12 mois de l'année affichée">📅 Toute l'année</button>
+      <span id="pilotSearchCount" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+    <div id="pilotSearchYearPanel" style="display:none;margin:0 0 14px;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:12px;max-height:340px;overflow:auto"></div>
     <!-- Contenu tableaux rendu dynamiquement -->
     <div id="mainContentInner">
 
@@ -7832,6 +7848,217 @@ document.addEventListener('click', function(e) {
     setTimeout(v2AfterRender,1500);
     setTimeout(v2AfterRender,4000);
     setTimeout(v2LoadCompleteness,2500);
+  });
+})();
+</script>
+
+<script>
+/* ═══════════ RECHERCHE PILOTAGE — vague 2 (15/07/2026, demande cliente) ═══════════
+   - Recherche sur le MOIS affiché : filtre les <tr> des tableaux par texte (fournisseur,
+     type, client, libellé) ou par montant. Ne re-rend JAMAIS les tbodies (règle n°6) :
+     uniquement style.display. Les totaux affichés restent ceux du mois complet.
+   - Recherche sur l'ANNÉE : lit les 12 docs pilotage/{uid}/months/{YYYY-MM} en lecture
+     seule et liste les lignes trouvées, cliquables pour naviguer vers le mois.
+   - Un MutationObserver ré-applique le filtre après tout re-render des tableaux. */
+(function(){
+  var TBODIES=['ca-tbody','rsupp-tbody','prev-tbody','fp-tbody','cf-tbody','cv-tbody','cred-tbody','leas-tbody','ms-tbody'];
+  var MONTHS_FR=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  var _obsTimer=null;
+
+  function norm(s){
+    return String(s==null?'':s).toLowerCase()
+      .replace(/[\u00a0\u202f]/g,' ').replace(/\s+/g,' ')
+      .replace(/,/g,'.').trim();
+  }
+  function curQuery(){ var el=document.getElementById('pilotSearchInput'); return el?norm(el.value):''; }
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function fmtEur(n){ return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'; }
+
+  /* ── Matching d'une ligne DOM ── */
+  function rowHaystack(tr){
+    var parts=[tr.textContent||''];
+    var fields=tr.querySelectorAll('input,select,textarea');
+    for(var i=0;i<fields.length;i++){
+      var f=fields[i];
+      if(f.tagName==='SELECT'){ var o=f.options[f.selectedIndex]; parts.push(o?o.text:(f.value||'')); }
+      else parts.push(f.value||'');
+    }
+    return norm(parts.join(' '));
+  }
+  function rowNumbers(tr){
+    var nums=[],i,v;
+    var fields=tr.querySelectorAll('input');
+    for(i=0;i<fields.length;i++){ v=parseFloat(norm(fields[i].value)); if(isFinite(v)) nums.push(Math.round(v*100)/100); }
+    var m=rowHaystack(tr).match(/-?\d+(?:\.\d+)?/g)||[];
+    for(i=0;i<m.length;i++){ v=parseFloat(m[i]); if(isFinite(v)) nums.push(Math.round(v*100)/100); }
+    return nums;
+  }
+  function rowMatches(tr,qs,qNum){
+    if(rowHaystack(tr).indexOf(qs)!==-1) return true;
+    if(qNum!==null){
+      var nums=rowNumbers(tr);
+      for(var i=0;i<nums.length;i++) if(nums[i]===qNum) return true;
+    }
+    return false;
+  }
+
+  /* ── Recherche sur le mois affiché ── */
+  window.pilotSearchApply=function(){
+    var qs=curQuery();
+    var clearBtn=document.getElementById('pilotSearchClearBtn');
+    if(clearBtn) clearBtn.style.display=qs?'':'none';
+    var countEl=document.getElementById('pilotSearchCount');
+    if(!qs){ pilotSearchRestore(); if(countEl) countEl.textContent=''; return; }
+    var qNum=/^-?\d+(?:\.\d+)?$/.test(qs)?Math.round(parseFloat(qs)*100)/100:null;
+    var total=0;
+    // Deux passes : certaines sections (grille CA) contiennent PLUSIEURS tbodies —
+    // on agrège les résultats par section avant de décider de son affichage.
+    var secList=[],secFound=[];
+    TBODIES.forEach(function(id){
+      var tb=document.getElementById(id); if(!tb) return;
+      var found=0;
+      for(var i=0;i<tb.children.length;i++){
+        var tr=tb.children[i];
+        if(tr.tagName!=='TR') continue;
+        var ok=rowMatches(tr,qs,qNum);
+        tr.style.display=ok?'':'none';
+        if(ok) found++;
+      }
+      total+=found;
+      var sec=tb.closest('[data-fam]');
+      if(sec){
+        var idx=secList.indexOf(sec);
+        if(idx===-1){ secList.push(sec); secFound.push(found); }
+        else secFound[idx]+=found;
+      }
+    });
+    for(var s=0;s<secList.length;s++) secList[s].style.display=secFound[s]?'':'none';
+    if(countEl) countEl.textContent=total===0
+      ? 'Aucune ligne sur ce mois — essayez « 📅 Toute l’année »'
+      : total+' ligne'+(total>1?'s':'')+' trouvée'+(total>1?'s':'')+' · totaux du mois complet inchangés';
+  };
+
+  function pilotSearchRestore(){
+    TBODIES.forEach(function(id){
+      var tb=document.getElementById(id); if(!tb) return;
+      for(var i=0;i<tb.children.length;i++) tb.children[i].style.display='';
+    });
+    // Ré-applique le filtre familles existant (v2ApplyFam est encapsulé → on repasse par l'onglet actif)
+    var on=document.querySelector('#famTabs .ftv2.on');
+    if(on&&window.v2PickFam) window.v2PickFam(on);
+  }
+  window.pilotSearchClear=function(){
+    var el=document.getElementById('pilotSearchInput'); if(el) el.value='';
+    var p=document.getElementById('pilotSearchYearPanel'); if(p){ p.style.display='none'; p.innerHTML=''; }
+    window.pilotSearchApply();
+  };
+
+  /* ── Recherche sur les 12 mois de l'année affichée (lecture seule) ── */
+  function pushEntries(out,arr,mi,section,labelFn,montantFn){
+    (arr||[]).forEach(function(r){
+      if(!r) return;
+      var label=labelFn(r)||'', mnt=montantFn(r)||0;
+      if(!norm(label)&&!mnt) return; // ligne vide
+      out.push({mi:mi,section:section,label:label,montant:mnt,hay:norm(label+' '+mnt)});
+    });
+  }
+  function caHTRow(r){ // lecture universelle multi-TVA (cf. règles projet)
+    var multi=(parseFloat(r.ht055)||0)+(parseFloat(r.ht10)||0)+(parseFloat(r.ht20)||0)
+             +(parseFloat(r.ht0)||0)+(parseFloat(r.ht21)||0)+(parseFloat(r.ht85)||0);
+    return multi>0?multi:(parseFloat(r.montantHT)||0);
+  }
+  window.pilotSearchYear=async function(){
+    var qs=curQuery();
+    var panel=document.getElementById('pilotSearchYearPanel');
+    if(!panel) return;
+    panel.style.display='';
+    if(!qs){ panel.innerHTML='<span style="font-size:12px;color:var(--muted)">Saisissez d’abord un fournisseur, un type ou un montant à rechercher.</span>'; return; }
+    if(!window._uid||!window._getDoc||!window._db){ panel.innerHTML='<span style="font-size:12px;color:var(--muted)">Connexion en cours, réessayez dans un instant…</span>'; return; }
+    var btn=document.getElementById('pilotSearchYearBtn');
+    if(btn){ btn.disabled=true; btn.textContent='⏳ Recherche…'; }
+    panel.innerHTML='<span style="font-size:12px;color:var(--muted)">Recherche sur les 12 mois de '+window._year+'…</span>';
+    try{
+      var curKey=(typeof getMonthKey==='function')?getMonthKey():null;
+      var proms=[];
+      for(var m=0;m<12;m++){
+        (function(mi){
+          var key=window._year+'-'+String(mi+1).padStart(2,'0');
+          if(key===curKey&&window._data&&window._data.chargesFixe){
+            proms.push(Promise.resolve({mi:mi,data:window._data})); // mois affiché : données vivantes (modifs non sauvées incluses)
+          }else{
+            proms.push(window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key))
+              .then(function(s){ return {mi:mi,data:(s&&s.exists&&s.exists())?s.data():null}; })
+              .catch(function(){ return {mi:mi,data:null}; }));
+          }
+        })(m);
+      }
+      var months=await Promise.all(proms);
+      var entries=[];
+      months.forEach(function(mo){
+        var d=mo.data; if(!d) return; var mi=mo.mi;
+        pushEntries(entries,d.chargesFixe,mi,'Charges fixes',function(r){return ((r.fournisseur||'')+' '+(r.type||'')).trim();},function(r){return parseFloat(r.montantHT)||0;});
+        pushEntries(entries,d.chargesVar,mi,'Charges variables',function(r){return ((r.fournisseur||'')+' '+(r.type||'')).trim();},function(r){return parseFloat(r.montantHT)||0;});
+        pushEntries(entries,d.leasing,mi,'Leasing',function(r){return ((r.fournisseur||'')+' '+(r.type||'')).trim();},function(r){return parseFloat(r.montantHT)||0;});
+        pushEntries(entries,d.credits,mi,'Crédits',function(r){return ((r.nom||'')+' '+(r.fournisseur||'')).trim();},function(r){return parseFloat(r.montant)||0;});
+        pushEntries(entries,d.facturesPro,mi,'Factures Pro',function(r){return ((r.client||'')+' '+(r.description||'')).trim();},caHTRow);
+        pushEntries(entries,d.rentreesSupp,mi,'Rentrées suppl.',function(r){return r.type||'';},function(r){return parseFloat(r.montant)||0;});
+        pushEntries(entries,(d.ca||[]).filter(function(r){return r&&caHTRow(r)>0;}),mi,'CA journalier',function(r){return 'CA du '+(r.date||'');},caHTRow);
+        if(d.masseSalariale&&d.masseSalariale.lignes) pushEntries(entries,d.masseSalariale.lignes,mi,'Masse salariale',function(r){return r.label||'';},function(r){return parseFloat(r.brut)||0;});
+      });
+      var qNum=/^-?\d+(?:\.\d+)?$/.test(qs)?Math.round(parseFloat(qs)*100)/100:null;
+      var hits=entries.filter(function(e){
+        if(e.hay.indexOf(qs)!==-1) return true;
+        if(qNum!==null&&Math.round((parseFloat(e.montant)||0)*100)/100===qNum) return true;
+        return false;
+      });
+      if(!hits.length){
+        panel.innerHTML='<span style="font-size:12px;color:var(--muted)">Aucun résultat pour « '+esc(qs)+' » sur '+window._year+'.</span>';
+      }else{
+        var html='<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px">'
+          +'<b style="font-size:13px">📅 '+hits.length+' résultat'+(hits.length>1?'s':'')+' sur '+window._year+'</b>'
+          +'<button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById(\'pilotSearchYearPanel\').style.display=\'none\'">Fermer</button></div>';
+        var tot=0, byM={};
+        hits.forEach(function(h){ (byM[h.mi]=byM[h.mi]||[]).push(h); tot+=parseFloat(h.montant)||0; });
+        Object.keys(byM).map(Number).sort(function(a,b){return a-b;}).forEach(function(mi){
+          html+='<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin:8px 0 4px">'+MONTHS_FR[mi]+'</div>';
+          byM[mi].forEach(function(h){
+            html+='<div onclick="pilotSearchGoto('+h.mi+')" title="Aller à '+MONTHS_FR[h.mi]+'" '
+              +'style="display:flex;justify-content:space-between;gap:10px;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:12.5px" '
+              +'onmouseover="this.style.background=\'rgba(79,126,248,.08)\'" onmouseout="this.style.background=\'\'">'
+              +'<span><span style="color:var(--muted)">'+esc(h.section)+'</span> · '+esc(h.label||'(sans libellé)')+'</span>'
+              +'<b style="white-space:nowrap">'+(h.montant?fmtEur(h.montant):'')+'</b></div>';
+          });
+        });
+        html+='<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;font-size:12.5px;display:flex;justify-content:space-between"><span>Total des lignes trouvées</span><b>'+fmtEur(tot)+'</b></div>';
+        panel.innerHTML=html;
+      }
+    }catch(e){
+      panel.innerHTML='<span style="font-size:12px;color:#b91c1c">Erreur de recherche : '+esc(e&&e.message?e.message:e)+'</span>';
+    }
+    if(btn){ btn.disabled=false; btn.textContent='📅 Toute l’année'; }
+  };
+  window.pilotSearchGoto=function(mi){
+    var b=document.querySelector('.ckm[data-mi="'+mi+'"]');
+    if(b){ b.click(); } // déclenche Alpine (selectedMonth + onMonthChange → loadMonth)
+    else{
+      var ms=document.getElementById('monthSelect');
+      if(ms){ ms.value=String(mi); if(window.loadMonth) window.loadMonth(); }
+    }
+    // Le filtre du mois se ré-applique automatiquement via l'observer après le re-render.
+  };
+
+  /* ── Ré-application automatique après tout re-render des tableaux ── */
+  document.addEventListener('DOMContentLoaded',function(){
+    var inner=document.getElementById('mainContentInner');
+    if(inner&&window.MutationObserver){
+      new MutationObserver(function(){
+        if(!curQuery()) return;
+        clearTimeout(_obsTimer);
+        _obsTimer=setTimeout(function(){ try{ window.pilotSearchApply(); }catch(e){} },180);
+      }).observe(inner,{childList:true,subtree:true}); // childList uniquement : nos changements de style ne re-déclenchent rien
+    }
+    var input=document.getElementById('pilotSearchInput');
+    if(input) input.addEventListener('keydown',function(e){ if(e.key==='Escape') window.pilotSearchClear(); });
   });
 })();
 </script>

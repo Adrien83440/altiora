@@ -556,6 +556,14 @@ html, body { overflow-x: hidden; max-width: 100vw; }
           <button class="tab" :class="{ on: _filter === 'leasing' }" @click="setFilterA('leasing')">🚗 Leasing</button>
           <button class="tab" :class="{ on: _filter === 'decouvert' }" @click="setFilterA('decouvert')">💳 Découvert</button>
         </div>
+        <!-- Tri de la liste — vague 2 (demande cliente 15/07/2026) -->
+        <select id="detteSort" onchange="setDetteSort(this.value)" title="Trier la liste"
+                style="padding:7px 10px;border:1px solid var(--border);border-radius:9px;font-size:12px;background:#fff;cursor:pointer">
+          <option value="defaut">Tri : Défaut</option>
+          <option value="alpha">Tri : Nom A→Z</option>
+          <option value="date">Tri : Date début ↓</option>
+          <option value="montant">Tri : Montant ↓</option>
+        </select>
       </div>
       <div class="dette-grid" id="detteGrid">
         <div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">
@@ -1143,6 +1151,7 @@ function renderDettes(){
   const grid=document.getElementById('detteGrid');
   let list=allDettes();
   if(_filter!=='tous')list=list.filter(d=>d.type===_filter);
+  if(window._applyDetteSort)list=window._applyDetteSort(list); // tri alpha/date/montant (vague 2)
   if(!list.length){
     grid.innerHTML=`<div style="text-align:center;padding:40px;color:var(--muted)"><div style="font-size:36px;margin-bottom:10px">🏦</div><div style="font-weight:700">Aucune dette${_filter!=='tous'?' de ce type':''}</div></div>`;
     return;
@@ -2274,6 +2283,28 @@ onAuthStateChanged(auth,user=>{
   const av=document.getElementById('av'); if(av)av.textContent=n[0]?.toUpperCase()||'A';
   const un=document.getElementById('uname'); if(un)un.textContent=n;
 });
+</script>
+<script>
+/* ═══ TRI DE LA LISTE DES DETTES — vague 2 (15/07/2026, demande cliente) ═══
+   Purement additif : sans sélection, l'ordre historique est conservé à l'identique. */
+var _detteSort='defaut';
+window._applyDetteSort=function(list){
+  if(_detteSort==='defaut'||!list||list.length<2) return list;
+  var l=list.slice(); // copie — ne jamais muter la liste source
+  if(_detteSort==='alpha'){
+    l.sort(function(a,b){
+      var an=String(a.nom||'').trim(), bn=String(b.nom||'').trim();
+      if(!an&&!bn) return 0; if(!an) return 1; if(!bn) return -1; // sans nom → en dernier
+      return an.localeCompare(bn,'fr',{sensitivity:'base'});
+    });
+  }else if(_detteSort==='date'){
+    l.sort(function(a,b){ return String(b.debut||'').localeCompare(String(a.debut||'')); }); // plus récente d'abord
+  }else if(_detteSort==='montant'){
+    l.sort(function(a,b){ return (parseFloat(b.montant)||0)-(parseFloat(a.montant)||0); });
+  }
+  return l;
+};
+window.setDetteSort=function(v){ _detteSort=v||'defaut'; if(typeof renderDettes==='function') renderDettes(); };
 </script>
 <script src="nav.js"></script>
 </body>
