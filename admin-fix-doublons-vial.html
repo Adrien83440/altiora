@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fix doublons VIAL (15/07/2026) — ALTEORE Admin</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a23; --panel2:#1d212c; --line:#2a2f3c;
+    --txt:#e7e9ee; --mut:#8b93a5; --accent:#6366f1; --orange:#f59e0b;
+    --green:#10b981; --red:#ef4444; --blue:#3b82f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--bg);color:var(--txt);font-size:13px;line-height:1.45}
+  header{padding:16px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:16px;margin:0 0 4px;font-weight:700}
+  header .sub{font-size:11px;color:var(--mut);font-family:ui-monospace,Menlo,monospace}
+  .wrap{padding:18px 22px;max-width:1250px;margin:0 auto}
+  button{background:var(--accent);color:#fff;border:0;padding:10px 18px;border-radius:8px;
+    font-size:13px;font-weight:600;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.35;cursor:not-allowed}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt)}
+  button.danger{background:var(--red)}
+  .err{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.4);color:#fca5a5;
+    padding:11px 14px;border-radius:8px;margin:10px 0}
+  .info{background:rgba(99,102,241,.1);border:1px solid rgba(99,102,241,.3);color:#c7d2fe;
+    padding:11px 14px;border-radius:8px;margin:10px 0;font-size:12px;line-height:1.55}
+  .ok-msg{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.4);color:#6ee7b7;
+    padding:11px 14px;border-radius:8px;margin:10px 0}
+  .steps{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0}
+  table{width:100%;border-collapse:collapse;font-family:ui-monospace,Menlo,monospace;font-size:12px;margin-top:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:var(--mut);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.3px}
+  td.num{text-align:right;white-space:nowrap}
+  .badge{display:inline-block;padding:1px 8px;border-radius:20px;font-size:10px;font-weight:700;font-family:sans-serif;white-space:nowrap}
+  .b-ok{background:rgba(16,185,129,.16);color:#6ee7b7}
+  .b-warn{background:rgba(245,158,11,.16);color:#fcd34d}
+  .b-red{background:rgba(239,68,68,.16);color:#fca5a5}
+  .b-blue{background:rgba(59,130,246,.16);color:#93c5fd}
+  .b-mut{background:rgba(139,147,165,.16);color:#c3c9d4}
+  .keep{color:var(--mut);font-size:11px;margin-top:4px}
+  .keep b{color:#6ee7b7;font-weight:600}
+  .totline{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--mut);margin:8px 0}
+  .totline b{color:var(--txt)}
+  #report pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;font-size:11px;max-height:260px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🧹 Suppression des doublons de saisie — Boulangerie VIAL</h1>
+  <div class="sub">uid 0V8VF5bJKrNY8quj6tWZ7SfTtKr2 · pilotage/months · chargesVar uniquement · outil jetable du 15/07/2026</div>
+</header>
+
+<div class="wrap">
+  <div id="err-zone"></div>
+
+  <div class="info">
+    <strong>Ce que fait cet outil :</strong> il supprime les lignes de charges variables identifiées comme doublons de saisie
+    (analyse du backup du 15/07). Chaque ligne est ciblée par son <code>__id</code> stable (ou son identité exacte),
+    <strong>jamais par sa position</strong> — la cliente peut continuer à travailler pendant l'opération.
+    Une ligne portant un <code>bankLink</code> (rapprochée à la banque) est automatiquement protégée.
+    Le document est relu juste avant l'écriture et seul le champ <code>chargesVar</code> est réécrit (merge).
+  </div>
+
+  <div class="steps">
+    <button id="btn-analyse" onclick="runAnalyse()" disabled>🔍 1. Analyser</button>
+    <button id="btn-backup" class="ghost" onclick="downloadBackup()" disabled>💾 2. Sauvegarde JSON (obligatoire)</button>
+    <button id="btn-delete" class="danger" onclick="runDelete()" disabled>🗑 3. Supprimer les lignes cochées</button>
+  </div>
+
+  <div id="out"></div>
+  <div id="report"></div>
+</div>
+
+<!-- ── Firebase (module ES6) ── -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey:"AIzaSyB003WqdRKrT0gbv7P4BNIICuXeqbu8dR4",
+  authDomain:"altiora-70599.firebaseapp.com", projectId:"altiora-70599",
+  storageBucket:"altiora-70599.firebasestorage.app",
+  messagingSenderId:"120905555746", appId:"1:120905555746:web:618460c65cdc9e57cc8f7b"
+});
+const auth = getAuth(app);
+const db   = getFirestore(app);
+
+window._db = db;
+window._doc = doc; window._getDoc = getDoc; window._setDoc = setDoc;
+
+const ADMIN_EMAILS = ['contact@adrienemily.com','api@altiora.app'];
+
+onAuthStateChanged(auth, async function(user) {
+  if (!user) { window.location.href = 'index.html'; return; }
+  let isAdmin = ADMIN_EMAILS.includes((user.email||'').toLowerCase());
+  if (!isAdmin) {
+    try {
+      const us = await getDoc(doc(db,'users',user.uid));
+      if (us.exists() && us.data().role === 'admin') isAdmin = true;
+    } catch(e) {}
+  }
+  if (!isAdmin) {
+    document.getElementById('err-zone').innerHTML =
+      '<div class="err">Accès réservé à l\'équipe ALTEORE.</div>';
+    return;
+  }
+  window._adminReady = true;
+  document.getElementById('btn-analyse').disabled = false;
+  window.runAnalyse();
+});
+</script>
+
+<script>
+/* ════════════════════════════════════════════════════════════════
+   MANIFESTE DES SUPPRESSIONS — analyse du backup du 15/07/2026
+   Ciblage par __id (stable) ou identité exacte. Section : chargesVar.
+   ════════════════════════════════════════════════════════════════ */
+var UID = '0V8VF5bJKrNY8quj6tWZ7SfTtKr2';
+var MONTHS = ['2026-01','2026-04','2026-05','2026-06'];
+
+var TARGETS = [
+  { key:'engie0505',  mk:'2026-05', kind:'id', id:'rmp6nksj2vd39zk',
+    label:'ENGIE — facture 630000542708 (re-saisie du 15/05)', ht:4049.49,
+    keep:'jumelle conservée : saisie du 24/04, liée à la banque le 15/07', checked:true },
+  { key:'ducreux0505', mk:'2026-05', kind:'id', id:'rmp6nfexpjsks1j',
+    label:'DUCREUX — facture E578154 (re-saisie du 15/05)', ht:188.06,
+    keep:'jumelle conservée : saisie du 24/04 (sera liée quand le prélèvement passera au rapprochement)', checked:true },
+  { key:'bimply04',   mk:'2026-04', kind:'id', id:'rmqkpfea3t194sf',
+    label:'BIMPLY PAR SWILE — facture 26501KVCQT (re-saisie du 19/06)', ht:11.89,
+    keep:'jumelle conservée : saisie d\'origine (même n° de facture)', checked:true },
+  { key:'up04a',      mk:'2026-04', kind:'id', id:'rmqkr6xcqix1boa',
+    label:'UP Déjeuner — facture FA 016243728 (re-saisie du 19/06)', ht:6.96,
+    keep:'jumelle conservée : saisie d\'origine (même n° de facture)', checked:true },
+  { key:'up04b',      mk:'2026-04', kind:'id', id:'rmqkr7phudpnkc6',
+    label:'UP Déjeuner — facture FA 016488899 (re-saisie du 19/06)', ht:6.55,
+    keep:'jumelle conservée : saisie d\'origine (même n° de facture)', checked:true },
+  { key:'ducreux01',  mk:'2026-01', kind:'pair2nd',
+    fournisseur:'DUCREUX', mht:4755.28, type:'E497592',
+    label:'DUCREUX — facture E497592 en double (ère import Excel, janvier)', ht:4755.28,
+    keep:'1re occurrence conservée, 2e supprimée', checked:true },
+  { key:'forez06',    mk:'2026-06', kind:'banktx', bankTxId:'5a9b1a22-c2ea-442c-9453-d07f04735377',
+    label:'FOREZ NETTOYAGE — ligne import banque 32,62 (doublon probable d\'une des 3 factures saisies)', ht:32.62,
+    keep:'⚠️ À CONFIRMER avec la cliente avant de cocher — les 3 factures manuelles restent', checked:false }
+];
+
+var _docs = {};          // mk -> data (dernière lecture)
+var _found = {};         // key -> {status, line}
+var _backupDone = false;
+
+function pf(x){ return parseFloat(String(x==null?'':x).replace(/\s/g,'').replace(',','.')) || 0; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function eur(n){ return (Number(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'; }
+function decId(id){
+  try{
+    var ts = parseInt(String(id).slice(1,9),36);
+    if(!ts || isNaN(ts)) return '';
+    var d = new Date(ts);
+    return d.toLocaleDateString('fr-FR')+' '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  }catch(e){ return ''; }
+}
+function hasBankLink(r){ return !!(r && r.bankLink && r.bankLink.bankTxId); }
+
+/* Retourne les indices des lignes qui matchent une cible dans un tableau chargesVar */
+function matchIndices(t, arr){
+  var out = [];
+  for (var i = 0; i < arr.length; i++) {
+    var r = arr[i];
+    if (!r || typeof r !== 'object') continue;
+    if (t.kind === 'id') {
+      if (r.__id === t.id) out.push(i);
+    } else if (t.kind === 'banktx') {
+      if (r.bankTxId === t.bankTxId) out.push(i);
+    } else if (t.kind === 'pair2nd') {
+      if ((r.fournisseur||'').trim().toUpperCase() === t.fournisseur &&
+          Math.abs(pf(r.montantHT) - t.mht) < 0.005 &&
+          (r.type||'').trim() === t.type) out.push(i);
+    }
+  }
+  return out;
+}
+
+/* Statut d'une cible sur des données fraîches : {status, idx, line}
+   status : 'ready' | 'resolved' | 'protected' | 'anomaly' | 'nomonth' */
+function evaluateTarget(t, data){
+  if (!data) return { status:'nomonth' };
+  var arr = Array.isArray(data.chargesVar) ? data.chargesVar : [];
+  var idxs = matchIndices(t, arr);
+  if (t.kind === 'pair2nd') {
+    if (idxs.length === 2) {
+      var cand = arr[idxs[1]];
+      if (hasBankLink(cand)) return { status:'protected', idx:idxs[1], line:cand };
+      return { status:'ready', idx:idxs[1], line:cand };
+    }
+    if (idxs.length <= 1) return { status:'resolved' };
+    return { status:'anomaly', count:idxs.length };
+  }
+  if (idxs.length === 0) return { status:'resolved' };
+  if (idxs.length > 1)  return { status:'anomaly', count:idxs.length };
+  var line = arr[idxs[0]];
+  if (hasBankLink(line)) return { status:'protected', idx:idxs[0], line:line };
+  return { status:'ready', idx:idxs[0], line:line };
+}
+
+async function loadFresh(){
+  _docs = {};
+  for (var i = 0; i < MONTHS.length; i++) {
+    var mk = MONTHS[i];
+    var snap = await window._getDoc(window._doc(window._db,'pilotage',UID,'months',mk));
+    _docs[mk] = snap.exists() ? snap.data() : null;
+  }
+}
+
+window.runAnalyse = async function(){
+  if (!window._adminReady) return;
+  var out = document.getElementById('out');
+  out.innerHTML = '<div class="info">⏳ Lecture des documents pilotage…</div>';
+  try {
+    await loadFresh();
+  } catch(e) {
+    out.innerHTML = '<div class="err">Erreur de lecture : '+esc(e.message)+'</div>';
+    return;
+  }
+
+  _found = {};
+  var rows = '';
+  var totalReady = 0;
+  TARGETS.forEach(function(t){
+    var ev = evaluateTarget(t, _docs[t.mk]);
+    _found[t.key] = ev;
+    var badge, cb = '';
+    if (ev.status === 'ready') {
+      badge = '<span class="badge b-warn">trouvée</span>';
+      cb = '<input type="checkbox" id="cb-'+t.key+'"'+(t.checked?' checked':'')+'>';
+      totalReady++;
+    } else if (ev.status === 'resolved') {
+      badge = '<span class="badge b-ok">déjà résolue</span>';
+    } else if (ev.status === 'protected') {
+      badge = '<span class="badge b-blue">🛡 liée banque — protégée</span>';
+    } else if (ev.status === 'nomonth') {
+      badge = '<span class="badge b-red">mois introuvable</span>';
+    } else {
+      badge = '<span class="badge b-red">anomalie ('+ev.count+' correspondances)</span>';
+    }
+    var lineInfo = '';
+    if (ev.line) {
+      var when = ev.line.__id ? decId(ev.line.__id) : '';
+      lineInfo = esc(ev.line.fournisseur||'') +
+        (ev.line.type ? ' · fact. '+esc(String(ev.line.type).trim()) : '') +
+        (when ? ' · saisie le '+when : '') +
+        (ev.line.pointe ? ' · pointé : '+esc(ev.line.pointe) : '');
+    }
+    rows += '<tr>'+
+      '<td>'+cb+'</td>'+
+      '<td>'+t.mk+'</td>'+
+      '<td>'+esc(t.label)+
+        (lineInfo?'<div class="keep">'+lineInfo+'</div>':'')+
+        '<div class="keep"><b>✓</b> '+esc(t.keep)+'</div></td>'+
+      '<td class="num">'+eur(t.ht)+'</td>'+
+      '<td>'+badge+'</td>'+
+    '</tr>';
+  });
+
+  var totCert = TARGETS.filter(function(t){ return _found[t.key].status==='ready' && t.checked; })
+                       .reduce(function(s,t){ return s+t.ht; },0);
+  out.innerHTML =
+    '<table><thead><tr><th></th><th>Mois</th><th>Ligne à supprimer</th><th>HT en trop</th><th>Statut</th></tr></thead>'+
+    '<tbody>'+rows+'</tbody></table>'+
+    '<div class="totline">Sélection par défaut : <b>'+eur(totCert)+' HT</b> de charges en trop. '+
+    'Coche/décoche puis passe aux étapes 2 et 3.</div>';
+
+  _backupDone = false;
+  document.getElementById('btn-backup').disabled = (totalReady === 0);
+  document.getElementById('btn-delete').disabled = true;
+  if (totalReady === 0) {
+    out.innerHTML += '<div class="ok-msg">✅ Plus rien à supprimer — tous les doublons sont déjà résolus.</div>';
+  }
+};
+
+window.downloadBackup = async function(){
+  try {
+    await loadFresh(); // backup = état le plus frais possible
+  } catch(e) {
+    alert('Lecture impossible : '+e.message); return;
+  }
+  var payload = {
+    exportedAt: new Date().toISOString(),
+    uid: UID,
+    note: 'Sauvegarde avant suppression des doublons de saisie (admin-fix-doublons-vial)',
+    months: _docs
+  };
+  var blob = new Blob([JSON.stringify(payload,null,1)],{type:'application/json'});
+  var a = document.createElement('a');
+  var d = new Date();
+  var stamp = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'-'+String(d.getHours()).padStart(2,'0')+String(d.getMinutes()).padStart(2,'0');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'backup-avant-suppression-doublons-VIAL-'+stamp+'.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  _backupDone = true;
+  document.getElementById('btn-delete').disabled = false;
+};
+
+window.runDelete = async function(){
+  if (!_backupDone) { alert('Télécharge d\'abord la sauvegarde JSON (étape 2).'); return; }
+  var picked = TARGETS.filter(function(t){
+    var cb = document.getElementById('cb-'+t.key);
+    return cb && cb.checked;
+  });
+  if (!picked.length) { alert('Aucune ligne cochée.'); return; }
+  var recap = picked.map(function(t){ return '· '+t.mk+' — '+t.label+' ('+eur(t.ht)+' HT)'; }).join('\n');
+  if (!confirm('Supprimer définitivement ces '+picked.length+' ligne(s) ?\n\n'+recap+'\n\nUne relecture fraîche + garde-fou bankLink sont appliqués avant chaque écriture.')) return;
+
+  var btn = document.getElementById('btn-delete');
+  btn.disabled = true; btn.textContent = '⏳ Suppression…';
+
+  var deleted = [], skipped = [], errors = [];
+  var byMonth = {};
+  picked.forEach(function(t){ (byMonth[t.mk] = byMonth[t.mk] || []).push(t); });
+
+  var mks = Object.keys(byMonth);
+  for (var i = 0; i < mks.length; i++) {
+    var mk = mks[i];
+    try {
+      // Relecture FRAÎCHE juste avant l'écriture (la cliente travaille peut-être en ce moment)
+      var ref = window._doc(window._db,'pilotage',UID,'months',mk);
+      var snap = await window._getDoc(ref);
+      if (!snap.exists()) { errors.push(mk+' : document introuvable'); continue; }
+      var data = snap.data();
+      var arr = Array.isArray(data.chargesVar) ? data.chargesVar.slice() : [];
+
+      var toRemove = []; // indices à retirer dans CE tableau frais
+      byMonth[mk].forEach(function(t){
+        var ev = evaluateTarget(t, data);
+        if (ev.status === 'ready') {
+          toRemove.push({ idx: ev.idx, t: t, line: ev.line });
+        } else if (ev.status === 'resolved') {
+          skipped.push(t.label+' — déjà résolue entre-temps');
+        } else if (ev.status === 'protected') {
+          skipped.push(t.label+' — 🛡 liée à la banque entre-temps, non supprimée');
+        } else {
+          skipped.push(t.label+' — anomalie, non supprimée');
+        }
+      });
+      if (!toRemove.length) continue;
+
+      toRemove.sort(function(a,b){ return b.idx - a.idx; });
+      toRemove.forEach(function(x){
+        deleted.push({ mois: mk, label: x.t.label, ht: x.t.ht, ligne: x.line });
+        arr.splice(x.idx, 1);
+      });
+
+      // Écriture ciblée : UNIQUEMENT chargesVar, en merge (rien d'autre n'est touché)
+      await window._setDoc(ref, { chargesVar: arr }, { merge: true });
+    } catch(e) {
+      errors.push(mk+' : '+(e && e.message ? e.message : e));
+    }
+  }
+
+  btn.textContent = '🗑 3. Supprimer les lignes cochées';
+  var totHT = deleted.reduce(function(s,x){ return s+x.ht; },0);
+  var html = '';
+  if (deleted.length) {
+    html += '<div class="ok-msg">✅ '+deleted.length+' ligne(s) supprimée(s) — '+eur(totHT)+' HT de charges en trop retirées.</div>';
+    html += '<pre>'+esc(JSON.stringify(deleted.map(function(x){ return {mois:x.mois, ligne:x.ligne}; }),null,1))+'</pre>';
+  }
+  if (skipped.length) html += '<div class="info">⏭ Ignorées : <br>'+skipped.map(esc).join('<br>')+'</div>';
+  if (errors.length)  html += '<div class="err">Erreurs : <br>'+errors.map(esc).join('<br>')+'</div>';
+  document.getElementById('report').innerHTML = html;
+
+  // Re-analyse pour vérifier l'état final
+  window.runAnalyse();
+};
+</script>
+</body>
+</html>
