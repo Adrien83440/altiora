@@ -289,7 +289,7 @@
       </div>
 
       <div class="info-box">
-        <strong>🔒 Sécurité & confidentialité</strong> — La connexion utilise une API d'agrégation bancaire agréée DSP2 par l'ACPR (Banque de France). Alteore accède uniquement en <strong>lecture seule</strong> à vos transactions. Vos identifiants bancaires ne transitent jamais par nos serveurs — vous vous authentifiez directement sur le site de votre banque. Connexion valable 90 jours, renouvelable. En connectant votre banque, vous consentez au traitement de vos données bancaires conformément à notre <a href="confidentialite.html" target="_blank" style="color:var(--blue-main);font-weight:600">Politique de Confidentialité</a>.
+        <strong>🔒 Sécurité & confidentialité</strong> — La connexion utilise une API d'agrégation bancaire agréée DSP2 par l'ACPR (Banque de France). Alteore accède uniquement en <strong>lecture seule</strong> à vos transactions. Vos identifiants bancaires ne transitent jamais par nos serveurs — vous vous authentifiez directement sur le site de votre banque. Connexion valable 90 à 180 jours selon votre banque, renouvelable. En connectant votre banque, vous consentez au traitement de vos données bancaires conformément à notre <a href="confidentialite.html" target="_blank" style="color:var(--blue-main);font-weight:600">Politique de Confidentialité</a>.
       </div>
     </div>
 
@@ -453,6 +453,8 @@ async function loadAllBanks() {
         selectedAccounts: Array.isArray(b.selectedAccounts) ? b.selectedAccounts : [],
         lastSync: b.lastSync || null,
         status: b.status || 'active',
+        accessValidForDays: b.accessValidForDays || null,
+        agreementExpiresAt: b.agreementExpiresAt || null,
         createdAt: b.createdAt || null
       });
     });
@@ -480,6 +482,8 @@ async function loadAllBanks() {
         selectedAccounts: Array.isArray(rootData.selectedAccounts) ? rootData.selectedAccounts : [],
         lastSync: rootData.lastSync || null,
         status: rootData.status || 'active',
+        accessValidForDays: rootData.accessValidForDays || null,
+        agreementExpiresAt: rootData.agreementExpiresAt || null,
         createdAt: rootData.createdAt || null
       });
     }
@@ -676,11 +680,21 @@ function showConnectedZone() {
 function renderBankCard(bank) {
   // ── Détection d'état anormal ──
   // 1) PENDING > 10 minutes = connexion jamais finalisée, bloquée
-  // 2) EXPIRED = dernière sync > 90 jours (limite GoCardless)
-  let abnormalState = null; // 'pending' | 'expired' | null
+  // 2) EXPIRED = consentement DSP2 arrivé à échéance. Sources, par priorité :
+  //    a. bank.status === 'expired' (posé par fetchAndStagePending quand
+  //       l'API signale euaExpired / requisition EX)
+  //    b. agreementExpiresAt dépassé (stocké à la connexion)
+  //    c. fallback connexions existantes sans agreementExpiresAt : createdAt + 90 j
+  //    d. dernier recours (très vieux docs sans createdAt) : lastSync > 90 j
+  // 3) EXPIRING = consentement qui expire dans ≤ 7 jours (bandeau préventif)
+  let abnormalState = null; // 'pending' | 'expired' | 'expiring' | null
   const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
   const createdTs = bank.createdAt ? new Date(bank.createdAt).getTime() : 0;
   const lastSyncTs = bank.lastSync ? new Date(bank.lastSync).getTime() : 0;
+  const agreementExpTs = bank.agreementExpiresAt ? new Date(bank.agreementExpiresAt).getTime() : 0;
+  // Échéance du consentement : valeur stockée, sinon estimation createdAt + 90 j
+  const expiryTs = agreementExpTs || (createdTs ? createdTs + 90 * DAY : 0);
 
   const isPending = !bank.requisition_id && bank.pending_requisition_id;
   const pendingAgeMs = createdTs ? (now - createdTs) : 0;
@@ -688,7 +702,11 @@ function renderBankCard(bank) {
 
   if (isPending && pendingAgeMs > TEN_MIN) {
     abnormalState = 'pending';
-  } else if (lastSyncTs && (now - lastSyncTs) > 90 * 24 * 60 * 60 * 1000) {
+  } else if (!isPending && (bank.status === 'expired' || (expiryTs && now > expiryTs))) {
+    abnormalState = 'expired';
+  } else if (!isPending && expiryTs && (expiryTs - now) <= 7 * DAY) {
+    abnormalState = 'expiring';
+  } else if (!isPending && !expiryTs && lastSyncTs && (now - lastSyncTs) > 90 * DAY) {
     abnormalState = 'expired';
   }
 
@@ -736,14 +754,25 @@ function renderBankCard(bank) {
       + '<div style="font-size:24px;flex-shrink:0">⌛</div>'
       + '<div style="flex:1;min-width:0">'
         + '<div style="font-size:13px;font-weight:800;color:#991b1b;margin-bottom:3px">Connexion bancaire expirée</div>'
-        + '<div style="font-size:12px;color:#991b1b;line-height:1.5;margin-bottom:10px">Les connexions bancaires ont une durée de vie de <strong>90 jours maximum</strong> (réglementation DSP2). Votre dernière synchronisation remonte à plus de 90 jours. Vous devez <strong>déconnecter cette banque puis vous reconnecter</strong> pour continuer à synchroniser vos transactions.</div>'
+        + '<div style="font-size:12px;color:#991b1b;line-height:1.5;margin-bottom:10px">Le consentement bancaire a une durée de vie limitée (<strong>90 à 180 jours</strong> selon les banques, réglementation DSP2) et celui de cette banque est <strong>arrivé à échéance</strong>. Déconnectez cette banque puis reconnectez-la (nouvelle validation sur le site de votre banque) pour reprendre la synchronisation. Vos données déjà importées sont conservées.</div>'
+        + '<button class="btn btn-danger btn-sm" onclick="disconnectOneBank(\'' + sid + '\')" style="padding:7px 14px;font-size:12px">🔌 Déconnecter et reconnecter</button>'
+      + '</div>'
+    + '</div>';
+  } else if (abnormalState === 'expiring') {
+    const expDateTxt = new Date(expiryTs).toLocaleDateString('fr-FR');
+    alertBanner = '<div style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:2px solid #f59e0b;border-radius:10px;padding:12px 14px;margin-bottom:12px;display:flex;align-items:flex-start;gap:12px">'
+      + '<div style="font-size:24px;flex-shrink:0">⏳</div>'
+      + '<div style="flex:1;min-width:0">'
+        + '<div style="font-size:13px;font-weight:800;color:#92400e;margin-bottom:3px">Connexion bancaire bientôt expirée</div>'
+        + '<div style="font-size:12px;color:#92400e;line-height:1.5;margin-bottom:10px">Le consentement DSP2 de cette banque arrive à échéance le <strong>' + expDateTxt + '</strong>. Pour éviter une interruption de la synchronisation, <strong>déconnectez puis reconnectez cette banque</strong> dès maintenant (nouvelle validation sur le site de votre banque). Vos données déjà importées sont conservées.</div>'
         + '<button class="btn btn-danger btn-sm" onclick="disconnectOneBank(\'' + sid + '\')" style="padding:7px 14px;font-size:12px">🔌 Déconnecter et reconnecter</button>'
       + '</div>'
     + '</div>';
   }
 
-  const borderColor = abnormalState === 'pending' ? '#f59e0b'
-                    : abnormalState === 'expired' ? '#dc2626'
+  const borderColor = abnormalState === 'pending'  ? '#f59e0b'
+                    : abnormalState === 'expiring' ? '#f59e0b'
+                    : abnormalState === 'expired'  ? '#dc2626'
                     : 'var(--border)';
 
   return '<div class="bank-block" style="border:1.5px solid ' + borderColor + ';border-radius:14px;padding:14px 16px;background:rgba(255,255,255,0.5);margin-bottom:12px">'
@@ -872,6 +901,11 @@ async function connectSelectedBank() {
           institution_id: _selectedBank.id,
           institution_name: _selectedBank.name,
           status: 'pending',
+          // Échéance du consentement DSP2 (durée fournie par bank-connect, défaut 90 j).
+          // Calculée à la génération du lien → légèrement en avance sur la vraie
+          // échéance (acceptation banque quelques minutes plus tard) = côté sûr.
+          accessValidForDays: parseInt(data.access_valid_for_days, 10) || 90,
+          agreementExpiresAt: new Date(Date.now() + ((parseInt(data.access_valid_for_days, 10) || 90) * 86400000)).toISOString(),
           createdAt: new Date().toISOString()
         });
         // Stocker dans sessionStorage pour retrouver après redirect
@@ -905,6 +939,8 @@ async function connectSelectedBank() {
           institution_id: _selectedBank.id,
           institution_name: _selectedBank.name,
           status: 'pending',
+          accessValidForDays: parseInt(data.access_valid_for_days, 10) || 90,
+          agreementExpiresAt: new Date(Date.now() + ((parseInt(data.access_valid_for_days, 10) || 90) * 86400000)).toISOString(),
           createdAt: new Date().toISOString(),
           connecting_bank_id: null,
           connecting_requisition_id: data.requisition_id,
@@ -1400,6 +1436,26 @@ async function fetchAndStagePending(arg1, dateFrom) {
 
   console.log('[SYNC] Réponse API:', JSON.stringify(data).substring(0, 300));
 
+  // ── Consentement DSP2 (EUA) expiré : marquer la banque, ne RIEN écraser ──
+  // Avant ce garde-fou, une sync sur consentement expiré écrivait quand même
+  // lastSync + status:'active' + soldes à 0, et purgeait les transactions en
+  // attente de cette banque dans bank_pending. Ici : on pose status:'expired'
+  // (le bandeau rouge de la carte s'appuie dessus) puis on s'arrête proprement.
+  const euaExpired = !!(data && (data.euaExpired === true
+    || data.requisitionStatus === 'EX'
+    || data.requisitionStatus === 'EXPIRED'));
+  if (euaExpired) {
+    try {
+      if (bank) {
+        bank.status = 'expired';
+        const bRef = bankDocRef(bank);
+        if (bRef) await window._setDoc(bRef, { status: 'expired', expiredDetectedAt: new Date().toISOString() }, { merge: true });
+      }
+    } catch(persistErr) { console.warn('[SYNC] statut expired non persisté :', persistErr.message); }
+    try { showConnectedZone(); } catch(e2) {}
+    throw new Error('Connexion ' + (bank ? bank.name : 'bancaire') + ' expirée : le consentement bancaire (90 à 180 jours, réglementation DSP2) est arrivé à échéance. Déconnectez puis reconnectez cette banque pour reprendre la synchronisation.');
+  }
+
   if (!res.ok || !data.success) {
     throw new Error(data.error || 'Sync échouée (HTTP ' + res.status + ')');
   }
@@ -1423,6 +1479,17 @@ async function fetchAndStagePending(arg1, dateFrom) {
       return Object.assign({}, t, { bankId: bankIdForTx });
     });
   });
+
+  // ── Garde-fou : TOUS les comptes en échec et 0 transaction → ne rien écraser ──
+  // (5xx banque, accès coupé, compte pas prêt…) : on préserve bank_pending, les
+  // soldes affichés et lastSync tels quels — les warnings ci-dessus expliquent déjà.
+  const allAccountsFailed = allTx.length === 0
+    && data.accounts.length > 0
+    && data.accounts.every(function(a){ return !!a.issueMessage; });
+  if (allAccountsFailed) {
+    console.warn('[SYNC] Tous les comptes en échec — aucun écrasement (bank_pending / soldes / lastSync préservés)');
+    return { debits: 0, total: 0 };
+  }
   const accountsSummary = data.accounts.map(function(a){
     return {
       accountId:         a.accountId || '',
