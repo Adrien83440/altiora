@@ -84,6 +84,17 @@ export default async function handler(req, res) {
       ? Math.min(180, parseInt(instData.transaction_total_days))
       : 90;
 
+    // Durée de validité du consentement (EUA) : GoCardless expose le maximum
+    // autorisé par banque (max_access_valid_for_days). Beaucoup de banques FR
+    // acceptent 180 jours depuis l'amendement RTS 2023 → on prend le maximum,
+    // plafonné à 180, au lieu des 90 jours codés en dur (reconnexions 2x moins
+    // fréquentes pour les banques compatibles).
+    const accessDays = (function () {
+      const max = parseInt(instData.max_access_valid_for_days, 10);
+      if (!isNaN(max) && max > 0) return Math.min(180, max);
+      return 90;
+    })();
+
     // 3. Créer un end-user agreement
     const agreementRes = await fetch(`${GC_BASE}/agreements/enduser/`, {
       method: 'POST',
@@ -95,7 +106,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         institution_id,
         max_historical_days: maxDays,
-        access_valid_for_days: 90,
+        access_valid_for_days: accessDays,
         access_scope: ['balances', 'details', 'transactions']
       })
     });
@@ -127,7 +138,9 @@ export default async function handler(req, res) {
     return res.status(200).json({
       link: requisition.link,
       requisition_id: requisition.id,
-      agreement_id: agreement.id
+      agreement_id: agreement.id,
+      // Additif : permet au front de stocker la date d'échéance du consentement
+      access_valid_for_days: parseInt(agreement.access_valid_for_days, 10) || accessDays
     });
 
   } catch (e) {

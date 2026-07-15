@@ -73,6 +73,15 @@ async function gcCall(url, headers, label) {
   return { httpStatus: res.status, ok: res.ok, data: data || {} };
 }
 
+// true si un body d'erreur GoCardless signale un consentement (EUA) expiré
+// (ex : "End User Agreement (EUA) xxx has expired")
+function isEuaExpiredBody(data) {
+  try {
+    const txt = JSON.stringify(data || {}).toLowerCase();
+    return txt.includes('expired') && (txt.includes('eua') || txt.includes('end user agreement'));
+  } catch (e) { return false; }
+}
+
 async function getGCToken() {
   const res = await fetch(`${GC_BASE}/token/new/`, {
     method: 'POST',
@@ -131,7 +140,7 @@ function accountIssueMessage(txHttp, accStatus) {
   if (txHttp === 403) {
     return 'L\'accès aux transactions de ce compte n\'a pas été autorisé lors du consentement bancaire. Déconnectez puis reconnectez la banque en autorisant l\'accès aux opérations.';
   }
-  if (txHttp === 404 || accStatus === 'EXPIRED') {
+  if (txHttp === 401 || txHttp === 404 || accStatus === 'EXPIRED') {
     return 'Ce compte n\'est plus accessible (consentement expiré ou compte retiré). Déconnectez puis reconnectez la banque.';
   }
   if (accStatus === 'ERROR' || accStatus === 'SUSPENDED') {
@@ -315,6 +324,10 @@ export default async function handler(req, res) {
     const rData = rCall.data;
     console.log('Req status:', rData.status, '| nb accounts:', rData.accounts?.length, '| HTTP:', rCall.httpStatus);
 
+    // Consentement (EUA) expiré ? Détection à trois niveaux (champ additif) :
+    // statut de la requisition, body des erreurs 401 par compte, statut des comptes.
+    let euaExpired = (rData.status === 'EX' || rData.status === 'EXPIRED');
+
     // Requisition introuvable côté GoCardless (supprimée) mais encore référencée dans Firestore
     if (rCall.httpStatus === 404) {
       return res.status(400).json({
@@ -326,7 +339,8 @@ export default async function handler(req, res) {
     if (!rData.accounts || rData.accounts.length === 0) {
       return res.status(400).json({
         error: requisitionStatusMessage(rData.status),
-        requisitionStatus: rData.status || 'unknown'
+        requisitionStatus: rData.status || 'unknown',
+        euaExpired: !!euaExpired
       });
     }
 
@@ -376,6 +390,7 @@ export default async function handler(req, res) {
           rawTxs = [...(txCall.data.transactions?.booked || []), ...(txCall.data.transactions?.pending || [])];
         }
         console.log(`[${accountId}] transactions → HTTP ${txCall.httpStatus} | ${rawTxs.length} transactions`);
+        if (isEuaExpiredBody(detCall.data) || isEuaExpiredBody(balCall.data) || isEuaExpiredBody(txCall.data)) euaExpired = true;
         if (rawTxs[0]) console.log('sample:', JSON.stringify(rawTxs[0]).substring(0, 250));
 
         // ── Diagnostic : transactions en erreur OU vides → interroger le statut du compte ──
@@ -387,6 +402,7 @@ export default async function handler(req, res) {
           const metaCall = await gcCall(`${GC_BASE}/accounts/${accountId}/`, gcH, `meta ${accountId}`);
           gcAccountStatus = (metaCall.ok && metaCall.data.status) || null;
           console.log(`[${accountId}] statut compte GoCardless: ${gcAccountStatus || 'inconnu'}`);
+          if (gcAccountStatus === 'EXPIRED') euaExpired = true;
 
           if (!txCall.ok || detailsFailed) {
             issueMessage = accountIssueMessage(txCall.ok ? detCall.httpStatus : txCall.httpStatus, gcAccountStatus);
@@ -460,6 +476,7 @@ export default async function handler(req, res) {
       accounts,
       totalTransactions: total,
       requisitionStatus: rData.status || null,
+      euaExpired: !!euaExpired,
       warnings: warningsOut
     });
 
