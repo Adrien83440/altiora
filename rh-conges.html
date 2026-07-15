@@ -469,16 +469,17 @@
       </div>
       <div class="msep">Soldes actuels</div>
       <div class="mrow">
-        <div class="mfield"><label class="mlabel">CP acquis (calculé auto)</label><input class="minput" type="number" id="aj-acquis" step="0.5" placeholder="0"/></div>
+        <div class="mfield"><label class="mlabel">CP acquis (total)</label><input class="minput" type="number" id="aj-acquis" step="0.5" placeholder="0"/></div>
         <div class="mfield"><label class="mlabel">CP pris (total approuvés)</label><input class="minput" type="number" id="aj-pris" step="0.5" placeholder="0" readonly style="background:rgba(250,255,254,0.5);color:var(--muted)"/></div>
       </div>
+      <div id="aj-auto-info" style="display:none;margin:-4px 0 10px;padding:6px 10px;background:#f0f9ff;border-radius:8px;font-size:11px;color:#0c4a6e"></div>
       <div id="aj-solde-affiche" style="padding:10px 14px;border-radius:8px;font-size:12px;font-weight:700;margin-bottom:10px;display:none"></div>
       <div class="mrow">
         <div class="mfield"><label class="mlabel">RTT restants</label><input class="minput" type="number" id="aj-rtt" step="0.5" placeholder="0"/></div>
         <div class="mfield"><label class="mlabel">Récup. restantes (h)</label><input class="minput" type="number" id="aj-recup" step="0.5" placeholder="0"/></div>
       </div>
       <div style="padding:10px 12px;background:#fef3c7;border-radius:8px;font-size:11px;color:#92400e;margin-top:4px">
-        ⚠️ Modifiez <b>CP acquis</b> pour corriger un solde incorrect. Le nombre de CP pris est calculé automatiquement depuis les demandes approuvées.
+        ⚠️ Saisissez le <b>total de CP acquis</b> souhaité (ex : celui de la dernière fiche de paie) — le compteur sera calé exactement sur cette valeur, puis l'acquisition mensuelle automatique reprendra ensuite. Les CP pris restent calculés depuis les demandes approuvées.
       </div>
     </div>
     <div class="modal-foot">
@@ -1483,8 +1484,20 @@ function loadAjustForm(){
   if(!emp) return;
   const s=getSoldes(emp);
 
-  setV('aj-acquis', (emp.cpAjustAcquis!=null ? emp.cpAjustAcquis : s.cpAcquis).toFixed(1));
+  // Toujours pré-remplir avec le TOTAL effectif (celui affiché partout dans l'app).
+  // (Ancien comportement bugué : affichait l'ajustement brut — un delta — comme si c'était le total.)
+  setV('aj-acquis', s.cpAcquis.toFixed(1));
   setV('aj-pris', s.cpPris.toFixed(1));
+
+  // Détail du calcul : part automatique + correction manuelle mémorisée
+  const autoInfoEl = document.getElementById('aj-auto-info');
+  if(autoInfoEl){
+    const ajustCourant = parseFloat(emp.cpAjustAcquis)||0;
+    const autoBase = Math.round((s.cpAcquis - ajustCourant)*100)/100;
+    autoInfoEl.style.display = '';
+    autoInfoEl.innerHTML = `🧮 Calcul automatique : <b>${autoBase.toFixed(1)}j</b>` +
+      (ajustCourant !== 0 ? ` · Correction manuelle enregistrée : <b>${(ajustCourant>0?'+':'')}${ajustCourant.toFixed(1)}j</b>` : '');
+  }
   setV('aj-rtt', emp.rttAjust||(_params.rttAnnuels||0));
   setV('aj-recup', emp.recupHeures||0);
 
@@ -1521,14 +1534,22 @@ window.loadAjustForm=loadAjustForm;
 async function saveAjust(){
   const empId=document.getElementById('aj-emp')?.value;
   if(!empId) return;
+  // La saisie représente le TOTAL de CP acquis souhaité (ex : fiche de paie).
+  // On la convertit en delta (cpAjustAcquis) par rapport au calcul automatique,
+  // car tous les consommateurs (calcCPAcquis ici, calcSoldes dans espace-salarie.js)
+  // ADDITIONNENT cpAjustAcquis à l'acquisition auto. Ainsi : total affiché = total
+  // saisi aujourd'hui, et l'acquisition mensuelle continue normalement ensuite.
+  const totalSaisi = parseFloat(document.getElementById('aj-acquis')?.value);
+  if(isNaN(totalSaisi)){ showToast('Saisissez le total de CP acquis','err'); return; }
+  const s = getSoldes(_emps[empId]);
+  const autoBase = s.cpAcquis - (parseFloat(_emps[empId]?.cpAjustAcquis)||0); // part auto pure (mois × taux)
   const data={
-    cpAjustAcquis: parseFloat(document.getElementById('aj-acquis')?.value)||0,
+    cpAjustAcquis: Math.round((totalSaisi - autoBase)*100)/100,
     rttAjust:      parseFloat(document.getElementById('aj-rtt')?.value)||0,
     recupHeures:   parseFloat(document.getElementById('aj-recup')?.value)||0,
   };
   // Vérifier si solde va devenir négatif après ajustement
-  const s = getSoldes(_emps[empId]);
-  const nouveauSolde = data.cpAjustAcquis - s.cpPris;
+  const nouveauSolde = totalSaisi - s.cpPris;
   if(nouveauSolde < 0 && !_emps[empId]?.apprenti && !['apprentissage','alternance','Apprentissage','Alternance'].includes(_emps[empId]?.typeContrat)){
     const ok = confirm(`⚠️ Avec ces valeurs, le solde de ${(_emps[empId]?.prenom||'cet employé')} sera de ${nouveauSolde.toFixed(1)}j (négatif).\n\nVoulez-vous confirmer ?`);
     if(!ok) return;
@@ -1546,7 +1567,7 @@ async function saveAjust(){
     }
     closeModal('modal-ajust');
     renderAll();
-    showToast('✅ Soldes mis à jour','ok');
+    showToast('✅ CP acquis calé à '+totalSaisi.toFixed(1)+'j','ok');
   }catch(e){ showToast('Erreur : '+e.message,'err'); }
 }
 window.saveAjust=saveAjust;
