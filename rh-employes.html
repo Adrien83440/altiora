@@ -301,6 +301,14 @@
         <div class="mfield"><label>Date de naissance</label><input class="minput" id="f-naissance" type="date"/></div>
         <div class="mfield"><label>Nationalité</label><input class="minput" id="f-nationalite" placeholder="Française"/></div>
       </div>
+      <!-- Vague 3 (RUP) : champs optionnels pour le Registre unique du personnel -->
+      <div class="mrow">
+        <div class="mfield"><label>Civilité / Sexe <span style="color:var(--muted);font-weight:400">(RUP)</span></label>
+          <select class="minput" id="f-civilite"><option value="">—</option><option value="M.">M.</option><option value="Mme">Mme</option></select>
+        </div>
+        <div class="mfield"><label>Titre de séjour <span style="color:var(--muted);font-weight:400">(salariés étrangers — RUP)</span></label>
+          <input class="minput" id="f-titre-sejour" placeholder="Type et n° d'ordre"/></div>
+      </div>
       <div class="mfield"><label>Adresse</label><input class="minput" id="f-adresse" placeholder="12 rue des Fleurs, 75001 Paris"/></div>
       <div class="mrow">
         <div class="mfield"><label>Téléphone</label><input class="minput" id="f-tel" placeholder="06 12 34 56 78"/></div>
@@ -332,6 +340,15 @@
       <div class="mrow">
         <div class="mfield"><label>Date d'entrée *</label><input class="minput" id="f-entree" type="date" oninput="onContratChange()"/></div>
         <div class="mfield"><label>Date de fin (CDD/Stage)</label><input class="minput" id="f-fin" type="date" oninput="onContratChange()"/></div>
+      </div>
+
+      <!-- Vague 3 (RUP) : mentions obligatoires stagiaires — visible quand contrat = Stage -->
+      <div id="stage-bloc" style="display:none;background:#eff6ff;border:1.5px solid #dbeafe;border-radius:10px;padding:12px 16px;margin-bottom:12px">
+        <div style="font-size:12px;font-weight:700;color:#1d4ed8;margin-bottom:10px">🎓 Stagiaire — mentions du Registre unique du personnel</div>
+        <div class="mrow">
+          <div class="mfield"><label>Tuteur (nom et prénom)</label><input class="minput" id="f-stage-tuteur" placeholder="Jean MARTIN"/></div>
+          <div class="mfield"><label>Lieu de présence</label><input class="minput" id="f-stage-lieu" placeholder="Établissement / service"/></div>
+        </div>
       </div>
 
       <!-- PÉRIODE D'ESSAI (affichage conditionnel) -->
@@ -1776,7 +1793,8 @@ window.openModalNouvelEmploye = function() {
   document.getElementById('modal-emp-title').textContent = '👤 Nouvel employé';
   populateCCNSelect('f-ccn', '');
   ['prenom','nom','naissance','nationalite','adresse','tel','email','nss',
-   'poste','dept','entree','fin','brut','net','heures','iban','note','superbrut','pin'].forEach(k => {
+   'poste','dept','entree','fin','brut','net','heures','iban','note','superbrut','pin',
+   'civilite','titre-sejour','stage-tuteur','stage-lieu'].forEach(k => {
     const el = document.getElementById('f-'+k);
     if (el) el.value = '';
   });
@@ -1820,6 +1838,9 @@ window.openModalEdit = function(id) {
   window._currentTauxCharges = e.tauxCharges || null;
   set('iban',e.iban); set('note',e.noteMoyenne||'');
   set('pin',e.pin||'');
+  // Vague 3 (RUP)
+  set('civilite',e.civilite); set('titre-sejour',e.titreSejour);
+  set('stage-tuteur',e.stageTuteur); set('stage-lieu',e.stageLieu);
   // Champs Administratif & Conformité
   const setEl = (id, val) => { const el=document.getElementById(id); if(el) el.value=val||''; };
   const setChk = (id, val) => { const el=document.getElementById(id); if(el) el.checked=!!val; };
@@ -1880,6 +1901,10 @@ window.saveEmploye = async function() {
     telephone:       document.getElementById('f-tel').value.trim()||null,
     email:           document.getElementById('f-email').value.trim()||null,
     nss:             document.getElementById('f-nss').value.trim()||null,
+    civilite:        document.getElementById('f-civilite')?.value||null,
+    titreSejour:     document.getElementById('f-titre-sejour')?.value.trim()||null,
+    stageTuteur:     document.getElementById('f-stage-tuteur')?.value.trim()||null,
+    stageLieu:       document.getElementById('f-stage-lieu')?.value.trim()||null,
     typeContrat:     document.getElementById('f-contrat').value,
     categoriePoste:  document.getElementById('f-categorie').value,
     statut:          document.getElementById('f-statut').value,
@@ -1987,6 +2012,10 @@ function _collectFormData() {
     telephone:       (document.getElementById('f-tel').value||'').trim()||null,
     email:           (document.getElementById('f-email').value||'').trim()||null,
     nss:             (document.getElementById('f-nss').value||'').trim()||null,
+    civilite:        document.getElementById('f-civilite')?.value||null,
+    titreSejour:     (document.getElementById('f-titre-sejour')?.value||'').trim()||null,
+    stageTuteur:     (document.getElementById('f-stage-tuteur')?.value||'').trim()||null,
+    stageLieu:       (document.getElementById('f-stage-lieu')?.value||'').trim()||null,
     typeContrat:     document.getElementById('f-contrat').value,
     categoriePoste:  document.getElementById('f-categorie').value,
     statut:          document.getElementById('f-statut').value,
@@ -3510,6 +3539,20 @@ window.approveResetPin = approveResetPin;
     if(sub&&nav){clearInterval(t);sub.style.maxHeight="2000px";nav.classList.add("rh-mode");}
     if(++tries>50)clearInterval(t);
   },50);
+})();
+</script>
+
+<script>
+/* ═══ Vague 3 (RUP) — affichage du bloc stagiaire quand contrat = Stage ═══
+   Wrapper purement additif autour de onContratChange (déjà appelé à l'ouverture
+   des modales et au changement de contrat) : aucune fonction existante modifiée. */
+(function(){
+  function toggleStageBloc(){
+    var c=document.getElementById('f-contrat'), b=document.getElementById('stage-bloc');
+    if(b) b.style.display=(c&&c.value==='Stage')?'':'none';
+  }
+  var orig=window.onContratChange;
+  window.onContratChange=function(){ if(typeof orig==='function') orig.apply(this,arguments); toggleStageBloc(); };
 })();
 </script>
 </body>

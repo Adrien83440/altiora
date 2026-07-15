@@ -1639,6 +1639,74 @@ const DOCS_CATALOGUE = [
     <tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr></table>
     <div class="dp-footer">${d.raison} — Conservation : 5 ans après départ du dernier salarié inscrit</div>` },
 
+  /* ═══ Vague 3 (15/07/2026, demande cliente) : RUP PRÉ-REMPLI depuis les fiches salariés.
+     Purement additif — la page de garde vierge ci-dessus est conservée telle quelle.
+     Lit le global _employes (chargé au boot de la page, archivés inclus) :
+     salariés dans l'ordre des embauches + partie spécifique stagiaires (L.1221-13 al.2). ═══ */
+  { id:'reg_personnel_auto', icon:'📖', titre:'Registre unique du personnel — pré-rempli', cat:'registre',
+    desc:'RUP généré automatiquement depuis vos fiches salariés : ordre des embauches, sorties, partie stagiaires (Art. L1221-13 CT)', tags:['legal'], needsSalarie:false,
+    content: function(d){
+      var esc=function(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');};
+      var fmtD=function(iso){ if(!iso) return '—'; var p=String(iso).split('-'); return p.length===3?(p[2]+'/'+p[1]+'/'+p[0]):esc(iso); };
+      var all=(typeof _employes!=='undefined'&&_employes)?Object.values(_employes):[];
+      var n=new Date(); n.setHours(12,0,0,0);
+      var todayIso=n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');
+      var byEntree=function(a,b){ var da=a.dateEntree||'9999-12-31', db=b.dateEntree||'9999-12-31'; return da<db?-1:da>db?1:String(a.nom||'').localeCompare(String(b.nom||''),'fr'); };
+      var sal=all.filter(function(e){return e.typeContrat!=='Stage';}).sort(byEntree);
+      var stg=all.filter(function(e){return e.typeContrat==='Stage';}).sort(byEntree);
+      var QUALIF={employe:'Employé / Ouvrier',agent_maitrise:'Agent de maîtrise',cadre:'Cadre'};
+      var mention=function(e){ var t=e.typeContrat||'—';
+        if(t==='CDD') return 'CDD — contrat à durée déterminée';
+        if(t==='Apprentissage') return 'Apprenti';
+        if(t==='Alternance') return 'Contrat de professionnalisation';
+        return t; };
+      var sexe=function(e){ return e.civilite==='M.'?'M':e.civilite==='Mme'?'F':'—'; };
+      var sortie=function(e){
+        if(e.dateSortie) return fmtD(e.dateSortie);
+        if(e.statut==='archive') return e.dateFinContrat?fmtD(e.dateFinContrat):'—';
+        if(e.dateFinContrat&&e.dateFinContrat<todayIso) return fmtD(e.dateFinContrat);
+        return ''; };
+      var obs=function(e){ var o=[];
+        if(e.titreSejour) o.push('Titre de séjour : '+esc(e.titreSejour));
+        var h=parseFloat(e.heuresHebdo);
+        if(isFinite(h)&&h>0&&h<35) o.push('Temps partiel ('+h+' h/sem)');
+        return o.join(' · '); };
+      var rows = sal.length ? sal.map(function(e,i){
+        return '<tr><td>'+(i+1)+'</td>'+
+          '<td><b>'+esc(String(e.nom||'').toUpperCase())+' '+esc(e.prenom||'')+'</b><br><span style="font-size:8pt;color:#555">né(e) le '+fmtD(e.dateNaissance)+'</span></td>'+
+          '<td>'+sexe(e)+'</td><td>'+esc(e.nationalite||'—')+'</td>'+
+          '<td>'+esc(e.poste||'—')+'<br><span style="font-size:8pt;color:#555">'+(QUALIF[e.categoriePoste]||'—')+'</span></td>'+
+          '<td>'+esc(mention(e))+'</td><td>'+fmtD(e.dateEntree)+'</td><td>'+(sortie(e)||'&nbsp;')+'</td><td>'+(obs(e)||'&nbsp;')+'</td></tr>';
+      }).join('') : '<tr><td colspan="9" style="text-align:center;color:#777">Aucune fiche salarié — créez vos fiches dans RH → Employés</td></tr>';
+      var rowsStg = stg.length ? stg.map(function(e,i){
+        return '<tr><td>'+(i+1)+'</td>'+
+          '<td><b>'+esc(String(e.nom||'').toUpperCase())+' '+esc(e.prenom||'')+'</b><br><span style="font-size:8pt;color:#555">né(e) le '+fmtD(e.dateNaissance)+'</span></td>'+
+          '<td>'+fmtD(e.dateEntree)+'</td><td>'+fmtD(e.dateFinContrat)+'</td>'+
+          '<td>'+esc(e.stageTuteur||'—')+'</td><td>'+esc(e.stageLieu||'—')+'</td><td>'+(obs(e)||'&nbsp;')+'</td></tr>';
+      }).join('') : '<tr><td colspan="7" style="text-align:center;color:#777">Aucun stagiaire enregistré</td></tr>';
+      var manq=[]; all.forEach(function(e){ var m=[];
+        if(!e.civilite) m.push('civilité');
+        if(!e.dateNaissance) m.push('date de naissance');
+        if(!e.nationalite) m.push('nationalité');
+        if(e.typeContrat==='Stage'&&!e.stageTuteur) m.push('tuteur');
+        if(e.typeContrat==='Stage'&&!e.stageLieu) m.push('lieu de présence');
+        if(m.length) manq.push(esc(((e.prenom||'')+' '+(e.nom||'')).trim())+' ('+m.join(', ')+')'); });
+      var warnManq = manq.length
+        ? '<div class="dp-warn-box rup-noprint">✏️ <b>'+manq.length+' fiche(s) à compléter</b> pour un RUP totalement conforme : '+manq.join(' · ')+'. Ces champs se renseignent dans <b>RH → Employés</b>. <i>(Cet encadré n\'apparaît pas à l\'impression.)</i></div>'
+        : '';
+      return '<style>@media print{.rup-noprint{display:none!important}}</style>'+
+        '<h2>REGISTRE UNIQUE DU PERSONNEL</h2><div class="dp-sub">Article L1221-13 du Code du travail — Document obligatoire dès le premier salarié</div>'+
+        '<div class="dp-header"><div><b>'+d.raison+'</b><br>'+d.adresse+'<br>SIRET : '+d.siret+'<br>Convention collective : '+d.ccn+'</div>'+
+        '<div style="text-align:right">Édité le : '+today()+'<br>Tenu par : _______________</div></div>'+
+        warnManq+
+        '<div class="dp-section"><div class="dp-section-title">Personnel salarié — dans l\'ordre des embauches ('+sal.length+')</div>'+
+        '<table style="font-size:8.5pt"><tr><th>N°</th><th>Nom & Prénoms</th><th>Sexe</th><th>Nationalité</th><th>Emploi / Qualification</th><th>Contrat</th><th>Entrée</th><th>Sortie</th><th>Observations</th></tr>'+rows+'</table></div>'+
+        '<div class="dp-section"><div class="dp-section-title">Partie spécifique — Stagiaires, dans l\'ordre d\'arrivée ('+stg.length+')</div>'+
+        '<table style="font-size:8.5pt"><tr><th>N°</th><th>Nom & Prénoms</th><th>Début du stage</th><th>Fin du stage</th><th>Tuteur</th><th>Lieu de présence</th><th>Observations</th></tr>'+rowsStg+'</table></div>'+
+        '<div class="dp-warn-box">⚠️ Conservation : 5 ans après le départ du salarié (les salariés sortis restent inscrits). À tenir à la disposition de l\'inspection du travail et des représentants du personnel. Pour les travailleurs étrangers, une copie du titre valant autorisation de travail est annexée au registre.</div>'+
+        '<div class="dp-footer">'+d.raison+' — SIRET '+d.siret+' — RUP pré-rempli par Alteore le '+today()+'</div>';
+    } },
+
   { id:'reg_accidents',  icon:'🩹', titre:'Registre des accidents du travail bénins', cat:'registre', desc:'Registre AT sans arrêt (Art. L441-4 CSS) — en lieu et place de déclaration', tags:['secu','legal'], needsSalarie:false,
     content: (d) => `<h2>REGISTRE DES ACCIDENTS DU TRAVAIL BÉNINS</h2><div class="dp-sub">Article L441-4 du Code de la Sécurité Sociale — Tenu avec accord de la CARSAT</div>
     <div class="dp-header"><div><b>${d.raison}</b><br>${d.adresse}<br>SIRET : ${d.siret}</div><div style="text-align:right">Ouvert le : ___________<br>N° accord CARSAT : _______________</div></div>
