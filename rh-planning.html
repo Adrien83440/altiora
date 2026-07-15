@@ -1025,6 +1025,7 @@
       <button class="btn btn-outline btn-sm" onclick="exportPlanningMensuelSalarie()" title="Planning mensuel individuel — une page par salarié (portrait A4)">👤 Planning individuel</button>
       <button class="btn btn-ai btn-sm" onclick="openAI()">✨ IA Planning</button>
       <button class="btn btn-sm" style="background:linear-gradient(135deg,#1d4ed8,#60a5fa);color:white" onclick="openCongeRapide()">🏖️ Congés</button>
+      <button class="btn btn-outline btn-sm" onclick="openTplModal()" title="Enregistrer la semaine affichée comme modèle d'équipe et l'appliquer à d'autres semaines" style="border-color:#0ea5e9;color:#0ea5e9">📋 Semaine type</button>
       <button class="btn btn-rh btn-sm" onclick="openCreneauModal()">+ Créneau</button>
     </div>
   </div>
@@ -1227,8 +1228,40 @@
     </div>
     <div class="modal-foot">
       <button class="btn btn-danger btn-sm" id="cr-del" style="display:none;margin-right:auto" onclick="delCr()">🗑 Supprimer</button>
+      <button class="btn btn-outline btn-sm" id="cr-dup" style="display:none" onclick="duplicateCr()" title="Créer une copie de ce créneau : changez la date, l'employé, ou passez en saisie multi-jours, puis enregistrez">📄 Dupliquer</button>
       <button class="btn btn-outline" onclick="closeCr()">Annuler</button>
       <button class="btn btn-rh" id="save-btn" onclick="saveCr()">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL SEMAINE TYPE (vague 4 — demande cliente 15/07/2026) -->
+<div class="overlay" id="modalTpl">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>📋 Semaine type — modèles d'équipe</h3>
+      <button class="mclose" onclick="closeTplModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="mf">
+        <label class="ml">💾 Enregistrer la semaine affichée comme modèle</label>
+        <div style="display:flex;gap:8px">
+          <input class="mi" id="tpl-name" placeholder="Nom du modèle — ex : Équipe été, Semaine de base…" style="flex:1"/>
+          <button type="button" class="btn btn-rh btn-sm" id="tpl-save-btn" onclick="saveWeekAsTemplate()" style="white-space:nowrap">💾 Enregistrer</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px" id="tpl-week-info"></div>
+        <div style="font-size:11px;color:var(--muted)">Les congés, maladies et jours fériés ne sont pas copiés dans le modèle.</div>
+      </div>
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin:14px 0 8px;border-top:1px solid var(--border);padding-top:12px">Mes modèles</div>
+      <div id="tpl-list" style="max-height:220px;overflow:auto"></div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px 12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;cursor:pointer;font-size:12px">
+        <input type="checkbox" id="tpl-replace" style="accent-color:#f97316;width:15px;height:15px"/>
+        <span><b>Remplacer</b> les créneaux de travail existants de la semaine (les congés / maladies / fériés déjà posés sont toujours conservés). Sinon, seuls les jours vides sont complétés.</span>
+      </label>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeTplModal()">Fermer</button>
+      <button class="btn btn-rh" id="tpl-apply-btn" onclick="applyTemplate()">📥 Appliquer à la semaine affichée</button>
     </div>
   </div>
 </div>
@@ -5309,6 +5342,219 @@ async function authFetch(u,b){var t='';try{if(window._auth&&window._auth.current
     if(sub&&nav){clearInterval(t);sub.style.maxHeight='2000px';nav.classList.add('rh-mode');}
     if(++tries>50)clearInterval(t);
   },50);
+})();
+</script>
+
+<script>
+/* ═══════════ VAGUE 4 (15/07/2026, demande cliente) — SEMAINE TYPE + DUPLIQUER CRÉNEAU ═══════════
+   Purement additif. Réutilise les briques existantes : _cr (state), saveKey(k,date) (écrit
+   rh/{uid}/plan_{wk} + miroir rh_planning_public), loadCrForWeeks, render, monday/fmt/weekKey,
+   _emps, _cur, _editId, showToast. Aucune fonction existante n'est modifiée.
+   Modèles stockés dans rh/{uid}/plan_templates/{id} = {nom, createdAt, slots:[{wd,empId,items[]}]}. */
+(function(){
+  var TPL_COL='plan_templates';
+  var INCIDENT_TYPES=['conge','maladie','ferie']; // jamais copiés dans un modèle, jamais écrasés à l'application
+  var APPLY_LBL='📥 Appliquer à la semaine affichée';
+  var _tpls=[];
+
+  function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+  function weekDates(){ var mon=monday(_cur), out=[]; for(var i=0;i<7;i++){ var d=new Date(mon); d.setDate(mon.getDate()+i); out.push(fmt(d)); } return out; }
+  function frDate(iso){ return String(iso||'').split('-').reverse().join('/'); }
+
+  /* ── Ouverture / fermeture de la modale ── */
+  window.openTplModal=async function(){
+    var ds=weekDates();
+    var info=document.getElementById('tpl-week-info');
+    if(info) info.textContent='Semaine affichée : du '+frDate(ds[0])+' au '+frDate(ds[6]);
+    document.getElementById('modalTpl').classList.add('show');
+    await loadTpls();
+  };
+  window.closeTplModal=function(){ document.getElementById('modalTpl').classList.remove('show'); };
+
+  async function loadTpls(){
+    var list=document.getElementById('tpl-list');
+    if(list) list.innerHTML='<div style="font-size:12px;color:var(--muted);padding:8px">Chargement…</div>';
+    _tpls=[];
+    try{
+      var s=await window._getDocs(window._col(window._db,'rh',window._uid,TPL_COL));
+      s.forEach(function(d){ _tpls.push(Object.assign({id:d.id}, d.data())); });
+      _tpls.sort(function(a,b){ return String(a.nom||'').localeCompare(String(b.nom||''),'fr',{sensitivity:'base'}); });
+    }catch(e){ console.warn('[semaine-type] load:',e.message||e); }
+    renderTplList();
+  }
+  function renderTplList(){
+    var list=document.getElementById('tpl-list'); if(!list) return;
+    if(!_tpls.length){
+      list.innerHTML='<div style="font-size:12px;color:var(--muted);padding:8px">Aucun modèle pour l\'instant — composez une semaine au planning puis enregistrez-la ci-dessus.</div>';
+      return;
+    }
+    list.innerHTML=_tpls.map(function(t){
+      var nb=(t.slots||[]).reduce(function(s,sl){ return s+((sl.items||[]).length); },0);
+      return '<label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;margin-bottom:6px;cursor:pointer">'+
+        '<input type="radio" name="tpl-pick" value="'+esc(t.id)+'" style="accent-color:#0ea5e9"/>'+
+        '<span style="flex:1;min-width:0"><b style="font-size:13px">'+esc(t.nom||'Sans nom')+'</b>'+
+        '<span style="display:block;font-size:11px;color:var(--muted)">'+nb+' créneau(x) · créé le '+frDate(t.createdAt)+'</span></span>'+
+        '<button type="button" class="btn btn-outline btn-sm" onclick="event.stopPropagation();event.preventDefault();deleteTpl(\''+esc(t.id)+'\')" title="Supprimer ce modèle">🗑</button>'+
+        '</label>';
+    }).join('');
+  }
+
+  /* ── Enregistrer la semaine affichée comme modèle ── */
+  window.saveWeekAsTemplate=async function(){
+    var nameEl=document.getElementById('tpl-name');
+    var nom=((nameEl&&nameEl.value)||'').trim();
+    if(!nom){ showToast('Donnez un nom au modèle','warn'); return; }
+    var dates=weekDates(), slots=[], nb=0;
+    dates.forEach(function(date,wd){
+      _emps.forEach(function(e){
+        var k=date+'_'+e.id;
+        var items=((_cr[k]&&_cr[k].items)||[]).filter(function(it){ return INCIDENT_TYPES.indexOf(it.type)===-1; });
+        if(items.length){
+          var copies=JSON.parse(JSON.stringify(items));
+          copies.forEach(function(it){ delete it.id; });
+          slots.push({wd:wd, empId:e.id, items:copies});
+          nb+=items.length;
+        }
+      });
+    });
+    if(!nb){ showToast('Aucun créneau à copier sur la semaine affichée (les congés/maladies ne sont pas copiés)','warn'); return; }
+    var btn=document.getElementById('tpl-save-btn');
+    if(btn){ btn.disabled=true; btn.textContent='⏳…'; }
+    try{
+      await window._setDoc(window._doc(window._db,'rh',window._uid,TPL_COL,'tpl'+Date.now()),
+        {nom:nom, createdAt:fmt(new Date()), slots:slots});
+      if(nameEl) nameEl.value='';
+      showToast('✅ Modèle « '+nom+' » enregistré — '+nb+' créneau(x)','ok');
+      await loadTpls();
+    }catch(e){
+      showToast('❌ Échec enregistrement : '+String(e.message||e).substring(0,80),'warn');
+    }
+    if(btn){ btn.disabled=false; btn.textContent='💾 Enregistrer'; }
+  };
+
+  window.deleteTpl=async function(id){
+    var t=_tpls.find(function(x){ return x.id===id; });
+    if(!confirm('Supprimer le modèle « '+((t&&t.nom)||id)+' » ?')) return;
+    try{
+      await window._deleteDoc(window._doc(window._db,'rh',window._uid,TPL_COL,id));
+      showToast('Modèle supprimé','ok');
+      await loadTpls();
+    }catch(e){ showToast('❌ Échec suppression : '+String(e.message||e).substring(0,60),'warn'); }
+  };
+
+  /* ── Appliquer le modèle sélectionné à la semaine affichée ── */
+  window.applyTemplate=async function(){
+    var pick=document.querySelector('input[name="tpl-pick"]:checked');
+    if(!pick){ showToast('Sélectionnez un modèle dans la liste','warn'); return; }
+    var tpl=_tpls.find(function(t){ return t.id===pick.value; });
+    if(!tpl||!(tpl.slots||[]).length){ showToast('Modèle vide','warn'); return; }
+    var replace=!!(document.getElementById('tpl-replace')&&document.getElementById('tpl-replace').checked);
+    var dates=weekDates();
+    var nbTpl=tpl.slots.reduce(function(s,sl){ return s+((sl.items||[]).length); },0);
+    if(!confirm('Appliquer « '+(tpl.nom||'')+' » ('+nbTpl+' créneaux) à la semaine du '+frDate(dates[0])+' ?\n\n'+
+      (replace
+        ? '⚠️ Les créneaux de TRAVAIL existants de la semaine seront remplacés. Les congés, maladies et fériés déjà posés sont conservés.'
+        : 'Mode « compléter » : seuls les jours vides de chaque salarié seront remplis.')+
+      '\n\nLa communication aux salariés (📢 Communiquer) reste une étape séparée.')) return;
+
+    var btn=document.getElementById('tpl-apply-btn');
+    if(btn){ btn.disabled=true; btn.textContent='⏳ Application…'; }
+
+    var empIds={}; _emps.forEach(function(e){ empIds[e.id]=true; });
+    var snapshots={};   // k -> items d'origine (rollback local, même stratégie que la saisie multi)
+    var touched={};     // k -> date à sauvegarder
+    var added=0, skippedEmp=0, skippedBusy=0, skippedConge=0;
+    function snap(k){ if(!(k in snapshots)) snapshots[k]=JSON.parse(JSON.stringify((_cr[k]&&_cr[k].items)||[])); }
+
+    // 1) Mode remplacer : purge des créneaux de travail de la semaine (congés & co conservés)
+    if(replace){
+      dates.forEach(function(date){
+        Object.keys(_cr).forEach(function(k){
+          if(k.indexOf(date+'_')!==0) return;
+          var items=_cr[k].items||[];
+          var kept=items.filter(function(it){ return INCIDENT_TYPES.indexOf(it.type)!==-1; });
+          if(kept.length!==items.length){ snap(k); _cr[k].items=kept; touched[k]=date; }
+        });
+      });
+    }
+
+    // 2) Pose des créneaux du modèle
+    var stamp=Date.now();
+    tpl.slots.forEach(function(sl,si){
+      var nbSlot=(sl.items||[]).length;
+      if(!empIds[sl.empId]){ skippedEmp+=nbSlot; return; }                 // salarié parti/archivé depuis
+      var date=dates[sl.wd]; if(!date) return;
+      var k=date+'_'+sl.empId;
+      var existing=(_cr[k]&&_cr[k].items)||[];
+      var hasConge=existing.some(function(it){ return INCIDENT_TYPES.indexOf(it.type)!==-1; });
+      if(hasConge){ skippedConge+=nbSlot; return; }                        // absent ce jour-là : on n'écrase pas
+      if(!replace&&existing.length){ skippedBusy+=nbSlot; return; }        // compléter : jour déjà rempli
+      snap(k);
+      if(!_cr[k])_cr[k]={items:[]};
+      (sl.items||[]).forEach(function(it,ii){
+        var copy=JSON.parse(JSON.stringify(it));
+        copy.id='c'+stamp+'_'+si+'_'+ii;
+        _cr[k].items.push(copy); added++;
+      });
+      touched[k]=date;
+    });
+
+    var keys=Object.keys(touched);
+    if(!keys.length){
+      if(btn){ btn.disabled=false; btn.textContent=APPLY_LBL; }
+      showToast('Rien à appliquer'+(skippedBusy?' — jours déjà remplis (cocher « Remplacer » ?)':''),'warn');
+      return;
+    }
+
+    // 3) Sauvegarde par lots de 10 (même stratégie que la saisie multi-jours), rollback local si échec
+    var err=null, done=0;
+    try{
+      for(var i=0;i<keys.length;i+=10){
+        var chunk=keys.slice(i,i+10);
+        await Promise.all(chunk.map(function(k){ return saveKey(k,touched[k]); }));
+        done+=chunk.length;
+        if(btn) btn.textContent='⏳ '+done+'/'+keys.length+'…';
+      }
+    }catch(e){
+      err=e;
+      Object.keys(snapshots).forEach(function(k){
+        if(!_cr[k])_cr[k]={items:[]};
+        _cr[k].items=snapshots[k];
+      });
+    }
+    if(btn){ btn.disabled=false; btn.textContent=APPLY_LBL; }
+    if(err){
+      showToast('❌ Échec application ('+done+'/'+keys.length+' ok) : '+String(err.message||err).substring(0,80),'warn');
+      try{ await loadCr(); render(); }catch(_e){}
+      return;
+    }
+    try{ await loadCrForWeeks([weekKey(new Date(dates[0]+'T12:00:00'))]); }catch(_e){}
+    render();
+    closeTplModal();
+    var extra=[];
+    if(skippedBusy)  extra.push(skippedBusy+' ignoré(s) : jour déjà rempli');
+    if(skippedConge) extra.push(skippedConge+' ignoré(s) : congé/absence posé');
+    if(skippedEmp)   extra.push(skippedEmp+' ignoré(s) : salarié introuvable');
+    showToast('✅ Modèle appliqué — '+added+' créneau(x) créés'+(extra.length?' · '+extra.join(' · '):''),'ok');
+  };
+
+  /* ── Dupliquer un créneau depuis la modale d'édition ── */
+  window.duplicateCr=function(){
+    if(!_editId) return;
+    _editId=null; // repasse la modale en mode création, champs déjà pré-remplis par editCr
+    document.getElementById('cr-del').style.display='none';
+    var t=document.getElementById('cr-title');
+    if(t) t.textContent='📄 Dupliquer — choisissez la date ou l\'employé cible';
+    showToast('Copie prête : ajustez la date, l\'employé ou la saisie multi-jours, puis 💾 Enregistrer','ok');
+  };
+  // Visibilité du bouton 📄 synchronisée sur celle de 🗑 (mode édition), sans modifier editCr
+  document.addEventListener('DOMContentLoaded',function(){
+    var del=document.getElementById('cr-del'), dup=document.getElementById('cr-dup');
+    if(del&&dup&&window.MutationObserver){
+      new MutationObserver(function(){ dup.style.display=(del.style.display==='block')?'':'none'; })
+        .observe(del,{attributes:true,attributeFilter:['style']});
+    }
+  });
 })();
 </script>
 </body>
