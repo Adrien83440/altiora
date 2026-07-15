@@ -673,6 +673,9 @@ tr.v2-flash td{animation:v2rowflash 1.2s ease}
       <button type="button" class="ftv2" data-f="dep" onclick="v2PickFam(this)"><span class="fdot" style="background:#f97316"></span>Dépenses <span class="fcnt" x-text="fmtE(t.fixesHT + t.varHT + t.masseSalHT)"></span></button>
       <button type="button" class="ftv2" data-f="fin" onclick="v2PickFam(this)"><span class="fdot" style="background:#8b5cf6"></span>Financement <span class="fcnt" x-text="fmtE(t.creditsPrincipal + t.creditsInteret + (t.leasingHT||0))"></span></button>
       <button type="button" class="ftv2" data-f="syn" onclick="v2PickFam(this)"><span class="fdot" style="background:#64748b"></span>Synthèse</button>
+      <!-- Vagues 5-6 (demande cliente 15/07/2026) -->
+      <button type="button" class="ftv2" data-f="base" onclick="v2PickFam(this)"><span class="fdot" style="background:#0ea5e9"></span>📋 Base charges</button>
+      <button type="button" class="ftv2" data-f="crea" onclick="v2PickFam(this)"><span class="fdot" style="background:#e11d48"></span>💶 Créances</button>
     </div>
     <!-- V2.2 : Recherche (vague 2 — demande cliente 15/07/2026) : filtre les lignes du mois
          par fournisseur / type / libellé / montant, sans jamais re-rendre les tbodies. -->
@@ -695,6 +698,10 @@ tr.v2-flash td{animation:v2rowflash 1.2s ease}
 
       <div class="loader"><div class="spin"></div> Connexion en cours...</div>
     </div>
+    <!-- Vague 5 : vue Base de charges — HORS mainContentInner (survit aux re-renders), rendue par renderBaseView() -->
+    <div class="section-card full" id="sec-base" style="display:none;margin-bottom:16px"></div>
+    <!-- Vague 6 : suivi des créances clients (factures pro) — rendue par renderCreaView() -->
+    <div class="section-card full" id="sec-crea" style="display:none;margin-bottom:16px"></div>
   </div>
 </div>
 
@@ -8059,6 +8066,234 @@ document.addEventListener('click', function(e) {
     }
     var input=document.getElementById('pilotSearchInput');
     if(input) input.addEventListener('keydown',function(e){ if(e.key==='Escape') window.pilotSearchClear(); });
+  });
+})();
+</script>
+
+<script>
+/* ═══════════ VAGUES 5-6 (15/07/2026, demande cliente) — BASE DE CHARGES + CRÉANCES CLIENTS ═══════════
+   Purement additif. Les deux sections #sec-base et #sec-crea vivent HORS de #mainContentInner
+   (elles survivent aux re-renders de loadMonth) et ne sont visibles que via leur onglet famille,
+   géré par un wrapper autour de window.v2PickFam. Aucune fonction existante modifiée.
+   - Base charges : récap du mois (fixes ligne à ligne + ✏️ openChargeScopeUpdate multi-mois,
+     variables en grandes lignes par type, crédits/leasing, masse salariale via calcMasseSalariale).
+   - Créances : factures pro de l'année avec statut (⏳ en attente / ✅ payée) + échéance ;
+     écriture sur le mois affiché via _data + saveAll(), sur un autre mois via setDoc merge. */
+(function(){
+  var MOIS=['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  var pf=function(v){ return parseFloat(String(v==null?'':v).replace(/\s/g,'').replace(',','.'))||0; };
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function eur(n){ return (parseFloat(n)||0).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2})+' €'; }
+  function frD(iso){ return iso?String(iso).split('-').reverse().join('/'):'—'; }
+  function curMonthIdx(){ var ms=document.getElementById('monthSelect'); var m=ms?parseInt(ms.value):NaN; return isFinite(m)?m:new Date().getMonth(); }
+  function curKey(){ return window._year+'-'+String(curMonthIdx()+1).padStart(2,'0'); }
+
+  /* ── Wrapper onglets familles : gère la visibilité des 2 sections externes ── */
+  var _origPick=window.v2PickFam;
+  window.v2PickFam=function(btn){
+    if(typeof _origPick==='function') _origPick(btn);
+    var f=btn&&btn.getAttribute?(btn.getAttribute('data-f')||'all'):'all';
+    var sb=document.getElementById('sec-base'), sc=document.getElementById('sec-crea');
+    if(sb) sb.style.display=(f==='base')?'':'none';
+    if(sc) sc.style.display=(f==='crea')?'':'none';
+    if(f==='base') renderBaseView();
+    if(f==='crea') renderCreaView();
+  };
+
+  /* ════════════════ VAGUE 5 — BASE DE CHARGES ════════════════ */
+  window.renderBaseView=function(){
+    var el=document.getElementById('sec-base'); if(!el) return;
+    var d=window._data||{};
+    var m=curMonthIdx();
+    var rowsF=(d.chargesFixe||[]).map(function(r,i){return {r:r,i:i};}).filter(function(x){ return (x.r.fournisseur||x.r.type||pf(x.r.montantHT)); });
+    var rowsL=(d.leasing||[]).map(function(r,i){return {r:r,i:i};}).filter(function(x){ return (x.r.fournisseur||x.r.type||pf(x.r.montantHT)); });
+    var rowsC=(d.credits||[]).filter(function(r){ return (r.nom||r.fournisseur||pf(r.montant)); });
+    var totF=rowsF.reduce(function(s,x){return s+pf(x.r.montantHT);},0);
+    var totL=rowsL.reduce(function(s,x){return s+pf(x.r.montantHT);},0);
+    var totC=rowsC.reduce(function(s,r){return s+pf(r.montant);},0);
+    // Variables : grandes lignes groupées par type (puis fournisseur si type vide)
+    var grp={}, totV=0;
+    (d.chargesVar||[]).forEach(function(r){
+      var ht=pf(r.montantHT); if(!(r.fournisseur||r.type||ht)) return;
+      var key=(r.type||r.fournisseur||'Autres').trim()||'Autres';
+      if(!grp[key]) grp[key]={n:0,ht:0};
+      grp[key].n++; grp[key].ht+=ht; totV+=ht;
+    });
+    var grpKeys=Object.keys(grp).sort(function(a,b){ return grp[b].ht-grp[a].ht; });
+    // Masse salariale (défensif)
+    var totMS=0;
+    try{ var ms=(typeof calcMasseSalariale==='function')?calcMasseSalariale(d.masseSalariale||{}):null; totMS=(ms&&pf(ms.total))||0; }catch(e){}
+    var grand=totF+totV+totC+totL+totMS;
+
+    var h='<div class="section-head" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 16px 0">'
+      +'<div><div style="font-weight:800;font-size:15px">📋 Base de charges — '+MOIS[m]+' '+window._year+'</div>'
+      +'<div style="font-size:11.5px;color:var(--muted)">Vue d\'ensemble du mois. Le bouton ✏️ modifie un montant sur ce mois <b>et les mois à venir</b> (tarif assurance, banque…).</div></div>'
+      +'<button type="button" class="btn btn-outline btn-sm" onclick="renderBaseView()">🔄 Actualiser</button></div>'
+      +'<div style="padding:12px 16px 16px">';
+
+    h+='<div style="font-size:11px;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:.4px;margin:6px 0">Charges fixes ('+rowsF.length+')</div>';
+    h+=rowsF.length
+      ? '<table class="data-table"><thead><tr><th>Fournisseur</th><th>Type</th><th style="text-align:right">Montant HT</th><th>Périodicité</th><th style="width:46px"></th></tr></thead><tbody>'
+        +rowsF.map(function(x){ return '<tr><td>'+esc(x.r.fournisseur||'—')+'</td><td>'+esc(x.r.type||'—')+'</td><td style="text-align:right;font-weight:700">'+eur(pf(x.r.montantHT))+'</td><td>'+esc(x.r.periodicite||'mensuelle')+'</td>'
+          +'<td><button type="button" class="btn btn-outline btn-sm" title="Modifier ce montant sur ce mois et les mois à venir" onclick="openChargeScopeUpdate(\'chargesFixe\','+x.i+')">✏️</button></td></tr>'; }).join('')
+        +'<tr><td colspan="2" style="font-weight:800">TOTAL FIXES HT</td><td style="text-align:right;font-weight:800">'+eur(totF)+'</td><td colspan="2"></td></tr></tbody></table>'
+      : '<div style="font-size:12px;color:var(--muted);padding:4px 0 10px">Aucune charge fixe saisie ce mois.</div>';
+
+    h+='<div style="font-size:11px;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:.4px;margin:14px 0 6px">Charges variables — grandes lignes</div>';
+    h+=grpKeys.length
+      ? '<table class="data-table"><thead><tr><th>Poste</th><th style="text-align:right">Lignes</th><th style="text-align:right">Montant HT</th></tr></thead><tbody>'
+        +grpKeys.map(function(k){ return '<tr><td>'+esc(k)+'</td><td style="text-align:right">'+grp[k].n+'</td><td style="text-align:right;font-weight:700">'+eur(grp[k].ht)+'</td></tr>'; }).join('')
+        +'<tr><td style="font-weight:800">TOTAL VARIABLES HT</td><td></td><td style="text-align:right;font-weight:800">'+eur(totV)+'</td></tr></tbody></table>'
+      : '<div style="font-size:12px;color:var(--muted);padding:4px 0 10px">Aucune charge variable saisie ce mois.</div>';
+
+    h+='<div style="font-size:11px;font-weight:700;color:#8b5cf6;text-transform:uppercase;letter-spacing:.4px;margin:14px 0 6px">Prêts, crédits & leasing</div>';
+    var finRows='';
+    rowsC.forEach(function(r){ finRows+='<tr><td>'+esc(r.nom||r.fournisseur||'—')+'</td><td>Crédit / emprunt</td><td style="text-align:right;font-weight:700">'+eur(pf(r.montant))+'</td><td style="font-size:11px;color:var(--muted)">géré dans <a href="dettes.html" style="color:#4f7ef8">💰 Dettes & Emprunts</a></td></tr>'; });
+    rowsL.forEach(function(x){ finRows+='<tr><td>'+esc(x.r.fournisseur||'—')+'</td><td>'+esc(x.r.type||'Leasing')+'</td><td style="text-align:right;font-weight:700">'+eur(pf(x.r.montantHT))+'</td>'
+      +'<td><button type="button" class="btn btn-outline btn-sm" title="Modifier ce loyer sur ce mois et les mois à venir" onclick="openChargeScopeUpdate(\'leasing\','+x.i+')">✏️</button></td></tr>'; });
+    h+=finRows
+      ? '<table class="data-table"><thead><tr><th>Nom</th><th>Nature</th><th style="text-align:right">Mensualité / Loyer</th><th></th></tr></thead><tbody>'+finRows
+        +'<tr><td style="font-weight:800">TOTAL FINANCEMENT</td><td></td><td style="text-align:right;font-weight:800">'+eur(totC+totL)+'</td><td></td></tr></tbody></table>'
+      : '<div style="font-size:12px;color:var(--muted);padding:4px 0 10px">Aucun crédit ni leasing ce mois.</div>';
+
+    h+='<div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:14px;padding:12px 14px;background:rgba(14,165,233,.07);border:1px solid rgba(14,165,233,.25);border-radius:12px">'
+      +'<span>👥 Masse salariale estimée : <b>'+eur(totMS)+'</b> <span style="font-size:11px;color:var(--muted)">(détail dans la section Masse salariale)</span></span>'
+      +'<span style="font-weight:800">💡 Total charges du mois : '+eur(grand)+'</span></div>';
+    h+='</div>';
+    el.innerHTML=h;
+  };
+
+  /* ════════════════ VAGUE 6 — CRÉANCES CLIENTS (FACTURES PRO) ════════════════ */
+  var _creaRows=[];           // {mKey, mi, idx, client, description, ttc, statut, echeance}
+  var _creaMonths={};         // mKey -> facturesPro array (cache de travail)
+  var _creaFilter='attente';
+  var _creaSort='echeance';
+
+  function fpTTC(r){
+    return Math.round(((pf(r.ht055)*1.055)+(pf(r.ht10)*1.10)+(pf(r.ht20)*1.20)+pf(r.ht0)+(pf(r.ht21)*1.021)+(pf(r.ht85)*1.085))*100)/100;
+  }
+  window.renderCreaView=async function(){
+    var el=document.getElementById('sec-crea'); if(!el) return;
+    el.innerHTML='<div style="padding:20px;font-size:13px;color:var(--muted)"><div class="spin" style="display:inline-block;vertical-align:-4px;margin-right:8px"></div>Chargement des factures de '+window._year+'…</div>';
+    if(!window._uid||!window._getDoc||!window._db){ el.innerHTML='<div style="padding:20px;font-size:13px;color:var(--muted)">Connexion en cours…</div>'; return; }
+    var ck=curKey();
+    var proms=[];
+    for(var m=0;m<12;m++){
+      (function(mi){
+        var key=window._year+'-'+String(mi+1).padStart(2,'0');
+        if(key===ck&&window._data&&window._data.facturesPro){ proms.push(Promise.resolve({mi:mi,key:key,fp:window._data.facturesPro})); }
+        else proms.push(window._getDoc(window._doc(window._db,'pilotage',window._uid,'months',key))
+          .then(function(s){ return {mi:mi,key:key,fp:(s&&s.exists&&s.exists()&&s.data().facturesPro)||null}; })
+          .catch(function(){ return {mi:mi,key:key,fp:null}; }));
+      })(m);
+    }
+    var months=await Promise.all(proms);
+    _creaRows=[]; _creaMonths={};
+    months.forEach(function(mo){
+      if(!mo.fp) return;
+      _creaMonths[mo.key]=mo.fp;
+      mo.fp.forEach(function(r,idx){
+        if(!r) return;
+        var ttc=fpTTC(r);
+        if(!(r.client||r.description||ttc)) return; // ligne vide
+        _creaRows.push({mKey:mo.key,mi:mo.mi,idx:idx,client:r.client||'',description:r.description||'',ttc:ttc,statut:r.statut||'',echeance:r.echeance||''});
+      });
+    });
+    drawCrea();
+  };
+
+  function drawCrea(){
+    var el=document.getElementById('sec-crea'); if(!el) return;
+    var rows=_creaRows.filter(function(r){
+      if(_creaFilter==='attente') return r.statut==='attente';
+      if(_creaFilter==='payee')   return r.statut==='payee';
+      return true;
+    });
+    rows=rows.slice().sort(function(a,b){
+      if(_creaSort==='client')  return (a.client||'').localeCompare(b.client||'','fr',{sensitivity:'base'})||a.mKey.localeCompare(b.mKey);
+      if(_creaSort==='montant') return b.ttc-a.ttc;
+      if(_creaSort==='mois')    return a.mKey.localeCompare(b.mKey);
+      var ea=a.echeance||'9999-12-31', eb=b.echeance||'9999-12-31';           // échéance croissante, vides en dernier
+      return ea<eb?-1:ea>eb?1:(a.client||'').localeCompare(b.client||'','fr');
+    });
+    var totAtt=_creaRows.filter(function(r){return r.statut==='attente';}).reduce(function(s,r){return s+r.ttc;},0);
+    var today=(function(){var n=new Date();n.setHours(12,0,0,0);return n.getFullYear()+'-'+String(n.getMonth()+1).padStart(2,'0')+'-'+String(n.getDate()).padStart(2,'0');})();
+    var chip=function(id,lbl){ return '<button type="button" class="btn btn-sm '+(_creaFilter===id?'btn-rh':'btn-outline')+'" onclick="creaSetFilter(\''+id+'\')">'+lbl+'</button>'; };
+
+    var h='<div class="section-head" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 16px 0">'
+      +'<div><div style="font-weight:800;font-size:15px">💶 Créances clients — factures pro '+window._year+'</div>'
+      +'<div style="font-size:11.5px;color:var(--muted)">Marquez vos factures pro « ⏳ En attente » pour suivre qui vous doit de l\'argent, puis « ✅ Payée » à l\'encaissement.</div></div>'
+      +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">'+chip('attente','⏳ À encaisser')+chip('payee','✅ Payées')+chip('all','Toutes')
+      +'<select class="btn btn-outline btn-sm" style="cursor:pointer" onchange="creaSetSort(this.value)">'
+      +'<option value="echeance"'+(_creaSort==='echeance'?' selected':'')+'>Tri : Échéance</option>'
+      +'<option value="client"'+(_creaSort==='client'?' selected':'')+'>Tri : Client A→Z</option>'
+      +'<option value="mois"'+(_creaSort==='mois'?' selected':'')+'>Tri : Mois</option>'
+      +'<option value="montant"'+(_creaSort==='montant'?' selected':'')+'>Tri : Montant ↓</option></select>'
+      +'<button type="button" class="btn btn-outline btn-sm" onclick="renderCreaView()">🔄</button></div></div>'
+      +'<div style="padding:12px 16px 16px">'
+      +'<div style="margin-bottom:10px;padding:10px 14px;background:rgba(225,29,72,.06);border:1px solid rgba(225,29,72,.25);border-radius:12px;font-size:13px">Reste à encaisser : <b>'+eur(totAtt)+'</b> ('+_creaRows.filter(function(r){return r.statut==='attente';}).length+' facture(s) en attente)</div>';
+
+    if(!rows.length){
+      h+='<div style="font-size:12.5px;color:var(--muted);padding:8px 0 4px">'
+        +(_creaFilter==='attente'
+          ? 'Aucune facture en attente. Passez sur « Toutes » pour marquer vos factures pro à suivre.'
+          : 'Aucune facture'+(_creaFilter==='payee'?' payée':'')+' sur '+window._year+'.')
+        +'</div>';
+    }else{
+      h+='<table class="data-table"><thead><tr><th>Client</th><th>Description</th><th>Mois</th><th>Échéance</th><th style="text-align:right">Montant TTC</th><th>Statut</th></tr></thead><tbody>'
+        +rows.map(function(r){
+          var late=r.statut==='attente'&&r.echeance&&r.echeance<today;
+          var gi=_creaRows.indexOf(r);
+          return '<tr'+(late?' style="background:rgba(225,29,72,.06)"':'')+'>'
+            +'<td style="font-weight:700">'+esc(r.client||'—')+(late?' <span title="Échéance dépassée">⚠️</span>':'')+'</td>'
+            +'<td>'+esc(r.description||'—')+'</td>'
+            +'<td>'+MOIS[r.mi].substring(0,4)+'. '+window._year+'</td>'
+            +'<td><input type="date" value="'+esc(r.echeance)+'" onchange="creaSetField('+gi+',\'echeance\',this.value)" style="border:1px solid var(--border);border-radius:8px;padding:4px 6px;font-size:12px"/></td>'
+            +'<td style="text-align:right;font-weight:700">'+eur(r.ttc)+'</td>'
+            +'<td><select onchange="creaSetField('+gi+',\'statut\',this.value)" style="border:1px solid var(--border);border-radius:8px;padding:4px 6px;font-size:12px;cursor:pointer">'
+            +'<option value=""'+(r.statut===''?' selected':'')+'>—</option>'
+            +'<option value="attente"'+(r.statut==='attente'?' selected':'')+'>⏳ En attente</option>'
+            +'<option value="payee"'+(r.statut==='payee'?' selected':'')+'>✅ Payée</option></select></td></tr>';
+        }).join('')+'</tbody></table>';
+    }
+    h+='</div>';
+    el.innerHTML=h;
+  }
+  window.creaSetFilter=function(f){ _creaFilter=f; drawCrea(); };
+  window.creaSetSort=function(s){ _creaSort=s; drawCrea(); };
+
+  window.creaSetField=async function(gi,field,value){
+    var r=_creaRows[gi]; if(!r) return;
+    r[field]=value;
+    var arr=_creaMonths[r.mKey]; if(!arr||!arr[r.idx]){ drawCrea(); return; }
+    arr[r.idx][field]=value||'';
+    try{
+      if(r.mKey===curKey()&&window._data&&window._data.facturesPro){
+        // Mois affiché : _data est la source de vérité → on passe par la sauvegarde standard
+        if(window._data.facturesPro[r.idx]) window._data.facturesPro[r.idx][field]=value||'';
+        if(typeof saveAll==='function') await saveAll();
+      }else{
+        // Autre mois : écriture ciblée (merge) — ne touche que le champ facturesPro du doc
+        await window._setDoc(window._doc(window._db,'pilotage',window._uid,'months',r.mKey),{facturesPro:arr},{merge:true});
+      }
+      if(typeof showToast==='function'){ showToast(field==='statut'?(value==='payee'?'✅ Facture marquée payée':value==='attente'?'⏳ Facture à encaisser':'Statut retiré'):'📅 Échéance enregistrée','ok'); }
+    }catch(e){
+      if(typeof showToast==='function') showToast('❌ Échec enregistrement : '+String(e&&e.message||e).substring(0,70),'err');
+    }
+    drawCrea();
+  };
+
+  /* ── Rafraîchissement automatique de la vue Base quand les tableaux du mois changent ── */
+  document.addEventListener('DOMContentLoaded',function(){
+    var inner=document.getElementById('mainContentInner');
+    if(inner&&window.MutationObserver){
+      var t=null;
+      new MutationObserver(function(){
+        var sb=document.getElementById('sec-base');
+        if(!sb||sb.style.display==='none') return;
+        clearTimeout(t); t=setTimeout(function(){ try{ renderBaseView(); }catch(e){} },250);
+      }).observe(inner,{childList:true,subtree:true});
+    }
   });
 })();
 </script>

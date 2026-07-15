@@ -1021,6 +1021,7 @@
       <button class="btn btn-outline btn-sm" onclick="openPolyPanel()">🎯 Polyvalence</button>
       <button class="btn btn-outline btn-sm" onclick="openParamsEntreprise()" title="Paramètres horaires de l'entreprise" style="border-color:#6366f1;color:#6366f1">⚙️ Paramètres</button>
       <button class="btn btn-outline btn-sm" onclick="exportPDF()">🖨️ Imprimer vue</button>
+      <button class="btn btn-outline btn-sm" onclick="openComptaModal()" title="Envoyer le planning de la semaine affichée à votre comptable par email" style="border-color:#059669;color:#059669">📧 Comptable</button>
       <button class="btn btn-sm" style="background:linear-gradient(135deg,#3b82f6,#60a5fa);color:white;box-shadow:0 2px 10px rgba(59,130,246,.3)" onclick="publishPlanning()">📢 Communiquer</button>
       <button class="btn btn-outline btn-sm" onclick="exportPlanningMensuelSalarie()" title="Planning mensuel individuel — une page par salarié (portrait A4)">👤 Planning individuel</button>
       <button class="btn btn-ai btn-sm" onclick="openAI()">✨ IA Planning</button>
@@ -1231,6 +1232,32 @@
       <button class="btn btn-outline btn-sm" id="cr-dup" style="display:none" onclick="duplicateCr()" title="Créer une copie de ce créneau : changez la date, l'employé, ou passez en saisie multi-jours, puis enregistrez">📄 Dupliquer</button>
       <button class="btn btn-outline" onclick="closeCr()">Annuler</button>
       <button class="btn btn-rh" id="save-btn" onclick="saveCr()">💾 Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ENVOI COMPTABLE (vague 6b — demande cliente 15/07/2026) -->
+<div class="overlay" id="modalCompta">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>📧 Envoyer le planning au comptable</h3>
+      <button class="mclose" onclick="closeComptaModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="mf">
+        <label class="ml">Email du comptable</label>
+        <input class="mi" id="compta-email" type="email" placeholder="comptable@cabinet.fr" autocomplete="off"/>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Adresse mémorisée pour les prochains envois.</div>
+      </div>
+      <div id="compta-week-info" style="font-size:12px;font-weight:700;margin-bottom:8px"></div>
+      <div style="padding:10px 12px;background:#eff6ff;border:1px solid #dbeafe;border-radius:10px;font-size:11.5px;color:#1e40af">
+        L'email contient le tableau de la semaine affichée (salariés × jours, horaires et total d'heures prévisionnelles).
+        Votre adresse est mise en répondre-à, le comptable peut vous écrire directement.
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-outline" onclick="closeComptaModal()">Annuler</button>
+      <button class="btn btn-rh" id="compta-send-btn" onclick="sendPlanningComptable()">📧 Envoyer</button>
     </div>
   </div>
 </div>
@@ -5555,6 +5582,114 @@ async function authFetch(u,b){var t='';try{if(window._auth&&window._auth.current
         .observe(del,{attributes:true,attributeFilter:['style']});
     }
   });
+})();
+</script>
+
+<script>
+/* ═══════════ VAGUE 6b (15/07/2026, demande cliente) — ENVOI DU PLANNING AU COMPTABLE ═══════════
+   Purement additif. Construit un tableau HTML email de la semaine affichée depuis _cr/_emps
+   et l'envoie via /api/send-planning-comptable (idToken vérifié côté serveur, Resend).
+   L'adresse du comptable est mémorisée dans rh_params/{uid}.comptableEmail (merge). */
+(function(){
+  var TYPE_LBL={travail:'',partiel:'',formation:'Formation ',astreinte:'Astreinte ',ecole:'École ',
+                conge:'🏖️ Congé',maladie:'🤒 Maladie',repos:'Repos',ferie:'Férié',autre:'Autre'};
+  var HOUR_TYPES={travail:1,partiel:1,formation:1,astreinte:1}; // école ajoutée si heuresComptent
+
+  function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function wDates(){ var mon=monday(_cur), out=[]; for(var i=0;i<7;i++){ var d=new Date(mon); d.setDate(mon.getDate()+i); out.push(fmt(d)); } return out; }
+  function frD(iso){ return String(iso||'').split('-').reverse().join('/'); }
+  function mins(hhmm){ var p=String(hhmm||'').split(':'); return (parseInt(p[0])||0)*60+(parseInt(p[1])||0); }
+  function plageMin(deb,fin){ if(!deb||!fin) return 0; var d=mins(deb), f=mins(fin); if(f<d) f+=1440; return Math.max(0,f-d); } // 22:00→02:00 = nuit
+  function itMinutes(it){
+    if(!(HOUR_TYPES[it.type]||(it.type==='ecole'&&it.heuresComptent))) return 0;
+    var ps=(it.plages&&it.plages.length)?it.plages:[{deb:it.deb,fin:it.fin}];
+    return ps.reduce(function(s,p){ return s+plageMin(p.deb,p.fin); },0);
+  }
+  function fmtH(min){ var h=Math.floor(min/60), m=min%60; return h+'h'+(m?String(m).padStart(2,'0'):''); }
+  function itLabel(it){
+    var hrs=(it.plages&&it.plages.length)
+      ? it.plages.map(function(p){ return (p.deb&&p.fin)?(p.deb+'–'+p.fin):''; }).filter(Boolean).join(', ')
+      : ((it.deb&&it.fin)?(it.deb+'–'+it.fin):'');
+    var pre=TYPE_LBL[it.type]!==undefined?TYPE_LBL[it.type]:'';
+    if(['conge','maladie','repos','ferie','autre'].indexOf(it.type)!==-1) return pre||it.type;
+    return (pre+hrs)||'—';
+  }
+
+  window.openComptaModal=async function(){
+    var ds=wDates();
+    var info=document.getElementById('compta-week-info');
+    if(info) info.textContent='Semaine du '+frD(ds[0])+' au '+frD(ds[6]);
+    document.getElementById('modalCompta').classList.add('show');
+    try{
+      var s=await window._getDoc(window._doc(window._db,'rh_params',window._uid));
+      if(s&&s.exists&&s.exists()){
+        var p=s.data();
+        var em=document.getElementById('compta-email');
+        if(em&&!em.value&&p.comptableEmail) em.value=p.comptableEmail;
+        window._comptaEntreprise=p.nomEntreprise||p.entreprise||'';
+      }
+    }catch(e){}
+  };
+  window.closeComptaModal=function(){ document.getElementById('modalCompta').classList.remove('show'); };
+
+  window.buildComptaTable=function(){
+    var ds=wDates();
+    var jours=['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+    var th='style="border:1px solid #d7dce8;background:#eef1f8;padding:6px 8px;font-size:11px;text-align:left"';
+    var td='style="border:1px solid #d7dce8;padding:6px 8px;font-size:11px;vertical-align:top"';
+    var html='<table style="border-collapse:collapse;width:100%"><tr><th '+th+'>Salarié</th>'
+      +ds.map(function(d,i){ return '<th '+th+'>'+jours[i]+' '+frD(d).substring(0,5)+'</th>'; }).join('')
+      +'<th '+th+'>Total</th></tr>';
+    var grand=0, lignes=0;
+    _emps.forEach(function(e){
+      var tot=0, cells='', has=false;
+      ds.forEach(function(date){
+        var items=((_cr[date+'_'+e.id]||{}).items)||[];
+        if(items.length) has=true;
+        tot+=items.reduce(function(s,it){ return s+itMinutes(it); },0);
+        cells+='<td '+td+'>'+(items.length?items.map(function(it){ return esc(itLabel(it)); }).join('<br>'):'—')+'</td>';
+      });
+      if(!has) return; // salarié sans aucun créneau cette semaine : non listé
+      lignes++; grand+=tot;
+      html+='<tr><td '+td+'><b>'+esc((e.prenom||'')+' '+(e.nom||''))+'</b></td>'+cells
+        +'<td '+td+'><b>'+fmtH(tot)+'</b></td></tr>';
+    });
+    html+='<tr><td '+th+' colspan="8">Total heures prévisionnelles de la semaine</td><td '+th+'><b>'+fmtH(grand)+'</b></td></tr></table>';
+    return {html:html, lignes:lignes};
+  };
+
+  window.sendPlanningComptable=async function(){
+    var to=(document.getElementById('compta-email')||{}).value||'';
+    to=to.trim();
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(to)){ showToast('Saisissez un email valide','warn'); return; }
+    var built=window.buildComptaTable();
+    if(!built.lignes){ showToast('Aucun créneau sur la semaine affichée','warn'); return; }
+    var btn=document.getElementById('compta-send-btn');
+    if(btn){ btn.disabled=true; btn.textContent='⏳ Envoi…'; }
+    try{
+      var idToken=await window._auth.currentUser.getIdToken();
+      var ds=wDates();
+      var r=await fetch('/api/send-planning-comptable',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          idToken:idToken, to:to,
+          weekLabel:frD(ds[0]),
+          tableHtml:built.html,
+          entreprise:window._comptaEntreprise||''
+        })
+      });
+      var j=null; try{ j=await r.json(); }catch(_e){}
+      if(!r.ok) throw new Error((j&&j.error)||('HTTP '+r.status));
+      // Mémoriser l'adresse pour la prochaine fois (merge : ne touche pas les autres params)
+      try{ await window._setDoc(window._doc(window._db,'rh_params',window._uid),{comptableEmail:to},{merge:true}); }catch(_e){}
+      closeComptaModal();
+      showToast('📧 Planning envoyé à '+to+' ✅','ok');
+    }catch(e){
+      showToast('❌ Échec envoi : '+String(e&&e.message||e).substring(0,80),'warn');
+    }
+    if(btn){ btn.disabled=false; btn.textContent='📧 Envoyer'; }
+  };
 })();
 </script>
 </body>
