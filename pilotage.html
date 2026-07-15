@@ -4043,6 +4043,8 @@ function saveInvoiceDate() {
     icon.setAttribute('data-status', st.status);
     icon.title = st.label + (st.status==='none' ? '' : ' (cliquer pour modifier)');
   }
+  // Wave RI : fin de saisie d'une facture → vérification immédiate des doublons
+  try { _chkDupChargeNow(key, i); } catch(eDup) {}
   scheduleSave();
   closeInvoiceDatePopover();
 }
@@ -4656,7 +4658,8 @@ async function propagateLeasing(i) {
 function addCharge(key, tbodyId) {
   if (key === 'leasing') { openAddCLModal('leasing'); return; }
   var isLeas = key==='leasing';
-  _data[key].push({fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non', dateDebut: isLeas?'':'', dateFin: isLeas?'':''});
+  // Wave RI : traçabilité — toute nouvelle ligne saisie à la main est estampillée
+  _data[key].push({fournisseur:'', type:'', montantHT:'', tvaRate:20, deductible:'Oui', pointe:'Non', dateDebut: isLeas?'':'', dateFin: isLeas?'':'', source:'manual', createdAt:new Date().toISOString()});
   document.getElementById(tbodyId).innerHTML = renderCharges(_data[key], key);
   refreshTotals();
 }
@@ -5590,6 +5593,7 @@ function updateChargeHT(key, i, value) {
   var el   = document.getElementById(key + '-ttc-' + i);
   if (el) el.value = ht !== 0 ? (ht*(1+rate/100)).toFixed(2) : '';
   refreshTotals();
+  chkDupCharge(key, i);
 }
 function updateChargeTTC(key, i, value) {
   var ttc  = parseFloat((value||"").replace(",",".")) || 0;
@@ -5599,6 +5603,7 @@ function updateChargeTTC(key, i, value) {
   var el = document.getElementById(key + '-ht-' + i);
   if (el) el.value = ht !== 0 ? ht.toFixed(2) : '';
   refreshTotals();
+  chkDupCharge(key, i);
 }
 function updateChargeTVARate(key, i, value) {
   _data[key][i].tvaRate = parseFloat(value);
@@ -5608,6 +5613,50 @@ function updateChargeTVARate(key, i, value) {
     if (el) el.value = (ht*(1+parseFloat(value)/100)).toFixed(2);
   }
   refreshTotals();
+}
+
+/* ═══ Wave RI : garde anti-doublon à la saisie ═══
+   Purement informative (toast), ne bloque jamais la saisie, ne touche aucune donnée.
+   Détecte dans le MÊME mois / même section : même fournisseur + même n° de facture
+   (champ Type), ou même fournisseur + même montant HT au centime. */
+var _dupWarnTimers = {};
+var _dupWarned = {};
+function _pfDup(x){ return parseFloat(String(x==null?'':x).replace(/\s/g,'').replace(',','.')) || 0; }
+function _normFour(x){ return (x==null?'':String(x)).replace(/\s+/g,' ').trim().toUpperCase(); }
+function chkDupCharge(key, i){
+  if (key!=='chargesFixe' && key!=='chargesVar' && key!=='leasing') return;
+  var tk = key + '-' + i;
+  if (_dupWarnTimers[tk]) clearTimeout(_dupWarnTimers[tk]);
+  _dupWarnTimers[tk] = setTimeout(function(){ _dupWarnTimers[tk] = null; _chkDupChargeNow(key, i); }, 1200);
+}
+function _chkDupChargeNow(key, i){
+  try {
+    var arr = _data && _data[key];
+    if (!Array.isArray(arr)) return;
+    var row = arr[i];
+    if (!row) return;
+    var four = _normFour(row.fournisseur);
+    var ht = _pfDup(row.montantHT);
+    var num = (row.type==null?'':String(row.type)).trim().toUpperCase();
+    if (!four || ht === 0) return;
+    for (var j = 0; j < arr.length; j++) {
+      if (j === i) continue;
+      var r = arr[j];
+      if (!r) continue;
+      if (_normFour(r.fournisseur) !== four) continue;
+      var sameNum = !!num && (r.type==null?'':String(r.type)).trim().toUpperCase() === num;
+      var sameAmt = Math.abs(_pfDup(r.montantHT) - ht) < 0.005;
+      if (sameNum || sameAmt) {
+        var wk = key + '|' + four + '|' + ht.toFixed(2) + '|' + num;
+        if (_dupWarned[wk]) return;
+        _dupWarned[wk] = true;
+        var when = '';
+        if (r.__id) { try { var ts = parseInt(String(r.__id).slice(1,9), 36); if (ts) when = ' (saisie le ' + new Date(ts).toLocaleDateString('fr-FR') + ')'; } catch(e2) {} }
+        showToast('⚠️ Doublon possible : « ' + (row.fournisseur||'') + ' » ' + (sameNum ? 'facture ' + num : fmtN(ht) + ' € HT') + ' existe déjà dans ce mois' + when + '. Vérifiez avant de conserver les deux lignes.', 'warning');
+        return;
+      }
+    }
+  } catch(e) { /* garde purement informative : ne jamais gêner la saisie */ }
 }
 
 var _dupLineIdx = null;
@@ -6442,7 +6491,7 @@ function openFixedModal(key) {
   key = (key === 'chargesVar') ? 'chargesVar' : 'chargesFixe';
   var isVar = (key === 'chargesVar');
   _dupLineIdx = null;
-  var nb = _data[key].filter(function(c){return c.fournisseur||c.montantHT;}).length;
+  var nb = _data[key].filter(function(c){return (c.fournisseur||'').trim();}).length;
   var el = document.getElementById('modal-nb-lignes');
   if(el) el.textContent = nb + ' ligne' + (nb>1?'s':'');
   var titleEl = document.getElementById('fixedModalTitle');
@@ -6468,6 +6517,21 @@ function openFixedModal(key) {
   document.getElementById('fixedModal').classList.add('show');
 }
 function closeModal()     { document.getElementById('fixedModal').classList.remove('show'); }
+// Copie propre pour la propagation : retire les marqueurs propres à la ligne d'origine
+// (liaison bancaire, identifiant de ligne, dates de facture, traçabilité d'import),
+// remet le pointé à Non et trace la source. Une copie planifiée sur un autre mois
+// n'est ni pointée, ni liée à la banque, ni datée de la facture d'origine.
+function _cleanPropagCopy(l) {
+  var c = JSON.parse(JSON.stringify(l));
+  delete c.bankLink; delete c.__id; delete c.bankTxId; delete c.montantTTC_bank;
+  delete c.bankTtcFixed; delete c.importedAt; delete c.autoImported; delete c._pointeAvantLien;
+  delete c.dateFacture; delete c.dateEcheance;
+  c.pointe = 'Non';
+  c.source = 'propagation';
+  c.propagatedAt = new Date().toISOString();
+  return c;
+}
+
 async function applyFixedCharges() {
   closeModal();
   if (!window._uid) return;
@@ -6477,11 +6541,14 @@ async function applyFixedCharges() {
   var fixedCharges;
   if (isLineMode && _dupLineIdx !== null) {
     var l = _data[targetKey][_dupLineIdx];
-    fixedCharges = (l.fournisseur||l.montantHT) ? [JSON.parse(JSON.stringify(l))] : [];
+    // Wave RI : une ligne sans fournisseur (fantôme) ne se propage jamais
+    fixedCharges = ((l.fournisseur||'').trim()) ? [_cleanPropagCopy(l)] : [];
   } else {
-    fixedCharges = JSON.parse(JSON.stringify(
-      _data[targetKey].filter(function(c){return c.fournisseur||c.montantHT;})
-    ));
+    // Wave RI : filtre sur le fournisseur (les fantômes à montant seul ne passent plus)
+    // + copies propres (source:'propagation', sans bankLink/__id/dates de facture)
+    fixedCharges = _data[targetKey]
+      .filter(function(c){ return (c.fournisseur||'').trim(); })
+      .map(_cleanPropagCopy);
   }
   if (!fixedCharges.length) { showToast('Aucune charge à dupliquer', 'warning'); return; }
   var modeEl = document.querySelector('input[name="applyMode"]:checked');
@@ -6850,7 +6917,7 @@ function catalogInputHtml(cat, uid, value, styleStr, placeholder, onInputCode) {
 function supplierInputHtml(key, i, value) {
   return catalogInputHtml(
     'suppliers', key+'-sup-'+i, value, 'width:95px', 'Fournisseur',
-    '_data[\''+key+'\']['+i+'].fournisseur=this.value'
+    '_data[\''+key+'\']['+i+'].fournisseur=this.value;chkDupCharge(\''+key+'\','+i+')'
   );
 }
 

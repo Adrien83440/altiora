@@ -272,7 +272,7 @@
   <div class="modal" style="max-width:580px">
     <div class="modal-head"><h3>⚙️ Règles de catégorisation automatique</h3><button class="modal-close" onclick="closeRulesModal()">✕</button></div>
     <div class="modal-body" style="max-height:60vh;overflow-y:auto">
-      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Si le libellé contient le mot-clé → catégorie assignée automatiquement.</p>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Si le libellé contient le mot-clé → catégorie assignée automatiquement. En définissant aussi la <strong>TVA</strong> et en cochant <strong>⚡ Auto</strong>, les opérations correspondantes sont <strong>rangées dans Pilotage sans clic</strong> (plafond de sécurité : 200&nbsp;€ par opération, personnalisable).</p>
       <div id="rules-list"></div>
       <div class="rules-add">
         <input id="rule-kw" placeholder="Mot-clé (ex: EDF, LOYER…)"/>
@@ -282,6 +282,15 @@
           <option value="leasing">🚗 Leasing</option>
           <option value="ignore">🚫 Ignorer</option>
         </select>
+        <select id="rule-tva" title="TVA appliquée automatiquement (optionnel)">
+          <option value="">TVA ?</option>
+          <option value="0">0%</option>
+          <option value="5.5">5,5%</option>
+          <option value="10">10%</option>
+          <option value="20">20%</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:4px;font-size:11px;font-weight:700;white-space:nowrap;cursor:pointer" title="Ranger automatiquement dans Pilotage les opérations qui correspondent (nécessite une TVA définie)"><input type="checkbox" id="rule-auto"/>⚡ Auto</label>
+        <input id="rule-max" placeholder="≤ 200€" style="width:64px" title="Plafond du rangement auto en € (défaut : 200)"/>
         <button class="btn btn-primary btn-sm" onclick="addRule()">+ Ajouter</button>
       </div>
     </div>
@@ -327,11 +336,25 @@ const DEFAULT_RULES=[
   {kw:'ALD',cat:'leasing'},{kw:'ARVAL',cat:'leasing'},{kw:'CREDIT BAIL',cat:'leasing'},
   {kw:'RETRAIT',cat:'ignore'},{kw:'DAB',cat:'ignore'},{kw:'VIR EMIS',cat:'ignore'},
   {kw:'VIREMENT INTERNE',cat:'ignore'},{kw:'SALAIRE',cat:'ignore'},{kw:'REMISE CHEQUE',cat:'ignore'},
+  // ── Wave RI : frais bancaires — TVA connue (0%, exonérés) + rangement automatique ──
+  // NB : certaines banques écrivent "COMISSION" avec un seul M → les deux orthographes sont couvertes.
+  {kw:'COMISSION',cat:'chargesVar',tvaRate:0,auto:true},
+  {kw:'COMMISSION',cat:'chargesVar',tvaRate:0,auto:true},
+  {kw:'REMISES CB',cat:'chargesVar',tvaRate:0,auto:true},
+  {kw:'FRAIS BANCAIRES',cat:'chargesVar',tvaRate:0,auto:true},
+  {kw:'FRAIS TENUE',cat:'chargesVar',tvaRate:0,auto:true},
+  {kw:'COM ECH PRET',cat:'chargesVar',tvaRate:0,auto:true},
 ];
+// Plafond de sécurité du rangement automatique (TTC, par opération).
+// Au-delà → validation manuelle. Surchargable par règle via le champ "max".
+const AUTO_IMPORT_MAX_TTC = 200;
 const CAT_LABELS={chargesFixe:'🏗 Charge fixe',chargesVar:'📦 Charge variable',leasing:'🚗 Leasing',ignore:'🚫 Ignorer'};
 const CAT_CLS={chargesFixe:'d-cf',chargesVar:'d-cv',leasing:'d-leas',ignore:'d-ign'};
 
 let _txList=[], _pilData={}, _rules=[], _filter='all', _search='', _dblCtx=null;
+// Wave RI : actions automatiques de la session (bandeau récap + annulation)
+let _autoActions={imported:[],linked:[],dismissed:false};
+let _skipAutoThisSession=false; // posé après une annulation, pour ne pas re-jouer les autos
 let _matchQueue=[], _matchIdx=0, _selectedMatchIdx=null;
 let _sortCol='date', _sortDir='desc'; // tri par défaut : date décroissante
 
@@ -384,6 +407,18 @@ async function loadPending(){
     const allTx=raw.transactions||[];
     const syncedAt=raw.syncedAt;
 
+    // ── C18 : transactions déjà liées lors d'une session précédente ──
+    // Sans cette lecture, un rechargement/re-sync ramène une transaction liée
+    // en "Nouvelle" (sans candidat, la charge liée étant exclue du matching)
+    // et un clic Importer recrée le doublon que le rapprochement avait évité.
+    const _linkedSet = new Set();
+    try{
+      const bcSnap=await window._getDoc(window._doc(window._db,'bank_connections',window._uid));
+      if(bcSnap.exists()){
+        (bcSnap.data().linkedTransactions||[]).forEach(function(l){ if(l&&l.bankTxId) _linkedSet.add(l.bankTxId); });
+      }
+    }catch(e){ console.warn('[C18] lecture linkedTransactions échouée (non bloquant)', e&&e.message); }
+
     // Charger Pilotage existant pour M-1, M, M+1 de chaque mois rencontré
     const monthsSet=new Set();
     for(const t of allTx){
@@ -404,7 +439,8 @@ async function loadPending(){
       const raw_amt=parseFloat(tx.montant||0);
       const isDebit=tx.type==='debit'||raw_amt<0;
       const montant=Math.abs(raw_amt);
-      const cat=isDebit?applyCat(tx.label):null;
+      const rule=isDebit?applyRule(tx.label):null;
+      const cat=isDebit?(rule?rule.cat:'chargesVar'):null;
       const txObj={
         id:idx, date:tx.date||'', monthKey:tx.monthKey||'',
         label:tx.label||'', customLabel:tx.label||'',
@@ -413,12 +449,19 @@ async function loadPending(){
         accountName:tx.accountName||'', accountIban:tx.accountIban||'',
         bankTxId:tx.bankTxId||('bk_'+idx),
         cat, status:'pending',
-        tvaRate:null,
+        // Wave RI : TVA préremplie par la règle (l'utilisateur peut toujours la changer)
+        tvaRate:(rule&&rule.tvaRate!==undefined&&rule.tvaRate!==null)?rule.tvaRate:null,
+        _rule:rule||null,
         matches:[],
         matchResolved:false,
         replaceMode:false,
       };
-      if(isDebit) txObj.matches=detectMatches(txObj,montant);
+      // C18 : transaction déjà liée dans une session précédente → statut persistant
+      if(_linkedSet.has(txObj.bankTxId)){
+        txObj.status='linked';
+        txObj.matchResolved=true;
+      }
+      if(isDebit && txObj.status==='pending') txObj.matches=detectMatches(txObj,montant);
       return txObj;
     });
 
@@ -426,6 +469,12 @@ async function loadPending(){
       const d=new Date(syncedAt);
       document.getElementById('topbar-sub').textContent=
         `Sync du ${d.toLocaleDateString('fr-FR')} à ${d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})} · ${allTx.length} transactions`;
+    }
+    // ── Wave RI : marquage des tx déjà en pilotage + auto-pointage + rangement auto ──
+    try{ markAlreadyImported(); }catch(e){ console.warn('[mark-imported]', e&&e.message); }
+    if(!_skipAutoThisSession){
+      try{ await autoLinkPass(); }catch(e){ console.warn('[auto-link] pass échouée (non bloquant)', e&&e.message); }
+      try{ await autoImportPass(); }catch(e){ console.warn('[auto-import] pass échouée (non bloquant)', e&&e.message); }
     }
     renderAll();
 
@@ -441,11 +490,16 @@ async function loadPending(){
   }catch(e){showError('Erreur : '+e.message);}
 }
 
-function applyCat(label){
-  if(!label) return 'chargesVar';
+// Wave RI : retourne la règle complète (cat + tvaRate + auto éventuels)
+function applyRule(label){
+  if(!label) return null;
   const up=label.toUpperCase();
-  for(const r of _rules) if(up.includes(r.kw.toUpperCase())) return r.cat;
-  return 'chargesVar';
+  for(const r of _rules) if(up.includes(r.kw.toUpperCase())) return r;
+  return null;
+}
+function applyCat(label){
+  const r=applyRule(label);
+  return r?r.cat:'chargesVar';
 }
 
 // Helper : décale un monthKey de N mois (N peut être négatif)
@@ -645,6 +699,8 @@ function renderAll(){
       </div>
     </div>
 
+    ${renderAutoBanner()}
+
     ${matchCount>0?`
     <div style="background:linear-gradient(135deg,#eef2ff,#f0f9ff);border:2px solid #6366f1;border-radius:14px;padding:16px 20px;display:flex;align-items:center;gap:14px;box-shadow:0 4px 16px rgba(99,102,241,0.12)">
       <div style="font-size:32px;flex-shrink:0">🔗</div>
@@ -773,8 +829,8 @@ function renderRow(tx){
 
   let statusHtml='';
   if(tx.type==='credit') statusHtml=`<span style="font-size:11px;color:var(--muted)">—</span>`;
-  else if(tx.status==='imported') statusHtml=`<span style="font-size:11px;font-weight:700;color:var(--green)">✅ Importée</span>`;
-  else if(tx.status==='linked')   statusHtml=`<span class="linked-badge" title="Liée à une charge déjà saisie dans Pilotage — aucun doublon créé">🔗 Liée à pilotage</span>`;
+  else if(tx.status==='imported') statusHtml=`<span style="font-size:11px;font-weight:700;color:var(--green)">✅ Importée</span>${tx._auto?' <span style="font-size:10px;font-weight:800;color:#065f46;background:#d1fae5;padding:1px 6px;border-radius:20px" title="Rangée automatiquement par une règle">⚡ auto</span>':''}`;
+  else if(tx.status==='linked')   statusHtml=`<span class="linked-badge" title="Liée à une charge déjà saisie dans Pilotage — aucun doublon créé">🔗 Liée à pilotage</span>${tx._autoLinked?' <span style="font-size:10px;font-weight:800;color:#065f46;background:#d1fae5;padding:1px 6px;border-radius:20px" title="Pointée automatiquement (échéance déjà saisie, même mois, montant au centime)">⚡ auto</span>':''}`;
   else if(tx.status==='ignored')  statusHtml=`<span style="font-size:11px;color:var(--muted)">🚫 Ignorée</span>`;
   else if(hasUnresolvedMatches)   statusHtml=`<span class="match-badge" onclick="reconcileOne(${tx.id})" title="Cliquez pour rapprocher cette opération avec une charge déjà saisie dans Pilotage">🔗 À rapprocher (${tx.matches.length})</span>`;
   else statusHtml=`<span class="new-badge">Nouvelle</span>`;
@@ -869,9 +925,11 @@ function learnRule(id){
   if(!words.length){showToast('Libellé trop court','warning');return;}
   const kw=words[0].toUpperCase();
   _rules=_rules.filter(r=>r.kw.toUpperCase()!==kw);
-  _rules.unshift({kw,cat:tx.cat||'chargesVar',custom:true});
-  _txList.filter(t=>t.type==='debit'&&t.status==='pending').forEach(t=>t.cat=applyCat(t.customLabel));
-  showToast(`🧠 Règle : "${kw}" → ${CAT_LABELS[tx.cat]||tx.cat}`,'success');
+  const learned={kw,cat:tx.cat||'chargesVar',custom:true};
+  if(tx.tvaRate!==null&&tx.tvaRate!==undefined) learned.tvaRate=tx.tvaRate;
+  _rules.unshift(learned);
+  refreshRulesOnPending();
+  showToast(`🧠 Règle : "${kw}" → ${CAT_LABELS[tx.cat]||tx.cat}${learned.tvaRate!==undefined?' · TVA '+learned.tvaRate+'%':''} (⚡ auto activable dans ⚙️ Règles)`,'success');
   renderAll();
 }
 
@@ -936,18 +994,26 @@ function showCurrentMatch(){
     <div class="field"><strong>Compte :</strong> ${escHtml(tx.accountName||'—')}</div>
   `;
 
+  // Wave RI : candidats du MÊME MOIS d'abord (le bon choix dans l'immense majorité des cas)
+  tx.matches.sort(function(a,b){
+    return (a.monthKey===tx.monthKey?0:1) - (b.monthKey===tx.monthKey?0:1);
+  });
+
   const candHtml=tx.matches.map(function(m,i){
     const monthLabel=formatMonthLabel(m.monthKey);
+    const monthDisp=(m.monthKey!==tx.monthKey)
+      ?`<span style="color:#b45309;font-weight:800">⚠️ ${monthLabel} — mois différent</span>`
+      :monthLabel;
     const tvaLabel=m.tvaRate>0?`TVA ${m.tvaRate}%`:'TVA 0%';
     const dateInfo=m.dateCharge?escHtml(m.dateCharge):'(sans date)';
     // Wave 3 : si c'est un match de groupe ventilé, on affiche un badge spécial
     // et on liste les fournisseurs sous-jacents pour que la cliente sache exactement ce qu'elle lie.
     let groupBlock = '';
-    let metaLine = `${CAT_LABELS[m.section]||m.section} · ${monthLabel} · ${dateInfo} · ${tvaLabel}`;
+    let metaLine = `${CAT_LABELS[m.section]||m.section} · ${monthDisp} · ${dateInfo} · ${tvaLabel}`;
     if (m.isGroup) {
       const n = (m.groupIndices||[]).length;
       const fList = (m.groupFournisseurs||[]).map(escHtml).join(' · ');
-      metaLine = `${CAT_LABELS[m.section]||m.section} · ${monthLabel} · ${dateInfo}`;
+      metaLine = `${CAT_LABELS[m.section]||m.section} · ${monthDisp} · ${dateInfo}`;
       groupBlock = `
         <div style="margin-top:6px;padding:6px 9px;background:#dbeafe;border:1px solid #bfdbfe;border-radius:6px;font-size:11px;color:#1e40af;line-height:1.4">
           <strong>🔗 Ventilation TVA — ${n} lignes liées</strong><br>
@@ -972,8 +1038,10 @@ function showCurrentMatch(){
   document.getElementById('match-link-btn').innerHTML='✅ Oui, c\'est cette charge<br><span style="font-weight:500;font-size:10px;opacity:.85">(je sélectionne et je lie)</span>';
   _selectedMatchIdx=null;
 
-  // Pré-sélection automatique si UN SEUL candidat (la cliente n'a plus qu'à valider)
-  if (tx.matches.length === 1) {
+  // Pré-sélection automatique : candidat unique, OU un seul candidat du même mois
+  // (après le tri ci-dessus, il est en position 0 — la cliente n'a plus qu'à valider)
+  const sameMonthCount=tx.matches.filter(function(m){ return m.monthKey===tx.monthKey; }).length;
+  if (tx.matches.length === 1 || sameMonthCount === 1) {
     setTimeout(function(){ selectMatch(0); }, 50);
   }
 
@@ -992,19 +1060,9 @@ function selectMatch(i){
   document.getElementById('match-link-btn').disabled=false;
 }
 
-async function linkSelectedMatch(){
-  if(_selectedMatchIdx===null) return;
-  const txId=_matchQueue[_matchIdx];
-  const tx=_txList[txId];
-  if(!tx||!tx.matches||!tx.matches[_selectedMatchIdx]) return;
-  const match=tx.matches[_selectedMatchIdx];
-  const linkBtn=document.getElementById('match-link-btn');
-  linkBtn.disabled=true;
-  linkBtn.textContent='⏳';
-
-  try{
-    // Wave 3 : si c'est un match de GROUPE ventilé, on lie toutes les lignes du groupe d'un coup.
-    // Sinon (cas standard), on lie juste la ligne unique. La logique est unifiée via une liste d'indices.
+// ── Cœur de la liaison — utilisé par le clic manuel ET l'auto-pointage (Wave RI) ──
+// Lève une erreur en cas de problème (montant modifié, ligne déjà liée…).
+async function performLink(tx, match){
     const indicesToLink = match.isGroup ? match.groupIndices : [match.index];
 
     // 1. Re-lecture du document pilotage pour modification (évite stale data)
@@ -1046,7 +1104,7 @@ async function linkSelectedMatch(){
     }
 
     // 3. Marquer chaque ligne comme pointée + ajouter bankLink
-    //    Toutes les lignes du groupe partagent le même bankLink (avec un flag splitGroup pour info)
+    //    _pointeAvantLien mémorise l'état précédent (restauré si annulation d'un auto-pointage)
     const bankLinkObj = {
       bankTxId: tx.bankTxId,
       linkedAt: new Date().toISOString(),
@@ -1061,9 +1119,11 @@ async function linkSelectedMatch(){
       bankLinkObj.splitGroupSize = indicesToLink.length;
     }
     for (const idx of indicesToLink) {
+      const prevPointe = data[match.section][idx].pointe || 'Non';
       data[match.section][idx] = {
         ...data[match.section][idx],
         pointe: 'Oui',
+        _pointeAvantLien: prevPointe,
         bankLink: bankLinkObj
       };
     }
@@ -1087,7 +1147,7 @@ async function linkSelectedMatch(){
             monthKey:match.monthKey,
             section:match.section,
             index:match.index,
-            indices: indicesToLink, // wave 3 : liste complète des index si groupe
+            indices: indicesToLink,
             isGroup: !!match.isGroup,
             fournisseur:match.fournisseur,
             montantHT:firstHt.toFixed(2),
@@ -1115,18 +1175,28 @@ async function linkSelectedMatch(){
     _txList.forEach(function(t){
       if(t===tx||!Array.isArray(t.matches)) return;
       t.matches=t.matches.filter(function(mm){
-        // Retirer les matches qui pointent vers une des lignes qu'on vient de lier
         if (mm.monthKey !== match.monthKey || mm.section !== match.section) return true;
-        // Pour un groupe, on enlève tout match qui touche n'importe lequel des indices liés
         if (mm.isGroup) {
           return !(mm.groupIndices||[]).some(function(gi){ return indicesToLink.indexOf(gi) >= 0; });
         }
         return indicesToLink.indexOf(mm.index) === -1;
       });
     });
+}
 
+async function linkSelectedMatch(){
+  if(_selectedMatchIdx===null) return;
+  const txId=_matchQueue[_matchIdx];
+  const tx=_txList[txId];
+  if(!tx||!tx.matches||!tx.matches[_selectedMatchIdx]) return;
+  const match=tx.matches[_selectedMatchIdx];
+  const linkBtn=document.getElementById('match-link-btn');
+  linkBtn.disabled=true;
+  linkBtn.textContent='⏳';
+
+  try{
+    await performLink(tx, match);
     showToast(`🔗 Liée à "${match.fournisseur}"`,'success');
-
     _matchIdx++;
     showCurrentMatch();
   }catch(e){
@@ -1165,6 +1235,229 @@ function closeMatchModal(){
   renderAll();
 }
 
+// ═══════════════════════════════════════════════════════════════
+// WAVE RAPPROCHEMENT INTELLIGENT — auto-pointage & rangement auto
+// ═══════════════════════════════════════════════════════════════
+
+// État d'une transaction dans le doc pilotage du mois, toutes sections confondues :
+// 'imported' si une ligne porte son bankTxId (import bancaire),
+// 'linked' si une charge manuelle porte un bankLink vers elle, null sinon.
+function txStateInPilotage(md, bankTxId){
+  if(!md||!bankTxId) return null;
+  const secs=['chargesFixe','chargesVar','leasing','credits'];
+  for(const sec of secs){
+    const arr=Array.isArray(md[sec])?md[sec]:[];
+    for(const r of arr){
+      if(!r) continue;
+      if(r.bankTxId===bankTxId) return 'imported';
+      if(r.bankLink&&r.bankLink.bankTxId===bankTxId) return 'linked';
+    }
+  }
+  return null;
+}
+function isTxAlreadyInPilotage(data, bankTxId){ return txStateInPilotage(data, bankTxId)!==null; }
+
+// Marque comme importées/liées les transactions déjà représentées dans Pilotage
+// (une tx importée lors d'une session précédente ne doit plus s'afficher "Nouvelle").
+function markAlreadyImported(){
+  _txList.forEach(function(t){
+    if(t.type!=='debit'||t.status!=='pending') return;
+    const st=txStateInPilotage(_pilData[t.monthKey], t.bankTxId);
+    if(st){ t.status=st; t.matchResolved=true; }
+  });
+}
+
+// Libellé "sûr" : un mot significatif (≥4 lettres, hors mots vides) du fournisseur
+// se retrouve dans le libellé bancaire.
+function labelSureMatch(fournisseur, bankLabel){
+  const lbl=(bankLabel||'').toUpperCase();
+  const stop={'SARL':1,'SASU':1,'EURL':1,'AVEC':1,'POUR':1,'DANS':1,'PRLV':1,'SEPA':1,'RECU':1};
+  const words=(fournisseur||'').toUpperCase().split(/[^A-Z0-9]+/).filter(function(w){ return w.length>=4 && !stop[w]; });
+  for(let i=0;i<words.length;i++){ if(lbl.includes(words[i])) return true; }
+  return false;
+}
+
+// ── Bloc B : auto-pointage des échéances déjà saisies ──
+// Conditions : candidat UNIQUE du MÊME MOIS, montant au centime (garanti par detectMatches).
+// - credits / leasing : suffisant (le libellé bancaire d'une échéance de prêt ne
+//   ressemble presque jamais au nom du crédit — on ne l'exige pas).
+// - chargesFixe / chargesVar : on exige EN PLUS un libellé "sûr". Sinon → modale manuelle.
+// Jamais d'auto sur les groupes ventilés, ni si le fournisseur est vide.
+async function autoLinkPass(){
+  const todo=_txList.filter(function(t){
+    return t.type==='debit'&&t.status==='pending'&&Array.isArray(t.matches)&&t.matches.length>0&&!t.matchResolved;
+  });
+  for(const tx of todo){
+    if(tx.status!=='pending') continue; // a pu changer via le nettoyage des matches
+    if(tx.matches.some(function(m){ return m.isGroup; })) continue; // ventilation TVA → manuel
+    const sameMonth=tx.matches.filter(function(m){ return m.monthKey===tx.monthKey; });
+    if(sameMonth.length!==1) continue; // 0 ou 2+ candidats du mois → manuel
+    const m=sameMonth[0];
+    if(!(m.fournisseur||'').trim()||m.fournisseur==='(sans nom)') continue;
+    const isEcheance=(m.section==='credits'||m.section==='leasing');
+    if(!isEcheance && !labelSureMatch(m.fournisseur, tx.label||tx.customLabel)) continue; // pas sûr → manuel
+    try{
+      await performLink(tx, m);
+      tx._autoLinked=true;
+      _autoActions.linked.push({bankTxId:tx.bankTxId,monthKey:m.monthKey,section:m.section,fournisseur:m.fournisseur,montant:tx.montant});
+    }catch(e){
+      console.warn('[auto-link] ignoré :', tx.label, e&&e.message);
+    }
+  }
+}
+
+// ── Bloc A : rangement automatique par règle (cat + TVA connues + auto) ──
+// Jamais d'auto si un candidat de rapprochement existe (l'anti-doublon prime),
+// plafond de sécurité AUTO_IMPORT_MAX_TTC (surchargable par règle via "max").
+async function autoImportPass(){
+  const todo=_txList.filter(function(t){
+    const cap=(t._rule&&typeof t._rule.max==='number'&&t._rule.max>0)?t._rule.max:AUTO_IMPORT_MAX_TTC;
+    return t.type==='debit'&&t.status==='pending'
+      &&t._rule&&t._rule.auto===true
+      &&t._rule.cat&&t._rule.cat!=='ignore'
+      &&t._rule.tvaRate!==undefined&&t._rule.tvaRate!==null
+      &&(!Array.isArray(t.matches)||t.matches.length===0)
+      &&t.montant<=cap;
+  });
+  if(!todo.length) return;
+  const byMonth={};
+  todo.forEach(function(t){ (byMonth[t.monthKey]=byMonth[t.monthKey]||[]).push(t); });
+  const mks=Object.keys(byMonth);
+  for(let i=0;i<mks.length;i++){
+    const mk=mks[i];
+    try{
+      const docRef=window._doc(window._db,'pilotage',window._uid,'months',mk);
+      const snap=await window._getDoc(docRef);
+      const data=snap.exists()?{...snap.data()}:{chargesFixe:[],chargesVar:[],leasing:[],credits:[],ca:[]};
+      let wrote=false;
+      for(const tx of byMonth[mk]){
+        const sec=tx.cat;
+        if(!data[sec]) data[sec]=[];
+        // Déjà représentée (import précédent ou charge liée) → marquer sans réécrire
+        if(isTxAlreadyInPilotage(data, tx.bankTxId)){ tx.status='imported'; tx._auto=true; continue; }
+        // Supprimer les lignes vides par défaut
+        data[sec]=data[sec].filter(function(r){ return (r.fournisseur||'').trim()||parseFloat(r.montantHT||0)>0||r.source==='bank_sync'; });
+        const tvaRate=parseFloat(tx.tvaRate);
+        const montantHT=tvaRate>0?Math.round(tx.montant/(1+tvaRate/100)*100)/100:tx.montant;
+        const entry={
+          fournisseur:tx.customLabel,
+          date: tx.customDate||tx.date||'',
+          type:sec==='chargesFixe'?'Charge fixe':sec==='leasing'?'Leasing / LOA':'Charge variable',
+          montantHT:montantHT.toFixed(2),
+          tvaRate:tvaRate, deductible:'Oui', pointe:'Non',
+          source:'bank_sync', bankTxId:tx.bankTxId,
+          montantTTC_bank: tx.montant.toFixed(2),
+          bankTtcFixed: true,
+          autoImported: true,
+          importedAt:new Date().toISOString()
+        };
+        if(sec==='leasing'){entry.dateDebut='';entry.dateFin='';}
+        data[sec].push(entry);
+        tx.status='imported'; tx._auto=true; wrote=true;
+        _autoActions.imported.push({bankTxId:tx.bankTxId,monthKey:mk,section:sec,label:tx.customLabel,montant:tx.montant});
+      }
+      if(wrote) await window._setDoc(docRef, data, {merge:true});
+    }catch(e){ console.warn('[auto-import] mois', mk, 'échoué :', e&&e.message); }
+  }
+}
+
+// Bandeau récap des actions automatiques de la session (annulable)
+function renderAutoBanner(){
+  const nI=_autoActions.imported.length, nL=_autoActions.linked.length;
+  if(_autoActions.dismissed||(nI===0&&nL===0)) return '';
+  const parts=[];
+  if(nI>0) parts.push(`⚡ <strong>${nI}</strong> opération${nI>1?'s':''} rangée${nI>1?'s':''} automatiquement (règle avec TVA connue — commissions CB, frais bancaires…)`);
+  if(nL>0) parts.push(`🔗 <strong>${nL}</strong> échéance${nL>1?'s':''} pointée${nL>1?'s':''} automatiquement (déjà saisie${nL>1?'s':''} dans Pilotage, même mois, montant au centime)`);
+  return `
+    <div style="background:linear-gradient(135deg,#ecfdf5,#f0fdfa);border:2px solid #10b981;border-radius:14px;padding:14px 18px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;box-shadow:0 4px 16px rgba(16,185,129,0.10)">
+      <div style="font-size:30px;flex-shrink:0">🤖</div>
+      <div style="flex:1;min-width:220px;font-size:12.5px;color:#065f46;line-height:1.55">${parts.join('<br>')}<br><span style="font-size:11px;opacity:.8">Chaque ligne porte un badge ⚡ — tout est annulable ici.</span></div>
+      <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap">
+        ${nI>0?`<button class="btn btn-outline btn-xs" onclick="setFilter('imported')">👁 Voir rangées</button>`:''}
+        ${nL>0?`<button class="btn btn-outline btn-xs" onclick="setFilter('linked')">👁 Voir pointées</button>`:''}
+        <button class="btn btn-outline btn-xs" style="color:var(--red);border-color:#fecaca" onclick="cancelAutoActions()">↩ Tout annuler</button>
+        <button class="btn btn-outline btn-xs" onclick="dismissAutoBanner()" title="Masquer ce bandeau (les actions sont conservées)">✕</button>
+      </div>
+    </div>`;
+}
+function dismissAutoBanner(){ _autoActions.dismissed=true; renderAll(); }
+
+// Annule TOUTES les actions automatiques de la session : retire les charges
+// auto-importées, délie les échéances auto-pointées (pointé restauré), purge
+// l'archive linkedTransactions correspondante, puis recharge sans re-jouer les autos.
+async function cancelAutoActions(){
+  const total=_autoActions.imported.length+_autoActions.linked.length;
+  if(!total) return;
+  if(!confirm('Annuler les '+total+' action(s) automatique(s) de cette session ?')) return;
+
+  // 1. Retirer les charges rangées automatiquement
+  const byMonth={};
+  _autoActions.imported.forEach(function(a){ (byMonth[a.monthKey]=byMonth[a.monthKey]||[]).push(a); });
+  for(const mk of Object.keys(byMonth)){
+    try{
+      const ref=window._doc(window._db,'pilotage',window._uid,'months',mk);
+      const snap=await window._getDoc(ref);
+      if(!snap.exists()) continue;
+      const data={...snap.data()};
+      const patch={};
+      byMonth[mk].forEach(function(a){
+        if(Array.isArray(data[a.section])){
+          data[a.section]=data[a.section].filter(function(r){ return !(r&&r.bankTxId===a.bankTxId&&r.autoImported===true); });
+          patch[a.section]=data[a.section];
+        }
+      });
+      if(Object.keys(patch).length) await window._setDoc(ref, patch, {merge:true});
+    }catch(e){ console.warn('[annulation auto-import]', mk, e&&e.message); }
+  }
+
+  // 2. Délier les échéances pointées automatiquement (pointé restauré)
+  const byMonthL={};
+  _autoActions.linked.forEach(function(a){ (byMonthL[a.monthKey]=byMonthL[a.monthKey]||[]).push(a); });
+  for(const mk of Object.keys(byMonthL)){
+    try{
+      const ref=window._doc(window._db,'pilotage',window._uid,'months',mk);
+      const snap=await window._getDoc(ref);
+      if(!snap.exists()) continue;
+      const data={...snap.data()};
+      const patch={};
+      byMonthL[mk].forEach(function(a){
+        const arr=Array.isArray(data[a.section])?data[a.section]:[];
+        for(let i=0;i<arr.length;i++){
+          const r=arr[i];
+          if(r&&r.bankLink&&r.bankLink.bankTxId===a.bankTxId){
+            const copy={...r};
+            copy.pointe=copy._pointeAvantLien||'Non';
+            delete copy._pointeAvantLien;
+            delete copy.bankLink;
+            arr[i]=copy;
+          }
+        }
+        data[a.section]=arr; patch[a.section]=arr;
+      });
+      if(Object.keys(patch).length) await window._setDoc(ref, patch, {merge:true});
+    }catch(e){ console.warn('[annulation auto-link]', mk, e&&e.message); }
+  }
+
+  // 3. Purger l'archive linkedTransactions des liaisons annulées
+  try{
+    if(_autoActions.linked.length){
+      const bcRef=window._doc(window._db,'bank_connections',window._uid);
+      const bcSnap=await window._getDoc(bcRef);
+      if(bcSnap.exists()){
+        const ids={};
+        _autoActions.linked.forEach(function(a){ ids[a.bankTxId]=true; });
+        const arr=(bcSnap.data().linkedTransactions||[]).filter(function(l){ return !(l&&ids[l.bankTxId]); });
+        await window._setDoc(bcRef,{linkedTransactions:arr},{merge:true});
+      }
+    }
+  }catch(e){ console.warn('[annulation auto-link] archive', e&&e.message); }
+
+  _autoActions={imported:[],linked:[],dismissed:false};
+  _skipAutoThisSession=true; // ne pas re-jouer les autos après une annulation explicite
+  showToast('↩ Actions automatiques annulées','success');
+  await loadPending();
+}
+
 async function importOne(id){
   const tx = _txList[id];
   if(!tx || tx.type!=='debit' || tx.status!=='pending' || !tx.cat || tx.cat==='ignore') return;
@@ -1189,8 +1482,8 @@ async function importOne(id){
     // Supprimer les lignes vides par défaut
     data[sec] = data[sec].filter(function(r){ return (r.fournisseur||'').trim() || parseFloat(r.montantHT||0) > 0 || r.source==='bank_sync'; });
 
-    // Dédupliquer par bankTxId
-    if(data[sec].some(r=>r.bankTxId===tx.bankTxId)){
+    // Dédupliquer par bankTxId — toutes sections, y compris charges manuelles liées (bankLink)
+    if(isTxAlreadyInPilotage(data, tx.bankTxId)){
       showToast('⚠️ Déjà importée','warning');
       if(btn){btn.disabled=false;btn.textContent='⬇️';}
       return;
@@ -1259,8 +1552,8 @@ async function importSelected(){
         if(!data[sec]) data[sec]=[];
         // Supprimer les lignes vides par défaut
         data[sec] = data[sec].filter(function(r){ return (r.fournisseur||'').trim() || parseFloat(r.montantHT||0) > 0 || r.source==='bank_sync'; });
-        // Dédupliquer par bankTxId
-        if((data[sec]||[]).some(r=>r.bankTxId===tx.bankTxId)) continue;
+        // Dédupliquer par bankTxId — toutes sections, y compris charges manuelles liées (bankLink)
+        if(isTxAlreadyInPilotage(data, tx.bankTxId)) continue;
         const entry={
           fournisseur:tx.customLabel,
           date: tx.customDate || tx.date || '',
@@ -1302,21 +1595,44 @@ function renderRulesList(){
   let html='';
   if(custom.length){
     html+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Vos règles (${custom.length})</div>`;
-    html+=custom.map((r,i)=>`<div class="rule-row"><span style="flex:1;font-size:12px;font-weight:700">${r.kw}</span><span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;background:#eef2ff;color:${clr[r.cat]||'#374151'}">${CAT_LABELS[r.cat]||r.cat}</span><button onclick="removeRule(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></div>`).join('');
+    html+=custom.map((r,i)=>`<div class="rule-row"><span style="flex:1;font-size:12px;font-weight:700">${r.kw}</span>${r.tvaRate!==undefined&&r.tvaRate!==null?`<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:#e0f2fe;color:#0369a1">TVA ${r.tvaRate}%</span>`:''}${r.auto?`<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:#d1fae5;color:#065f46" title="Rangement automatique${r.max?' ≤ '+r.max+'€':' ≤ 200€'}">⚡ auto</span>`:''}<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;background:#eef2ff;color:${clr[r.cat]||'#374151'}">${CAT_LABELS[r.cat]||r.cat}</span><button onclick="removeRule(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></div>`).join('');
   }
-  html+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:10px 0 8px">Règles par défaut (${defs.length})</div><div style="display:flex;flex-wrap:wrap;gap:5px">${defs.map(r=>`<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:#f1f5f9;color:${clr[r.cat]||'#374151'}">${r.kw}</span>`).join('')}</div>`;
+  html+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:10px 0 8px">Règles par défaut (${defs.length})</div><div style="display:flex;flex-wrap:wrap;gap:5px">${defs.map(r=>`<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:${r.auto?'#d1fae5':'#f1f5f9'};color:${clr[r.cat]||'#374151'}" title="${r.auto?'⚡ Rangement automatique · TVA '+r.tvaRate+'%':''}">${r.auto?'⚡ ':''}${r.kw}</span>`).join('')}</div>`;
   el.innerHTML=html;
 }
 function addRule(){
   const kw=document.getElementById('rule-kw').value.trim().toUpperCase();
   const cat=document.getElementById('rule-cat').value;
   if(!kw) return;
+  const rule={kw,cat,custom:true};
+  const tvaEl=document.getElementById('rule-tva');
+  if(tvaEl&&tvaEl.value!==''){ rule.tvaRate=parseFloat(tvaEl.value); }
+  const autoEl=document.getElementById('rule-auto');
+  if(autoEl&&autoEl.checked){
+    if(rule.tvaRate===undefined){ showToast('⚠️ Le rangement auto nécessite une TVA définie','warning'); return; }
+    rule.auto=true;
+  }
+  const maxEl=document.getElementById('rule-max');
+  const maxV=maxEl?parseFloat(String(maxEl.value).replace(/\s/g,'').replace(',','.')):NaN;
+  if(!isNaN(maxV)&&maxV>0) rule.max=maxV;
   _rules=_rules.filter(r=>r.kw.toUpperCase()!==kw);
-  _rules.unshift({kw,cat,custom:true});
+  _rules.unshift(rule);
   document.getElementById('rule-kw').value='';
+  if(tvaEl)tvaEl.value='';
+  if(autoEl)autoEl.checked=false;
+  if(maxEl)maxEl.value='';
   renderRulesList();
-  _txList.filter(t=>t.type==='debit'&&t.status==='pending').forEach(t=>t.cat=applyCat(t.customLabel));
+  refreshRulesOnPending();
   renderAll();
+}
+// Ré-applique les règles (catégorie + TVA préremplie) aux transactions en attente
+function refreshRulesOnPending(){
+  _txList.filter(t=>t.type==='debit'&&t.status==='pending').forEach(function(t){
+    const r=applyRule(t.customLabel);
+    t.cat=r?r.cat:'chargesVar';
+    if(r&&r.tvaRate!==undefined&&r.tvaRate!==null&&(t.tvaRate===null||t.tvaRate===undefined)) t.tvaRate=r.tvaRate;
+    t._rule=r||null;
+  });
 }
 function removeRule(i){_rules.splice(i,1);renderRulesList();}
 async function saveRulesAndClose(){
@@ -1348,6 +1664,7 @@ window.matchNoMatch=matchNoMatch;window.matchIgnore=matchIgnore;
 window.matchSkipNext=matchSkipNext;window.closeMatchModal=closeMatchModal;
 window.openRulesModal=openRulesModal;window.closeRulesModal=closeRulesModal;
 window.addRule=addRule;window.removeRule=removeRule;window.saveRulesAndClose=saveRulesAndClose;
+window.cancelAutoActions=cancelAutoActions;window.dismissAutoBanner=dismissAutoBanner;
 window.handleLogout=handleLogout;
 </script>
 <script src="nav.js"></script>

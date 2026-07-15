@@ -1194,6 +1194,34 @@ function showMultiImportSummary(results, successCount, skipCount) {
   showToast(`✅ ${successCount} onglet(s) importé(s) !`, 'ok');
 }
 
+// ═══ Wave RI : garde anti-doublon à l'import de charges ═══
+// Compare les lignes entrantes à l'existant du mois cible (même fournisseur
+// normalisé + même montant HT au centime). Les doublons sont IGNORÉS après
+// confirmation ; si TOUT est en doublon, l'import est annulé — rien n'est écrit.
+function _normFourImp(x){ return (x==null?'':String(x)).replace(/\s+/g,' ').trim().toUpperCase(); }
+function filterChargeDuplicates(existingArr, newCharges, ymLabel, sectionLabel){
+  const existing = Array.isArray(existingArr) ? existingArr : [];
+  const isDup = (n) => {
+    const four = _normFourImp(n.fournisseur);
+    const ht = parseFloat(String(n.montantHT||'').replace(',','.')) || 0;
+    if (!four || ht === 0) return false;
+    return existing.some(r => r && _normFourImp(r.fournisseur) === four
+      && Math.abs((parseFloat(String(r.montantHT||'').replace(',','.'))||0) - ht) < 0.005);
+  };
+  const dups = newCharges.filter(isDup);
+  if (!dups.length) return newCharges;
+  const kept = newCharges.filter(n => !isDup(n));
+  const preview = dups.slice(0,8).map(d => '• ' + (d.fournisseur||'?') + ' — ' + (parseFloat(String(d.montantHT||'').replace(',','.'))||0).toFixed(2) + ' € HT').join('\n');
+  const more = dups.length > 8 ? '\n… et ' + (dups.length-8) + ' autre(s)' : '';
+  if (!kept.length) {
+    alert('⚠️ Import annulé : ' + dups.length + ' ligne(s) existent déjà dans ' + sectionLabel + ' de ' + ymLabel + ' (même fournisseur + même montant HT) :\n\n' + preview + more + '\n\nRien n\'a été importé — aucun doublon créé.');
+    throw new Error('Import annulé : toutes les lignes existent déjà (doublons évités).');
+  }
+  const ok = confirm('⚠️ ' + dups.length + ' ligne(s) semblent déjà exister dans ' + sectionLabel + ' de ' + ymLabel + ' (même fournisseur + même montant HT) :\n\n' + preview + more + '\n\nElles seront IGNORÉES pour éviter les doublons.\n\nOK → importer les ' + kept.length + ' autre(s) ligne(s)\nAnnuler → ne rien importer');
+  if (!ok) throw new Error('Import annulé (doublons détectés).');
+  return kept;
+}
+
 // ── Import direct (sans UI mapping) utilisé pour le multi-onglets ──
 async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
   if (!window._uid || !window._setDoc) throw new Error('Non connecté');
@@ -1273,7 +1301,8 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
       }))
       .filter(r => isChargeRowValid(r.fournisseur, parseFloat(r.montantHT) || 0));
     if (!newCharges.length) throw new Error('Aucune ligne valide : chaque charge doit avoir un fournisseur (les lignes vides, totaux et cumuls sont exclus).');
-    const merged = [...(existing.chargesFixe || []), ...newCharges];
+    const checkedFixe = filterChargeDuplicates(existing.chargesFixe, newCharges, ym, 'Charges fixes');
+    const merged = [...(existing.chargesFixe || []), ...checkedFixe];
     await window._setDoc(ref, { ...existing, chargesFixe: merged }, { merge: true });
   }
 
@@ -1297,7 +1326,8 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
       }))
       .filter(r => isChargeRowValid(r.fournisseur, parseFloat(r.montantHT) || 0));
     if (!newCharges.length) throw new Error('Aucune ligne valide : chaque charge doit avoir un fournisseur (les lignes vides, totaux et cumuls sont exclus).');
-    const merged = [...(existing.chargesVar || []), ...newCharges];
+    const checkedVar = filterChargeDuplicates(existing.chargesVar, newCharges, ym, 'Charges variables');
+    const merged = [...(existing.chargesVar || []), ...checkedVar];
     await window._setDoc(ref, { ...existing, chargesVar: merged }, { merge: true });
   }
 
@@ -1340,6 +1370,7 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
     const existing = snap.exists() ? snap.data() : {};
     const chargesFixe = existing.chargesFixe || [];
     const chargesVar = existing.chargesVar || [];
+    const addFixe = [], addVar = [];
     rows.forEach(r => {
       const typeRaw = String(get(r, 'type')).toLowerCase();
       const isVar = typeRaw.includes('var');
@@ -1353,9 +1384,11 @@ async function importDataDirect(destKey, rows, headers, mapping, forcedMonth) {
         importedAt: importStamp
       };
       if (!isChargeRowValid(entry.fournisseur, parseFloat(entry.montantHT) || 0)) return;
-      if (isVar) chargesVar.push(entry); else chargesFixe.push(entry);
+      if (isVar) addVar.push(entry); else addFixe.push(entry);
     });
-    await window._setDoc(ref, { ...existing, chargesFixe, chargesVar }, { merge: true });
+    const okFixe = addFixe.length ? filterChargeDuplicates(chargesFixe, addFixe, ym, 'Charges fixes') : [];
+    const okVar  = addVar.length  ? filterChargeDuplicates(chargesVar,  addVar,  ym, 'Charges variables') : [];
+    await window._setDoc(ref, { ...existing, chargesFixe: [...chargesFixe, ...okFixe], chargesVar: [...chargesVar, ...okVar] }, { merge: true });
   }
 
   else if (destKey === 'stock') {
