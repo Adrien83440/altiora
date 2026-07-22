@@ -838,7 +838,17 @@ function renderRow(tx){
   else if(tx.status==='linked')   statusHtml=`<span class="linked-badge" title="Liée à une charge déjà saisie dans Pilotage — aucun doublon créé">🔗 Liée à pilotage</span>${tx._autoLinked?' <span style="font-size:10px;font-weight:800;color:#065f46;background:#d1fae5;padding:1px 6px;border-radius:20px" title="Pointée automatiquement (échéance déjà saisie, même mois, montant au centime)">⚡ auto</span>':''}`;
   else if(tx.status==='ignored')  statusHtml=`<span style="font-size:11px;color:var(--muted)">🚫 Ignorée</span>`;
   else if(hasUnresolvedMatches)   statusHtml=`<span class="match-badge" onclick="reconcileOne(${tx.id})" title="Cliquez pour rapprocher cette opération avec une charge déjà saisie dans Pilotage">🔗 À rapprocher (${tx.matches.length})</span>`;
-  else statusHtml=`<span class="new-badge">Nouvelle</span>`;
+  else {
+    // Règle ⚡ auto reconnue mais rangement non appliqué → expliquer pourquoi
+    // (avant : badge « Nouvelle » muet, l'utilisateur croit que la règle ne marche pas)
+    let autoNote='';
+    if(tx._rule&&tx._rule.auto===true&&tx._rule.tvaRate!==undefined&&tx._rule.tvaRate!==null){
+      const capR=(typeof tx._rule.max==='number'&&tx._rule.max>0)?tx._rule.max:AUTO_IMPORT_MAX_TTC;
+      if(tx.montant>capR) autoNote=`<span style="font-size:9.5px;font-weight:800;color:#92400e;background:#fef3c7;border-radius:20px;padding:1px 6px;white-space:nowrap" title="Règle ⚡ auto reconnue, mais le montant dépasse son plafond de sécurité (${capR} €) : validation manuelle demandée. Plafond modifiable dans ⚙️ Règles auto (✏️ sur la règle).">⚡ &gt; ${capR}€</span>`;
+      else autoNote=`<span style="font-size:9.5px;font-weight:800;color:#0369a1;background:#e0f2fe;border-radius:20px;padding:1px 6px;white-space:nowrap" title="Règle ⚡ auto reconnue, mais non appliquée à cette opération : un rapprochement avec une charge déjà saisie était possible, ou les actions automatiques ont été annulées cette session. À valider manuellement.">⚡ manuel</span>`;
+    }
+    statusHtml=`<span class="new-badge">Nouvelle</span>${autoNote?' '+autoNote:''}`;
+  }
 
   let actHtml='';
   if(tx.type==='credit') actHtml=`<span style="color:var(--muted)">—</span>`;
@@ -906,6 +916,7 @@ function updateImportCounters(){
 }
 function updateCat(id,v){
   _txList[id].cat=v||null;
+  _txList[id]._catManual=!!v; // choix explicite de l'utilisateur → prime sur les règles
   const sel=document.getElementById('dest-'+id);
   if(sel) sel.className='dest-select '+(v?CAT_CLS[v]||'':'');
   // Mettre à jour le bouton import de cette ligne
@@ -924,17 +935,56 @@ function autoAll(){_txList.filter(t=>t.type==='debit'&&t.status==='pending').for
 function setFilter(f){_filter=f;renderAll();}
 function setSearch(q){_search=q;renderAll();}
 
-function learnRule(id){
+// Mots « génériques bancaires » à ne pas proposer comme mot-clé de règle : une
+// règle « PRLV » ou « VIREMENT » matcherait quasiment TOUTES les opérations —
+// catastrophique avec le rangement automatique. Le 1er mot significatif hors de
+// cette liste est proposé, et l'utilisateur peut le corriger dans la boîte de saisie.
+const KW_GENERIC=new Set(['PRLV','PRELEVEMENT','PRELEVEMENTS','VIREMENT','VIREMENTS','SEPA','EUROPEEN','EMIS','RECU','CARTE','CARTES','PAIEMENT','PAIEMENTS','ACHAT','ACHATS','REGLEMENT','OPERATION','FACTURE','ECHEANCE','MENSUALITE','DEBIT','CREDIT','BANQUE','CAISSE','SOCIETE','GENERALE','NATIONALE','MUTUEL','POPULAIRE','AGRICOLE','LYONNAIS','INTERNET','MOBILE','COMPTE']);
+
+async function learnRule(id){
   const tx=_txList[id];
-  const words=(tx.customLabel||'').split(/\s+/).filter(w=>w.length>3);
+  // La règle mémorise la catégorie ET la TVA de la ligne → les deux doivent être choisies
+  // (c'est ce qui permet le rangement automatique avec la TVA du CLIENT, pas celle du défaut)
+  if(!tx.cat||tx.cat==='ignore'){showToast('⚠️ Choisissez d\'abord la catégorie de cette ligne — la règle la mémorisera','warning');return;}
+  if(tx.tvaRate===null||tx.tvaRate===undefined){showToast('⚠️ Choisissez d\'abord la TVA de cette ligne — la règle la mémorisera','warning');return;}
+  const words=(tx.customLabel||tx.label||'').toUpperCase().split(/[^A-Z0-9]+/).filter(w=>w.length>3);
   if(!words.length){showToast('Libellé trop court','warning');return;}
-  const kw=words[0].toUpperCase();
+  const suggested=words.find(w=>!KW_GENERIC.has(w))||words[0];
+  let kw=prompt('🧠 Mot-clé de la règle :\nToute opération dont le libellé CONTIENT ce mot sera reconnue.\n(Ex : « COMMISSION » couvre « COMMISSIONS CB LCL », « COMMISSION MONETIQUE »…)',suggested);
+  if(kw===null) return;
+  kw=kw.trim().toUpperCase();
+  if(kw.length<3){showToast('Mot-clé trop court (3 caractères minimum)','warning');return;}
+  const catLbl=CAT_LABELS[tx.cat]||tx.cat;
+  // Opérations en attente couvertes par le mot-clé (pour le plafond + le récap du confirm)
+  const covered=_txList.filter(t=>t.type==='debit'&&t.status==='pending'&&((t.customLabel||t.label||'').toUpperCase().includes(kw)));
+  const maxCovered=covered.reduce((mx,t)=>Math.max(mx,t.montant||0),0);
+  const wantAuto=confirm('🧠 Règle « '+kw+' » → '+catLbl+' · TVA '+tx.tvaRate+'%\n\nActiver aussi le RANGEMENT AUTOMATIQUE ⚡ ?\n\nOK : les opérations correspondantes seront rangées toutes seules dans Pilotage'+(covered.length?' — dont les '+covered.length+' actuellement en attente'+(maxCovered>0?' (jusqu\'à '+maxCovered.toFixed(2)+' €)':''):'')+'.\nAnnuler : la règle pré-remplit seulement catégorie + TVA (import manuel).');
+  const learned={kw,cat:tx.cat,custom:true,tvaRate:tx.tvaRate};
+  if(wantAuto){
+    learned.auto=true;
+    // Couvrir les opérations visibles annoncées dans le confirm, même > plafond par défaut
+    if(maxCovered>AUTO_IMPORT_MAX_TTC) learned.max=Math.ceil(maxCovered/10)*10;
+  }
   _rules=_rules.filter(r=>r.kw.toUpperCase()!==kw);
-  const learned={kw,cat:tx.cat||'chargesVar',custom:true};
-  if(tx.tvaRate!==null&&tx.tvaRate!==undefined) learned.tvaRate=tx.tvaRate;
   _rules.unshift(learned);
   refreshRulesOnPending();
-  showToast(`🧠 Règle : "${kw}" → ${CAT_LABELS[tx.cat]||tx.cat}${learned.tvaRate!==undefined?' · TVA '+learned.tvaRate+'%':''} (⚡ auto activable dans ⚙️ Règles)`,'success');
+  // La TVA de la règle fait foi pour les lignes en attente couvertes (même si un
+  // ancien pré-remplissage — ex. 20 % de la règle par défaut — était déjà posé dessus)
+  _txList.forEach(function(t){
+    if(t.type==='debit'&&t.status==='pending'&&((t.customLabel||t.label||'').toUpperCase().includes(kw))) t.tvaRate=learned.tvaRate;
+  });
+  // Persistance immédiate : avant, la règle 🧠 était perdue si on quittait la page
+  // sans importer (elle n'était sauvée que par « Importer » ou ⚙️ 💾 Sauvegarder)
+  try{ await window._setDoc(window._doc(window._db,'bank_rules',window._uid),{rules:_rules.filter(r=>r.custom)}); }
+  catch(e){ console.warn('[learnRule] sauvegarde bank_rules échouée', e&&e.message); }
+  let swept=0;
+  if(wantAuto){
+    const before=_autoActions.imported.length;
+    try{ await autoImportPass(); }catch(e){ console.warn('[learnRule] rangement auto échoué', e&&e.message); }
+    swept=_autoActions.imported.length-before;
+    if(swept>0) _autoActions.dismissed=false; // ré-afficher le bandeau récap annulable
+  }
+  showToast('🧠 Règle « '+kw+' » → '+catLbl+' · TVA '+tx.tvaRate+'%'+(wantAuto?(' · ⚡ auto'+(swept>0?' — '+swept+' opération(s) rangée(s)':'')):''),'success');
   renderAll();
 }
 
@@ -1600,9 +1650,9 @@ function renderRulesList(){
   let html='';
   if(custom.length){
     html+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:8px">Vos règles (${custom.length})</div>`;
-    html+=custom.map((r,i)=>`<div class="rule-row"><span style="flex:1;font-size:12px;font-weight:700">${r.kw}</span>${r.tvaRate!==undefined&&r.tvaRate!==null?`<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:#e0f2fe;color:#0369a1">TVA ${r.tvaRate}%</span>`:''}${r.auto?`<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:#d1fae5;color:#065f46" title="Rangement automatique${r.max?' ≤ '+r.max+'€':' ≤ 200€'}">⚡ auto</span>`:''}<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;background:#eef2ff;color:${clr[r.cat]||'#374151'}">${CAT_LABELS[r.cat]||r.cat}</span><button onclick="removeRule(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></div>`).join('');
+    html+=custom.map((r,i)=>`<div class="rule-row"><span style="flex:1;font-size:12px;font-weight:700">${r.kw}</span>${r.tvaRate!==undefined&&r.tvaRate!==null?`<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:#e0f2fe;color:#0369a1">TVA ${r.tvaRate}%</span>`:''}${r.auto?`<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:#d1fae5;color:#065f46" title="Rangement automatique${r.max?' ≤ '+r.max+'€':' ≤ 200€'}">⚡ auto</span>`:''}<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;background:#eef2ff;color:${clr[r.cat]||'#374151'}">${CAT_LABELS[r.cat]||r.cat}</span><button onclick="editRuleAt(${i},true)" title="Modifier cette règle (précharge le formulaire ci-dessous — « + Ajouter » la remplacera)" style="background:none;border:none;cursor:pointer;font-size:13px">✏️</button><button onclick="removeRule(${i})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:14px">✕</button></div>`).join('');
   }
-  html+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:10px 0 8px">Règles par défaut (${defs.length})</div><div style="display:flex;flex-wrap:wrap;gap:5px">${defs.map(r=>`<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:${r.auto?'#d1fae5':'#f1f5f9'};color:${clr[r.cat]||'#374151'}" title="${r.auto?'⚡ Rangement automatique · TVA '+r.tvaRate+'%':''}">${r.auto?'⚡ ':''}${r.kw}</span>`).join('')}</div>`;
+  html+=`<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;margin:10px 0 8px">Règles par défaut (${defs.length})</div><div style="display:flex;flex-wrap:wrap;gap:5px">${defs.map((r,j)=>`<span onclick="editRuleAt(${j},false)" style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;background:${r.auto?'#d1fae5':'#f1f5f9'};color:${clr[r.cat]||'#374151'};cursor:pointer" title="${r.auto?'⚡ Rangement automatique · TVA '+r.tvaRate+'% · ':''}Cliquez pour personnaliser (TVA, plafond…) — votre version prendra le dessus">${r.auto?'⚡ ':''}${r.kw}</span>`).join('')}</div>`;
   el.innerHTML=html;
 }
 function addRule(){
@@ -1634,12 +1684,35 @@ function addRule(){
 function refreshRulesOnPending(){
   _txList.filter(t=>t.type==='debit'&&t.status==='pending').forEach(function(t){
     const r=applyRule(t.customLabel);
-    t.cat=r?r.cat:'chargesVar';
+    // Ligne couverte par une règle → la règle fait foi, SAUF si l'utilisateur a
+    // choisi la catégorie à la main (avant : reset systématique en chargesVar)
+    if(r&&!t._catManual) t.cat=r.cat; else if(!t.cat) t.cat='chargesVar';
     if(r&&r.tvaRate!==undefined&&r.tvaRate!==null&&(t.tvaRate===null||t.tvaRate===undefined)) t.tvaRate=r.tvaRate;
     t._rule=r||null;
   });
 }
 function removeRule(i){_rules.splice(i,1);renderRulesList();}
+// Précharge le formulaire d'ajout avec une règle existante. isCustom=true → règle
+// perso (modif = re-ajout, le remplacement par mot-clé est déjà géré par addRule) ;
+// isCustom=false → règle par défaut : on en crée une COPIE perso qui, placée en tête
+// de _rules, prend le dessus sur le défaut (c'est ainsi qu'on change la TVA d'une
+// règle par défaut selon la banque du client).
+function fillRuleForm(r){
+  const kwEl=document.getElementById('rule-kw'); if(kwEl) kwEl.value=r.kw||'';
+  const catEl=document.getElementById('rule-cat'); if(catEl) catEl.value=r.cat||'chargesVar';
+  const tvaEl=document.getElementById('rule-tva'); if(tvaEl) tvaEl.value=(r.tvaRate!==undefined&&r.tvaRate!==null)?String(r.tvaRate):'';
+  const autoEl=document.getElementById('rule-auto'); if(autoEl) autoEl.checked=!!r.auto;
+  const maxEl=document.getElementById('rule-max'); if(maxEl) maxEl.value=(typeof r.max==='number'&&r.max>0)?r.max:'';
+  if(kwEl) kwEl.focus();
+}
+function editRuleAt(i,isCustom){
+  const list=isCustom?_rules.filter(x=>x.custom):_rules.filter(x=>!x.custom);
+  const r=list[i]; if(!r) return;
+  fillRuleForm(r);
+  showToast(isCustom
+    ?'✏️ Règle chargée dans le formulaire — ajustez puis « + Ajouter » pour la remplacer'
+    :'✏️ Règle par défaut copiée — ajustez (TVA, plafond…) puis « + Ajouter » : votre version prendra le dessus','success');
+}
 async function saveRulesAndClose(){
   const custom=_rules.filter(r=>r.custom);
   await window._setDoc(window._doc(window._db,'bank_rules',window._uid),{rules:custom});
@@ -1669,6 +1742,7 @@ window.matchNoMatch=matchNoMatch;window.matchIgnore=matchIgnore;
 window.matchSkipNext=matchSkipNext;window.closeMatchModal=closeMatchModal;
 window.openRulesModal=openRulesModal;window.closeRulesModal=closeRulesModal;
 window.addRule=addRule;window.removeRule=removeRule;window.saveRulesAndClose=saveRulesAndClose;
+window.editRuleAt=editRuleAt;
 window.cancelAutoActions=cancelAutoActions;window.dismissAutoBanner=dismissAutoBanner;
 window.handleLogout=handleLogout;
 </script>
