@@ -275,7 +275,12 @@ module.exports = async (req, res) => {
       discountParams['discounts[0][coupon]'] = filleulCouponId;
     } else if (promoId) {
       discountParams['discounts[0][promotion_code]'] = promoId;
-    } else {
+    } else if (!grantTrial) {
+      // Champ « code promo » de la page Stripe : uniquement HORS essai.
+      // Le parcours site force déjà le skip de l'essai quand un code est
+      // appliqué (voir plus haut) ; taper un code directement sur la page
+      // Stripe pendant un essai contournait cette règle et permettait de
+      // cumuler essai 15 jours + mois offerts du coupon.
       discountParams['allow_promotion_codes'] = 'true';
     }
 
@@ -285,7 +290,15 @@ module.exports = async (req, res) => {
       'line_items[0][quantity]': '1',
       'automatic_tax[enabled]': 'true',
       ...(grantTrial ? { 'subscription_data[trial_period_days]': '15' } : {}),
-      'payment_method_collection': 'if_required',
+      // ── CB TOUJOURS collectée (fix 24/07/2026) ──
+      // 'if_required' laissait Stripe SAUTER la saisie de carte dès que le dû
+      // du jour était 0 € (essai 15 jours, code promo 100%) → subscriptions
+      // sans aucun moyen de paiement, impossibles à facturer en fin d'essai
+      // (constaté en prod : clients en trial Master/Pro sans carte).
+      // 'always' = la carte est enregistrée via SetupIntent même à 0 € dû ;
+      // Stripe affiche « 0,00 € dû aujourd'hui » puis débite automatiquement
+      // à la fin de l'essai (ou à la 1re facture non couverte par un coupon).
+      'payment_method_collection': 'always',
       ...discountParams,
       success_url: baseUrl + '/dashboard.html?subscription=success&plan=' + plan,
       cancel_url: baseUrl + '/pricing.html?cancelled=1',

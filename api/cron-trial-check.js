@@ -580,6 +580,24 @@ module.exports = async (req, res) => {
 
       console.log(`[cron-trial] 👤 ${uid} (${email || '?'}) — J${daysLeft >= 0 ? '-' + daysLeft : '+' + Math.abs(daysLeft)} — plan=${plan}`);
 
+      // ── Essai Stripe (CB enregistrée au checkout) : cycle géré par Stripe ──
+      // Une subscription vivante (trialing/active) sera convertie et débitée
+      // automatiquement en fin d'essai : les emails du cycle d'essai
+      // d'inscription (J-x, « essai expiré », winback) ne concernent pas ce
+      // compte, et le passage forcé en trial_expired à J+0 entrerait en course
+      // avec le webhook Stripe le jour même de la conversion.
+      // Fail-safe : au-delà de J+2 sans nouvelle du webhook (statut resté
+      // trialing alors que l'essai est fini depuis 2 jours = événement Stripe
+      // perdu), on laisse le pipeline normal reprendre la main et verrouiller.
+      // (Même logique que la garde de la boucle promo plus bas.)
+      if (data.stripeSubscriptionId
+          && ['trialing', 'active'].includes(data.subscriptionStatus)
+          && daysLeft >= -2) {
+        console.log(`[cron-trial] ⏭️ ${uid} — sub Stripe ${data.subscriptionStatus}, cycle géré par Stripe`);
+        stats.skippedStripe = (stats.skippedStripe || 0) + 1;
+        continue;
+      }
+
       try {
         // ──────────────────────────────────────────────────────
         // J1 (daysLeft=14) — activation : a-t-il saisi son CA ?
