@@ -1450,11 +1450,22 @@ function loadPlanUI(plan, subStatus, subId) {
   // d'inscription, promo/code offert, expiré, free…) aucun paiement n'a eu lieu
   // → on autorise la souscription payante de N'IMPORTE quel plan.
   const hasLiveSub = !!subId && (subStatus === 'active' || subStatus === 'trialing');
+  // ── past_due (fix 24/07/2026) : une sub Stripe existe mais sa facture est
+  // impayée. Avant ce fix, ce statut n'affichait NI le portail (hasLiveSub
+  // faux) NI la résiliation, tout en proposant les cartes de plans → un clic
+  // créait une DEUXIÈME subscription au lieu de régulariser la première.
+  // Désormais : cartes de plans masquées, portail + résiliation affichés —
+  // le portail Stripe permet d'ajouter la carte et de régler la facture due.
+  const isPastDueSub = !!subId && subStatus === 'past_due';
 
   ['pro','max','master'].forEach(pl => {
     const card = document.getElementById('card-' + pl);
     const cta = document.getElementById('cta-' + pl);
     if (!card || !cta) return;
+    // Sub past_due : pas de nouvelle souscription tant que la facture en
+    // attente n'est pas réglée (sinon double abonnement) → cartes masquées,
+    // la régularisation passe par « ⚙️ Gérer mon abonnement » (portail).
+    if (isPastDueSub) { card.style.display = 'none'; return; }
     const plRank = PLAN_RANK[pl];
 
     if (!hasLiveSub) {
@@ -1487,10 +1498,10 @@ function loadPlanUI(plan, subStatus, subId) {
   });
   // Bouton portail Stripe
   const portalBtn = document.getElementById('portalBtn');
-  if (portalBtn) portalBtn.style.display = hasLiveSub ? 'inline-flex' : 'none';
+  if (portalBtn) portalBtn.style.display = (hasLiveSub || isPastDueSub) ? 'inline-flex' : 'none';
   // Carte désabonnement (uniquement plans payants actifs)
   const unsubCard = document.getElementById('unsub-card');
-  if (unsubCard) unsubCard.style.display = hasLiveSub ? 'block' : 'none';
+  if (unsubCard) unsubCard.style.display = (hasLiveSub || isPastDueSub) ? 'block' : 'none';
   // Charger les vraies factures selon le plan
   renderFactures(_currentPlan);
 }
